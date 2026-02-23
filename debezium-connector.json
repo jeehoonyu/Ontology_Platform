@@ -1,0 +1,18 @@
+{
+  "name": "ontology-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "admin",
+    "database.password": "password",
+    "database.dbname" : "ontology_ops",
+    "database.server.name": "ops_pg",
+    "plugin.name": "pgoutput",
+    "table.include.list": "public.object_state,public.action_outbox",
+    "slot.name": "ontology_cdc",
+    "publication.name": "ontology_pub",
+    "tombstones.on.delete": "false"
+  }
+}
