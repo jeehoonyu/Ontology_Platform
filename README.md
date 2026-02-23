@@ -56,3 +56,64 @@ Based on modern ontology-driven principles (conceptually aligned with systems li
    cd oms
    python AgentStudio.py
    ```
+
+## Sample Examples
+
+### 1. Creating an Object Type (REST API)
+Creating the semantic definition for an "Employee".
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8000/object-types' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "id": "employee",
+  "display_name": "Employee",
+  "description": "A company employee",
+  "properties": {
+    "first_name": {"type": "string"},
+    "role": {"type": "string"}
+  }
+}'
+```
+
+### 2. Executing a Kinetic Action (Python)
+Showing the Idempotency Key in action to prevent double-execution:
+```python
+import requests
+import uuid
+
+# 1. Generate Idempotency Key for this specific action attempt
+idem_key = f"idem_{uuid.uuid4()}"
+
+payload = {
+    "action_type_id": "promote_employee",
+    "parameters": {"employee_id": "emp_123", "new_role": "Senior Engineer"},
+    "idempotency_key": idem_key
+}
+
+# 2. First Execution (Succeeds and creates Outbox Event)
+response1 = requests.post("http://127.0.0.1:8000/actions/execute", json=payload)
+print(response1.json())
+# Output: {'status': 'SUCCESS', 'message': 'Action processed and outbox event queued.', 'outbox_event_id': '...'}
+
+# 3. Network Retry Simulation (Same idempotency key is safely caught)
+response2 = requests.post("http://127.0.0.1:8000/actions/execute", json=payload)
+print(response2.json())
+# Output: {'status': 'SUCCESS_CACHED', 'message': 'Action previously executed.', 'outbox_event_id': '...'}
+```
+
+### 3. Agent Tool Execution (LLM SDK)
+Simulating an LLM reading Context Packs and proposing a mutation.
+```python
+from AgentStudio import ObjectQueryTool, ActionTool
+
+# 1. LLM reads structured relational graph context (Ontology-Aware Generation)
+query_tool = ObjectQueryTool()
+context_pack = query_tool.execute("employee", {"role": "Engineer"})
+
+# 2. LLM proposes a kinetic mutation, caught by Human-In-The-Loop (HITL)
+action_tool = ActionTool()
+result = action_tool.execute("promote_employee", {"employee_id": "obj_1"})
+print(result)
+# Output: {'status': 'REQUIRES_HUMAN_APPROVAL', 'message': "Action 'promote_employee' staged for HITL review dashboard."}
+```
