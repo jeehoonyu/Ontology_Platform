@@ -59,7 +59,9 @@ Based on modern ontology-driven principles (conceptually aligned with systems li
 
 ## Sample Examples
 
-### 1. Creating an Object Type (REST API)
+### 1. Creating Object Types (REST API)
+
+#### Example A: Employee
 Creating the semantic definition for an "Employee".
 ```bash
 curl -X 'POST' \
@@ -72,6 +74,64 @@ curl -X 'POST' \
   "properties": {
     "first_name": {"type": "string"},
     "role": {"type": "string"}
+  }
+}'
+```
+
+#### Example B: Buildings & Real Estate
+Defining a physical structure like an office building.
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8000/object-types' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "id": "building",
+  "display_name": "Corporate Building",
+  "description": "A commercial property asset",
+  "properties": {
+    "facility_code": {"type": "string"},
+    "square_footage": {"type": "integer"},
+    "max_occupancy": {"type": "integer"},
+    "has_helipad": {"type": "boolean"}
+  }
+}'
+```
+
+#### Example C: Agricultural Goods (Fruits)
+Modeling perishables for supply chain tracking.
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8000/object-types' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "id": "fruit_batch",
+  "display_name": "Fruit Batch",
+  "description": "A shipment of agricultural fruit",
+  "properties": {
+    "fruit_type": {"type": "string"},
+    "origin_country": {"type": "string"},
+    "harvest_date": {"type": "integer"},
+    "is_organic": {"type": "boolean"},
+    "weight_kg": {"type": "integer"}
+  }
+}'
+```
+
+#### Example D: Natural Disasters (Events)
+Tracking external events that might disrupt the operational twin (e.g., affecting the `building` or delaying the `fruit_batch`).
+```bash
+curl -X 'POST' \
+  'http://127.0.0.1:8000/object-types' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "id": "natural_disaster",
+  "display_name": "Natural Disaster Event",
+  "description": "An atmospheric or geographical anomaly affecting operations",
+  "properties": {
+    "disaster_type": {"type": "string"},  // e.g. "Hurricane", "Earthquake"
+    "severity_category": {"type": "integer"}, // e.g. Category 1-5
+    "affected_zip_codes": {"type": "json"},
+    "active": {"type": "boolean"}
   }
 }'
 ```
