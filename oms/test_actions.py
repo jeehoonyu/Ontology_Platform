@@ -1,9 +1,17 @@
 import uuid
+import os
+import tempfile
+
+tmpdir = tempfile.TemporaryDirectory()
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'actions.db')}"
+
 from app.database import SessionLocal, engine
 from app import models, models_action
 from app.schemas import ActionExecutionRequest
 from app.main import execute_action
-import time
+
+models.Base.metadata.create_all(bind=engine)
+models_action.Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
 
@@ -35,11 +43,15 @@ print("Response:", res1.model_dump())
 # Check Outbox
 outbox_events = db.query(models_action.OutboxEvent).all()
 print(f"Total Outbox Events: {len(outbox_events)}")
+assert len(outbox_events) == 1
 
 # 3. Execute Action Again (Same Idempotency Key) - should return cached
 print("\n--- RETRY EXECUTION (IDEMPOTENCY) ---")
 res2 = execute_action(req, db)
 print("Response:", res2.model_dump())
+assert res2.status == "SUCCESS_CACHED"
 
 db.close()
+engine.dispose()
+tmpdir.cleanup()
 print("\nTest passing if second response has status SUCCESS_CACHED.")

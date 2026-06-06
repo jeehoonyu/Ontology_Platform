@@ -1,8 +1,24 @@
-version: "3.8"
-
 services:
+  oms-api:
+    build:
+      context: ./oms
+      dockerfile: Dockerfile
+    container_name: ontology_oms_api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://admin:password@postgres:5432/ontology_ops
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   postgres:
-    image: postgres:15
+    image: postgis/postgis:15-3.4
     container_name: ontology_postgres
     environment:
       POSTGRES_USER: admin

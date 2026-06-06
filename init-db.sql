@@ -1,5 +1,6 @@
 -- Enable GiST indices for overlapping temporal bounds
 CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS postgis;
 
 -- We track temporal boundaries via tstzrange (timestamp with time zone ranges)
 -- Bitemporal means tracking both System Time (transaction_time) and Valid Time (business_time)
@@ -26,9 +27,32 @@ CREATE TABLE IF NOT EXISTS object_state (
 
 -- Transactional Outbox Pattern Table
 CREATE TABLE IF NOT EXISTS action_outbox (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id VARCHAR PRIMARY KEY,
     action_type_id VARCHAR NOT NULL,
     payload JSONB NOT NULL,
     status VARCHAR DEFAULT 'PENDING',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key VARCHAR PRIMARY KEY,
+    action_type_id VARCHAR NOT NULL,
+    response_payload JSONB,
+    created_at INTEGER
+);
+
+-- Optional native PostGIS mirror for production-scale spatial indexing. The
+-- FastAPI reference implementation stores GeoJSON in ontology JSON properties,
+-- but this table can be populated by CDC/materialization jobs when spatial
+-- queries need database-native GiST indexes.
+CREATE TABLE IF NOT EXISTS ontology_geometries (
+    object_id VARCHAR PRIMARY KEY,
+    object_type_id VARCHAR NOT NULL,
+    geometry GEOMETRY(GEOMETRY, 4326) NOT NULL,
+    properties JSONB DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS ontology_geometries_geom_idx
+ON ontology_geometries
+USING GIST (geometry);

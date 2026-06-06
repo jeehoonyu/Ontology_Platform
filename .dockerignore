@@ -1,0 +1,10 @@
+.git
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+pgdata/
+chdata/
+oms/venv/
+oms/.venv/
+uvicorn*.log

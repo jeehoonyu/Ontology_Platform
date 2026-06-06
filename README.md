@@ -1,27 +1,55 @@
-# Ontology Platform
+# Ontology Artificial Intelligence Platform
 
-An enterprise-scale operational platform that maps data, logic, action, and security into a unified computational graph. This architecture acts as a kinetic "digital twin" of the organization, allowing both human operators and autonomous AI agents to interact with a consistent, auditable "world model" in real-time.
+An enterprise-scale operational platform that maps data, logic, action, AI agents, and security into a unified computational graph. This architecture acts as a kinetic "digital twin" of the organization, allowing both human operators and autonomous AI agents to interact with a consistent, auditable world model.
+
+This is an open local implementation of public AIP/Foundry-style architecture patterns. It does not implement Palantir's proprietary platform internals. The design maps public concepts such as ontology objects/links/actions, pipeline hydration, governed action execution, agent tools, evals, lineage, and audit into a compact FastAPI service.
 
 ## Architecture Highlights
-Based on modern ontology-driven principles (conceptually aligned with systems like Palantir AIP), this backend segregates reading and writing to safely power LLM workflows.
+Based on modern ontology-driven principles, this backend separates the data plane, ontology plane, action plane, and agent plane so AI workflows can read operational context and propose mutations without bypassing governance.
 
 1. **Ontology Metadata Service (OMS)**
    - Built with **FastAPI** and **SQLAlchemy**.
    - Defines the exact semantics of reality via `ObjectType`, `LinkType`, and `ActionType` models.
-2. **Kinetic Action Engine**
+   - Stores live `ObjectInstance` and `LinkInstance` records as the current operational twin.
+   - Adds Object Set filtering, grouped aggregation, and Search Around traversal over ontology links.
+   - Supports GIS-ready ontology properties using GeoJSON `geometry` fields.
+   - Persists Saved Object Sets for reusable application, map, and agent contexts.
+2. **Data Plane and Pipeline Builder**
+   - `DataAsset` records hold local tabular JSON datasets.
+   - `PipelineDefinition` steps support `filter`, `normalize`, `classify`, `summarize`, `derive`, `derive_geo_point`, `project`, `map_to_ontology`, and `link_objects`.
+   - `PipelineRun` records capture lineage, step metrics, output datasets, and ontology hydration counts.
+   - Data Health expectations validate required fields, uniqueness, allowed values, regexes, ranges, types, and row counts.
+3. **GIS and Spatial Intelligence**
+   - Stores GeoJSON directly on ontology objects for portable map layers.
+   - Provides radius search, bounding-box filtering, polygon geofence evaluation, and GeoJSON FeatureCollection export.
+   - Supports MGRS encode/decode and MGRS enrichment during pipeline hydration.
+   - Persists Foundry-style map layer definitions backed by object types or saved object sets.
+   - Docker uses a PostGIS-ready PostgreSQL image and creates an optional `ontology_geometries` mirror table for indexed production materialization.
+4. **Kinetic Action Engine**
    - Implements the **Transactional Outbox Pattern** to prevent the "Dual-Write Problem" (ensuring internal ontology states and external network calls, like REST webhooks, never fall out of sync).
    - Utilizes strict **Idempotency Key Engine** caching to guarantee mutations only fire exactly once, even during network retry spikes.
-3. **Agent Tooling (AIP Studio Mechanics)**
-   - `ObjectQueryTool`: Grounds LLMs with explicitly linked "Context Packs" instead of unstructured vector text searches (Ontology-Aware Generation).
-   - `ActionTool`: Safely exposes enterprise actions to the LLM agent, bounded by a strict **Human-in-the-Loop (HITL)** approval mechanism for high-impact mutations.
+   - Supports `rules.requires_approval`, `rules.risk_level`, and declarative `object_mutations` for governed state changes.
+5. **Agent Studio Mechanics**
+   - `AgentDefinition` scopes allowed object types, allowed actions, and optional model endpoint metadata.
+   - `AgentSession` builds ontology context packs and stages allowed actions for human review.
+   - `EvalSuite` and `EvalRun` provide deterministic checks for retrieval and action-proposal behavior.
+6. **Governance, Lineage, and Observability**
+   - `ApprovalRequest` enforces human-in-the-loop approval for high-risk actions.
+   - `AuditLog` records ontology changes, pipeline runs, approvals, agent sessions, eval runs, and action execution.
+   - `ModelEndpoint` stores governed model/provider metadata and retention policy, while the local runtime remains deterministic by default.
 
 ## Project Structure
 - `docker-compose.yml`: Scaffolding for the Data / Materialization Planes (PostgreSQL Bitemporal DB, ClickHouse, Kafka, Debezium CDC).
 - `init-db.sql`: PostgreSQL initialization script deploying GiST indices for Bitemporal History state tracking.
 - `oms/`: The core Python backend directory housing the `FastAPI` instance.
   - `oms/app/main.py`: Rest API Endpoints.
-  - `oms/app/models.py` & `models_action.py`: Database tables and Outbox/Idempotency abstractions.
+  - `oms/app/models.py` & `models_action.py`: Database tables, runtime graph, pipelines, agents, evals, outbox, approvals, and audit abstractions.
+  - `oms/app/runtime.py`: Validation, object sets, data health, pipeline execution, ontology hydration, action mutation, context packing, and eval scoring logic.
   - `oms/AgentStudio.py`: Pydantic structured SDK Tools for LLM-to-Ontology mapping.
+  - `oms/test_aip_runtime.py`: End-to-end local scenario covering pipeline hydration, agent proposal, approval, action execution, idempotency, and evals.
+  - `oms/test_gis_runtime.py`: Spatial scenario covering GeoJSON hydration, radius search, bbox filtering, FeatureCollection export, and geofence evaluation.
+  - `oms/test_foundry_gis_features.py`: Foundry-style scenario covering MGRS, saved object sets, map layers, and object profiles.
+  - `oms/test_ontology_validation.py`: Conformance scenario covering ontology validation, object-set search, aggregation, Search Around, data expectations, and intentional graph corruption detection.
 
 ## Setup & Running Locally
 
@@ -43,14 +71,38 @@ Based on modern ontology-driven principles (conceptually aligned with systems li
    ```
    *The Swagger UI is available at `http://127.0.0.1:8000/docs`.*
 
-3. **Test the Idempotency & Action Plane**
-   While the server is running, open a new terminal and execute the test scripts:
+3. **Run with Docker Compose**
+   The Compose stack now includes the OMS API plus PostGIS-enabled Postgres, ClickHouse, Kafka, and Debezium:
+   ```bash
+   docker compose up --build oms-api postgres
+   ```
+   The API is exposed at `http://127.0.0.1:8000/docs`. To run the full data-plane scaffold:
+   ```bash
+   docker compose up --build
+   ```
+   If you already initialized `pgdata` with the earlier plain Postgres image, run `CREATE EXTENSION IF NOT EXISTS postgis;` manually or recreate the local `pgdata` volume before relying on native PostGIS tables.
+
+4. **Open the Workspaces**
+   The API also serves a compact local operator UI:
+   - Map Workspace: `http://127.0.0.1:8000/workspace/map`
+   - AIP Workspace: `http://127.0.0.1:8000/workspace/aip`
+
+   Use **Bootstrap** in the top bar to load the maintenance ontology, GIS features, saved object set, map layer, agents, and eval suite. The map workspace uses Leaflet basemaps with local ontology overlays for MGRS decode, radius search, geofence evaluation, feature collections, and object profiles. Basemap tiles require network access; operational overlays and the canvas fallback still render from local API data. The AIP workspace exercises ontology context loading, Assist, Agent Sessions, Pipeline Builder, approvals, and evals.
+
+5. **Test the Runtime**
+   Run the end-to-end AIP-like scenario and the legacy action idempotency check:
    ```bash
    cd oms
+   python test_foundry_gis_features.py
+   python test_gis_runtime.py
+   python test_ontology_validation.py
+   python test_aip_runtime.py
+   python test_maintenance_copilot.py
+   python test_sentinel_operations_graph.py
    python test_actions.py
    ```
 
-4. **Test the Agentic Tooling**
+6. **Test the Agentic Tooling**
    Simulates LLM function-calling workflows triggering the Human-In-The-Loop mechanism:
    ```bash
    cd oms
@@ -177,3 +229,242 @@ result = action_tool.execute("promote_employee", {"employee_id": "obj_1"})
 print(result)
 # Output: {'status': 'REQUIRES_HUMAN_APPROVAL', 'message': "Action 'promote_employee' staged for HITL review dashboard."}
 ```
+
+## AIP-Style API Surface
+
+The core runtime is available from Swagger at `http://127.0.0.1:8000/docs`.
+
+- `POST /domains/maintenance/bootstrap`: create and optionally hydrate the Maintenance Operations Copilot MVP.
+- `GET /domains/maintenance/summary`: inspect facilities, assets, technicians, parts, work orders, and purchase requests.
+- `POST /domains/sentinel/bootstrap`: create the Sentinel Operations Graph ontology and governed analyst tools.
+- `GET /domains/sentinel/summary`: inspect Sentinel case and evidence object counts.
+- `POST /cases`, `GET /cases`, `GET /cases/{case_id}`: create and inspect lawful investigation/incident cases.
+- `POST /cases/{case_id}/evidence`: ingest evidence text, extract entities, and preserve provenance.
+- `POST /cases/{case_id}/tasks`, `POST /cases/{case_id}/findings`: create analyst tasks and evidence-backed findings.
+- `GET /cases/{case_id}/graph`, `GET /cases/{case_id}/timeline`, `GET /cases/{case_id}/provenance`: inspect graph, timeline, and chain-of-custody style metadata.
+- `POST /cases/{case_id}/agent/summarize`, `/agent/missing-evidence`, `/agent/suggest-next-steps`, `/agent/draft-report`: analyst copilot helpers.
+- `POST /graph/neighbors`, `POST /graph/shortest-path`: graph traversal APIs.
+- `POST /object-types`, `POST /link-types`, `POST /action-types`: define ontology semantics.
+- `POST /objects`, `POST /links`: create runtime object and link instances.
+- `POST /object-sets/search`: Foundry-style object set filtering over object properties, metadata, and lineage.
+- `POST /object-sets/aggregate`: grouped count/sum/avg/min/max style metrics over object sets.
+- `POST /object-sets/search-around`: generic ontology Search Around traversal over link instances.
+- `POST /object-sets/saved`, `GET /object-sets/saved/{id}/objects`: persist and evaluate reusable object sets.
+- `GET /ontology/validate`: validate schemas, object instances, links, cardinality, actions, pipelines, agents, logic, automations, and eval suites.
+- `GET /objects/{object_type_id}/{object_id}/profile`: object-centric profile with linked objects, link metrics, and spatial metadata.
+- `POST /gis/spatial-query`: query ontology objects by GeoJSON geometry, radius, bbox, polygon, and normal object filters.
+- `POST /gis/feature-collection`: export spatial ontology objects as a GeoJSON `FeatureCollection`.
+- `POST /gis/geofence/evaluate`: evaluate which spatial objects fall inside or outside a polygon or bbox geofence.
+- `POST /gis/mgrs/encode`, `POST /gis/mgrs/decode`: convert between WGS84 latitude/longitude and MGRS grid references.
+- `POST /gis/map-layers`, `GET /gis/map-layers/{layer_id}/features`: define and render Foundry-style ontology map layers.
+- `POST /data-assets`: register JSON datasets.
+- `POST /data-assets/{asset_id}/expectations/run`: run Data Health expectations against a registered dataset.
+- `POST /pipelines`, `POST /pipelines/{pipeline_id}/run`: clean, enrich, classify, summarize, and hydrate datasets into ontology objects.
+- `POST /actions/execute`: validate parameters, stage high-risk actions for approval, mutate objects, write outbox events, and cache idempotent responses.
+- `GET /approvals`, `POST /approvals/{approval_id}/decision`: approve or reject high-impact action requests.
+- `POST /agents`, `POST /agents/{agent_id}/sessions`: create scoped ontology-grounded agents and generate context/action plans.
+- `GET /aip/tools`: inspect the implemented local equivalents of public AIP tools.
+- `POST /aip/assist/query`: context-aware local AIP Assist equivalent.
+- `POST /aip/pipeline-builder/generate`: prompt-to-pipeline-step suggestions.
+- `POST /aip/document-intelligence/extract`: schema/regex document extraction.
+- `POST /aip/notepad/transform`: local spellcheck/shorten/modify/translate-intent transforms.
+- `GET /mcp/context`: MCP-style context export for external agents/IDEs.
+- `POST /threads`, `POST /threads/{thread_id}/messages`: AIP Threads-style ad-hoc workspaces.
+- `POST /logic-functions`, `POST /logic-functions/{logic_id}/run`: AIP Logic-style block workflows.
+- `POST /automations`, `POST /automations/{automation_id}/run`: Automate-style condition/effect evaluation.
+- `POST /scheduler/generate-cron`: prompt-to-cron helper.
+- `POST /eval-suites`, `POST /eval-suites/{suite_id}/run`: evaluate agent retrieval and action proposal behavior.
+- `GET /audit-logs`: inspect governance and lineage events.
+
+## Public AIP Tool Coverage
+
+Public Palantir docs list AIP Assist, AIP Logic, AIP Chatbot Studio, AIP Evals, AIP Threads, Palantir MCP, AIP Model Catalog, AIP Document Intelligence, AIP features in Pipeline Builder, Automate integration, Scheduler, and Notepad features. This repo implements local equivalents for those tools with deterministic Python logic and ontology-backed state:
+
+- AIP Assist: `/aip/assist/query`
+- AIP Chatbot Studio / Agent Studio: `/agents`, `/agents/{agent_id}/sessions`
+- AIP Logic: `/logic-functions`, `/logic-functions/{logic_id}/run`
+- AIP Evals: `/eval-suites`, `/eval-suites/{suite_id}/run`
+- AIP Threads: `/threads`
+- Palantir MCP-style context: `/mcp/context`
+- AIP Model Catalog: `/model-endpoints`
+- AIP Document Intelligence: `/aip/document-intelligence/extract`
+- Pipeline Builder AIP assistance: `/aip/pipeline-builder/generate`
+- Automate and Scheduler: `/automations`, `/scheduler/generate-cron`
+- Notepad AIP transforms: `/aip/notepad/transform`
+- Ontology Object Sets and Search Around: `/object-sets/search`, `/object-sets/aggregate`, `/object-sets/search-around`
+- Data Health Expectations: `/data-assets/{asset_id}/expectations/run`
+- Ontology Integrity Validation: `/ontology/validate`
+- GIS Spatial Intelligence: `/gis/spatial-query`, `/gis/feature-collection`, `/gis/geofence/evaluate`
+- MGRS Grid Reference: `/gis/mgrs/encode`, `/gis/mgrs/decode`
+- Foundry-style Map Layers and Saved Object Sets: `/object-sets/saved`, `/gis/map-layers`
+- Object Views: `/objects/{object_type_id}/{object_id}/profile`
+
+These endpoints are intentionally local approximations. They provide the same architectural roles for development and testing, but they do not claim compatibility with Palantir's proprietary APIs, model-routing plane, UI builders, security services, or managed infrastructure.
+
+## Ontology Validation Strategy
+
+The fastest way to determine whether this project works like the intended idea is not to compare proprietary code. It is to define behavioral contracts and run them continuously:
+
+- `GET /ontology/validate` proves that object types, object instances, link types, link instances, action mutations, pipelines, agents, logic functions, automations, and eval suites refer to real resources and obey declared cardinality.
+- `POST /data-assets/{asset_id}/expectations/run` proves that pipeline inputs and outputs satisfy data contracts before they hydrate the ontology.
+- `POST /object-sets/search` and `/object-sets/search-around` prove that applications and agents can retrieve the same operational graph context through generic tools, not one-off domain code.
+- `oms/test_ontology_validation.py` includes both a healthy graph assertion and an intentional broken-link insertion to verify that the validator catches corrupted ontology state.
+
+## GIS Spatial Layer
+
+GIS is implemented as a first-class ontology capability. Any object type can declare a GeoJSON field:
+
+```json
+{
+  "geometry": {"type": "geometry"}
+}
+```
+
+The geometry value follows GeoJSON coordinate order:
+
+```json
+{
+  "type": "Point",
+  "coordinates": [-122.4012, 37.7924]
+}
+```
+
+The pipeline DSL can derive that geometry from raw longitude/latitude fields:
+
+```json
+{
+  "operation": "derive_geo_point",
+  "longitude_field": "longitude",
+  "latitude_field": "latitude",
+  "target_field": "geometry"
+}
+```
+
+The same record can also derive MGRS:
+
+```json
+{
+  "operation": "derive_mgrs",
+  "geometry_field": "geometry",
+  "target_field": "mgrs",
+  "precision": 5
+}
+```
+
+This keeps the reference implementation portable across SQLite and PostgreSQL. For heavier workloads, Docker now uses `postgis/postgis:15-3.4`, enables the `postgis` extension, and creates `ontology_geometries` as an optional native spatial mirror with a GiST index.
+
+Useful checks:
+
+- `python oms/test_foundry_gis_features.py`: validates MGRS, saved object sets, map layer rendering, object profiles, and validator coverage.
+- `python oms/test_gis_runtime.py`: validates GIS hydration, radius query, bbox query, FeatureCollection export, and geofence evaluation.
+- `GET /ontology/validate`: validates declared `geometry` fields as GeoJSON.
+- `POST /gis/feature-collection`: returns map-ready GeoJSON for any spatial object type.
+- `POST /gis/mgrs/encode`: returns an MGRS grid reference for a latitude/longitude.
+
+## Foundry-Style Application Layer
+
+The platform now includes three reusable application-building primitives inspired by public Foundry application patterns:
+
+- Saved Object Sets: persist object type plus filters so an exploration can be reused in dashboards, agents, and map layers.
+- Map Layers: define a geospatial object layer with `geometry_field`, optional saved object set, style metadata, and FeatureCollection rendering.
+- Object Profiles: return object properties, inbound/outbound links, linked objects, basic metrics, and spatial/MGRS metadata for an object-centric view.
+
+Example map layer flow:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/object-sets/saved" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"critical_assets","display_name":"Critical Assets","object_type_id":"asset","filters":{"criticality":"high"}}'
+
+curl -X POST "http://127.0.0.1:8000/gis/map-layers" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"critical_asset_layer","display_name":"Critical Asset Layer","object_type_id":"asset","saved_object_set_id":"critical_assets","style":{"marker_color":"#d43f3a"}}'
+
+curl "http://127.0.0.1:8000/gis/map-layers/critical_asset_layer/features"
+```
+
+## Maintenance Operations Copilot MVP
+
+The first focused product direction is a maintenance/facilities operations copilot. It turns raw asset and work-order data into an operational ontology, then lets an agent propose governed actions.
+
+Bootstrap the domain:
+```bash
+curl -X POST "http://127.0.0.1:8000/domains/maintenance/bootstrap" \
+  -H "Content-Type: application/json" \
+  -d '{"actor": "demo", "run_pipelines": true}'
+```
+
+The bootstrap creates:
+
+- Object types: `facility`, `asset`, `technician`, `part`, `work_order`, `purchase_request`
+- Link types: facility-to-asset, asset-to-work-order, technician-to-work-order
+- Actions: `assign_technician`, `escalate_work_order`, `create_purchase_request`, `close_work_order`
+- Seed datasets and hydration pipelines, including GeoJSON facility/asset locations
+- Agent: `maintenance_ops_agent`
+- Logic workflow: `maintenance_triage_logic`
+- Eval suite: `maintenance_ops_agent_eval`
+- Automation: `maintenance_critical_work_order_monitor`
+
+Validate the product loop:
+```text
+Raw maintenance data
+→ pipeline classification and summarization
+→ ontology objects
+→ agent context
+→ proposed assignment/escalation/procurement action
+→ approval gate for high-risk changes
+→ object mutation, outbox event, audit log, eval result
+```
+
+Run the focused conformance test:
+```bash
+cd oms
+python test_maintenance_copilot.py
+```
+
+## Sentinel Operations Graph MVP
+
+The second focused product direction is a Gotham-ish, lawful operational intelligence workspace for enterprise incident response, fraud review, cyber triage, disaster operations, compliance investigations, and maintenance command centers. It is not a surveillance, targeting, or enforcement system.
+
+Bootstrap the domain:
+```bash
+curl -X POST "http://127.0.0.1:8000/domains/sentinel/bootstrap" \
+  -H "Content-Type: application/json" \
+  -d '{"actor": "demo"}'
+```
+
+The bootstrap creates:
+
+- Object types: `sentinel_case`, `sentinel_evidence_document`, `sentinel_observation`, `sentinel_entity`, `sentinel_location`, `sentinel_event`, `sentinel_task`, `sentinel_finding`, `sentinel_decision`, `sentinel_report`
+- Link types with provenance/confidence: `case_contains_evidence`, `evidence_mentions_entity`, `case_has_task`, `case_has_finding`, `case_has_decision`, `case_has_report`, `case_has_observation`, `case_has_event`, `evidence_supports_observation`, `observation_supports_finding`, `finding_supports_decision`, `event_occurred_at_location`, `entity_associated_with_entity`
+- Governed actions: `publish_sentinel_report`, `close_sentinel_case`
+- Agent: `sentinel_analyst_agent`
+- Eval suite: `sentinel_analyst_eval`
+
+Validate the intelligence loop:
+```text
+Raw evidence text
+→ document extraction
+→ entity objects
+→ provenance-bearing graph links
+→ case graph / timeline / shortest path
+→ analyst copilot summary and missing-evidence checks
+→ draft report
+→ approval-gated publication
+→ audit log and eval result
+```
+
+Run the focused conformance test:
+```bash
+cd oms
+python test_sentinel_operations_graph.py
+```
+
+## Public Design Inputs
+
+The implementation is based on public Palantir documentation patterns:
+
+- Foundry data flow: source systems to datasets, transforms, ontology objects/links, applications, decisions, and actions.
+- Ontology backend: semantic elements such as objects/properties/links and kinetic elements such as actions/functions/security.
+- AIP: Assist, Chatbot Studio, Logic, Evals, Threads, MCP, Model Catalog, Document Intelligence, Pipeline Builder assistance, Notepad, Scheduler, Automate, and governance.
+- Architecture: secure model integration, observability, action logging, chained workflow tracing, and ontology-backed automation.

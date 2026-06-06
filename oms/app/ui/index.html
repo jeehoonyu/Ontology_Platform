@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ontology AIP Workspace</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">OA</span>
+          <div>
+            <strong>Ontology AIP</strong>
+            <span id="systemStatus">API status pending</span>
+          </div>
+        </div>
+        <nav class="nav-tabs" aria-label="Workspace views">
+          <button id="mapNav" class="nav-tab" type="button">Map Workspace</button>
+          <button id="aipNav" class="nav-tab" type="button">AIP Workspace</button>
+        </nav>
+        <div class="top-actions">
+          <button id="bootstrapBtn" class="btn primary" type="button">Bootstrap</button>
+          <button id="validateBtn" class="btn" type="button">Validate</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="mapView" class="workspace">
+          <aside class="side-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Layers</h2>
+                <button id="refreshLayersBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <button id="assetLayerBtn" class="btn" type="button">Load Assets</button>
+                <button id="criticalLayerBtn" class="btn" type="button">Critical Layer</button>
+                <label class="field">
+                  <span>Layer</span>
+                  <select id="layerSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Basemap</span>
+                  <select id="basemapSelect">
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="light">Carto Light</option>
+                    <option value="dark">Carto Dark</option>
+                    <option value="imagery">Esri Imagery</option>
+                  </select>
+                </label>
+                <div class="button-row">
+                  <button id="fitMapBtn" class="btn" type="button">Fit Map</button>
+                  <button id="mgrsOverlayBtn" class="btn" type="button">MGRS Focus</button>
+                </div>
+                <button id="renderLayerBtn" class="btn" type="button">Render Layer</button>
+              </div>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Spatial</h2>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>MGRS</span>
+                  <input id="mgrsInput" value="10SEG5272182950" />
+                </label>
+                <div class="button-row">
+                  <button id="decodeMgrsBtn" class="btn" type="button">Decode</button>
+                  <button id="radiusBtn" class="btn" type="button">Radius</button>
+                  <button id="geofenceBtn" class="btn" type="button">Geofence</button>
+                </div>
+                <pre id="spatialResult" class="mini-output"></pre>
+              </div>
+            </section>
+          </aside>
+
+          <section class="map-stage">
+            <div class="map-toolbar">
+              <div>
+                <strong id="mapTitle">Operational Map</strong>
+                <span id="mapSubtitle">No layer loaded</span>
+              </div>
+              <div class="metric-strip">
+                <span id="featureCount">0 features</span>
+                <span id="selectedCoord">No selection</span>
+                <span id="mapViewport">No viewport</span>
+              </div>
+            </div>
+            <div class="map-container">
+              <div id="leafletMap" class="leaflet-map" aria-label="Interactive operational map"></div>
+              <canvas id="mapCanvas" class="map-fallback" aria-label="Operational map canvas fallback"></canvas>
+              <div class="map-legend" aria-label="Map legend">
+                <span><i class="legend-dot critical"></i>critical</span>
+                <span><i class="legend-dot normal"></i>asset</span>
+                <span><i class="legend-line"></i>geofence / radius</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Object</h2>
+              </div>
+              <div id="objectProfile" class="object-profile empty-state">No object selected</div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Feature Data</h2>
+              </div>
+              <div id="featureTable" class="table-wrap"></div>
+            </section>
+          </aside>
+        </section>
+
+        <section id="aipView" class="workspace aip-layout">
+          <aside class="side-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Context</h2>
+                <button id="loadContextBtn" class="btn small" type="button">Load</button>
+              </div>
+              <label class="field">
+                <span>Object Type</span>
+                <select id="objectTypeSelect">
+                  <option value="asset">asset</option>
+                  <option value="work_order">work_order</option>
+                  <option value="facility">facility</option>
+                  <option value="sentinel_case">sentinel_case</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Filters JSON</span>
+                <textarea id="contextFilters" rows="5">{}</textarea>
+              </label>
+              <div id="contextObjects" class="object-list"></div>
+            </section>
+          </aside>
+
+          <section class="aip-main">
+            <section class="assistant-panel">
+              <div class="section-title">
+                <h2>Assist</h2>
+                <button id="askAssistBtn" class="btn primary" type="button">Ask</button>
+              </div>
+              <textarea id="assistPrompt" rows="4">Which tools can help inspect critical assets and propose maintenance actions?</textarea>
+              <div id="assistAnswer" class="answer-box"></div>
+            </section>
+
+            <section class="split-grid">
+              <div class="panel-section">
+                <div class="section-title">
+                  <h2>Agent Session</h2>
+                  <button id="runAgentBtn" class="btn" type="button">Run</button>
+                </div>
+                <label class="field">
+                  <span>Agent</span>
+                  <select id="agentSelect"></select>
+                </label>
+                <textarea id="agentPrompt" rows="4">Please escalate work order for urgent pump issue</textarea>
+                <pre id="agentResult" class="mini-output tall"></pre>
+              </div>
+
+              <div class="panel-section">
+                <div class="section-title">
+                  <h2>Pipeline Builder</h2>
+                  <button id="generatePipelineBtn" class="btn" type="button">Generate</button>
+                </div>
+                <textarea id="pipelinePrompt" rows="4">Clean open records, classify priority, summarize, and hydrate ontology</textarea>
+                <pre id="pipelineResult" class="mini-output tall"></pre>
+              </div>
+            </section>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Approvals</h2>
+                <button id="loadApprovalsBtn" class="btn small" type="button">Load</button>
+              </div>
+              <div id="approvalList" class="object-list"></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Evals</h2>
+                <button id="runEvalBtn" class="btn small" type="button">Run</button>
+              </div>
+              <select id="evalSelect"></select>
+              <pre id="evalResult" class="mini-output"></pre>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/ui/assets/app.js"></script>
+  </body>
+</html>
