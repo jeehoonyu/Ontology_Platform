@@ -5,29 +5,415 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ontology AIP Workspace</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <link rel="stylesheet" href="/ui/assets/styles.css?v=platform-shell-3" />
   </head>
   <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <span class="brand-mark">OA</span>
-          <div>
-            <strong>Ontology AIP</strong>
-            <span id="systemStatus">API status pending</span>
-          </div>
+    <div class="app-shell platform-shell">
+      <aside class="platform-sidebar" aria-label="Platform navigation">
+        <div class="sidebar-head">
+          <span class="brand-orb">OA</span>
+          <button id="collapseNavBtn" class="icon-btn" type="button" aria-label="Collapse navigation">=</button>
         </div>
-        <nav class="nav-tabs" aria-label="Workspace views">
-          <button id="mapNav" class="nav-tab" type="button">Map Workspace</button>
-          <button id="aipNav" class="nav-tab" type="button">AIP Workspace</button>
+        <nav class="side-nav">
+          <button id="homeNav" class="side-nav-item" type="button"><span>H</span>Home</button>
+          <button id="searchNav" class="side-nav-item" type="button"><span>S</span>Search <kbd>ctrl + J</kbd></button>
+          <button id="filesNav" class="side-nav-item" type="button"><span>F</span>Files</button>
+          <button id="ontologyNav" class="side-nav-item" type="button"><span>O</span>Ontology</button>
+          <button id="applicationsNav" class="side-nav-item" type="button"><span>A</span>Applications</button>
         </nav>
-        <div class="top-actions">
-          <button id="bootstrapBtn" class="btn primary" type="button">Bootstrap</button>
-          <button id="validateBtn" class="btn" type="button">Validate</button>
+        <div class="side-section">
+          <span>Applications</span>
+          <button id="workshopNav" class="side-nav-item" type="button"><span>W</span>Workshop</button>
+          <button id="object-explorerNav" class="side-nav-item" type="button"><span>OE</span>Object Explorer</button>
+          <button id="pipelineNav" class="side-nav-item" type="button"><span>P</span>Pipeline Builder</button>
+          <button id="aipNav" class="side-nav-item" type="button"><span>AI</span>AIP Logic</button>
+          <button id="mapNav" class="side-nav-item" type="button"><span>M</span>Map</button>
         </div>
-      </header>
+        <div class="side-footer">
+          <button id="assistLauncherBtn" class="side-nav-item" type="button"><span>AI</span>AIP Assist <kbd>ctrl + shift + U</kbd></button>
+          <button class="side-nav-item muted-action" type="button"><span>?</span>Support</button>
+          <button class="side-nav-item muted-action" type="button"><span>JR</span>Account</button>
+        </div>
+      </aside>
 
-      <main>
+      <div class="platform-content">
+        <header class="topbar platform-topbar">
+          <div class="brand">
+            <span class="brand-mark">OA</span>
+            <div>
+              <strong>Ontology AIP</strong>
+              <span id="systemStatus">API status pending</span>
+            </div>
+          </div>
+          <button id="openSearchBtn" class="global-search-button" type="button">Search for anything in your enterprise <kbd>ctrl + J</kbd></button>
+          <div class="top-actions">
+            <button id="bootstrapBtn" class="btn primary" type="button">Bootstrap</button>
+            <button id="validateBtn" class="btn" type="button">Validate</button>
+          </div>
+        </header>
+
+        <main>
+        <section id="homeView" class="platform-page">
+          <section class="home-hero">
+            <h1>Welcome back, Jeehoon</h1>
+            <button id="homeSearchBtn" class="home-search" type="button">Search for anything in your enterprise <kbd>ctrl + J</kbd></button>
+            <div class="hero-card">
+              <article>
+                <span class="app-tile-icon blue">G</span>
+                <h2>Get started</h2>
+                <p>Learn about the local ontology platform and speedrun your first operational workflow.</p>
+                <button id="homeAipBtn" class="btn primary" type="button">Open AIP Logic</button>
+              </article>
+              <article>
+                <span class="app-tile-icon teal">I</span>
+                <h2>Install examples</h2>
+                <p>Bootstrap maintenance sample data, agents, actions, object sets, and map layers.</p>
+                <button id="homeBootstrapBtn" class="btn" type="button">Bootstrap</button>
+              </article>
+              <article>
+                <span class="app-tile-icon slate">C</span>
+                <h2>Join workspace</h2>
+                <p>Use the app catalog, object explorer, and command search to move across tools.</p>
+                <button id="homeAppsBtn" class="btn" type="button">View apps</button>
+              </article>
+            </div>
+          </section>
+
+          <section class="home-grid">
+            <div class="panel-section home-recent">
+              <div class="section-title">
+                <h2>Recent</h2>
+                <div class="segmented">
+                  <button class="segment active" type="button">Files</button>
+                  <button class="segment" type="button">Projects</button>
+                </div>
+              </div>
+              <div id="recentResources" class="resource-empty">No recently viewed resources</div>
+            </div>
+            <aside class="home-side">
+              <section class="panel-section">
+                <div class="section-title">
+                  <h2>Recommended applications</h2>
+                  <button id="viewAllAppsBtn" class="text-btn" type="button">View all</button>
+                </div>
+                <div id="homeAppGrid" class="app-grid"></div>
+              </section>
+              <section class="panel-section">
+                <h2>Get in touch</h2>
+                <button class="btn full-width" type="button">Contact platform support</button>
+                <button class="btn full-width" type="button">Discuss with developer community</button>
+              </section>
+            </aside>
+          </section>
+        </section>
+
+        <section id="filesView" class="platform-page hidden">
+          <div class="page-heading">
+            <div>
+              <span class="breadcrumb">All files / All spaces</span>
+              <h1>Files</h1>
+            </div>
+            <button class="btn primary" type="button">New</button>
+          </div>
+          <section class="quick-filters">
+            <article><strong>Portfolios</strong><span>Organize related projects by use case or area of interest.</span><button class="text-btn" type="button">Apply</button></article>
+            <article><strong>Projects</strong><span>Secure containers for related work and permissions.</span><button class="text-btn" type="button">Apply</button></article>
+            <article><strong>Promoted items</strong><span>A catalog of useful projects, folders, and resources.</span><button class="text-btn" type="button">Apply</button></article>
+          </section>
+          <label class="explorer-search"><span>Search all portfolios, projects, folders and files...</span><input id="filesSearchInput" /></label>
+          <section class="explorer-layout">
+            <aside class="filter-rail">
+              <div class="filter-title">Filters <span class="pill">0</span></div>
+              <div class="filter-group">
+                <strong>Types</strong>
+                <label><input type="checkbox" /> AIP Logic</label>
+                <label><input type="checkbox" /> Ontology</label>
+                <label><input type="checkbox" /> Map</label>
+                <label><input type="checkbox" /> Agent</label>
+              </div>
+              <div class="filter-group">
+                <strong>Projects</strong>
+                <label><input type="checkbox" /> Maintenance Operations</label>
+                <label><input type="checkbox" /> Local Workspace</label>
+              </div>
+            </aside>
+            <div id="filesTable" class="table-wrap platform-table"></div>
+          </section>
+        </section>
+
+        <section id="ontologyView" class="platform-page hidden">
+          <div class="page-heading centered-heading">
+            <h1>Object Explorer search</h1>
+            <div class="object-search-bar">
+              <select id="ontologyFilterSelect">
+                <option value="">Filter by...</option>
+                <option value="asset">Asset</option>
+                <option value="work_order">Work order</option>
+              </select>
+              <input id="ontologySearchInput" placeholder="Search for objects..." />
+              <button id="ontologySearchBtn" class="btn primary" type="button">Search</button>
+            </div>
+          </div>
+          <section class="panel-section shortcuts-panel">
+            <div class="section-title">
+              <h2>Shortcuts</h2>
+              <div class="segmented">
+                <button class="segment active" type="button">Recents</button>
+                <button class="segment" type="button">Favorites</button>
+                <button class="segment" type="button">Your object sets</button>
+              </div>
+            </div>
+            <div class="resource-empty compact-empty">No recents</div>
+          </section>
+          <section class="ontology-catalog">
+            <div class="section-title">
+              <h2>Object type catalog</h2>
+              <div class="button-row">
+                <input id="objectTypeCatalogFilter" placeholder="Filter for an object type..." />
+                <select><option>Relevancy</option><option>Name</option></select>
+              </div>
+            </div>
+            <div id="ontologyCatalogTable" class="table-wrap platform-table"></div>
+          </section>
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>Object set catalog</h2>
+              <div class="button-row">
+                <input placeholder="Search explorations..." />
+                <button class="segment active" type="button">All</button>
+                <button class="segment" type="button">Created by me</button>
+              </div>
+            </div>
+            <div class="resource-empty compact-empty">No saved explorations and lists</div>
+          </section>
+        </section>
+
+        <section id="applicationsView" class="platform-page hidden">
+          <div class="app-catalog-shell">
+            <aside class="app-categories">
+              <label class="dark-search"><input id="appSearchInput" placeholder="Search for applications..." /></label>
+              <button class="app-category active" data-app-category="all" type="button">All apps <span>13</span></button>
+              <button class="app-category" data-app-category="operations" type="button">Analytics & Operations <span>6</span></button>
+              <button class="app-category" data-app-category="data" type="button">Data integration <span>4</span></button>
+              <button class="app-category" data-app-category="ontology" type="button">Ontology <span>3</span></button>
+              <button class="app-category" data-app-category="developer" type="button">Developer toolchain <span>1</span></button>
+            </aside>
+            <section class="app-list-panel">
+              <div class="section-title dark-title">
+                <h2>Applications</h2>
+                <button id="appFiltersBtn" class="text-btn" type="button">Filters</button>
+              </div>
+              <div id="applicationCatalog" class="application-list"></div>
+            </section>
+            <aside id="applicationDetail" class="app-detail-panel">
+              <div class="empty-state dark-empty">Click on an application to see details</div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="workshopView" class="workspace builder-workspace hidden">
+          <aside class="side-panel builder-rail">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Workshop</h2>
+                <button id="refreshWorkshopBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>Module</span>
+                  <select id="workshopModuleSelect"></select>
+                </label>
+                <button id="newWorkshopBtn" class="btn" type="button">New Module</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="segmented full">
+                <button class="segment active" data-workshop-panel="layout" type="button">Layout</button>
+                <button class="segment" data-workshop-panel="variables" type="button">Variables</button>
+                <button class="segment" data-workshop-panel="events" type="button">Events</button>
+              </div>
+              <div class="workshop-panel active" data-workshop-panel-body="layout">
+                <div class="node-library" id="workshopWidgetPicker"></div>
+              </div>
+              <div class="workshop-panel" data-workshop-panel-body="variables">
+                <div id="workshopVariables" class="builder-list"></div>
+                <button id="addWorkshopVariableBtn" class="btn full-width" type="button">Add Variable</button>
+              </div>
+              <div class="workshop-panel" data-workshop-panel-body="events">
+                <div id="workshopEvents" class="builder-list"></div>
+                <button id="addWorkshopEventBtn" class="btn full-width" type="button">Add Event</button>
+              </div>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="workshopTitle">Workshop Builder</strong>
+                <span id="workshopSummary">Layout, variables, events, and live widgets</span>
+              </div>
+              <div class="logic-actions">
+                <button id="previewWorkshopBtn" class="btn" type="button">Preview</button>
+                <button id="renderWorkshopBtn" class="btn" type="button">Render Live</button>
+                <button id="saveWorkshopBtn" class="btn" type="button">Save</button>
+                <button id="publishWorkshopBtn" class="btn primary" type="button">Publish</button>
+              </div>
+            </section>
+            <section id="workshopCanvas" class="workshop-canvas" aria-label="Workshop live canvas"></section>
+          </section>
+
+          <aside class="detail-panel builder-config">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Config</h2>
+              </div>
+              <div id="workshopConfig" class="stack compact"></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Live Data</h2>
+              </div>
+              <pre id="workshopLiveData" class="mini-output tall"></pre>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Versions</h2>
+              </div>
+              <div id="workshopVersions" class="builder-list"></div>
+            </section>
+          </aside>
+        </section>
+
+        <section id="object-explorerView" class="workspace explorer-workspace hidden">
+          <aside class="side-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Object Explorer</h2>
+                <button id="refreshObjectExplorerBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>Object Type</span>
+                  <select id="explorerObjectTypeSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Global Search</span>
+                  <input id="explorerSearchInput" placeholder="Search objects..." />
+                </label>
+                <label class="field">
+                  <span>Filters JSON</span>
+                  <textarea id="explorerFiltersInput" rows="4">{}</textarea>
+                </label>
+                <button id="runExplorerQueryBtn" class="btn primary" type="button">Run Query</button>
+                <button id="saveExplorationBtn" class="btn" type="button">Save Exploration</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Saved Explorations</h2>
+              </div>
+              <div id="savedExplorations" class="builder-list"></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Filter Charts</h2>
+              </div>
+              <div id="explorerFacetRail" class="facet-stack"></div>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="explorerTitle">Exploration</strong>
+                <span id="explorerSummary">Select an object type and run a query</span>
+              </div>
+              <div class="logic-actions">
+                <button id="bulkActionBtn" class="btn" type="button">Bulk Action</button>
+                <button id="openExplorerObjectBtn" class="btn primary" type="button">Open Object View</button>
+              </div>
+            </section>
+            <section id="explorerCharts" class="explorer-charts"></section>
+            <section id="explorerResults" class="table-wrap platform-table explorer-results"></section>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Object Preview</h2>
+              </div>
+              <div id="explorerObjectPreview" class="object-profile empty-state">No object selected</div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Available Actions</h2>
+              </div>
+              <div id="explorerActionList" class="builder-list"></div>
+            </section>
+          </aside>
+        </section>
+
+        <section id="pipelineView" class="workspace pipeline-workspace hidden">
+          <aside class="side-panel builder-rail">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Pipeline Builder</h2>
+                <button id="refreshPipelineBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>Graph</span>
+                  <select id="pipelineGraphSelect"></select>
+                </label>
+                <button id="newPipelineGraphBtn" class="btn" type="button">New Graph</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Node Library</h2>
+              </div>
+              <div id="pipelineNodeLibrary" class="node-library"></div>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="pipelineTitle">DAG Editor</strong>
+                <span id="pipelineSummary">Input, transform, output, deliver</span>
+              </div>
+              <div class="logic-actions">
+                <button id="validatePipelineGraphBtn" class="btn" type="button">Validate</button>
+                <button id="previewPipelineGraphBtn" class="btn" type="button">Preview</button>
+                <button id="savePipelineGraphBtn" class="btn" type="button">Save</button>
+                <button id="deliverPipelineGraphBtn" class="btn primary" type="button">Deliver</button>
+              </div>
+            </section>
+            <section id="pipelineCanvas" class="pipeline-canvas" aria-label="Pipeline DAG canvas"></section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Preview</h2>
+              </div>
+              <div id="pipelinePreviewTable" class="table-wrap platform-table"></div>
+            </section>
+          </section>
+
+          <aside class="detail-panel builder-config">
+            <section class="panel-section">
+              <div class="segmented full">
+                <button class="segment active" data-pipeline-panel="build" type="button">Build</button>
+                <button class="segment" data-pipeline-panel="lineage" type="button">Lineage</button>
+                <button class="segment" data-pipeline-panel="schedule" type="button">Schedule</button>
+                <button class="segment" data-pipeline-panel="health" type="button">Health</button>
+              </div>
+              <div id="pipelineConfig" class="pipeline-panel active" data-pipeline-panel-body="build"></div>
+              <pre id="pipelineLineagePanel" class="pipeline-panel mini-output tall" data-pipeline-panel-body="lineage"></pre>
+              <div id="pipelineSchedulePanel" class="pipeline-panel builder-list" data-pipeline-panel-body="schedule"></div>
+              <div id="pipelineHealthPanel" class="pipeline-panel builder-list" data-pipeline-panel-body="health"></div>
+            </section>
+          </aside>
+        </section>
+
         <section id="mapView" class="workspace">
           <aside class="side-panel">
             <section class="panel-section">
@@ -117,8 +503,46 @@
           </aside>
         </section>
 
-        <section id="aipView" class="workspace aip-layout">
+        <section id="aipView" class="workspace aip-layout logic-layout">
           <aside class="side-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Logic</h2>
+                <button id="refreshLogicBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>Logic Function</span>
+                  <select id="logicFunctionSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Branch</span>
+                  <select id="logicBranchSelect">
+                    <option value="main">main</option>
+                    <option value="draft">draft</option>
+                    <option value="experiment">experiment</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Mode</span>
+                  <select id="assistModeSelect">
+                    <option value="default">AIP Assist</option>
+                    <option value="developer">Developer Assist</option>
+                    <option value="platform">Platform Docs</option>
+                    <option value="agent">AIP Agent</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Inputs</h2>
+                <button id="addInputBtn" class="btn small" type="button">Add</button>
+              </div>
+              <div id="logicInputs" class="logic-inputs"></div>
+            </section>
+
             <section class="panel-section">
               <div class="section-title">
                 <h2>Context</h2>
@@ -135,27 +559,71 @@
               </label>
               <label class="field">
                 <span>Filters JSON</span>
-                <textarea id="contextFilters" rows="5">{}</textarea>
+                <textarea id="contextFilters" rows="4">{}</textarea>
               </label>
-              <div id="contextObjects" class="object-list"></div>
+              <div id="contextObjects" class="object-list compact-list"></div>
             </section>
           </aside>
 
-          <section class="aip-main">
-            <section class="assistant-panel">
-              <div class="section-title">
-                <h2>Assist</h2>
-                <button id="askAssistBtn" class="btn primary" type="button">Ask</button>
+          <section class="aip-main logic-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong>AIP Logic Builder</strong>
+                <span id="logicSummary">Configure inputs, blocks, and outputs</span>
               </div>
-              <textarea id="assistPrompt" rows="4">Which tools can help inspect critical assets and propose maintenance actions?</textarea>
-              <div id="assistAnswer" class="answer-box"></div>
+              <div class="logic-actions">
+                <select id="blockTypeSelect" aria-label="Block type"></select>
+                <button id="addBlockBtn" class="btn" type="button">Add Block</button>
+                <button id="saveLogicBtn" class="btn" type="button">Save</button>
+                <button id="runLogicBtn" class="btn primary" type="button">Run</button>
+              </div>
             </section>
 
-            <section class="split-grid">
-              <div class="panel-section">
-                <div class="section-title">
+            <section id="logicBlocks" class="logic-chain" aria-label="Logic block chain"></section>
+
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Output</h2>
+              </div>
+              <div class="output-grid">
+                <label class="field">
+                  <span>Return Type</span>
+                  <select id="logicOutputType">
+                    <option value="string">string</option>
+                    <option value="object">object</option>
+                    <option value="object_set">object set</option>
+                    <option value="edits">ontology edits</option>
+                    <option value="json">json</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Output Variable</span>
+                  <select id="logicOutputVariable"></select>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel-section classic-tools">
+              <div class="section-title">
+                <h2>Tool Surfaces</h2>
+                <div class="segmented">
+                  <button class="segment active" data-tool-tab="assist" type="button">Assist</button>
+                  <button class="segment" data-tool-tab="agent" type="button">Agent</button>
+                  <button class="segment" data-tool-tab="pipeline" type="button">Pipeline</button>
+                </div>
+              </div>
+              <div class="tool-tab active" data-tool-panel="assist">
+                <div class="section-title inline-title">
+                  <h2>Assist</h2>
+                  <button id="askAssistBtn" class="btn small primary" type="button">Ask</button>
+                </div>
+                <textarea id="assistPrompt" rows="4">Which tools can help inspect critical assets and propose maintenance actions?</textarea>
+                <div id="assistAnswer" class="answer-box"></div>
+              </div>
+              <div class="tool-tab" data-tool-panel="agent">
+                <div class="section-title inline-title">
                   <h2>Agent Session</h2>
-                  <button id="runAgentBtn" class="btn" type="button">Run</button>
+                  <button id="runAgentBtn" class="btn small" type="button">Run</button>
                 </div>
                 <label class="field">
                   <span>Agent</span>
@@ -164,11 +632,10 @@
                 <textarea id="agentPrompt" rows="4">Please escalate work order for urgent pump issue</textarea>
                 <pre id="agentResult" class="mini-output tall"></pre>
               </div>
-
-              <div class="panel-section">
-                <div class="section-title">
+              <div class="tool-tab" data-tool-panel="pipeline">
+                <div class="section-title inline-title">
                   <h2>Pipeline Builder</h2>
-                  <button id="generatePipelineBtn" class="btn" type="button">Generate</button>
+                  <button id="generatePipelineBtn" class="btn small" type="button">Generate</button>
                 </div>
                 <textarea id="pipelinePrompt" rows="4">Clean open records, classify priority, summarize, and hydrate ontology</textarea>
                 <pre id="pipelineResult" class="mini-output tall"></pre>
@@ -176,29 +643,98 @@
             </section>
           </section>
 
-          <aside class="detail-panel">
+          <aside class="detail-panel logic-run-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Run Panel</h2>
+              </div>
+              <div class="segmented full">
+                <button class="segment active" data-run-tab="run" type="button">Run</button>
+                <button class="segment" data-run-tab="debugger" type="button">Debugger</button>
+                <button class="segment" data-run-tab="evals" type="button">Evals</button>
+                <button class="segment" data-run-tab="history" type="button">History</button>
+              </div>
+              <div class="run-tab active" data-run-panel="run">
+                <label class="field">
+                  <span>Inputs JSON</span>
+                  <textarea id="logicRunInputs" rows="6">{
+  "prompt": "Summarize critical maintenance risk",
+  "work_order_id": "wo_pump_urgent"
+}</textarea>
+                </label>
+                <pre id="logicRunResult" class="mini-output tall"></pre>
+              </div>
+              <div class="run-tab" data-run-panel="debugger">
+                <pre id="logicDebugger" class="mini-output tall"></pre>
+              </div>
+              <div class="run-tab" data-run-panel="evals">
+                <div class="section-title inline-title">
+                  <h2>Evals</h2>
+                  <button id="runEvalBtn" class="btn small" type="button">Run</button>
+                </div>
+                <select id="evalSelect"></select>
+                <pre id="evalResult" class="mini-output"></pre>
+              </div>
+              <div class="run-tab" data-run-panel="history">
+                <div id="logicHistory" class="object-list compact-list"></div>
+              </div>
+            </section>
+
             <section class="panel-section">
               <div class="section-title">
                 <h2>Approvals</h2>
                 <button id="loadApprovalsBtn" class="btn small" type="button">Load</button>
               </div>
-              <div id="approvalList" class="object-list"></div>
-            </section>
-            <section class="panel-section">
-              <div class="section-title">
-                <h2>Evals</h2>
-                <button id="runEvalBtn" class="btn small" type="button">Run</button>
-              </div>
-              <select id="evalSelect"></select>
-              <pre id="evalResult" class="mini-output"></pre>
+              <div id="approvalList" class="object-list compact-list"></div>
             </section>
           </aside>
         </section>
-      </main>
+        </main>
+      </div>
+    </div>
+
+    <div id="globalSearchOverlay" class="global-search-overlay hidden" role="dialog" aria-modal="true" aria-label="Global search">
+      <div class="global-search-modal">
+        <div class="global-search-head">
+          <span>S</span>
+          <input id="globalSearchInput" placeholder="Search for applications, files, objects, datasets..." />
+          <button id="clearSearchBtn" class="text-btn" type="button">Clear</button>
+          <button id="closeSearchBtn" class="icon-btn" type="button" aria-label="Close search">x</button>
+        </div>
+        <div class="global-search-command">
+          <strong id="searchCommandLabel">All search results</strong>
+          <span>Enter to open selected result</span>
+        </div>
+        <div id="globalSearchResults" class="global-search-results"></div>
+        <div class="global-search-footer">
+          <span>Hotkeys</span>
+          <kbd>ctrl</kbd><kbd>J</kbd>
+          <span>Open quicksearch</span>
+          <kbd>esc</kbd>
+          <span>Close</span>
+        </div>
+      </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="/ui/assets/app.js"></script>
+    <div id="objectBulkModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Bulk action">
+      <section class="modal-panel">
+        <div class="section-title">
+          <h2>Bulk Action</h2>
+          <button id="closeBulkActionBtn" class="icon-btn" type="button" aria-label="Close bulk action">x</button>
+        </div>
+        <label class="field">
+          <span>Action</span>
+          <select id="bulkActionSelect"></select>
+        </label>
+        <label class="field">
+          <span>Parameters JSON</span>
+          <textarea id="bulkActionParams" rows="6">{}</textarea>
+        </label>
+        <button id="executeBulkActionBtn" class="btn primary full-width" type="button">Execute on Selected</button>
+      </section>
+    </div>
+    <script src="/ui/assets/app.js?v=platform-shell-3"></script>
   </body>
 </html>
