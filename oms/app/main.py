@@ -7,6 +7,71 @@ from pathlib import Path
 import time
 
 from . import models, schemas, models_action
+# New Foundry tool-equivalent modules (self-contained routers + ORM models).
+# Importing them here registers their tables on the shared Base before create_all().
+from . import (
+    ontology_interfaces,
+    ontology_value_types,
+    ontology_versioning,
+    ontology_functions,
+    connectivity,
+    streaming,
+    schedules,
+    media_sets,
+    lineage,
+    analytics,
+    apps,
+    modeling,
+    observability,
+    security_access,
+    security_data,
+    cipher,
+    marketplace,
+    aip_extras,
+    dev_toolchain,
+    notepad,
+    ontology_core,
+    aip_agents,
+    aip_evals,
+    aip_document,
+    datasets_ext,
+    workshop_runtime,
+    slate_runtime,
+    carbon_runtime,
+    gis_ops,
+    quiver_runtime,
+    modeling_metrics,
+    observability_checks,
+    cipher_ops,
+    security_propagation,
+    contour_ops,
+    object_explorer_ops,
+    streaming_ops,
+    schedules_ops,
+    marketplace_ops,
+    osdk_ops,
+    compute_ops,
+    connectivity_ops,
+    media_ops,
+    notepad_ops,
+    admin_directory,
+    admin_auth,
+    admin_usage,
+    ontology_interfaces_ops,
+    lineage_ops,
+    webhooks_ops,
+    vertex_ops,
+    automate_ops,
+    aip_content_sources,
+    modeling_evaluation_ops,
+    fusion_ops,
+    object_views_ops,
+    pipeline_builder_ops,
+    classification_ops,
+    autopilot_ops,
+    mcp_tools,
+    audit_ops,
+)
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
 from .domain_sentinel import (
@@ -70,6 +135,72 @@ app = FastAPI(title="Ontology Artificial Intelligence Platform")
 UI_DIR = Path(__file__).resolve().parent / "ui"
 app.mount("/ui/assets", StaticFiles(directory=str(UI_DIR)), name="ui-assets")
 
+# Mount the new Foundry tool-equivalent routers. Each module exposes `router`.
+for _ext_module in (
+    ontology_interfaces,
+    ontology_value_types,
+    ontology_versioning,
+    ontology_functions,
+    connectivity,
+    streaming,
+    schedules,
+    media_sets,
+    lineage,
+    analytics,
+    apps,
+    modeling,
+    observability,
+    security_access,
+    security_data,
+    cipher,
+    marketplace,
+    aip_extras,
+    dev_toolchain,
+    notepad,
+    ontology_core,
+    aip_agents,
+    aip_evals,
+    aip_document,
+    datasets_ext,
+    workshop_runtime,
+    slate_runtime,
+    carbon_runtime,
+    gis_ops,
+    quiver_runtime,
+    modeling_metrics,
+    observability_checks,
+    cipher_ops,
+    security_propagation,
+    contour_ops,
+    object_explorer_ops,
+    streaming_ops,
+    schedules_ops,
+    marketplace_ops,
+    osdk_ops,
+    compute_ops,
+    connectivity_ops,
+    media_ops,
+    notepad_ops,
+    admin_directory,
+    admin_auth,
+    admin_usage,
+    ontology_interfaces_ops,
+    lineage_ops,
+    webhooks_ops,
+    vertex_ops,
+    automate_ops,
+    aip_content_sources,
+    modeling_evaluation_ops,
+    fusion_ops,
+    object_views_ops,
+    pipeline_builder_ops,
+    classification_ops,
+    autopilot_ops,
+    mcp_tools,
+    audit_ops,
+):
+    app.include_router(_ext_module.router)
+
 
 def _not_found(resource: str, resource_id: str):
     raise HTTPException(status_code=404, detail=f"{resource} '{resource_id}' not found")
@@ -82,7 +213,7 @@ def serve_workspace():
 
 @app.get("/workspace/{view}", include_in_schema=False)
 def serve_workspace_view(view: str):
-    if view not in {"map", "aip"}:
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline"}:
         _not_found("Workspace", view)
     return FileResponse(UI_DIR / "index.html")
 
@@ -157,6 +288,32 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate, db: Session = Depe
     errors = validate_object_properties(object_type, obj.properties)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
+
+    # Enforce the configured primary-key uniqueness when the object type has a
+    # profile that declares one (no profile / no PK => no enforcement, so existing
+    # callers without a configured profile are unaffected).
+    profile = db.query(ontology_core.ObjectTypeProfile).filter(
+        ontology_core.ObjectTypeProfile.object_type_id == obj.object_type_id
+    ).first()
+    if profile and getattr(profile, "primary_key", None):
+        pk = profile.primary_key
+        pk_value = (obj.properties or {}).get(pk)
+        if pk_value is not None:
+            clash = next(
+                (
+                    inst
+                    for inst in db.query(models.ObjectInstance).filter(
+                        models.ObjectInstance.object_type_id == obj.object_type_id
+                    ).all()
+                    if (inst.properties or {}).get(pk) == pk_value
+                ),
+                None,
+            )
+            if clash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"primary key '{pk}'={pk_value!r} already exists for object type '{obj.object_type_id}'",
+                )
 
     now = now_ts()
     db_model = models.ObjectInstance(
