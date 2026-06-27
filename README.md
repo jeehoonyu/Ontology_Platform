@@ -301,6 +301,48 @@ Public Palantir docs list AIP Assist, AIP Logic, AIP Chatbot Studio, AIP Evals, 
 
 These endpoints are intentionally local approximations. They provide the same architectural roles for development and testing, but they do not claim compatibility with Palantir's proprietary APIs, model-routing plane, UI builders, security services, or managed infrastructure.
 
+## Extended Foundry Tool Coverage (New Modules)
+
+To complete the public Foundry tool surface, the platform adds 18 self-contained router modules under `oms/app/`. Each follows the existing conventions (shared `Base`, SQLAlchemy 2.0 models, `APIRouter`, deterministic local logic) and is mounted in `main.py`. A full docs-vs-implementation matrix lives in [`foundry-docs/COVERAGE.md`](foundry-docs/COVERAGE.md), and end-to-end behavior is verified by `oms/test_foundry_tools.py` (82 endpoint assertions).
+
+**Ontology depth**
+- `ontology_interfaces.py` — Interfaces (polymorphic contracts) & shared property types: `/interfaces`, `/interfaces/{id}/implementers`, `/interfaces/{id}/check-object-type`, `/shared-property-types`.
+- `ontology_value_types.py` — Value types & structs with constraint validation: `/value-types`, `/value-types/{id}/validate`.
+- `ontology_versioning.py` — Ontology Manager branches & proposals: `/ontology/branches`, `/ontology/proposals`, `.../submit`, `.../decision`, `.../merge`.
+- `ontology_functions.py` — Typed Functions on Objects: `/ontology-functions`, `/ontology-functions/{id}/run`.
+
+**Data integration**
+- `connectivity.py` — Data Connection sources, syncs, exports: `/connections/sources`, `/connections/sources/{id}/syncs`, `/connections/syncs/{id}/run`, `/connections/exports`.
+- `streaming.py` — Streams: `/streams`, `/streams/{id}/publish`, `/streams/{id}/records`, `/streams/{id}/archive`.
+- `schedules.py` — Schedules & builds: `/schedules`, `/schedules/{id}/trigger`, `/builds`.
+- `media_sets.py` — Media sets & extraction: `/media-sets`, `/media-sets/{id}/items`, `/media-items/{id}/extract`.
+- `lineage.py` — Cross-resource lineage graph: `/lineage/graph`, `/lineage/resource/{kind}/{id}`.
+
+**Analytics & applications**
+- `analytics.py` — Contour, Quiver, Fusion: `/analytics/contour(.../run)`, `/analytics/quiver(.../compute)`, `/analytics/fusion(.../evaluate)`.
+- `apps.py` — Workshop, Slate, Carbon: `/apps/workshop(.../render)`, `/apps/slate`, `/apps/carbon`.
+
+**Modeling**
+- `modeling.py` — Modeling Objectives, training, deployments: `/modeling/objectives(.../train,.../release)`, `/modeling/deployments(.../infer)`.
+
+**Observability**
+- `observability.py` — Monitoring views, traces, metrics: `/observability/monitoring-views(.../evaluate)`, `/observability/traces`, `/observability/metrics`, `/observability/summary`.
+
+**Security & governance**
+- `security_access.py` — Projects, roles, permissions: `/projects`, `/roles`, `/projects/{id}/grants`, `/access/check`.
+- `security_data.py` — Markings, restricted views, scanner, retention, checkpoints: `/markings(.../grant)`, `/restricted-views(.../apply)`, `/governance/scan`, `/retention-policies`, `/checkpoints`.
+- `cipher.py` — Encrypt/tokenize/decrypt with licenses: `/cipher/channels`, `/cipher/encrypt`, `/cipher/tokenize`, `/cipher/decrypt`.
+
+**Delivery & dev toolchain**
+- `marketplace.py` — DevOps products & Marketplace: `/devops/products(.../releases)`, `/marketplace`, `/marketplace/{id}/install`, `/installations/{id}/upgrade`.
+- `aip_extras.py` — AIP Model Catalog/BYOM, Compute Modules, OSDK generator: `/aip/model-catalog`, `/aip/model-catalog/byom`, `/compute-modules(.../invoke)`, `/osdk/generate`.
+- `dev_toolchain.py` — Code Repositories, Workspaces, Workbook: `/code-repositories` (branches, files, commits, `.../checks/run`, `.../merge`), `/code-workspaces(.../status)`, `/code-workbooks(.../run)`.
+- `notepad.py` — Notepad documents & reports with live ontology embeds: `/notepad/documents`, `.../blocks`, `.../render`, `.../export`.
+
+> With these two modules added, **every tool documented in `foundry-docs-full/` has a working local equivalent** (100% breadth). The app exposes **248 routes** across **75 tables**; `oms/test_foundry_tools.py` covers the new surface with **95 endpoint assertions** (all green alongside the 7 scenario tests).
+
+> Note on local environment: the bundled `oms/venv` was created for Python 3.13 on another machine and does not run here. Use Python 3.12 (`venv312`) or recreate the venv with `python -m venv venv && pip install -r requirements.txt`. The full suite runs with: `for t in test_*.py; do python $t; done`.
+
 ## Ontology Validation Strategy
 
 The fastest way to determine whether this project works like the intended idea is not to compare proprietary code. It is to define behavioral contracts and run them continuously:

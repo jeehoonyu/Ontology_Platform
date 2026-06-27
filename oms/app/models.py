@@ -27,6 +27,7 @@ class LinkType(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
     display_name: Mapped[str] = mapped_column(String)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"))
     target_object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"))
     cardinality: Mapped[str] = mapped_column(String) # ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY
