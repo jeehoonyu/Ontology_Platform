@@ -1430,6 +1430,94 @@ def hydrate_links(
     return records, {"materialized_links": created, "skipped_links": skipped}
 
 
+def _aggregate_pipeline_records(records: List[Dict[str, Any]], step: Dict[str, Any]) -> List[Dict[str, Any]]:
+    group_by = step.get("group_by", [])
+    aggregations = step.get("aggregations", [])
+    groups: Dict[Tuple, List[Dict[str, Any]]] = {}
+    for record in records:
+        key = tuple(record.get(g) for g in group_by)
+        groups.setdefault(key, []).append(record)
+    output: List[Dict[str, Any]] = []
+    for key, rows in groups.items():
+        row: Dict[str, Any] = {g: k for g, k in zip(group_by, key)}
+        for agg in aggregations:
+            op = agg.get("op", "count")
+            field = agg.get("field")
+            alias = agg.get("as", f"{op}_{field}" if field else "count")
+            nums = [
+                r.get(field) for r in rows
+                if isinstance(r.get(field), (int, float)) and not isinstance(r.get(field), bool)
+            ]
+            if op == "count":
+                row[alias] = len(rows)
+            elif op == "sum":
+                row[alias] = sum(nums)
+            elif op == "avg":
+                row[alias] = sum(nums) / len(nums) if nums else 0
+            elif op == "min":
+                row[alias] = min(nums) if nums else None
+            elif op == "max":
+                row[alias] = max(nums) if nums else None
+            else:
+                row[alias] = None
+        output.append(row)
+    return output
+
+
+def _join_pipeline_records(left: List[Dict[str, Any]], right: List[Dict[str, Any]], step: Dict[str, Any]) -> List[Dict[str, Any]]:
+    left_on = step.get("left_on") or step.get("on")
+    right_on = step.get("right_on") or step.get("on")
+    how = step.get("how", "inner")
+    prefix = step.get("prefix", "")
+    index: Dict[Any, Dict[str, Any]] = {}
+    for r in right:
+        index.setdefault(r.get(right_on), r)
+    output: List[Dict[str, Any]] = []
+    for row in left:
+        match = index.get(row.get(left_on))
+        if match:
+            merged = dict(row)
+            for k, v in match.items():
+                if k == right_on:
+                    continue
+                merged[f"{prefix}{k}"] = v
+            output.append(merged)
+        elif how == "left":
+            output.append(dict(row))
+    return output
+
+
+def _dedupe_pipeline_records(records: List[Dict[str, Any]], keys: List[str]) -> List[Dict[str, Any]]:
+    seen: Set = set()
+    output: List[Dict[str, Any]] = []
+    for record in records:
+        marker = tuple(record.get(k) for k in keys) if keys else json.dumps(record, sort_keys=True, default=str)
+        if marker not in seen:
+            seen.add(marker)
+            output.append(record)
+    return output
+
+
+def _cast_value(value: Any, to: str) -> Any:
+    try:
+        if to == "string":
+            return None if value is None else str(value)
+        if to in ("integer", "int", "long"):
+            return int(value)
+        if to in ("double", "float", "number"):
+            return float(value)
+        if to == "boolean":
+            return value if isinstance(value, bool) else str(value).strip().lower() in {"true", "1", "yes"}
+    except (ValueError, TypeError):
+        return None
+    return value
+
+
+def _pipeline_sort_key(value: Any):
+    is_num = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return (value is None, not is_num, value if is_num else str(value))
+
+
 def execute_pipeline_steps(
     db: Session,
     *,
@@ -1490,6 +1578,35 @@ def execute_pipeline_steps(
             )
         elif operation == "link_objects":
             records, metrics = hydrate_links(db, records, step)
+        elif operation == "join":
+            right_asset = db.query(models.DataAsset).filter(models.DataAsset.id == step["right_asset_id"]).first()
+            if not right_asset:
+                raise ValueError(f"join right_asset_id '{step.get('right_asset_id')}' not found")
+            records = _join_pipeline_records(records, right_asset.records or [], step)
+            metrics = {"joined_with": right_asset.id, "right_rows": len(right_asset.records or [])}
+        elif operation == "union":
+            other = db.query(models.DataAsset).filter(models.DataAsset.id == step["asset_id"]).first()
+            if not other:
+                raise ValueError(f"union asset_id '{step.get('asset_id')}' not found")
+            records = records + copy.deepcopy(other.records or [])
+            metrics = {"unioned_with": other.id, "added_rows": len(other.records or [])}
+        elif operation in {"aggregate", "group_by"}:
+            records = _aggregate_pipeline_records(records, step)
+            metrics = {"groups": len(records)}
+        elif operation in {"dedupe", "distinct"}:
+            records = _dedupe_pipeline_records(records, step.get("keys", []))
+        elif operation == "cast":
+            field = step["field"]
+            to = step["to"]
+            records = [{**record, field: _cast_value(record.get(field), to)} for record in records]
+        elif operation == "rename":
+            mapping = step.get("mapping", {})
+            records = [{mapping.get(k, k): v for k, v in record.items()} for record in records]
+        elif operation == "sort":
+            field = step["field"]
+            records = sorted(records, key=lambda r: _pipeline_sort_key(r.get(field)), reverse=bool(step.get("desc")))
+        elif operation == "limit":
+            records = records[: int(step.get("count", len(records)))]
         else:
             raise ValueError(f"Unsupported pipeline operation '{operation}'")
 
@@ -2672,18 +2789,107 @@ def generate_cron_from_prompt(prompt: str) -> Dict[str, str]:
     return {"cron": cron, "timezone": "UTC", "explanation": explanation}
 
 
-def execute_logic_blocks(
+def _logic_cmp(op: str, left: Any, right: Any) -> bool:
+    """Comparison operators for AIP Logic conditional/condition evaluation."""
+    try:
+        if op in ("eq", "=="):
+            return left == right
+        if op in ("ne", "!="):
+            return left != right
+        if op == "gt":
+            return left > right
+        if op == "gte":
+            return left >= right
+        if op == "lt":
+            return left < right
+        if op == "lte":
+            return left <= right
+        if op == "in":
+            return left in (right or [])
+        if op == "contains":
+            return str(right) in str(left)
+        if op == "not_null":
+            return left is not None
+        if op == "truthy":
+            return bool(left)
+    except TypeError:
+        return False
+    return False
+
+
+def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any], limit: int = 1000):
+    """Query an object set with simple equality filters (AIP Logic 'Query Objects')."""
+    instances = (
+        db.query(models.ObjectInstance)
+        .filter(models.ObjectInstance.object_type_id == object_type_id)
+        .all()
+    )
+    filters = filters or {}
+    matched = [
+        i for i in instances
+        if all((i.properties or {}).get(k) == v for k, v in filters.items())
+    ]
+    return matched[: int(limit)], len(matched)
+
+
+def _eval_logic_condition(condition: Dict[str, Any], scope: Dict[str, Any], db: Session) -> bool:
+    """Evaluate an AIP Logic condition against the current variable scope."""
+    if not condition:
+        return True
+    if "object_count" in condition:
+        spec = condition["object_count"]
+        _, count = _logic_object_rows(db, spec.get("object_type_id"), spec.get("filters", {}), limit=10 ** 9)
+        return _logic_cmp(condition.get("op", "gt"), count, condition.get("value", 0))
+    left = resolve_value(condition.get("left"), scope)
+    right = resolve_value(condition.get("right"), scope)
+    return _logic_cmp(condition.get("op", "truthy"), left, right)
+
+
+def _deterministic_llm(block: Dict[str, Any], scope: Dict[str, Any]) -> Dict[str, Any]:
+    """A local, deterministic stand-in for an AIP Logic 'Use LLM' block.
+
+    No network calls. Supports echo/template/summarize/classify/extract modes so
+    Logic functions can be authored and exercised exactly as documented while the
+    platform stays deterministic by default.
+    """
+    mode = block.get("mode", "echo")
+    prompt = str(resolve_value(block.get("prompt", "$prompt"), scope) or "")
+    if mode == "template":
+        try:
+            response: Any = str(block.get("template", "")).format(**scope)
+        except Exception:
+            response = block.get("template", "")
+    elif mode == "summarize":
+        words = prompt.split()
+        max_words = int(block.get("max_words", 30))
+        response = " ".join(words[:max_words]) + (" ..." if len(words) > max_words else "")
+    elif mode == "classify":
+        labels = block.get("labels", [])
+        lowered = prompt.lower()
+        response = next((lbl for lbl in labels if str(lbl).lower() in lowered), (labels[0] if labels else "unknown"))
+    elif mode == "extract":
+        response = extract_document_intelligence(prompt, block.get("extraction_schema", {}))
+    else:  # echo
+        response = prompt
+    return {"mode": mode, "prompt": prompt, "response": response}
+
+
+def _exec_logic_block_list(
     db: Session,
     *,
     logic_function: models.LogicFunction,
+    blocks: List[Dict[str, Any]],
     inputs: Dict[str, Any],
-) -> Dict[str, Any]:
-    outputs: Dict[str, Any] = {}
-    trace: List[Dict[str, Any]] = []
-    proposed_actions: List[Dict[str, Any]] = []
-
-    for index, block in enumerate(logic_function.blocks or []):
+    outputs: Dict[str, Any],
+    trace: List[Dict[str, Any]],
+    proposed_actions: List[Dict[str, Any]],
+    loop_scope: Dict[str, Any],
+    depth: int = 0,
+) -> None:
+    for index, block in enumerate(blocks or []):
         block_type = block.get("type") or block.get("operation")
+        # Variable scope chains inputs + loop variables + accumulated block outputs.
+        scope = {**inputs, **loop_scope, **outputs}
         result: Dict[str, Any] = {}
 
         if block_type == "retrieve_context":
@@ -2695,19 +2901,19 @@ def execute_logic_blocks(
             )
             outputs[block.get("output", "context")] = result
         elif block_type == "assist":
-            prompt = resolve_value(block.get("prompt", "$prompt"), inputs) or inputs.get("prompt", "")
+            prompt = resolve_value(block.get("prompt", "$prompt"), scope) or scope.get("prompt", "")
             result = answer_assist_query(db, prompt=str(prompt), application_context=block.get("application_context"))
             outputs[block.get("output", "assist")] = result
         elif block_type == "document_extract":
-            text = resolve_value(block.get("text", "$text"), inputs) or ""
+            text = resolve_value(block.get("text", "$text"), scope) or ""
             result = extract_document_intelligence(str(text), block.get("extraction_schema", {}))
             outputs[block.get("output", "document")] = result
         elif block_type == "pipeline_suggest":
-            prompt = resolve_value(block.get("prompt", "$prompt"), inputs) or inputs.get("prompt", "")
+            prompt = resolve_value(block.get("prompt", "$prompt"), scope) or scope.get("prompt", "")
             result = suggest_pipeline_from_prompt(str(prompt), block.get("sample_fields", []))
             outputs[block.get("output", "pipeline")] = result
         elif block_type == "notepad_transform":
-            text = resolve_value(block.get("text", "$text"), inputs) or ""
+            text = resolve_value(block.get("text", "$text"), scope) or ""
             result = transform_notepad_text(
                 text=str(text),
                 operation=block.get("operation_name", "shorten"),
@@ -2721,7 +2927,7 @@ def execute_logic_blocks(
             if not action:
                 raise ValueError(f"ActionType '{action_id}' not found")
             parameters = {
-                key: resolve_value(value, inputs)
+                key: resolve_value(value, scope)
                 for key, value in (block.get("parameters") or {}).items()
             }
             proposal = {
@@ -2733,16 +2939,113 @@ def execute_logic_blocks(
             proposed_actions.append(proposal)
             result = proposal
             outputs[block.get("output", "proposed_action")] = proposal
-        elif block_type == "set_output":
+        elif block_type in ("set_output", "set_variable"):
             key = block.get("key", "value")
-            value = resolve_value(block.get("value"), {**inputs, **outputs})
+            value = resolve_value(block.get("value"), scope)
             outputs[key] = value
             result = {key: value}
+        # --- documented control flow & tool blocks ---
+        elif block_type == "llm":
+            result = _deterministic_llm(block, scope)
+            outputs[block.get("output", "llm")] = result
+        elif block_type == "object_query":
+            rows, count = _logic_object_rows(
+                db, block.get("object_type_id"), block.get("filters", {}), int(block.get("limit", 1000))
+            )
+            result = {
+                "object_type_id": block.get("object_type_id"),
+                "count": count,
+                "rows": [{"id": i.id, "properties": i.properties} for i in rows],
+            }
+            outputs[block.get("output", "query")] = result
+        elif block_type == "object_aggregate":
+            rows, count = _logic_object_rows(
+                db, block.get("object_type_id"), block.get("filters", {}), limit=10 ** 9
+            )
+            op = block.get("op", "count")
+            field = block.get("field")
+            nums = [
+                (i.properties or {}).get(field)
+                for i in rows
+                if isinstance((i.properties or {}).get(field), (int, float)) and not isinstance((i.properties or {}).get(field), bool)
+            ]
+            if op == "count":
+                value: Any = count
+            elif op == "sum":
+                value = sum(nums)
+            elif op == "avg":
+                value = (sum(nums) / len(nums)) if nums else 0
+            elif op == "min":
+                value = min(nums) if nums else None
+            elif op == "max":
+                value = max(nums) if nums else None
+            else:
+                raise ValueError(f"Unsupported aggregate op '{op}'")
+            result = {"op": op, "field": field, "value": value, "count": count}
+            outputs[block.get("output", "aggregate")] = result
+        elif block_type == "apply_action":
+            action_id = block["action_type_id"]
+            action = db.query(models.ActionType).filter(models.ActionType.id == action_id).first()
+            if not action:
+                raise ValueError(f"ActionType '{action_id}' not found")
+            parameters = {
+                key: resolve_value(value, scope)
+                for key, value in (block.get("parameters") or {}).items()
+            }
+            mutated = apply_action_mutations(
+                db, action_type=action, parameters=parameters, actor=block.get("actor", "logic")
+            )
+            result = {"action_type_id": action.id, "mutated_object_ids": mutated}
+            outputs[block.get("output", "applied_action")] = result
+        elif block_type == "conditional":
+            condition_met = _eval_logic_condition(block.get("condition", {}), scope, db)
+            branch = block.get("then", []) if condition_met else block.get("else", [])
+            _exec_logic_block_list(
+                db, logic_function=logic_function, blocks=branch, inputs=inputs, outputs=outputs,
+                trace=trace, proposed_actions=proposed_actions, loop_scope=loop_scope, depth=depth + 1,
+            )
+            result = {"condition": condition_met, "branch": "then" if condition_met else "else"}
+        elif block_type == "for_each":
+            items = resolve_value(block.get("items"), scope)
+            if items is None and block.get("object_type_id"):
+                rows, _ = _logic_object_rows(db, block.get("object_type_id"), block.get("filters", {}), int(block.get("limit", 1000)))
+                items = [{"id": i.id, "properties": i.properties} for i in rows]
+            item_var = block.get("item_var", "item")
+            iterations = 0
+            for idx, item in enumerate(items or []):
+                nested_loop_scope = {**loop_scope, item_var: item, "loop_index": idx}
+                _exec_logic_block_list(
+                    db, logic_function=logic_function, blocks=block.get("blocks", []), inputs=inputs,
+                    outputs=outputs, trace=trace, proposed_actions=proposed_actions,
+                    loop_scope=nested_loop_scope, depth=depth + 1,
+                )
+                iterations += 1
+            result = {"iterations": iterations, "item_var": item_var}
         else:
             raise ValueError(f"Unsupported logic block '{block_type}'")
 
-        trace.append({"index": index, "type": block_type, "result": result})
+        trace.append({"index": index, "depth": depth, "type": block_type, "result": result})
 
+
+def execute_logic_blocks(
+    db: Session,
+    *,
+    logic_function: models.LogicFunction,
+    inputs: Dict[str, Any],
+) -> Dict[str, Any]:
+    outputs: Dict[str, Any] = {}
+    trace: List[Dict[str, Any]] = []
+    proposed_actions: List[Dict[str, Any]] = []
+    _exec_logic_block_list(
+        db,
+        logic_function=logic_function,
+        blocks=logic_function.blocks or [],
+        inputs=inputs,
+        outputs=outputs,
+        trace=trace,
+        proposed_actions=proposed_actions,
+        loop_scope={},
+    )
     return {"outputs": outputs, "trace": trace, "proposed_actions": proposed_actions}
 
 
