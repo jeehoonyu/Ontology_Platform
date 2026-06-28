@@ -362,6 +362,24 @@ def train_model(objective_id: str, body: TrainRequest, db: Session = Depends(get
     return row
 
 
+@router.get("/modeling/objectives/{objective_id}/submissions", response_model=List[ModelSubmissionRead])
+def list_objective_submissions(objective_id: str, db: Session = Depends(get_db)):
+    objective = db.query(ModelingObjective).filter(ModelingObjective.id == objective_id).first()
+    if not objective:
+        raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
+    return db.query(ModelSubmission).filter(
+        ModelSubmission.objective_id == objective_id
+    ).order_by(ModelSubmission.created_at.desc()).all()
+
+
+@router.get("/modeling/submissions/{submission_id}", response_model=ModelSubmissionRead)
+def get_model_submission(submission_id: str, db: Session = Depends(get_db)):
+    row = db.query(ModelSubmission).filter(ModelSubmission.id == submission_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"ModelSubmission '{submission_id}' not found")
+    return row
+
+
 # --- Release ---
 
 @router.post("/modeling/objectives/{objective_id}/release", response_model=ModelSubmissionRead)
@@ -460,6 +478,28 @@ def _predict_records(
     return predictions
 
 
+def _record_modelops_prediction_log(
+    db: Session,
+    *,
+    deployment: "ModelDeployment",
+    request_shape: str,
+    input_count: int,
+    response: Dict[str, Any],
+) -> None:
+    try:
+        from . import modelops
+        modelops.record_prediction_log(
+            db,
+            deployment=deployment,
+            request_shape=request_shape,
+            input_count=input_count,
+            response=response,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 @router.post("/modeling/deployments/{deployment_id}/infer")
 def infer(
     deployment_id: str,
@@ -499,7 +539,15 @@ def infer(
         if not isinstance(records, list):
             raise HTTPException(status_code=422, detail="'records' must be a list of records")
         predictions = _predict_records(records, objective)
-        return {"predictions": predictions}
+        response = {"predictions": predictions}
+        _record_modelops_prediction_log(
+            db,
+            deployment=deployment,
+            request_shape="legacy_records",
+            input_count=len(records),
+            response=response,
+        )
+        return response
 
     # --- Multi-I/O REST envelope: {input_name: [{field: value}, ...], ...} ---
     # Each top-level key is an input name mapping to a list of records. The
@@ -534,4 +582,11 @@ def infer(
             output_name = f"{input_name}_out"
         response[output_name] = out_records
 
+    _record_modelops_prediction_log(
+        db,
+        deployment=deployment,
+        request_shape="multi_io",
+        input_count=sum(len(body[input_name]) for input_name in input_names),
+        response=response,
+    )
     return response
