@@ -79,6 +79,8 @@ from . import (
     platform_core,
     asset_reliability_scenario,
     ontology_generator,
+    imports_ops,
+    system_hardening,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -214,6 +216,8 @@ for _ext_module in (
     platform_core,
     asset_reliability_scenario,
     ontology_generator,
+    imports_ops,
+    system_hardening,
 ):
     app.include_router(_ext_module.router)
 
@@ -229,7 +233,7 @@ def serve_workspace():
 
 @app.get("/workspace/{view}", include_in_schema=False)
 def serve_workspace_view(view: str):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center"}:
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "validation"}:
         _not_found("Workspace", view)
     return FileResponse(UI_DIR / "index.html")
 
@@ -274,6 +278,11 @@ def read_root():
             "shared_activity_timeline",
             "platform_graph_overview",
             "asset_reliability_command_center",
+            "data_imports",
+            "validation_dashboard",
+            "project_snapshot",
+            "schema_health",
+            "event_consistency",
             "action_execution_with_hitl",
             "agent_studio",
             "aip_evals",
