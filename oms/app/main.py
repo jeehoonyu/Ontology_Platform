@@ -70,7 +70,15 @@ from . import (
     classification_ops,
     autopilot_ops,
     mcp_tools,
+    decision_intelligence,
+    modelops,
     audit_ops,
+    ops_control,
+    investigations,
+    reliability_ops,
+    platform_core,
+    asset_reliability_scenario,
+    ontology_generator,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -197,7 +205,15 @@ for _ext_module in (
     classification_ops,
     autopilot_ops,
     mcp_tools,
+    decision_intelligence,
+    modelops,
     audit_ops,
+    ops_control,
+    investigations,
+    reliability_ops,
+    platform_core,
+    asset_reliability_scenario,
+    ontology_generator,
 ):
     app.include_router(_ext_module.router)
 
@@ -213,7 +229,7 @@ def serve_workspace():
 
 @app.get("/workspace/{view}", include_in_schema=False)
 def serve_workspace_view(view: str):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline"}:
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center"}:
         _not_found("Workspace", view)
     return FileResponse(UI_DIR / "index.html")
 
@@ -224,6 +240,7 @@ def read_root():
         "service": "Ontology Artificial Intelligence Platform",
         "capabilities": [
             "ontology_metadata",
+            "ontology_generator",
             "runtime_object_graph",
             "object_sets",
             "saved_object_sets",
@@ -237,6 +254,26 @@ def read_root():
             "geojson_feature_exports",
             "geofence_evaluation",
             "pipeline_builder",
+            "decision_intelligence",
+            "temporal_object_timeline",
+            "entity_resolution",
+            "scenario_simulation",
+            "modelops_workspace",
+            "model_drift_monitoring",
+            "model_prediction_logs",
+            "ops_control_plane",
+            "operational_alerts",
+            "incident_runbooks",
+            "investigation_graph_workspace",
+            "data_quality_contracts",
+            "lineage_impact_analysis",
+            "deterministic_backfills",
+            "unified_event_bus",
+            "global_search",
+            "policy_simulation",
+            "shared_activity_timeline",
+            "platform_graph_overview",
+            "asset_reliability_command_center",
             "action_execution_with_hitl",
             "agent_studio",
             "aip_evals",
@@ -333,6 +370,14 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate, db: Session = Depe
         subject_type="object_instance",
         subject_id=object_id,
         payload={"object_type_id": obj.object_type_id, "lineage": obj.lineage},
+    )
+    decision_intelligence.record_object_snapshot(
+        db,
+        db_model,
+        event_type="ontology.object.created",
+        actor="system",
+        source_type="object_api",
+        source_id=object_id,
     )
     db.commit()
     db.refresh(db_model)
@@ -614,7 +659,7 @@ def export_gis_feature_collection(request: schemas.GISFeatureCollectionRequest, 
 @app.post("/gis/geofence/evaluate", response_model=schemas.GISGeofenceResponse)
 def evaluate_gis_geofence(request: schemas.GISGeofenceRequest, db: Session = Depends(get_db)):
     try:
-        return evaluate_geofence(
+        result = evaluate_geofence(
             db,
             object_type_id=request.object_type_id,
             geofence=request.geofence,
@@ -623,6 +668,20 @@ def evaluate_gis_geofence(request: schemas.GISGeofenceRequest, db: Session = Dep
             geometry_field=request.geometry_field,
             limit=request.limit,
         )
+        summary = result.get("summary", {})
+        ops_control.record_ops_event(
+            db,
+            source="gis",
+            event_type="gis.geofence.evaluated",
+            severity="high" if summary.get("inside", 0) else "info",
+            title=f"Geofence evaluated for {request.object_type_id}",
+            subject_type="object_type",
+            subject_id=request.object_type_id,
+            object_type_id=request.object_type_id,
+            payload=summary,
+        )
+        db.commit()
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -782,6 +841,16 @@ def run_data_asset_expectations(
         subject_id=asset_id,
         payload={"status": result["status"], "summary": result["summary"]},
     )
+    ops_control.record_ops_event(
+        db,
+        source="data_health",
+        event_type="data.expectations.evaluated",
+        severity="high" if result["status"] == "FAIL" else "medium" if result["status"] == "WARN" else "info",
+        title=f"Data expectations {result['status']} for {asset.display_name}",
+        subject_type="data_asset",
+        subject_id=asset_id,
+        payload={"status": result["status"], "summary": result["summary"]},
+    )
     db.commit()
     return result
 
@@ -853,6 +922,16 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
         subject_id=run_id,
         payload={"pipeline_id": pipeline.id},
     )
+    ops_control.record_ops_event(
+        db,
+        source="pipeline",
+        event_type="pipeline.run.started",
+        severity="info",
+        title=f"Pipeline {pipeline.display_name} started",
+        subject_type="pipeline_run",
+        subject_id=run_id,
+        payload={"pipeline_id": pipeline.id, "input_asset_id": input_asset.id},
+    )
     db.commit()
     db.refresh(run)
 
@@ -896,6 +975,16 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
             subject_id=run_id,
             payload={"records_out": len(output_records), "metrics": metrics},
         )
+        ops_control.record_ops_event(
+            db,
+            source="pipeline",
+            event_type="pipeline.run.completed",
+            severity="info",
+            title=f"Pipeline {pipeline.display_name} completed",
+            subject_type="pipeline_run",
+            subject_id=run_id,
+            payload={"pipeline_id": pipeline.id, "records_out": len(output_records), "metrics": metrics},
+        )
         db.commit()
         db.refresh(run)
         return run
@@ -912,6 +1001,16 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
             subject_type="pipeline_run",
             subject_id=run_id,
             payload={"error": str(exc)},
+        )
+        ops_control.record_ops_event(
+            db,
+            source="pipeline",
+            event_type="pipeline.run.failed",
+            severity="high",
+            title=f"Pipeline {pipeline.display_name} failed",
+            subject_type="pipeline_run",
+            subject_id=run_id,
+            payload={"pipeline_id": pipeline.id, "error": str(exc)},
         )
         db.commit()
         db.refresh(failed_run)
@@ -1016,6 +1115,16 @@ def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depend
                 subject_id=approval_id,
                 payload={"action_type_id": request.action_type_id, "parameters": request.parameters},
             )
+            ops_control.record_ops_event(
+                db,
+                source="action",
+                event_type="action.approval.requested",
+                severity="high",
+                title=f"Approval requested for {request.action_type_id}",
+                subject_type="approval_request",
+                subject_id=approval_id,
+                payload={"action_type_id": request.action_type_id, "parameters": request.parameters},
+            )
             db.commit()
             return schemas.ActionExecutionResponse(
                 status="REQUIRES_APPROVAL",
@@ -1061,6 +1170,16 @@ def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depend
             db,
             actor=request.actor,
             event_type="action.executed",
+            subject_type="action_type",
+            subject_id=request.action_type_id,
+            payload=response_data,
+        )
+        ops_control.record_ops_event(
+            db,
+            source="action",
+            event_type="action.executed",
+            severity="medium" if mutated_object_ids else "info",
+            title=f"Action {request.action_type_id} executed",
             subject_type="action_type",
             subject_id=request.action_type_id,
             payload=response_data,
@@ -1120,6 +1239,16 @@ def decide_approval(
         subject_type="approval_request",
         subject_id=approval_id,
         payload={"decision": normalized, "reason": decision.reason},
+    )
+    ops_control.record_ops_event(
+        db,
+        source="action",
+        event_type="action.approval.decided",
+        severity="medium",
+        title=f"Approval {normalized.lower()} for {approval.action_type_id}",
+        subject_type="approval_request",
+        subject_id=approval_id,
+        payload={"decision": normalized, "reason": decision.reason, "action_type_id": approval.action_type_id},
     )
     db.commit()
     db.refresh(approval)
@@ -1202,6 +1331,16 @@ def run_agent_session(
         db,
         actor="agent",
         event_type="agent.session.completed",
+        subject_type="agent_session",
+        subject_id=session_id,
+        payload={"agent_id": agent.id, "status": status, "proposed_actions": proposed_actions},
+    )
+    ops_control.record_ops_event(
+        db,
+        source="agent",
+        event_type="agent.session.completed",
+        severity="medium" if proposed_actions else "info",
+        title=f"Agent {agent.display_name} session {status}",
         subject_type="agent_session",
         subject_id=session_id,
         payload={"agent_id": agent.id, "status": status, "proposed_actions": proposed_actions},

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ontology AIP Workspace</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="/ui/assets/styles.css?v=platform-shell-3" />
+    <link rel="stylesheet" href="/ui/assets/styles.css?v=modelops-1" />
   </head>
   <body>
     <div class="app-shell platform-shell">
@@ -23,8 +23,14 @@
         </nav>
         <div class="side-section">
           <span>Applications</span>
+          <button id="commandCenterNav" class="side-nav-item" type="button"><span>CC</span>Command Center</button>
+          <button id="graphNav" class="side-nav-item" type="button"><span>G</span>Platform Graph</button>
           <button id="workshopNav" class="side-nav-item" type="button"><span>W</span>Workshop</button>
           <button id="object-explorerNav" class="side-nav-item" type="button"><span>OE</span>Object Explorer</button>
+          <button id="decisionNav" class="side-nav-item" type="button"><span>D</span>Decision</button>
+          <button id="modelsNav" class="side-nav-item" type="button"><span>MO</span>ModelOps</button>
+          <button id="opsNav" class="side-nav-item" type="button"><span>OC</span>Ops Control</button>
+          <button id="investigationsNav" class="side-nav-item" type="button"><span>IG</span>Investigations</button>
           <button id="pipelineNav" class="side-nav-item" type="button"><span>P</span>Pipeline Builder</button>
           <button id="aipNav" class="side-nav-item" type="button"><span>AI</span>AIP Logic</button>
           <button id="mapNav" class="side-nav-item" type="button"><span>M</span>Map</button>
@@ -165,6 +171,57 @@
             </div>
             <div class="resource-empty compact-empty">No recents</div>
           </section>
+          <section class="ontology-generator-shell">
+            <div class="section-title">
+              <div>
+                <h2>Ontology Generator</h2>
+                <span>Generate reviewed object types, property mappings, actions, and ontology-output pipelines from datasets.</span>
+              </div>
+              <div class="button-row">
+                <button id="createOntologyDraftBtn" class="btn" type="button">Create Draft</button>
+                <button id="validateOntologyDraftBtn" class="btn" type="button">Validate</button>
+                <button id="applyOntologyDraftBtn" class="btn primary" type="button">Apply</button>
+              </div>
+            </div>
+            <div class="ontology-generator-grid">
+              <aside class="generator-form">
+                <label class="field">
+                  <span>Dataset</span>
+                  <select id="ontologyGeneratorAssetSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Display name</span>
+                  <input id="ontologyGeneratorDisplayNameInput" placeholder="Generated from dataset name" />
+                </label>
+                <label class="field">
+                  <span>Object type ID</span>
+                  <input id="ontologyGeneratorObjectTypeInput" placeholder="auto-generated" />
+                </label>
+                <label class="check-row">
+                  <input id="ontologyGeneratorActionsToggle" type="checkbox" />
+                  <span>Scaffold create/edit/delete actions</span>
+                </label>
+                <label class="check-row">
+                  <input id="ontologyGeneratorPipelineToggle" type="checkbox" checked />
+                  <span>Create Pipeline Builder ontology-output graph</span>
+                </label>
+                <label class="field">
+                  <span>Draft</span>
+                  <select id="ontologyDraftSelect"></select>
+                </label>
+              </aside>
+              <section class="generator-review">
+                <div id="ontologyGeneratorValidation" class="generator-validation"></div>
+                <div id="ontologyGeneratorProperties" class="table-wrap platform-table"></div>
+              </section>
+              <aside class="generator-output">
+                <h3>Generated Pipeline</h3>
+                <pre id="ontologyGeneratorPipeline" class="mini-output tall"></pre>
+                <h3>Apply Result</h3>
+                <pre id="ontologyGeneratorResult" class="mini-output"></pre>
+              </aside>
+            </div>
+          </section>
           <section class="ontology-catalog">
             <div class="section-title">
               <h2>Object type catalog</h2>
@@ -192,10 +249,10 @@
           <div class="app-catalog-shell">
             <aside class="app-categories">
               <label class="dark-search"><input id="appSearchInput" placeholder="Search for applications..." /></label>
-              <button class="app-category active" data-app-category="all" type="button">All apps <span>13</span></button>
-              <button class="app-category" data-app-category="operations" type="button">Analytics & Operations <span>6</span></button>
-              <button class="app-category" data-app-category="data" type="button">Data integration <span>4</span></button>
-              <button class="app-category" data-app-category="ontology" type="button">Ontology <span>3</span></button>
+              <button class="app-category active" data-app-category="all" type="button">All apps <span>20</span></button>
+              <button class="app-category" data-app-category="operations" type="button">Analytics & Operations <span>10</span></button>
+              <button class="app-category" data-app-category="data" type="button">Data integration <span>5</span></button>
+              <button class="app-category" data-app-category="ontology" type="button">Ontology <span>4</span></button>
               <button class="app-category" data-app-category="developer" type="button">Developer toolchain <span>1</span></button>
             </aside>
             <section class="app-list-panel">
@@ -209,6 +266,130 @@
               <div class="empty-state dark-empty">Click on an application to see details</div>
             </aside>
           </div>
+        </section>
+
+        <section id="searchView" class="platform-page hidden">
+          <div class="page-heading">
+            <div>
+              <span class="breadcrumb">Platform / Search</span>
+              <h1>Global search and command palette</h1>
+            </div>
+            <button id="platformSearchBtn" class="btn primary" type="button">Search</button>
+          </div>
+          <section class="ontology-catalog">
+            <div class="object-search-bar platform-search-bar">
+              <select id="platformSearchKind">
+                <option value="">All resources</option>
+                <option value="object">Objects</option>
+                <option value="object_type">Object types</option>
+                <option value="dataset">Datasets</option>
+                <option value="pipeline">Pipelines</option>
+                <option value="action">Actions</option>
+                <option value="logic">AIP Logic</option>
+                <option value="agent">Agents</option>
+                <option value="event">Events</option>
+                <option value="incident">Incidents</option>
+                <option value="investigation">Investigations</option>
+                <option value="model">Models</option>
+              </select>
+              <input id="platformSearchInput" placeholder="Search objects, datasets, incidents, models, and commands..." />
+              <button id="platformSearchInlineBtn" class="btn primary" type="button">Search</button>
+            </div>
+          </section>
+          <section id="platformSearchSummary" class="ops-metric-grid"></section>
+          <section class="platform-split">
+            <section class="panel-section">
+              <div class="section-title"><h2>Resources</h2></div>
+              <div id="platformSearchResults" class="table-wrap platform-table"></div>
+            </section>
+            <aside class="panel-section">
+              <div class="section-title"><h2>Commands</h2></div>
+              <div id="platformSearchCommands" class="application-list"></div>
+            </aside>
+          </section>
+        </section>
+
+        <section id="graphView" class="platform-page hidden">
+          <div class="page-heading">
+            <div>
+              <span class="breadcrumb">Platform / Graph</span>
+              <h1>Platform graph overview</h1>
+            </div>
+            <button id="refreshGraphBtn" class="btn primary" type="button">Refresh</button>
+          </div>
+          <section id="platformGraphSummary" class="ops-metric-grid"></section>
+          <section class="platform-split">
+            <section class="panel-section">
+              <div class="section-title"><h2>Nodes</h2></div>
+              <div id="platformGraphNodes" class="table-wrap platform-table"></div>
+            </section>
+            <aside class="panel-section">
+              <div class="section-title"><h2>Edges</h2></div>
+              <div id="platformGraphEdges" class="table-wrap platform-table"></div>
+            </aside>
+          </section>
+        </section>
+
+        <section id="command-centerView" class="platform-page command-center-workspace hidden">
+          <div class="page-heading">
+            <div>
+              <span class="breadcrumb">Operational MVP / Asset Reliability</span>
+              <h1>Asset Reliability Command Center</h1>
+            </div>
+            <div class="button-row">
+              <button id="bootstrapCommandCenterBtn" class="btn" type="button">Bootstrap Scenario</button>
+              <button id="runCommandCenterTriageBtn" class="btn primary" type="button">Run Triage</button>
+              <button id="refreshCommandCenterBtn" class="btn" type="button">Refresh</button>
+            </div>
+          </div>
+
+          <section id="commandCenterKpis" class="ops-metric-grid"></section>
+
+          <section class="command-center-grid">
+            <section class="panel-section command-main">
+              <div class="section-title">
+                <h2>High-Risk Assets</h2>
+                <div class="button-row">
+                  <button class="btn small" type="button" data-open-view="map">Map</button>
+                  <button class="btn small" type="button" data-open-view="graph">Graph</button>
+                </div>
+              </div>
+              <div id="commandCenterRiskList" class="table-wrap platform-table"></div>
+            </section>
+
+            <aside class="panel-section">
+              <div class="section-title"><h2>Selected Asset</h2></div>
+              <div id="commandCenterSelectedAsset" class="object-profile empty-state">No selected asset</div>
+            </aside>
+
+            <section class="panel-section">
+              <div class="section-title"><h2>Reliability Checks</h2></div>
+              <div id="commandCenterChecks" class="object-profile"></div>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Agent Recommendation & Approval</h2>
+                <button id="approveCommandCenterBtn" class="btn small" type="button">Approve & Execute</button>
+              </div>
+              <div id="commandCenterRecommendation" class="object-profile"></div>
+            </section>
+
+            <section class="panel-section command-main">
+              <div class="section-title"><h2>Incident Report</h2></div>
+              <pre id="commandCenterReport" class="mini-output tall"></pre>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-title"><h2>Asset Timeline</h2></div>
+              <div id="commandCenterTimeline" class="table-wrap platform-table"></div>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-title"><h2>Validation Dashboard</h2></div>
+              <div id="commandCenterValidation" class="object-profile"></div>
+            </section>
+          </section>
         </section>
 
         <section id="workshopView" class="workspace builder-workspace hidden">
@@ -383,6 +564,7 @@
                 <span id="pipelineSummary">Input, transform, output, deliver</span>
               </div>
               <div class="logic-actions">
+                <button id="autoLayoutPipelineBtn" class="btn" type="button">Auto Layout</button>
                 <button id="validatePipelineGraphBtn" class="btn" type="button">Validate</button>
                 <button id="previewPipelineGraphBtn" class="btn" type="button">Preview</button>
                 <button id="savePipelineGraphBtn" class="btn" type="button">Save</button>
@@ -410,6 +592,511 @@
               <pre id="pipelineLineagePanel" class="pipeline-panel mini-output tall" data-pipeline-panel-body="lineage"></pre>
               <div id="pipelineSchedulePanel" class="pipeline-panel builder-list" data-pipeline-panel-body="schedule"></div>
               <div id="pipelineHealthPanel" class="pipeline-panel builder-list" data-pipeline-panel-body="health"></div>
+            </section>
+          </aside>
+        </section>
+
+        <section id="modelsView" class="workspace modelops-workspace hidden">
+          <aside class="side-panel builder-rail">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>ModelOps</h2>
+                <button id="refreshModelOpsBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>Objective</span>
+                  <select id="modelObjectiveSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Submission</span>
+                  <select id="modelSubmissionSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Deployment</span>
+                  <select id="modelDeploymentSelect"></select>
+                </label>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="decision-tabs">
+                <button class="segment active" data-modelops-tab="objectives" type="button">Objectives</button>
+                <button class="segment" data-modelops-tab="training" type="button">Training</button>
+                <button class="segment" data-modelops-tab="gates" type="button">Evaluation Gates</button>
+                <button class="segment" data-modelops-tab="releases" type="button">Releases</button>
+                <button class="segment" data-modelops-tab="monitoring" type="button">Monitoring</button>
+                <button class="segment" data-modelops-tab="inference" type="button">Inference</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Summary</h2>
+              </div>
+              <div id="modelOpsSummary" class="builder-list"></div>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="modelOpsTitle">Objectives</strong>
+                <span id="modelOpsSubtitle">Manage objectives, releases, deployments, and monitoring</span>
+              </div>
+              <div class="logic-actions">
+                <button id="createModelObjectiveBtn" class="btn" type="button">Create Objective</button>
+                <button id="trainModelBtn" class="btn" type="button">Train</button>
+                <button id="runModelMonitorBtn" class="btn primary" type="button">Run Monitor</button>
+              </div>
+            </section>
+
+            <section class="modelops-panel active" data-modelops-panel="objectives">
+              <section class="panel-section">
+                <div class="section-title"><h2>Objective Draft</h2></div>
+                <div class="block-grid three">
+                  <label class="field"><span>ID</span><input id="modelObjectiveIdInput" placeholder="asset_risk_model" /></label>
+                  <label class="field"><span>Name</span><input id="modelObjectiveNameInput" value="Asset Risk Model" /></label>
+                  <label class="field"><span>Problem Type</span><select id="modelProblemTypeSelect"><option value="regression">regression</option><option value="classification">classification</option></select></label>
+                  <label class="field"><span>Target Field</span><input id="modelTargetFieldInput" value="risk_score" /></label>
+                  <label class="field"><span>Feature Fields</span><input id="modelFeatureFieldsInput" value="temperature, pressure" /></label>
+                  <label class="field"><span>Input Dataset</span><select id="modelInputAssetSelect"></select></label>
+                </div>
+              </section>
+              <section id="modelObjectiveList" class="modelops-grid"></section>
+            </section>
+
+            <section class="modelops-panel" data-modelops-panel="training">
+              <section class="panel-section">
+                <div class="section-title"><h2>Train Submission</h2></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Trainer</span><select id="modelTrainerTypeSelect"><option value="regression">regression</option><option value="classification">classification</option><option value="forecasting">forecasting</option></select></label>
+                  <label class="field"><span>Algorithm</span><input id="modelAlgorithmInput" placeholder="optional" /></label>
+                  <label class="field"><span>Training Dataset</span><select id="modelTrainingAssetSelect"></select></label>
+                  <label class="field"><span>Target Column</span><input id="modelTrainTargetInput" value="risk_score" /></label>
+                  <label class="field"><span>Eval Metric</span><input id="modelEvalMetricInput" value="rmse" /></label>
+                  <label class="field"><span>Quality Preset</span><select id="modelQualityPresetSelect"><option value="balanced">balanced</option><option value="fast">fast</option><option value="strict">strict</option></select></label>
+                </div>
+              </section>
+              <section id="modelSubmissionList" class="modelops-grid"></section>
+            </section>
+
+            <section class="modelops-panel" data-modelops-panel="gates">
+              <section class="panel-section">
+                <div class="section-title"><h2>Evaluation Gate</h2><button id="createModelCheckBtn" class="btn small primary" type="button">Create Check</button></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Name</span><input id="modelCheckNameInput" value="quality_gate" /></label>
+                  <label class="field"><span>Type</span><select id="modelCheckTypeSelect"><option value="automatic">automatic</option><option value="manual">manual</option></select></label>
+                  <label class="field"><span>Metric</span><input id="modelCheckMetricInput" value="r2" /></label>
+                  <label class="field"><span>Operator</span><select id="modelCheckOperatorSelect"><option value=">=">&gt;=</option><option value=">">&gt;</option><option value="<=">&lt;=</option><option value="<">&lt;</option></select></label>
+                  <label class="field"><span>Threshold</span><input id="modelCheckThresholdInput" type="number" step="0.01" value="0.70" /></label>
+                </div>
+              </section>
+              <section id="modelGatePanel" class="panel-section"></section>
+            </section>
+
+            <section class="modelops-panel" data-modelops-panel="releases">
+              <section class="panel-section">
+                <div class="section-title"><h2>Release & Deploy</h2></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Version</span><input id="modelReleaseVersionInput" value="v1.0" /></label>
+                  <label class="field"><span>Environment</span><select id="modelReleaseEnvSelect"><option value="staging">staging</option><option value="production">production</option></select></label>
+                  <label class="field"><span>Deployment Mode</span><select id="modelDeploymentModeSelect"><option value="live">live</option><option value="batch">batch</option></select></label>
+                </div>
+                <div class="button-row">
+                  <button id="createModelReleaseBtn" class="btn primary" type="button">Create Release</button>
+                  <button id="createModelDeploymentBtn" class="btn" type="button">Create Deployment</button>
+                </div>
+              </section>
+              <section id="modelReleasePanel" class="modelops-grid"></section>
+            </section>
+
+            <section class="modelops-panel" data-modelops-panel="monitoring">
+              <section class="panel-section">
+                <div class="section-title"><h2>Monitor Draft</h2><button id="createModelMonitorBtn" class="btn small primary" type="button">Create Monitor</button></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Name</span><input id="modelMonitorNameInput" value="Deployment Drift Monitor" /></label>
+                  <label class="field"><span>Baseline Dataset</span><select id="modelBaselineAssetSelect"></select></label>
+                  <label class="field"><span>Current Dataset</span><select id="modelCurrentAssetSelect"></select></label>
+                  <label class="field"><span>Feature Fields</span><input id="modelMonitorFieldsInput" value="temperature, pressure" /></label>
+                  <label class="field"><span>Prediction Field</span><input id="modelPredictionFieldInput" value="prediction" /></label>
+                  <label class="field"><span>Target Field</span><input id="modelMonitorTargetInput" value="risk_score" /></label>
+                </div>
+                <label class="field"><span>Thresholds JSON</span><textarea id="modelMonitorThresholdsInput" rows="4">{"numeric_mean_shift_warn":0.2,"numeric_mean_shift_fail":0.5}</textarea></label>
+              </section>
+              <section id="modelMonitorPanel" class="modelops-grid"></section>
+            </section>
+
+            <section class="modelops-panel" data-modelops-panel="inference">
+              <section class="panel-section">
+                <div class="section-title"><h2>Inference Playground</h2><button id="runModelInferenceBtn" class="btn small primary" type="button">Run</button></div>
+                <label class="field"><span>Records JSON</span><textarea id="modelInferenceInput" rows="8">[{"temperature": 10, "pressure": 20}]</textarea></label>
+              </section>
+              <section id="modelInferencePanel" class="panel-section"></section>
+            </section>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title"><h2>Latest Runs</h2></div>
+              <div id="modelOpsRunList" class="builder-list"></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title"><h2>Output</h2></div>
+              <pre id="modelOpsOutput" class="mini-output tall"></pre>
+            </section>
+          </aside>
+        </section>
+
+        <section id="decisionView" class="workspace decision-workspace hidden">
+          <aside class="side-panel builder-rail">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Decision Intelligence</h2>
+                <button id="refreshDecisionBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field">
+                  <span>Object Type</span>
+                  <select id="decisionObjectTypeSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Object ID</span>
+                  <input id="decisionObjectIdInput" placeholder="asset_1" />
+                </label>
+                <button id="bootstrapDecisionBtn" class="btn" type="button">Bootstrap Rules</button>
+                <button id="evaluateDecisionBtn" class="btn primary" type="button">Evaluate Risk</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="decision-tabs">
+                <button class="segment active" data-decision-tab="risk" type="button">Risk Board</button>
+                <button class="segment" data-decision-tab="explain" type="button">Explain</button>
+                <button class="segment" data-decision-tab="timeline" type="button">Timeline</button>
+                <button class="segment" data-decision-tab="entity" type="button">Entity Resolution</button>
+                <button class="segment" data-decision-tab="scenario" type="button">Scenario</button>
+                <button class="segment" data-decision-tab="agent" type="button">Agent Plan</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Rules</h2>
+              </div>
+              <div id="decisionRuleList" class="builder-list"></div>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="decisionTitle">Risk Board</strong>
+                <span id="decisionSummary">Evaluate ontology objects against local deterministic rules</span>
+              </div>
+              <div class="logic-actions">
+                <button id="explainDecisionBtn" class="btn" type="button">Explain Object</button>
+                <button id="loadTimelineBtn" class="btn" type="button">Load Timeline</button>
+                <button id="runDecisionScenarioBtn" class="btn primary" type="button">Run Scenario</button>
+              </div>
+            </section>
+
+            <section class="decision-panel active" data-decision-panel="risk">
+              <section id="decisionRiskBoard" class="decision-board"></section>
+            </section>
+            <section class="decision-panel" data-decision-panel="explain">
+              <section id="decisionExplanation" class="panel-section"></section>
+            </section>
+            <section class="decision-panel" data-decision-panel="timeline">
+              <section id="decisionTimeline" class="panel-section"></section>
+            </section>
+            <section class="decision-panel" data-decision-panel="entity">
+              <section class="panel-section">
+                <div class="section-title">
+                  <h2>Candidate Queue</h2>
+                  <button id="runEntityResolutionBtn" class="btn small primary" type="button">Run</button>
+                </div>
+                <label class="field">
+                  <span>Fields</span>
+                  <input id="entityFieldsInput" value="name" />
+                </label>
+                <div id="entityCandidateList" class="builder-list"></div>
+              </section>
+            </section>
+            <section class="decision-panel" data-decision-panel="scenario">
+              <section class="panel-section">
+                <div class="section-title">
+                  <h2>Scenario Simulator</h2>
+                </div>
+                <div class="block-grid">
+                  <label class="field"><span>Seed Object IDs</span><input id="scenarioSeedsInput" placeholder="asset_1, asset_2" /></label>
+                  <label class="field"><span>Overrides JSON</span><textarea id="scenarioOverridesInput" rows="5">{}</textarea></label>
+                </div>
+                <pre id="decisionScenarioOutput" class="mini-output tall"></pre>
+              </section>
+            </section>
+            <section class="decision-panel" data-decision-panel="agent">
+              <section class="panel-section">
+                <div class="section-title">
+                  <h2>Agent Plan</h2>
+                  <button id="runDecisionAgentBtn" class="btn small primary" type="button">Run</button>
+                </div>
+                <label class="field"><span>Agent</span><select id="decisionAgentSelect"></select></label>
+                <label class="field"><span>Prompt</span><textarea id="decisionAgentPrompt" rows="4">Assess risk and propose the safest next action</textarea></label>
+                <pre id="decisionAgentPlan" class="mini-output tall"></pre>
+              </section>
+            </section>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Scorecards</h2>
+              </div>
+              <div id="decisionScorecardList" class="builder-list"></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Decision Output</h2>
+              </div>
+              <pre id="decisionOutput" class="mini-output tall"></pre>
+            </section>
+          </aside>
+        </section>
+
+        <section id="opsView" class="workspace ops-workspace hidden">
+          <aside class="side-panel builder-rail">
+            <section class="panel-section">
+              <div class="section-title">
+                <h2>Ops Control</h2>
+                <button id="refreshOpsBtn" class="btn small" type="button">Refresh</button>
+              </div>
+              <div class="stack compact">
+                <label class="field"><span>Incident</span><select id="opsIncidentSelect"></select></label>
+                <label class="field"><span>Runbook</span><select id="opsRunbookSelect"></select></label>
+                <label class="field"><span>Data Contract</span><select id="opsContractSelect"></select></label>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="decision-tabs">
+                <button class="segment active" data-ops-tab="command" type="button">Command Center</button>
+                <button class="segment" data-ops-tab="alerts" type="button">Alerts</button>
+                <button class="segment" data-ops-tab="incidents" type="button">Incidents</button>
+                <button class="segment" data-ops-tab="runbooks" type="button">Runbooks</button>
+                <button class="segment" data-ops-tab="approvals" type="button">Approvals</button>
+                <button class="segment" data-ops-tab="reliability" type="button">Reliability</button>
+                <button class="segment" data-ops-tab="inbox" type="button">Inbox</button>
+              </div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title"><h2>Latest Events</h2></div>
+              <div id="opsEventList" class="builder-list"></div>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="opsTitle">Command Center</strong>
+                <span id="opsSummary">Operational events, alerts, incidents, runbooks, approvals, and reliability</span>
+              </div>
+              <div class="logic-actions">
+                <button id="evaluateOpsAlertsBtn" class="btn" type="button">Evaluate Alerts</button>
+                <button id="createOpsIncidentBtn" class="btn" type="button">Create Incident</button>
+                <button id="executeOpsRunbookBtn" class="btn primary" type="button">Run Runbook</button>
+              </div>
+            </section>
+
+            <section class="ops-panel active" data-ops-panel="command">
+              <section id="opsSummaryCards" class="ops-metric-grid"></section>
+              <section class="panel-section">
+                <div class="section-title"><h2>Open Alerts</h2></div>
+                <section id="opsCommandAlertList" class="modelops-grid"></section>
+              </section>
+            </section>
+
+            <section class="ops-panel" data-ops-panel="alerts">
+              <section class="panel-section">
+                <div class="section-title"><h2>Alert Rule</h2><button id="createOpsAlertRuleBtn" class="btn small primary" type="button">Create Rule</button></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Name</span><input id="opsAlertRuleNameInput" value="High severity operations" /></label>
+                  <label class="field"><span>Source</span><input id="opsAlertRuleSourceInput" placeholder="optional" /></label>
+                  <label class="field"><span>Event Type</span><input id="opsAlertRuleEventInput" placeholder="optional" /></label>
+                  <label class="field"><span>Min Severity</span><select id="opsAlertRuleSeveritySelect"><option value="high">high</option><option value="critical">critical</option><option value="medium">medium</option><option value="info">info</option></select></label>
+                </div>
+                <label class="field"><span>Expression JSON</span><textarea id="opsAlertRuleExpressionInput" rows="4">{}</textarea></label>
+              </section>
+              <section class="panel-section">
+                <div class="section-title"><h2>Rules</h2></div>
+                <div id="opsAlertRuleList" class="builder-list"></div>
+              </section>
+              <section class="panel-section">
+                <div class="section-title"><h2>Alerts</h2></div>
+                <section id="opsAlertList" class="modelops-grid"></section>
+              </section>
+            </section>
+
+            <section class="ops-panel" data-ops-panel="incidents">
+              <section class="panel-section">
+                <div class="section-title"><h2>Incident Draft</h2></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Name</span><input id="opsIncidentNameInput" value="Operations Incident" /></label>
+                  <label class="field"><span>Severity</span><select id="opsIncidentSeveritySelect"><option value="medium">medium</option><option value="high">high</option><option value="critical">critical</option><option value="low">low</option></select></label>
+                  <label class="field"><span>Owner</span><input id="opsIncidentOwnerInput" value="workspace" /></label>
+                </div>
+                <label class="field"><span>Description</span><textarea id="opsIncidentDescriptionInput" rows="3">Operational signal requires review.</textarea></label>
+                <label class="field"><span>Linked Objects JSON</span><textarea id="opsIncidentObjectsInput" rows="4">[]</textarea></label>
+              </section>
+              <section id="opsIncidentList" class="modelops-grid"></section>
+            </section>
+
+            <section class="ops-panel" data-ops-panel="runbooks">
+              <section class="panel-section">
+                <div class="section-title"><h2>Runbook Draft</h2><button id="createOpsRunbookBtn" class="btn small primary" type="button">Create Runbook</button></div>
+                <label class="field"><span>Name</span><input id="opsRunbookNameInput" value="Risk Triage Runbook" /></label>
+                <label class="field"><span>Steps JSON</span><textarea id="opsRunbookStepsInput" rows="9">[
+  {"type":"query_objects","object_type_id":"asset","filters":{"criticality":"high"},"limit":5,"output":"objects"},
+  {"type":"create_notification","title":"Risk triage complete","message":"High criticality objects were queried.","severity":"medium"}
+]</textarea></label>
+                <label class="field"><span>Inputs JSON</span><textarea id="opsRunbookInputsInput" rows="4">{}</textarea></label>
+              </section>
+              <section id="opsRunbookList" class="modelops-grid"></section>
+              <section class="panel-section"><pre id="opsRunbookOutput" class="mini-output tall"></pre></section>
+            </section>
+
+            <section class="ops-panel" data-ops-panel="approvals">
+              <section class="panel-section">
+                <div class="section-title"><h2>Approval Queue</h2></div>
+                <div id="opsApprovalList" class="builder-list"></div>
+              </section>
+            </section>
+
+            <section class="ops-panel" data-ops-panel="reliability">
+              <section id="opsReliabilitySummary" class="panel-section"></section>
+              <section class="panel-section">
+                <div class="section-title"><h2>Data Contract</h2><button id="createDataContractBtn" class="btn small primary" type="button">Create</button></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Name</span><input id="opsContractNameInput" value="Dataset Contract" /></label>
+                  <label class="field"><span>Dataset</span><select id="opsContractAssetSelect"></select></label>
+                  <label class="field"><span>Run Dataset</span><select id="opsContractRunAssetSelect"></select></label>
+                </div>
+                <label class="field"><span>Checks JSON</span><textarea id="opsContractChecksInput" rows="8">[
+  {"type":"row_count_bounds","min":1},
+  {"type":"required_fields","fields":["id"]},
+  {"type":"missing_rate","field":"id","max":0}
+]</textarea></label>
+                <div class="button-row">
+                  <button id="runDataContractBtn" class="btn" type="button">Run Contract</button>
+                </div>
+              </section>
+              <section id="opsDataContractList" class="modelops-grid"></section>
+              <section class="panel-section">
+                <div class="section-title"><h2>Lineage Impact</h2><button id="analyzeLineageImpactBtn" class="btn small primary" type="button">Analyze</button></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Kind</span><select id="opsImpactKindSelect"><option value="dataset">dataset</option><option value="pipeline">pipeline</option><option value="object_type">object_type</option></select></label>
+                  <label class="field"><span>Resource ID</span><input id="opsImpactResourceInput" placeholder="dataset or pipeline id" /></label>
+                  <label class="field"><span>Direction</span><select id="opsImpactDirectionSelect"><option value="downstream">downstream</option><option value="upstream">upstream</option></select></label>
+                </div>
+              </section>
+              <section class="panel-section">
+                <div class="section-title"><h2>Backfill</h2><button id="createBackfillBtn" class="btn small primary" type="button">Create</button></div>
+                <div class="block-grid">
+                  <label class="field"><span>Name</span><input id="opsBackfillNameInput" value="Pipeline Backfill" /></label>
+                  <label class="field"><span>Pipeline</span><select id="opsBackfillPipelineSelect"></select></label>
+                </div>
+                <div id="opsBackfillList" class="builder-list"></div>
+              </section>
+            </section>
+
+            <section class="ops-panel" data-ops-panel="inbox">
+              <section id="opsInboxList" class="builder-list"></section>
+            </section>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title"><h2>Output</h2></div>
+              <pre id="opsOutput" class="mini-output tall"></pre>
+            </section>
+          </aside>
+        </section>
+
+        <section id="investigationsView" class="workspace investigations-workspace hidden">
+          <aside class="side-panel builder-rail">
+            <section class="panel-section">
+              <div class="section-title"><h2>Investigations</h2><button id="refreshInvestigationsBtn" class="btn small" type="button">Refresh</button></div>
+              <div id="investigationList" class="builder-list"></div>
+            </section>
+            <section class="panel-section">
+              <div class="section-title"><h2>New Investigation</h2><button id="createInvestigationBtn" class="btn small primary" type="button">Create</button></div>
+              <label class="field"><span>Name</span><input id="investigationNameInput" value="Operations Investigation" /></label>
+              <label class="field"><span>Owner</span><input id="investigationOwnerInput" value="workspace" /></label>
+              <label class="field"><span>Description</span><textarea id="investigationDescriptionInput" rows="3">Investigate linked operational objects and evidence.</textarea></label>
+              <label class="field"><span>Object Refs JSON</span><textarea id="investigationObjectRefsInput" rows="4">[]</textarea></label>
+            </section>
+          </aside>
+
+          <section class="builder-main">
+            <section class="logic-toolbar panel-section">
+              <div class="logic-title">
+                <strong id="investigationTitle">Case Board</strong>
+                <span>Evidence, hypotheses, graph, timeline, and report generation</span>
+              </div>
+              <div class="logic-actions">
+                <button id="addEvidenceBtn" class="btn" type="button">Add Evidence</button>
+                <button id="addHypothesisBtn" class="btn" type="button">Add Hypothesis</button>
+                <button id="generateReportBtn" class="btn primary" type="button">Generate Report</button>
+              </div>
+            </section>
+            <section class="decision-tabs horizontal-tabs">
+              <button class="segment active" data-investigation-tab="board" type="button">Case Board</button>
+              <button class="segment" data-investigation-tab="graph" type="button">Entity Graph</button>
+              <button class="segment" data-investigation-tab="evidence" type="button">Evidence</button>
+              <button class="segment" data-investigation-tab="timeline" type="button">Timeline</button>
+              <button class="segment" data-investigation-tab="hypotheses" type="button">Hypotheses</button>
+              <button class="segment" data-investigation-tab="report" type="button">Report</button>
+            </section>
+            <section class="investigation-panel active" data-investigation-panel="board">
+              <section id="investigationBoard" class="panel-section"></section>
+            </section>
+            <section class="investigation-panel" data-investigation-panel="graph">
+              <section id="investigationGraph" class="panel-section"></section>
+            </section>
+            <section class="investigation-panel" data-investigation-panel="evidence">
+              <section class="panel-section">
+                <div class="section-title"><h2>Evidence Draft</h2></div>
+                <div class="block-grid three">
+                  <label class="field"><span>Title</span><input id="evidenceTitleInput" value="Evidence" /></label>
+                  <label class="field"><span>Source</span><input id="evidenceSourceInput" value="workspace" /></label>
+                  <label class="field"><span>Tags</span><input id="evidenceTagsInput" value="triage" /></label>
+                </div>
+                <label class="field"><span>Object Refs JSON</span><textarea id="evidenceObjectRefsInput" rows="3">[]</textarea></label>
+                <label class="field"><span>Payload JSON</span><textarea id="evidencePayloadInput" rows="5">{}</textarea></label>
+              </section>
+              <section id="investigationEvidenceList" class="modelops-grid"></section>
+            </section>
+            <section class="investigation-panel" data-investigation-panel="timeline">
+              <section id="investigationTimeline" class="panel-section"></section>
+            </section>
+            <section class="investigation-panel" data-investigation-panel="hypotheses">
+              <section class="panel-section">
+                <div class="section-title"><h2>Hypothesis Draft</h2></div>
+                <label class="field"><span>Statement</span><textarea id="hypothesisStatementInput" rows="3">Operational risk is linked to the selected object.</textarea></label>
+                <div class="block-grid">
+                  <label class="field"><span>Confidence</span><input id="hypothesisConfidenceInput" type="number" min="0" max="100" value="60" /></label>
+                  <label class="field"><span>Evidence IDs</span><input id="hypothesisEvidenceInput" placeholder="comma-separated" /></label>
+                </div>
+              </section>
+              <section id="investigationHypothesisList" class="modelops-grid"></section>
+            </section>
+            <section class="investigation-panel" data-investigation-panel="report">
+              <section class="panel-section">
+                <label class="field"><span>Report Title</span><input id="reportTitleInput" placeholder="optional" /></label>
+              </section>
+              <section id="investigationReport" class="panel-section"></section>
+            </section>
+          </section>
+
+          <aside class="detail-panel">
+            <section class="panel-section">
+              <div class="section-title"><h2>Investigation Output</h2></div>
+              <pre id="investigationOutput" class="mini-output tall"></pre>
             </section>
           </aside>
         </section>
@@ -718,6 +1405,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js"></script>
     <div id="objectBulkModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Bulk action">
       <section class="modal-panel">
         <div class="section-title">
@@ -735,6 +1423,6 @@
         <button id="executeBulkActionBtn" class="btn primary full-width" type="button">Execute on Selected</button>
       </section>
     </div>
-    <script src="/ui/assets/app.js?v=platform-shell-3"></script>
+    <script src="/ui/assets/app.js?v=ontology-generator-1"></script>
   </body>
 </html>
