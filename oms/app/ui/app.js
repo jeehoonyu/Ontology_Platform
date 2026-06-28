@@ -157,7 +157,10 @@ const state = {
   platformGraph: {
     overview: null,
     selectedNodeId: "",
-    selectedKinds: []
+    selectedKinds: [],
+    search: "",
+    neighborFocusId: "",
+    savedFilters: []
   },
   commandCenter: {
     selectedAssetId: "asset_pump_4",
@@ -167,7 +170,11 @@ const state = {
     actionResult: null,
     importJobs: [],
     selectedImportJobId: "",
-    importResult: null
+    importResult: null,
+    importTemplates: [],
+    selectedImportTemplate: "asset",
+    generatedDraft: null,
+    reportExport: null
   },
   validationWorkspace: {
     dashboard: null,
@@ -649,7 +656,10 @@ function renderOntologyGenerator() {
   if (!el("ontologyGeneratorAssetSelect")) return;
   fillSelect(
     el("ontologyGeneratorAssetSelect"),
-    state.datasets.map((asset) => ({ value: asset.id, label: asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id })),
+    state.datasets.map((asset) => ({
+      value: asset.id,
+      label: `${asset.asset_schema?.source_import_job_id ? "Imported - " : ""}${asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id}`
+    })),
     state.ontologyGenerator.selectedAssetId || state.datasets[0]?.id || "",
     "Choose dataset"
   );
@@ -921,10 +931,43 @@ async function refreshGraphWorkspace() {
 function filteredPlatformGraph() {
   const overview = state.platformGraph.overview || { nodes: [], edges: [], summary: {} };
   const kinds = state.platformGraph.selectedKinds.length ? new Set(state.platformGraph.selectedKinds) : new Set(Object.keys(overview.summary || {}));
-  const nodes = (overview.nodes || []).filter((node) => kinds.has(node.kind));
+  const query = (state.platformGraph.search || "").toLowerCase().trim();
+  let nodes = (overview.nodes || []).filter((node) => {
+    const haystack = `${node.id} ${node.label} ${node.kind} ${node.resource_id}`.toLowerCase();
+    return kinds.has(node.kind) && (!query || haystack.includes(query));
+  });
+  if (state.platformGraph.neighborFocusId) {
+    const neighborIds = new Set([state.platformGraph.neighborFocusId]);
+    for (const edge of overview.edges || []) {
+      if (edge.source === state.platformGraph.neighborFocusId) neighborIds.add(edge.target);
+      if (edge.target === state.platformGraph.neighborFocusId) neighborIds.add(edge.source);
+    }
+    nodes = nodes.filter((node) => neighborIds.has(node.id));
+  }
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = (overview.edges || []).filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
   return { nodes, edges, kinds };
+}
+
+function loadSavedGraphFilters() {
+  try {
+    state.platformGraph.savedFilters = JSON.parse(localStorage.getItem("platformGraphFilters") || "[]");
+  } catch (_) {
+    state.platformGraph.savedFilters = [];
+  }
+}
+
+function saveCurrentGraphFilter() {
+  const filter = {
+    name: `Filter ${new Date().toLocaleTimeString()}`,
+    kinds: state.platformGraph.selectedKinds,
+    search: state.platformGraph.search,
+    saved_at: Date.now()
+  };
+  state.platformGraph.savedFilters = [filter, ...(state.platformGraph.savedFilters || [])].slice(0, 6);
+  localStorage.setItem("platformGraphFilters", JSON.stringify(state.platformGraph.savedFilters));
+  renderGraphWorkspace();
+  showToast("Graph filter saved locally");
 }
 
 function renderGraphWorkspace() {
@@ -950,6 +993,8 @@ function renderGraphWorkspace() {
         <input type="checkbox" data-graph-kind="${escapeHtml(kind)}" ${filtered.kinds.has(kind) ? "checked" : ""} />
         <span>${escapeHtml(kind)} (${escapeHtml(overview.summary[kind])})</span>
       </label>
+    `).join("") + (state.platformGraph.savedFilters || []).map((filter, index) => `
+      <button class="toggle-chip" type="button" data-load-graph-filter="${index}">${escapeHtml(filter.name)}</button>
     `).join("") || '<div class="empty-state compact-empty">No graph kinds yet. Bootstrap or import data first.</div>';
   }
   renderPlatformGraphCanvas(filtered.nodes, filtered.edges);
@@ -1099,6 +1144,10 @@ function renderPlatformGraphInspector(nodes, edges) {
     <div class="kv"><span>Kind</span><strong>${escapeHtml(selected.kind)}</strong></div>
     <div class="kv"><span>Resource</span><strong>${escapeHtml(selected.resource_id)}</strong></div>
     <div class="kv"><span>Neighbors</span><strong>${escapeHtml(neighbors.length)}</strong></div>
+    <div class="button-row">
+      <button class="btn small" type="button" data-expand-graph-neighbors="${escapeHtml(selected.id)}">Expand neighbors</button>
+      <button class="btn small" type="button" data-open-graph-resource="${escapeHtml(selected.kind)}">Open resource</button>
+    </div>
     <pre class="mini-output">${compactJson(selected.payload || {})}</pre>
     <div class="stack compact">
       ${neighbors.slice(0, 8).map((edge) => `<button class="list-item" type="button" data-platform-graph-node="${escapeHtml(edge.source === selected.id ? edge.target : edge.source)}"><strong>${escapeHtml(edge.label || edge.kind)}</strong><span>${escapeHtml(edge.source === selected.id ? edge.target : edge.source)}</span></button>`).join("") || '<div class="empty-state compact-empty">No visible neighbors</div>'}
@@ -1109,14 +1158,16 @@ function renderPlatformGraphInspector(nodes, edges) {
 async function refreshCommandCenterWorkspace() {
   try {
     const assetId = state.commandCenter.selectedAssetId || "asset_pump_4";
-    const [summary, validation, importJobs] = await Promise.all([
+    const [summary, validation, importJobs, importTemplates] = await Promise.all([
       api(`/scenarios/asset-reliability/summary?asset_id=${encodeURIComponent(assetId)}`),
       api("/scenarios/asset-reliability/validation-dashboard"),
-      api("/imports/jobs")
+      api("/imports/jobs"),
+      api("/imports/templates")
     ]);
     state.commandCenter.summary = summary;
     state.commandCenter.validation = validation;
     state.commandCenter.importJobs = importJobs.jobs || [];
+    state.commandCenter.importTemplates = importTemplates.templates || [];
     if (!state.commandCenter.selectedImportJobId && state.commandCenter.importJobs.length) {
       state.commandCenter.selectedImportJobId = state.commandCenter.importJobs[0].id;
     }
@@ -1208,6 +1259,10 @@ async function approveCommandCenterAction() {
   }
 }
 
+function selectedCommandImportJob() {
+  return (state.commandCenter.importJobs || []).find((job) => job.id === state.commandCenter.selectedImportJobId) || state.commandCenter.importResult || null;
+}
+
 function commandCenterChecklist(summary) {
   const kpis = summary.kpis || {};
   return [
@@ -1235,8 +1290,63 @@ function renderProofTrail(summary) {
   ];
   return steps.map((step) => {
     const cls = step.status === "FAIL" ? "red" : step.status === "WARN" ? "amber" : step.status === "PASS" || step.status === "APPROVED" ? "green" : "";
-    return `<div class="proof-step"><span class="pill ${cls}">${escapeHtml(step.status)}</span><strong>${escapeHtml(step.name)}</strong><span>${escapeHtml(step.evidence || "not available yet")}</span></div>`;
+    const target = step.name.toLowerCase().replace(/[^a-z]+/g, "_").replace(/^_|_$/g, "");
+    return `<button class="proof-step" type="button" data-command-proof="${escapeHtml(target)}"><span class="pill ${cls}">${escapeHtml(step.status)}</span><strong>${escapeHtml(step.name)}</strong><span>${escapeHtml(step.evidence || "not available yet")}</span></button>`;
   }).join("");
+}
+
+function renderCommandCenterStepper(summary) {
+  const job = selectedCommandImportJob();
+  const generated = state.commandCenter.generatedDraft;
+  const triage = state.commandCenter.triage;
+  const latestReport = triage?.report || summary.latest_report || state.commandCenter.reportExport;
+  const steps = [
+    { label: "Start with sample data", done: !!summary.selected_asset, action: "bootstrap" },
+    { label: "Import your CSV/JSON", done: !!job, action: "import" },
+    { label: "Review inferred schema", done: !!job?.schema?.field_count, action: "validate" },
+    { label: "Generate ontology", done: !!generated?.draft || !!job?.target_dataset_id, action: "ontology" },
+    { label: "Inspect graph/map/timeline", done: (summary.timeline || []).length > 0, action: "inspect" },
+    { label: "Run reliability triage", done: !!triage?.approval || (summary.approvals || []).length > 0, action: "triage" },
+    { label: "Approve action", done: !!state.commandCenter.actionResult?.execution, action: "approval" },
+    { label: "Export proof report", done: !!latestReport, action: "report" },
+  ];
+  return steps.map((step, index) => `
+    <button class="demo-step ${step.done ? "done" : ""}" type="button" data-command-step="${escapeHtml(step.action)}">
+      <span>${index + 1}</span>
+      <strong>${escapeHtml(step.label)}</strong>
+    </button>
+  `).join("");
+}
+
+function renderCommandCenterImportMapping() {
+  const container = el("commandCenterImportMapping");
+  if (!container) return;
+  const templates = state.commandCenter.importTemplates || [];
+  fillSelect(
+    el("commandCenterImportTemplateSelect"),
+    templates.map((template) => ({ value: template.id, label: template.display_name })),
+    state.commandCenter.selectedImportTemplate || "asset",
+    "Choose template"
+  );
+  const job = selectedCommandImportJob();
+  if (!job) {
+    container.innerHTML = '<div class="empty-state compact-empty">Create an import job to review mappings.</div>';
+    return;
+  }
+  const template = templates.find((item) => item.id === (selectedValue("commandCenterImportTemplateSelect") || job.template || "asset")) || templates[0];
+  const fields = (job.schema?.fields || []).map((field) => field.name);
+  const mapping = job.semantic_mapping || {};
+  const sourceOptions = (selected) => optionList(fields.map((field) => ({ value: field, label: field })), selected, "Unmapped");
+  container.innerHTML = `
+    <div class="section-title tight"><h3>${escapeHtml(template?.display_name || "Template")} mapping</h3></div>
+    ${(Object.keys(template?.fields || {})).map((target) => `
+      <label class="field compact-field">
+        <span>${escapeHtml(target)}${(template.required || []).includes(target) ? " *" : ""}</span>
+        <select data-import-target-field="${escapeHtml(target)}">${sourceOptions(mapping[target] || "")}</select>
+      </label>
+    `).join("") || '<div class="empty-state compact-empty">No template fields.</div>'}
+    ${(job.mapping_warnings || []).map((warning) => `<div class="list-item"><strong>${escapeHtml(warning.code)}</strong><span>${escapeHtml(warning.message)}</span></div>`).join("")}
+  `;
 }
 
 async function importCommandCenterCsv() {
@@ -1253,6 +1363,10 @@ async function importCommandCenterCsv() {
   });
   state.commandCenter.importResult = result;
   state.commandCenter.selectedImportJobId = result.id;
+  await api(`/imports/jobs/${encodeURIComponent(result.id)}/validate`, {
+    method: "POST",
+    body: JSON.stringify({ template: selectedValue("commandCenterImportTemplateSelect") || state.commandCenter.selectedImportTemplate || "asset", mapping: {} })
+  }).catch(() => null);
   await refreshCommandCenterWorkspace();
   showToast(`Import job ${result.status}`);
 }
@@ -1271,6 +1385,10 @@ async function importCommandCenterJson() {
   });
   state.commandCenter.importResult = result;
   state.commandCenter.selectedImportJobId = result.id;
+  await api(`/imports/jobs/${encodeURIComponent(result.id)}/validate`, {
+    method: "POST",
+    body: JSON.stringify({ template: selectedValue("commandCenterImportTemplateSelect") || state.commandCenter.selectedImportTemplate || "asset", mapping: {} })
+  }).catch(() => null);
   await refreshCommandCenterWorkspace();
   showToast(`Import job ${result.status}`);
 }
@@ -1293,22 +1411,99 @@ async function promoteCommandCenterImport() {
   showToast(`Promoted to ${result.dataset.id}`);
 }
 
-function exportCommandCenterReport() {
-  const latest = state.commandCenter.triage?.report || state.commandCenter.summary?.latest_report;
-  const body = latest?.body || "";
-  if (!body.trim()) {
-    showToast("No report available yet");
-    return;
+async function uploadCommandCenterFile() {
+  const input = el("commandCenterFileInput");
+  if (!input.files || !input.files.length) throw new Error("Choose a CSV or JSON file first");
+  const form = new FormData();
+  form.append("file", input.files[0]);
+  form.append("display_name", el("commandCenterImportDisplayName").value || input.files[0].name);
+  form.append("target_dataset_id", el("commandCenterImportDatasetId").value || "");
+  form.append("template", selectedValue("commandCenterImportTemplateSelect") || state.commandCenter.selectedImportTemplate || "asset");
+  const response = await fetch("/imports/files", { method: "POST", body: form });
+  if (!response.ok) throw new Error(await response.text());
+  const result = await response.json();
+  state.commandCenter.importResult = result;
+  state.commandCenter.selectedImportJobId = result.id;
+  await refreshCommandCenterWorkspace();
+  showToast(`Uploaded ${result.filename || "file"}`);
+}
+
+function readCommandCenterMapping() {
+  const mapping = {};
+  document.querySelectorAll("[data-import-target-field]").forEach((select) => {
+    mapping[select.dataset.importTargetField] = select.value;
+  });
+  return mapping;
+}
+
+async function validateCommandCenterImport() {
+  const job = selectedCommandImportJob();
+  if (!job?.id) throw new Error("Create or select an import job first");
+  const template = selectedValue("commandCenterImportTemplateSelect") || state.commandCenter.selectedImportTemplate || "asset";
+  const result = await api(`/imports/jobs/${encodeURIComponent(job.id)}/validate`, {
+    method: "POST",
+    body: JSON.stringify({ template, mapping: readCommandCenterMapping() })
+  });
+  state.commandCenter.importResult = result.job;
+  await refreshCommandCenterWorkspace();
+  showToast(result.validation.status);
+}
+
+async function generateCommandCenterOntologyDraft() {
+  const job = selectedCommandImportJob();
+  if (!job?.id) throw new Error("Create or select an import job first");
+  const template = selectedValue("commandCenterImportTemplateSelect") || state.commandCenter.selectedImportTemplate || "asset";
+  if (!job.template) {
+    await api(`/imports/jobs/${encodeURIComponent(job.id)}/validate`, {
+      method: "POST",
+      body: JSON.stringify({ template, mapping: readCommandCenterMapping() })
+    });
   }
-  const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
+  const result = await api(`/imports/jobs/${encodeURIComponent(job.id)}/generate-ontology-draft`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: "workspace",
+      include_actions: true,
+      create_pipeline_graph: true
+    })
+  });
+  state.commandCenter.generatedDraft = result;
+  state.ontologyGenerator.selectedAssetId = result.dataset?.id || state.ontologyGenerator.selectedAssetId;
+  state.ontologyGenerator.selectedDraftId = result.draft?.id || state.ontologyGenerator.selectedDraftId;
+  await Promise.allSettled([loadDataAssets(), loadOntologyGeneratorDrafts(), refreshCommandCenterWorkspace()]);
+  showToast(result.status === "DRAFT_EXISTS" ? "Ontology draft already exists" : "Ontology draft generated");
+}
+
+async function downloadCommandCenterTemplate(format) {
+  const template = selectedValue("commandCenterImportTemplateSelect") || state.commandCenter.selectedImportTemplate || "asset";
+  const response = await fetch(`/imports/templates/${encodeURIComponent(template)}/sample?format=${encodeURIComponent(format)}`);
+  if (!response.ok) throw new Error(await response.text());
+  const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${latest.id || "asset-reliability-report"}.md`;
+  link.download = `${template}-sample.${format}`;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+async function exportCommandCenterReport() {
+  const response = await fetch(`/scenarios/asset-reliability/report?format=markdown&asset_id=${encodeURIComponent(state.commandCenter.selectedAssetId || "asset_pump_4")}`);
+  if (!response.ok) throw new Error(await response.text());
+  const body = await response.text();
+  state.commandCenter.reportExport = body;
+  const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "asset-reliability-report.md";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  await refreshCommandCenterWorkspace();
   showToast("Report exported");
 }
 
@@ -1326,6 +1521,11 @@ function renderCommandCenterWorkspace() {
       ["Open incidents", kpis.open_incidents ?? 0]
     ];
     metricBox.innerHTML = metrics.map(([label, value]) => `<article><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></article>`).join("");
+  }
+
+  const stepper = el("commandCenterStepper");
+  if (stepper) {
+    stepper.innerHTML = renderCommandCenterStepper(summary);
   }
 
   const checklist = el("commandCenterChecklist");
@@ -1374,6 +1574,7 @@ function renderCommandCenterWorkspace() {
       validation_errors: selectedJob.validation_errors
     }) : "No import job selected.";
   }
+  renderCommandCenterImportMapping();
 
   const riskList = el("commandCenterRiskList");
   if (riskList) {
@@ -1570,6 +1771,64 @@ function renderValidationWorkspace() {
       imports: (data.import_jobs || []).length,
     }) : "Generate a project snapshot to inspect exportable local state.";
   }
+}
+
+function openCommandProof(target) {
+  const routes = {
+    pipeline_run: "pipeline",
+    ontology_hydration: "ontology",
+    data_contract: "ops",
+    model_monitor: "models",
+    risk_explanation: "decision",
+    approval: "ops",
+    audit_activity: "ops",
+    validation_matrix: "validation",
+    report: "investigations"
+  };
+  setView(routes[target] || "command-center");
+}
+
+function runCommandStep(action) {
+  const handlers = {
+    bootstrap: () => bootstrapCommandCenter(),
+    import: () => el("commandCenterImport").scrollIntoView({ behavior: "smooth", block: "start" }),
+    validate: () => validateCommandCenterImport(),
+    ontology: () => generateCommandCenterOntologyDraft(),
+    inspect: () => setView("graph"),
+    triage: () => runCommandCenterTriage(),
+    approval: () => approveCommandCenterAction(),
+    report: () => exportCommandCenterReport(),
+  };
+  const handler = handlers[action];
+  if (handler) Promise.resolve(handler()).catch((error) => showToast(error.message));
+}
+
+function openSelectedGraphResource(kind) {
+  const routeByKind = {
+    dataset: "ontology",
+    pipeline: "pipeline",
+    object_type: "ontology",
+    object: "object-explorer",
+    incident: "ops",
+    model: "models",
+    monitor: "models",
+    report: "investigations"
+  };
+  setView(routeByKind[kind] || "graph");
+}
+
+function useLastImportInOntologyGenerator() {
+  const imported = [...state.datasets].filter((asset) => asset.asset_schema?.source_import_job_id);
+  const latest = imported[0] || state.datasets[0];
+  if (!latest) {
+    showToast("No imported dataset available");
+    return;
+  }
+  state.ontologyGenerator.selectedAssetId = latest.id;
+  el("ontologyGeneratorDisplayNameInput").value = latest.display_name || "";
+  el("ontologyGeneratorObjectTypeInput").value = "";
+  renderOntologyGenerator();
+  showToast(`Selected ${latest.id}`);
 }
 
 function openApplication(appId) {
@@ -1873,7 +2132,12 @@ function defaultPipelineDraft() {
 
 async function loadDataAssets() {
   try {
-    state.datasets = await api("/data-assets");
+    const rows = await api("/data-assets");
+    state.datasets = [...rows].sort((a, b) => {
+      const ai = a.asset_schema?.source_import_job_id ? 0 : 1;
+      const bi = b.asset_schema?.source_import_job_id ? 0 : 1;
+      return ai - bi || String(b.updated_at || 0).localeCompare(String(a.updated_at || 0));
+    });
   } catch (_) {
     state.datasets = [];
   }
@@ -1916,7 +2180,10 @@ function compactGraph(graph) {
 }
 
 function datasetOptions(selected = "") {
-  const items = state.datasets.map((asset) => ({ value: asset.id, label: asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id }));
+  const items = state.datasets.map((asset) => ({
+    value: asset.id,
+    label: `${asset.asset_schema?.source_import_job_id ? "Imported - " : ""}${asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id}`
+  }));
   return optionList(items, selected, "Choose dataset");
 }
 
@@ -1931,6 +2198,7 @@ function renderPipelineBuilder() {
   renderPipelineConfig();
   renderPipelinePreview();
   renderPipelineSidePanels();
+  renderPipelineActionStatus();
 }
 
 function renderPipelineNodeLibrary() {
@@ -2126,7 +2394,7 @@ function openOntologyGeneratorFromPipeline() {
   const draft = state.pipeline.draft || defaultPipelineDraft();
   const active = draft.nodes.find((node) => node.id === state.pipeline.activeNodeId);
   const input = draft.nodes.find((node) => node.type === "input_dataset");
-  state.ontologyGenerator.selectedAssetId = active?.config?.source_asset_id || input?.config?.asset_id || state.datasets[0]?.id || "";
+  state.ontologyGenerator.selectedAssetId = state.pipeline.delivery?.output_asset_id || active?.config?.source_asset_id || input?.config?.asset_id || state.datasets[0]?.id || "";
   const objectTypeId = active?.config?.object_type_id || "";
   el("ontologyGeneratorObjectTypeInput").value = objectTypeId;
   setView("ontology");
@@ -2283,6 +2551,19 @@ function renderPipelineSidePanels() {
   `;
 }
 
+function renderPipelineActionStatus() {
+  const strip = el("pipelineActionStatus");
+  if (!strip) return;
+  const validation = state.pipeline.validation;
+  const preview = state.pipeline.preview;
+  const delivery = state.pipeline.delivery;
+  strip.innerHTML = `
+    <article><strong>${escapeHtml(validation?.status || "Not validated")}</strong><span>${escapeHtml((validation?.errors || []).length)} errors / ${escapeHtml((validation?.warnings || []).length)} warnings</span></article>
+    <article><strong>${escapeHtml(preview ? `${preview.row_count} rows` : "No preview")}</strong><span>${escapeHtml((preview?.schema?.fields || []).map((field) => field.name).slice(0, 4).join(", ") || "Preview before deliver")}</span></article>
+    <article><strong>${escapeHtml(delivery?.status || "Not delivered")}</strong><span>${escapeHtml(delivery?.output_asset_id || "Output dataset pending")}</span></article>
+  `;
+}
+
 async function savePipelineGraph() {
   const draft = state.pipeline.draft || defaultPipelineDraft();
   const payload = {
@@ -2307,6 +2588,7 @@ async function validatePipelineGraph() {
   if (!state.pipeline.selectedId) await savePipelineGraph();
   state.pipeline.validation = await api(`/pipeline-builder/graphs/${encodeURIComponent(state.pipeline.selectedId)}/validate`, { method: "POST" });
   renderPipelineSidePanels();
+  renderPipelineActionStatus();
   showToast(state.pipeline.validation.status);
 }
 
@@ -2328,6 +2610,7 @@ async function deliverPipelineGraph() {
   });
   await loadDataAssets();
   renderPipelineSidePanels();
+  renderPipelineActionStatus();
   showToast(`Delivered ${state.pipeline.delivery.records_out} rows`);
 }
 
@@ -5465,6 +5748,16 @@ function bindEvents() {
   el("platformSearchBtn").addEventListener("click", refreshSearchWorkspace);
   el("platformSearchInlineBtn").addEventListener("click", refreshSearchWorkspace);
   el("refreshGraphBtn").addEventListener("click", refreshGraphWorkspace);
+  el("platformGraphSearchInput").addEventListener("input", (event) => {
+    state.platformGraph.search = event.target.value;
+    renderGraphWorkspace();
+  });
+  el("expandGraphNeighborsBtn").addEventListener("click", () => {
+    state.platformGraph.neighborFocusId = state.platformGraph.neighborFocusId ? "" : state.platformGraph.selectedNodeId;
+    renderGraphWorkspace();
+  });
+  el("fitGraphBtn").addEventListener("click", renderGraphWorkspace);
+  el("saveGraphFilterBtn").addEventListener("click", saveCurrentGraphFilter);
   el("platformGraphFilters").addEventListener("change", (event) => {
     const checkbox = event.target.closest("[data-graph-kind]");
     if (!checkbox) return;
@@ -5477,6 +5770,29 @@ function bindEvents() {
     renderGraphWorkspace();
   });
   el("graphView").addEventListener("click", (event) => {
+    const saved = event.target.closest("[data-load-graph-filter]");
+    if (saved) {
+      const filter = state.platformGraph.savedFilters[Number(saved.dataset.loadGraphFilter)];
+      if (filter) {
+        state.platformGraph.selectedKinds = filter.kinds || [];
+        state.platformGraph.search = filter.search || "";
+        el("platformGraphSearchInput").value = state.platformGraph.search;
+        state.platformGraph.neighborFocusId = "";
+        renderGraphWorkspace();
+      }
+      return;
+    }
+    const expand = event.target.closest("[data-expand-graph-neighbors]");
+    if (expand) {
+      state.platformGraph.neighborFocusId = expand.dataset.expandGraphNeighbors;
+      renderGraphWorkspace();
+      return;
+    }
+    const openResource = event.target.closest("[data-open-graph-resource]");
+    if (openResource) {
+      openSelectedGraphResource(openResource.dataset.openGraphResource);
+      return;
+    }
     const node = event.target.closest("[data-platform-graph-node]");
     if (!node) return;
     state.platformGraph.selectedNodeId = node.dataset.platformGraphNode;
@@ -5486,14 +5802,33 @@ function bindEvents() {
   el("bootstrapCommandCenterBtn").addEventListener("click", () => bootstrapCommandCenter().catch((error) => showToast(error.message)));
   el("runCommandCenterTriageBtn").addEventListener("click", () => runCommandCenterTriage().catch((error) => showToast(error.message)));
   el("approveCommandCenterBtn").addEventListener("click", () => approveCommandCenterAction().catch((error) => showToast(error.message)));
+  el("uploadCommandCenterFileBtn").addEventListener("click", () => uploadCommandCenterFile().catch((error) => showToast(error.message)));
   el("importCommandCenterCsvBtn").addEventListener("click", () => importCommandCenterCsv().catch((error) => showToast(error.message)));
   el("importCommandCenterJsonBtn").addEventListener("click", () => importCommandCenterJson().catch((error) => showToast(error.message)));
+  el("validateCommandCenterImportBtn").addEventListener("click", () => validateCommandCenterImport().catch((error) => showToast(error.message)));
+  el("generateCommandCenterDraftBtn").addEventListener("click", () => generateCommandCenterOntologyDraft().catch((error) => showToast(error.message)));
+  el("downloadCommandCenterCsvTemplateBtn").addEventListener("click", () => downloadCommandCenterTemplate("csv").catch((error) => showToast(error.message)));
+  el("downloadCommandCenterJsonTemplateBtn").addEventListener("click", () => downloadCommandCenterTemplate("json").catch((error) => showToast(error.message)));
+  el("commandCenterImportTemplateSelect").addEventListener("change", (event) => {
+    state.commandCenter.selectedImportTemplate = event.target.value;
+    renderCommandCenterWorkspace();
+  });
   el("promoteCommandCenterImportBtn").addEventListener("click", () => promoteCommandCenterImport().catch((error) => showToast(error.message)));
-  el("exportCommandCenterReportBtn").addEventListener("click", exportCommandCenterReport);
+  el("exportCommandCenterReportBtn").addEventListener("click", () => exportCommandCenterReport().catch((error) => showToast(error.message)));
+  el("commandCenterStepper").addEventListener("click", (event) => {
+    const step = event.target.closest("[data-command-step]");
+    if (step) runCommandStep(step.dataset.commandStep);
+  });
+  el("commandCenterProofTrail").addEventListener("click", (event) => {
+    const proof = event.target.closest("[data-command-proof]");
+    if (proof) openCommandProof(proof.dataset.commandProof);
+  });
   el("commandCenterImportJobs").addEventListener("click", (event) => {
     const row = event.target.closest("[data-command-import-job]");
     if (!row) return;
     state.commandCenter.selectedImportJobId = row.dataset.commandImportJob;
+    const selected = selectedCommandImportJob();
+    if (selected?.template) state.commandCenter.selectedImportTemplate = selected.template;
     renderCommandCenterWorkspace();
   });
   el("refreshValidationBtn").addEventListener("click", () => refreshValidationWorkspace().catch((error) => showToast(error.message)));
@@ -5573,6 +5908,7 @@ function bindEvents() {
   el("ontologyGeneratorAssetSelect").addEventListener("change", (event) => {
     state.ontologyGenerator.selectedAssetId = event.target.value;
   });
+  el("ontologyUseLastImportBtn").addEventListener("click", useLastImportInOntologyGenerator);
   el("ontologyDraftSelect").addEventListener("change", (event) => {
     state.ontologyGenerator.selectedDraftId = event.target.value;
     state.ontologyGenerator.result = null;
@@ -5968,6 +6304,7 @@ function bindEvents() {
 }
 
 async function init() {
+  loadSavedGraphFilters();
   bindEvents();
   setView(state.view, false);
   await refreshHealth();

@@ -1489,6 +1489,52 @@ kbd {
   margin: 14px auto;
 }
 
+.command-guide {
+  max-width: 1320px;
+  margin: 14px auto;
+}
+
+.demo-stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.demo-step {
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  text-align: left;
+}
+
+.demo-step > span {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #eef3f1;
+  color: #53606a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.demo-step.done {
+  border-color: rgba(47, 109, 79, 0.42);
+  background: #f5faf7;
+}
+
+.demo-step.done > span {
+  background: #2f6d4f;
+  color: #fff;
+}
+
 .import-grid {
   display: grid;
   grid-template-columns: minmax(260px, 360px) minmax(0, 1fr) minmax(280px, 420px);
@@ -1501,6 +1547,68 @@ kbd {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+}
+
+.mapping-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.section-title.tight {
+  margin: 0;
+}
+
+.section-title.tight h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.compact-field {
+  gap: 4px;
+}
+
+.compact-field span {
+  font-size: 11px;
+}
+
+.compact-input {
+  min-height: 34px;
+  width: min(260px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fff;
+}
+
+.pipeline-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pipeline-status-strip article {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+  min-width: 0;
+}
+
+.pipeline-status-strip strong,
+.pipeline-status-strip span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-status-strip span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 .validation-layout {
@@ -2311,7 +2419,8 @@ tr.selected {
   .platform-graph-layout,
   .command-proof-grid,
   .import-grid,
-  .validation-layout {
+  .validation-layout,
+  .pipeline-status-strip {
     grid-template-columns: 1fr;
   }
 
@@ -2398,6 +2507,7 @@ tr.selected {
   .command-proof-grid,
   .import-grid,
   .validation-layout,
+  .pipeline-status-strip,
   .ontology-generator-grid,
   .split-grid,
   .block-grid,

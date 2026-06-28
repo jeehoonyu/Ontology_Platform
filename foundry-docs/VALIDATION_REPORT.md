@@ -9,7 +9,8 @@ Current result:
 - Breadth: strong coverage across ontology, actions, AIP Logic, Workshop, Object Explorer, Pipeline Builder, GIS, data health, modeling, ModelOps, decision intelligence, ops, investigations, reliability, security, governance, global search, eventing, policies, timelines, and graph overview.
 - Outcome proof: the Asset Reliability Command Center provides one complete local workflow from raw maintenance data to governed operational decision, incident, and report.
 - Authoring fidelity: Pipeline Builder now has a D3 drag/connect canvas, Ontology Manager has a dataset-to-object-type generator, and the Platform Graph has a D3 relationship canvas with filters and inspection.
-- User data path: CSV/JSON import jobs infer schemas, preview records, record validation errors, and promote reviewed data into local datasets for the Ontology Generator and Command Center workflow.
+- User data path: CSV/JSON import jobs infer schemas, preview records, validate template mappings, upload local files without extra dependencies, and promote reviewed data into local datasets for the Ontology Generator and Command Center workflow.
+- Guided evaluator flow: Command Center now has a stepper, clickable proof trail, import-to-ontology draft generation, backend-backed report export, and linked evidence IDs.
 - Trust dashboard: `/workspace/validation` surfaces matrix status, priority gaps, runtime schema health, event consistency, and project snapshot evidence.
 - Fidelity: high for local behavioral workflows; intentionally different for hosted infrastructure, proprietary UI internals, and LLM/model routing.
 - Evidence: `foundry-docs/VALIDATION_MATRIX.md`, `oms/test_docs_conformance.py`, and existing focused tests.
@@ -28,7 +29,7 @@ Current result:
 | ModelOps | Medium-high | Objectives, training, eval gates, releases, deployments, inference logs, drift monitors |
 | Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, visual graph overview |
 | Operational MVP | High | Asset Reliability Command Center bootstrap/import, proof trail, triage, approval, action execution, incident, report, validation dashboard |
-| Data import and project portability | Medium-high | CSV/JSON import jobs, schema inference, promote-to-dataset, audit/ops events, JSON snapshot export/import |
+| Data import and project portability | Medium-high | CSV/JSON/file import jobs, semantic mapping, import-to-ontology drafts, audit/ops events, extended JSON snapshot export/import |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
 | Security/governance | Medium | Local roles, markings, restricted views, scanners, retention, audit |
 
@@ -78,7 +79,7 @@ python test_docs_conformance.py
 ## Next Priorities
 
 1. Add browser screenshot capture for `/workspace/command-center`, `/workspace/pipeline`, `/workspace/ontology`, `/workspace/graph`, and `/workspace/validation` when Playwright or Chrome control is available.
-2. Add file-picker upload support on top of the current paste-based CSV/JSON import UI.
-3. Add snapshot restore coverage for more secondary resources such as workshops, saved explorations, model monitors, incidents, investigations, and reports.
+2. Add richer import mapping transforms such as derived geo points, unit normalization, and enum cleanup before promotion.
+3. Add full restore coverage for every exported secondary resource, including monitor runs, prediction logs, evidence, and historical report versions.
 4. Expand visual conformance notes for Workshop, Pipeline Builder, Object Explorer, Ontology Generator, Graph, Validation, and Map using user-provided screenshots.
 5. Keep public source links current because Palantir documentation changes over time.
