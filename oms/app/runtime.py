@@ -1318,6 +1318,7 @@ def hydrate_objects(
     hydrated_records: List[Dict[str, Any]] = []
     materialized = 0
     updated = 0
+    from . import decision_intelligence
 
     for record in records:
         if object_id_expr is not None:
@@ -1352,9 +1353,17 @@ def hydrate_objects(
             existing.source_asset_id = source_asset_id
             existing.lineage = {**(existing.lineage or {}), **lineage}
             existing.updated_at = now_ts()
+            decision_intelligence.record_object_snapshot(
+                db,
+                existing,
+                event_type="pipeline.object.updated",
+                actor="pipeline",
+                source_type="pipeline_run",
+                source_id=run_id,
+            )
             updated += 1
         else:
-            db.add(models.ObjectInstance(
+            created = models.ObjectInstance(
                 id=str(object_id),
                 object_type_id=object_type_id,
                 properties=properties,
@@ -1362,7 +1371,16 @@ def hydrate_objects(
                 lineage=lineage,
                 created_at=now_ts(),
                 updated_at=now_ts(),
-            ))
+            )
+            db.add(created)
+            decision_intelligence.record_object_snapshot(
+                db,
+                created,
+                event_type="pipeline.object.created",
+                actor="pipeline",
+                source_type="pipeline_run",
+                source_id=run_id,
+            )
             materialized += 1
 
         next_record = dict(record)
@@ -2188,6 +2206,7 @@ def apply_action_mutations(
     rules = action_type.rules or {}
     mutations = rules.get("object_mutations", [])
     mutated_ids: List[str] = []
+    from . import decision_intelligence
 
     for mutation in mutations:
         object_type_id = mutation["object_type_id"]
@@ -2232,6 +2251,14 @@ def apply_action_mutations(
             "last_action_actor": actor,
         }
         existing.updated_at = now_ts()
+        decision_intelligence.record_object_snapshot(
+            db,
+            existing,
+            event_type="action.object.mutated",
+            actor=actor,
+            source_type="action_type",
+            source_id=action_type.id,
+        )
         mutated_ids.append(existing.id)
 
     return mutated_ids
@@ -2291,9 +2318,15 @@ def plan_agent_session(
         filters=filters,
         limit=max_context_objects,
     )
+    try:
+        from . import decision_intelligence
+        context["decision_intelligence"] = decision_intelligence.build_decision_context(db, context)
+    except Exception as exc:
+        context["decision_intelligence"] = {"error": str(exc), "object_risk": [], "duplicate_warnings": []}
     prompt = user_prompt.lower()
     action_ids = agent.allowed_actions or []
     proposed_actions: List[Dict[str, Any]] = []
+    risk_requires_approval = bool((context.get("decision_intelligence") or {}).get("high_risk_object_ids"))
 
     for action_id in action_ids:
         action = db.query(models.ActionType).filter(models.ActionType.id == action_id).first()
@@ -2304,17 +2337,26 @@ def plan_agent_session(
             parameters = {
                 name: None for name in (action.parameters or {}).keys()
             }
+            requires_approval = bool(
+                agent.approval_required
+                or (action.rules or {}).get("requires_approval")
+                or risk_requires_approval
+            )
+            rationale = "Prompt matched an allowed ontology action; parameters must be supplied or confirmed by a user."
+            if risk_requires_approval:
+                rationale += " Decision intelligence found high-risk context, so the action remains staged for approval."
             proposed_actions.append({
                 "action_type_id": action.id,
                 "display_name": action.display_name,
                 "parameters": parameters,
-                "requires_approval": bool(agent.approval_required or (action.rules or {}).get("requires_approval")),
-                "rationale": "Prompt matched an allowed ontology action; parameters must be supplied or confirmed by a user.",
+                "requires_approval": requires_approval,
+                "rationale": rationale,
             })
 
     plan = {
         "steps": [
             {"name": "retrieve_context", "status": "completed"},
+            {"name": "inspect_decision_intelligence", "status": "completed"},
             {"name": "inspect_allowed_actions", "status": "completed"},
             {
                 "name": "stage_action_for_review" if proposed_actions else "answer_from_context",
@@ -2325,6 +2367,7 @@ def plan_agent_session(
             "allowed_object_types": agent.allowed_object_types,
             "allowed_actions": agent.allowed_actions,
             "approval_required": agent.approval_required,
+            "high_risk_object_ids": (context.get("decision_intelligence") or {}).get("high_risk_object_ids", []),
         },
     }
     status = "ACTION_PROPOSED" if proposed_actions else "ANSWERED_WITH_CONTEXT"
@@ -2983,6 +3026,107 @@ def _exec_logic_block_list(
                 raise ValueError(f"Unsupported aggregate op '{op}'")
             result = {"op": op, "field": field, "value": value, "count": count}
             outputs[block.get("output", "aggregate")] = result
+        elif block_type == "explain_object":
+            from . import decision_intelligence
+            object_type_id = resolve_value(block.get("object_type_id"), scope) or block.get("object_type_id")
+            object_id = resolve_value(block.get("object_id"), scope) or block.get("object_id")
+            if not object_type_id or not object_id:
+                raise ValueError("explain_object requires object_type_id and object_id")
+            result = decision_intelligence.explain_object_by_id(db, str(object_type_id), str(object_id))
+            outputs[block.get("output", "explanation")] = result
+        elif block_type == "score_risk":
+            from . import decision_intelligence
+            object_type_id = resolve_value(block.get("object_type_id"), scope) or block.get("object_type_id")
+            object_id = resolve_value(block.get("object_id"), scope) or block.get("object_id")
+            scorecard_ids = block.get("scorecard_ids") or []
+            if isinstance(scorecard_ids, str):
+                scorecard_ids = [item.strip() for item in scorecard_ids.split(",") if item.strip()]
+            if not object_type_id or not object_id:
+                raise ValueError("score_risk requires object_type_id and object_id")
+            result = decision_intelligence.score_object_by_id(db, str(object_type_id), str(object_id), scorecard_ids=scorecard_ids)
+            outputs[block.get("output", "risk")] = result
+        elif block_type == "run_scenario":
+            from . import decision_intelligence
+            seed_object_ids = resolve_value(block.get("seed_object_ids"), scope) or block.get("seed_object_ids") or []
+            if isinstance(seed_object_ids, str):
+                seed_object_ids = [item.strip() for item in seed_object_ids.split(",") if item.strip()]
+            overrides = block.get("overrides") or {}
+            propagation_rules = block.get("propagation_rules") or []
+            result = decision_intelligence.run_scenario_inline(
+                db,
+                seed_object_ids=seed_object_ids,
+                overrides=overrides,
+                propagation_rules=propagation_rules,
+            )
+            outputs[block.get("output", "scenario")] = result
+        elif block_type == "create_incident":
+            from . import ops_control
+            linked_objects = block.get("linked_objects") or []
+            if isinstance(linked_objects, str):
+                linked_objects = resolve_value(linked_objects, scope) or []
+            incident = ops_control.create_incident_inline(
+                db,
+                display_name=str(resolve_value(block.get("display_name"), scope) or block.get("display_name") or "Logic Incident"),
+                description=resolve_value(block.get("description"), scope) or block.get("description"),
+                severity=str(resolve_value(block.get("severity"), scope) or block.get("severity") or "medium"),
+                owner=resolve_value(block.get("owner"), scope) or block.get("owner"),
+                linked_objects=linked_objects,
+                alert_ids=block.get("alert_ids") or [],
+                approval_ids=block.get("approval_ids") or [],
+                actor=block.get("actor", "logic"),
+            )
+            result = ops_control._incident_dict(incident)
+            outputs[block.get("output", "incident")] = result
+        elif block_type == "evaluate_alert_rules":
+            from . import ops_control
+            result = ops_control.evaluate_alert_rules_inline(
+                db,
+                limit=int(block.get("limit", 500)),
+                source=block.get("source"),
+                event_type=block.get("event_type"),
+                status=block.get("status"),
+            )
+            outputs[block.get("output", "alerts")] = result
+        elif block_type == "run_runbook":
+            from . import ops_control
+            runbook_id = resolve_value(block.get("runbook_id"), scope) or block.get("runbook_id")
+            if not runbook_id:
+                raise ValueError("run_runbook requires runbook_id")
+            inputs = {
+                key: resolve_value(value, scope)
+                for key, value in (block.get("inputs") or {}).items()
+            }
+            incident_id = resolve_value(block.get("incident_id"), scope) or block.get("incident_id")
+            result = ops_control.execute_runbook_inline(
+                db,
+                runbook_id=str(runbook_id),
+                incident_id=incident_id,
+                inputs=inputs,
+                actor=block.get("actor", "logic"),
+            )
+            outputs[block.get("output", "runbook")] = result
+        elif block_type == "run_data_contract":
+            from . import reliability_ops
+            contract_id = resolve_value(block.get("contract_id"), scope) or block.get("contract_id")
+            asset_id = resolve_value(block.get("asset_id"), scope) or block.get("asset_id")
+            if not contract_id:
+                raise ValueError("run_data_contract requires contract_id")
+            result = reliability_ops.run_data_contract_inline(db, contract_id=str(contract_id), asset_id=asset_id)
+            outputs[block.get("output", "data_contract")] = result
+        elif block_type == "analyze_lineage_impact":
+            from . import reliability_ops
+            resource_kind = resolve_value(block.get("resource_kind"), scope) or block.get("resource_kind") or "dataset"
+            resource_id = resolve_value(block.get("resource_id"), scope) or block.get("resource_id")
+            if not resource_id:
+                raise ValueError("analyze_lineage_impact requires resource_id")
+            result = reliability_ops.analyze_lineage_impact_inline(
+                db,
+                resource_kind=str(resource_kind),
+                resource_id=str(resource_id),
+                direction=block.get("direction", "downstream"),
+                max_depth=int(block.get("max_depth", 8)),
+            )
+            outputs[block.get("output", "lineage_impact")] = result
         elif block_type == "apply_action":
             action_id = block["action_type_id"]
             action = db.query(models.ActionType).filter(models.ActionType.id == action_id).first()
