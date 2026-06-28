@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -700,6 +701,67 @@ def _latest_report(db: Session) -> Optional[Dict[str, Any]]:
     return investigations._report_dict(report) if report else None
 
 
+def _scenario_report_payload(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    summary = _summarize(db, asset_id=asset_id)
+    report = summary.get("latest_report")
+    pipeline_runs = [
+        _pipeline_run_dict(row)
+        for row in db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).limit(12).all()
+    ]
+    evidence = {
+        "asset_id": asset_id,
+        "selected_asset_id": (summary.get("selected_asset") or {}).get("id"),
+        "selected_work_order_id": (summary.get("selected_work_order") or {}).get("id"),
+        "pipeline_run_ids": [row["id"] for row in pipeline_runs],
+        "data_contract_status": (summary.get("data_contract") or {}).get("status"),
+        "model_monitor_status": (summary.get("model_monitor") or {}).get("status"),
+        "approval_ids": [row.get("id") for row in summary.get("approvals", [])],
+        "incident_ids": [row.get("id") for row in summary.get("incidents", [])],
+        "report_id": (report or {}).get("id"),
+        "timeline_ids": [row.get("id") for row in summary.get("timeline", []) if row.get("id")],
+    }
+    return {
+        "scenario_id": SCENARIO_ID,
+        "generated_at": _now(),
+        "summary": summary,
+        "report": report,
+        "pipeline_runs": pipeline_runs,
+        "evidence": evidence,
+    }
+
+
+def _scenario_report_markdown(payload: Dict[str, Any]) -> str:
+    summary = payload.get("summary") or {}
+    kpis = summary.get("kpis") or {}
+    report = payload.get("report") or {}
+    evidence = payload.get("evidence") or {}
+    lines = [
+        "# Asset Reliability Command Center Report",
+        "",
+        f"- Scenario: {payload.get('scenario_id')}",
+        f"- Generated at: {payload.get('generated_at')}",
+        f"- High-risk assets: {kpis.get('high_risk_assets', 0)}",
+        f"- Open approvals: {kpis.get('open_approvals', 0)}",
+        f"- Open incidents: {kpis.get('open_incidents', 0)}",
+        f"- Data contract: {kpis.get('data_contract_status', 'NOT_RUN')}",
+        f"- Model monitor: {kpis.get('model_monitor_status', 'NOT_RUN')}",
+        "",
+        "## Evidence IDs",
+        "",
+        f"- Asset: {evidence.get('selected_asset_id') or '-'}",
+        f"- Work order: {evidence.get('selected_work_order_id') or '-'}",
+        f"- Pipeline runs: {', '.join(evidence.get('pipeline_run_ids') or []) or '-'}",
+        f"- Approvals: {', '.join(evidence.get('approval_ids') or []) or '-'}",
+        f"- Incidents: {', '.join(evidence.get('incident_ids') or []) or '-'}",
+        f"- Report: {evidence.get('report_id') or '-'}",
+        "",
+        "## Narrative",
+        "",
+        report.get("body") or "No generated report body is available yet.",
+    ]
+    return "\n".join(lines)
+
+
 def _risk_findings(db: Session) -> List[Dict[str, Any]]:
     rows = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == "asset").all()
     findings = []
@@ -1166,3 +1228,37 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
 @router.get("/scenarios/asset-reliability/validation-dashboard")
 def asset_reliability_validation_dashboard(db: Session = Depends(get_db)):
     return _validation_dashboard(db)
+
+
+@router.get("/scenarios/asset-reliability/report")
+def asset_reliability_report(
+    asset_id: str = Query(HIGH_RISK_ASSET_ID),
+    format: str = Query("json", pattern="^(json|markdown)$"),
+    actor: str = Query("workspace"),
+    db: Session = Depends(get_db),
+):
+    payload = _scenario_report_payload(db, asset_id=asset_id)
+    create_audit_log(
+        db,
+        actor=actor,
+        event_type="scenario.report.exported",
+        subject_type="scenario",
+        subject_id=SCENARIO_ID,
+        payload={"asset_id": asset_id, "format": format, "evidence": payload["evidence"]},
+    )
+    ops_control.record_ops_event(
+        db,
+        source="scenario",
+        event_type="scenario.report.exported",
+        severity="info",
+        title="Asset reliability report exported",
+        subject_type="scenario",
+        subject_id=SCENARIO_ID,
+        object_type_id="asset",
+        object_id=asset_id,
+        payload={"format": format, "evidence": payload["evidence"]},
+    )
+    db.commit()
+    if format == "markdown":
+        return PlainTextResponse(_scenario_report_markdown(payload), media_type="text/markdown")
+    return payload
