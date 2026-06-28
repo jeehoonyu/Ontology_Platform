@@ -43,6 +43,22 @@ NODE_TYPES = {
     "output_dataset",
 }
 
+NODE_TYPE_CATALOG = [
+    {"type": "input_dataset", "label": "Input Dataset", "category": "input", "description": "Read records from a local DataAsset."},
+    {"type": "filter", "label": "Filter", "category": "transform", "description": "Keep rows matching deterministic filter criteria."},
+    {"type": "project", "label": "Project / Select", "category": "transform", "description": "Select a subset of columns."},
+    {"type": "rename", "label": "Rename", "category": "transform", "description": "Rename one or more fields."},
+    {"type": "join", "label": "Join", "category": "transform", "description": "Join two upstream branches or a configured right-hand dataset."},
+    {"type": "union", "label": "Union", "category": "transform", "description": "Append rows from another branch or dataset."},
+    {"type": "aggregate", "label": "Aggregate", "category": "transform", "description": "Group rows and compute count, sum, avg, min, or max."},
+    {"type": "sort", "label": "Sort", "category": "transform", "description": "Sort rows by a field."},
+    {"type": "limit", "label": "Limit", "category": "transform", "description": "Keep the first N rows."},
+    {"type": "unique_id", "label": "Unique ID", "category": "transform", "description": "Create a stable local identifier from selected fields."},
+    {"type": "llm_assist", "label": "LLM Assist", "category": "ai", "description": "Deterministically summarize selected fields as a local LLM analogue."},
+    {"type": "ontology_output", "label": "Ontology Output", "category": "output", "description": "Materialize rows into ontology object instances on delivery."},
+    {"type": "dataset_output", "label": "Dataset Output", "category": "output", "description": "Write delivered rows to a local output DataAsset."},
+]
+
 
 class PipelineBuilderGraph(Base):
     __tablename__ = "pipeline_builder_graphs"
@@ -123,6 +139,11 @@ def _now() -> int:
 
 def _new_id() -> str:
     return uuid.uuid4().hex
+
+
+@router.get("/pipeline-builder/node-types")
+def list_node_types():
+    return {"node_types": NODE_TYPE_CATALOG}
 
 
 def _get_graph(db: Session, graph_id: str) -> PipelineBuilderGraph:
@@ -446,15 +467,29 @@ def _execute_graph(
                 id_field = config.get("id_field") or "id"
                 mapping = config.get("mapping") or {}
                 if object_type_id and db.get(models.ObjectType, object_type_id):
+                    from . import decision_intelligence
                     for row in rows:
                         object_id = str(_value(row, id_field) or _stable_row_id(row, list(row.keys())))
                         properties = {target: _value(row, source) for source, target in mapping.items()} if mapping else copy.deepcopy(row)
                         existing = db.get(models.ObjectInstance, object_id)
                         if existing:
                             existing.properties = {**(existing.properties or {}), **properties}
+                            existing.lineage = {
+                                **(existing.lineage or {}),
+                                "pipeline_builder_graph_id": graph.id,
+                                "node_id": node_id,
+                            }
                             existing.updated_at = _now()
+                            decision_intelligence.record_object_snapshot(
+                                db,
+                                existing,
+                                event_type="pipeline_builder.object.updated",
+                                actor="pipeline_builder",
+                                source_type="pipeline_builder_graph",
+                                source_id=graph.id,
+                            )
                         else:
-                            db.add(models.ObjectInstance(
+                            created = models.ObjectInstance(
                                 id=object_id,
                                 object_type_id=object_type_id,
                                 properties=properties,
@@ -462,7 +497,16 @@ def _execute_graph(
                                 lineage={"pipeline_builder_graph_id": graph.id, "node_id": node_id},
                                 created_at=_now(),
                                 updated_at=_now(),
-                            ))
+                            )
+                            db.add(created)
+                            decision_intelligence.record_object_snapshot(
+                                db,
+                                created,
+                                event_type="pipeline_builder.object.created",
+                                actor="pipeline_builder",
+                                source_type="pipeline_builder_graph",
+                                source_id=graph.id,
+                            )
                         materialized_objects += 1
         elif node_type in {"dataset_output", "output_dataset"}:
             final_node_id = node_id
@@ -568,7 +612,24 @@ def update_graph(graph_id: str, body: PipelineGraphUpdate, db: Session = Depends
 
 @router.post("/pipeline-builder/graphs/{graph_id}/validate")
 def validate_graph(graph_id: str, db: Session = Depends(get_db)):
-    return _validate_graph(db, _get_graph(db, graph_id))
+    graph = _get_graph(db, graph_id)
+    validation = _validate_graph(db, graph)
+    try:
+        from . import ops_control
+        ops_control.record_ops_event(
+            db,
+            source="pipeline_builder",
+            event_type="pipeline_builder.graph.validated",
+            severity="high" if validation.get("status") == "INVALID" else "info",
+            title=f"Pipeline graph {graph.display_name} validation {validation.get('status')}",
+            subject_type="pipeline_builder_graph",
+            subject_id=graph.id,
+            payload=validation,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return validation
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/preview")
@@ -576,7 +637,7 @@ def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewR
     graph = _get_graph(db, graph_id)
     execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=False)
     limit = max(1, min(int(body.limit), 500))
-    return {
+    result = {
         "graph_id": graph.id,
         "status": "PREVIEW_READY",
         "row_count": len(execution["rows"]),
@@ -586,6 +647,22 @@ def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewR
         "lineage": execution["lineage"],
         "metrics": execution["metrics"],
     }
+    try:
+        from . import ops_control
+        ops_control.record_ops_event(
+            db,
+            source="pipeline_builder",
+            event_type="pipeline_builder.graph.previewed",
+            severity="info",
+            title=f"Pipeline graph {graph.display_name} previewed",
+            subject_type="pipeline_builder_graph",
+            subject_id=graph.id,
+            payload={"row_count": result["row_count"], "schema": result["schema"]},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return result
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/deliver")
@@ -668,6 +745,20 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         subject_id=graph.id,
         payload={"run_id": run.id, "output_asset_id": asset.id, "records_out": len(execution["rows"])},
     ))
+    try:
+        from . import ops_control
+        ops_control.record_ops_event(
+            db,
+            source="pipeline_builder",
+            event_type="pipeline_builder.graph.delivered",
+            severity="info",
+            title=f"Pipeline graph {graph.display_name} delivered",
+            subject_type="pipeline_builder_graph",
+            subject_id=graph.id,
+            payload={"run_id": run.id, "output_asset_id": asset.id, "records_out": len(execution["rows"])},
+        )
+    except Exception:
+        pass
     graph.status = "DELIVERED"
     graph.updated_at = now
     db.commit()

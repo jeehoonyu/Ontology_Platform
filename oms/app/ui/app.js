@@ -1,4 +1,4 @@
-const WORKSPACE_VIEWS = ["home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline"];
+const WORKSPACE_VIEWS = ["home", "files", "ontology", "applications", "search", "graph", "command-center", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations"];
 
 function routeViewFromPath(pathname) {
   const last = pathname.split("/").filter(Boolean).pop();
@@ -20,6 +20,7 @@ const state = {
   featureLayer: null,
   overlayLayer: null,
   markerByFeatureId: new Map(),
+  featureRiskById: {},
   basemap: "osm",
   leafletAvailable: false,
   tileWarningShown: false,
@@ -48,6 +49,7 @@ const state = {
   selectedApplication: null,
   lastSearchQuery: "",
   datasets: [],
+  classicPipelines: [],
   workshop: {
     modules: [],
     selectedId: "",
@@ -63,17 +65,104 @@ const state = {
     query: null,
     selectedObjectId: "",
     selectedIds: [],
-    activeActionId: ""
+    activeActionId: "",
+    riskById: {}
   },
   pipeline: {
     graphs: [],
     selectedId: "",
     activeNodeId: "",
+    activeEdgeId: "",
     activePanel: "build",
+    canvasMode: "select",
+    connectingFrom: "",
+    nodeTypes: [],
     draft: null,
     preview: null,
     validation: null,
     delivery: null
+  },
+  ontologyGenerator: {
+    drafts: [],
+    selectedDraftId: "",
+    selectedAssetId: "",
+    includeActions: false,
+    createPipelineGraph: true,
+    result: null
+  },
+  modelops: {
+    activeTab: "objectives",
+    summary: null,
+    objectives: [],
+    submissions: [],
+    checks: [],
+    checkResults: [],
+    eligibility: null,
+    releases: [],
+    deployments: [],
+    monitors: [],
+    monitorRuns: [],
+    predictionLogs: [],
+    selectedObjectiveId: "",
+    selectedSubmissionId: "",
+    selectedDeploymentId: "",
+    selectedMonitorId: "",
+    inferenceResult: null
+  },
+  decision: {
+    activeTab: "risk",
+    rules: [],
+    scorecards: [],
+    evaluation: null,
+    explanation: null,
+    timeline: null,
+    entityJob: null,
+    candidates: [],
+    scenario: null,
+    agentRun: null
+  },
+  ops: {
+    activeTab: "command",
+    summary: null,
+    events: [],
+    alertRules: [],
+    alerts: [],
+    incidents: [],
+    runbooks: [],
+    inbox: [],
+    approvals: [],
+    reliability: null,
+    dataContracts: [],
+    backfills: [],
+    selectedIncidentId: "",
+    selectedRunbookId: "",
+    selectedContractId: "",
+    output: null
+  },
+  investigations: {
+    activeTab: "board",
+    list: [],
+    selectedId: "",
+    detail: null,
+    graph: null,
+    timeline: null,
+    output: null
+  },
+  platformSearch: {
+    query: "",
+    kind: "",
+    results: [],
+    commands: []
+  },
+  platformGraph: {
+    overview: null
+  },
+  commandCenter: {
+    selectedAssetId: "asset_pump_4",
+    summary: null,
+    triage: null,
+    validation: null,
+    actionResult: null
   }
 };
 
@@ -100,6 +189,14 @@ const LOGIC_BLOCK_TYPES = [
   { type: "llm", label: "Use LLM" },
   { type: "object_query", label: "Query Objects" },
   { type: "object_aggregate", label: "Aggregate Objects" },
+  { type: "explain_object", label: "Explain Object" },
+  { type: "score_risk", label: "Score Risk" },
+  { type: "run_scenario", label: "Run Scenario" },
+  { type: "create_incident", label: "Create Incident" },
+  { type: "evaluate_alert_rules", label: "Evaluate Alert Rules" },
+  { type: "run_runbook", label: "Run Runbook" },
+  { type: "run_data_contract", label: "Run Data Contract" },
+  { type: "analyze_lineage_impact", label: "Analyze Lineage Impact" },
   { type: "propose_action", label: "Propose Action" },
   { type: "apply_action", label: "Apply Action" },
   { type: "pipeline_suggest", label: "Pipeline Suggest" },
@@ -114,12 +211,19 @@ const LOGIC_COMPARE_OPS = ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "no
 
 const PLATFORM_APPS = [
   { id: "files", name: "Projects & files", category: "data", icon: "F", color: "slate", view: "files", description: "Browse local projects, files, logic definitions, agents, and ontology resources." },
+  { id: "command-center", name: "Asset Reliability Command Center", category: "operations", icon: "CC", color: "blue", view: "command-center", description: "Run one full raw-data to operational decision workflow with risk, checks, agent recommendation, approval, incident, and report." },
+  { id: "search", name: "Global Search", category: "operations", icon: "S", color: "blue", view: "search", description: "Search objects, datasets, pipelines, events, incidents, models, investigations, and commands." },
+  { id: "graph", name: "Platform Graph", category: "ontology", icon: "G", color: "teal", view: "graph", description: "Inspect how datasets, pipelines, ontology objects, incidents, and links connect." },
   { id: "object-explorer", name: "Object Explorer", category: "ontology", icon: "O", color: "teal", view: "object-explorer", description: "Explore object types, chart filters, inspect objects, and save explorations." },
   { id: "ontology", name: "Ontology Manager", category: "ontology", icon: "OM", color: "teal", view: "ontology", description: "Search object types, inspect ontology usage, and discover object sets." },
+  { id: "decision", name: "Decision Intelligence", category: "operations", icon: "D", color: "blue", view: "decision", description: "Explain risk, inspect object timelines, resolve entities, simulate scenarios, and review agent plans." },
+  { id: "ops", name: "Ops Control Plane", category: "operations", icon: "OC", color: "slate", view: "ops", description: "Monitor operational events, alerts, incidents, approvals, runbooks, and reliability signals." },
+  { id: "investigations", name: "Investigations", category: "operations", icon: "IG", color: "blue", view: "investigations", description: "Build case boards with evidence, hypotheses, entity graphs, timelines, and reports." },
   { id: "aip", name: "AIP Logic", category: "operations", icon: "AI", color: "blue", view: "aip", description: "Build, test, debug, and run LLM-backed ontology logic functions." },
   { id: "map", name: "Map", category: "operations", icon: "M", color: "teal", view: "map", description: "Analyze geospatial and MGRS-enabled operational data." },
   { id: "workshop", name: "Workshop", category: "operations", icon: "W", color: "slate", view: "workshop", description: "Compose operational dashboards from objects, filters, widgets, and actions." },
   { id: "pipeline", name: "Pipeline Builder", category: "data", icon: "P", color: "teal", view: "pipeline", description: "Design DAG pipelines, preview transforms, deliver datasets, and inspect lineage." },
+  { id: "models", name: "ModelOps", category: "data", icon: "MO", color: "blue", view: "models", description: "Manage model objectives, evaluation gates, releases, deployments, drift monitoring, and inference logs." },
   { id: "notepad", name: "Notepad", category: "operations", icon: "N", color: "blue", view: "home", description: "Create object-aware notes, reports, and narrative artifacts." },
   { id: "contour", name: "Contour", category: "data", icon: "C", color: "slate", view: "files", description: "Analyze large datasets with filters, joins, and visual summaries." },
   { id: "fusion", name: "Fusion", category: "data", icon: "X", color: "teal", view: "files", description: "Interact with live data in a spreadsheet-like interface." },
@@ -141,19 +245,19 @@ const WORKSHOP_WIDGET_TYPES = [
 ];
 
 const PIPELINE_NODE_TYPES = [
-  { type: "input_dataset", label: "Input Dataset" },
-  { type: "filter", label: "Filter" },
-  { type: "project", label: "Project / Select" },
-  { type: "rename", label: "Rename" },
-  { type: "join", label: "Join" },
-  { type: "union", label: "Union" },
-  { type: "aggregate", label: "Aggregate" },
-  { type: "sort", label: "Sort" },
-  { type: "limit", label: "Limit" },
-  { type: "unique_id", label: "Unique ID" },
-  { type: "llm_assist", label: "LLM Assist" },
-  { type: "ontology_output", label: "Ontology Output" },
-  { type: "dataset_output", label: "Dataset Output" }
+  { type: "input_dataset", label: "Input Dataset", category: "input" },
+  { type: "filter", label: "Filter", category: "transform" },
+  { type: "project", label: "Project / Select", category: "transform" },
+  { type: "rename", label: "Rename", category: "transform" },
+  { type: "join", label: "Join", category: "transform" },
+  { type: "union", label: "Union", category: "transform" },
+  { type: "aggregate", label: "Aggregate", category: "transform" },
+  { type: "sort", label: "Sort", category: "transform" },
+  { type: "limit", label: "Limit", category: "transform" },
+  { type: "unique_id", label: "Unique ID", category: "transform" },
+  { type: "llm_assist", label: "LLM Assist", category: "ai" },
+  { type: "ontology_output", label: "Ontology Output", category: "output" },
+  { type: "dataset_output", label: "Dataset Output", category: "output" }
 ];
 
 const BASEMAPS = {
@@ -228,12 +332,28 @@ function setView(view, push = true) {
     renderMap(false);
   } else if (view === "aip") {
     refreshAipLists();
+  } else if (view === "ontology") {
+    refreshOntologyWorkspace();
   } else if (view === "workshop") {
     refreshWorkshop();
   } else if (view === "object-explorer") {
     refreshObjectExplorer();
   } else if (view === "pipeline") {
     refreshPipelineBuilder();
+  } else if (view === "models") {
+    refreshModelOpsWorkspace();
+  } else if (view === "decision") {
+    refreshDecisionWorkspace();
+  } else if (view === "ops") {
+    refreshOpsWorkspace();
+  } else if (view === "investigations") {
+    refreshInvestigationsWorkspace();
+  } else if (view === "search") {
+    refreshSearchWorkspace();
+  } else if (view === "graph") {
+    refreshGraphWorkspace();
+  } else if (view === "command-center") {
+    refreshCommandCenterWorkspace();
   } else {
     renderPlatformView(view);
   }
@@ -326,8 +446,16 @@ function variableOptions(selected = "", placeholder = "Choose variable") {
 
 function platformResourceRows() {
   const rows = [
+    { name: "Asset Reliability Command Center", type: "Application", path: "/workspace/command-center", role: "Owner", updated: "Current session", view: "command-center" },
+    { name: "Global Search", type: "Application", path: "/workspace/search", role: "Owner", updated: "Current session", view: "search" },
+    { name: "Platform Graph", type: "Application", path: "/workspace/graph", role: "Owner", updated: "Current session", view: "graph" },
     { name: "AIP Logic Workspace", type: "Application", path: "/workspace/aip", role: "Owner", updated: "Current session", view: "aip" },
     { name: "Map Workspace", type: "Application", path: "/workspace/map", role: "Owner", updated: "Current session", view: "map" },
+    { name: "Object Explorer Workspace", type: "Application", path: "/workspace/object-explorer", role: "Owner", updated: "Current session", view: "object-explorer" },
+    { name: "Decision Intelligence Workspace", type: "Application", path: "/workspace/decision", role: "Owner", updated: "Current session", view: "decision" },
+    { name: "ModelOps Workspace", type: "Application", path: "/workspace/models", role: "Owner", updated: "Current session", view: "models" },
+    { name: "Ops Control Plane", type: "Application", path: "/workspace/ops", role: "Owner", updated: "Current session", view: "ops" },
+    { name: "Investigation Graph Workspace", type: "Application", path: "/workspace/investigations", role: "Owner", updated: "Current session", view: "investigations" },
     { name: "Ontology Object Explorer", type: "Application", path: "/workspace/ontology", role: "Owner", updated: "Current session", view: "ontology" }
   ];
   for (const logic of state.catalogs.logicFunctions || []) {
@@ -378,6 +506,9 @@ function renderPlatformView(view = state.view) {
   if (view === "files") renderFilesPage();
   if (view === "ontology") renderOntologyPage();
   if (view === "applications") renderApplicationsPage();
+  if (view === "search") renderSearchWorkspace();
+  if (view === "graph") renderGraphWorkspace();
+  if (view === "command-center") renderCommandCenterWorkspace();
   renderGlobalSearchResults();
 }
 
@@ -445,6 +576,29 @@ function renderFilesPage() {
   `;
 }
 
+async function refreshOntologyWorkspace() {
+  await Promise.allSettled([refreshLogicCatalogs(), loadDataAssets(), loadOntologyGeneratorDrafts()]);
+  if (!state.ontologyGenerator.selectedAssetId && state.datasets.length) {
+    state.ontologyGenerator.selectedAssetId = state.datasets[0].id;
+  }
+  renderOntologyPage();
+}
+
+async function loadOntologyGeneratorDrafts() {
+  try {
+    state.ontologyGenerator.drafts = await api("/ontology-generator/drafts");
+    if (!state.ontologyGenerator.selectedDraftId && state.ontologyGenerator.drafts.length) {
+      state.ontologyGenerator.selectedDraftId = state.ontologyGenerator.drafts[0].id;
+    }
+  } catch (_) {
+    state.ontologyGenerator.drafts = [];
+  }
+}
+
+function activeOntologyDraft() {
+  return (state.ontologyGenerator.drafts || []).find((draft) => draft.id === state.ontologyGenerator.selectedDraftId) || state.ontologyGenerator.drafts?.[0] || null;
+}
+
 function renderOntologyPage() {
   const table = el("ontologyCatalogTable");
   if (!table) return;
@@ -472,6 +626,113 @@ function renderOntologyPage() {
       </tbody>
     </table>
   `;
+  renderOntologyGenerator();
+}
+
+function renderOntologyGenerator() {
+  if (!el("ontologyGeneratorAssetSelect")) return;
+  fillSelect(
+    el("ontologyGeneratorAssetSelect"),
+    state.datasets.map((asset) => ({ value: asset.id, label: asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id })),
+    state.ontologyGenerator.selectedAssetId || state.datasets[0]?.id || "",
+    "Choose dataset"
+  );
+  const drafts = state.ontologyGenerator.drafts || [];
+  fillSelect(
+    el("ontologyDraftSelect"),
+    drafts.map((draft) => ({ value: draft.id, label: `${draft.draft?.display_name || draft.object_type_id} - ${draft.status}` })),
+    state.ontologyGenerator.selectedDraftId,
+    "No generator draft"
+  );
+  el("ontologyGeneratorActionsToggle").checked = !!state.ontologyGenerator.includeActions;
+  el("ontologyGeneratorPipelineToggle").checked = state.ontologyGenerator.createPipelineGraph !== false;
+  const draftRow = activeOntologyDraft();
+  if (!draftRow) {
+    el("ontologyGeneratorValidation").innerHTML = '<div class="empty-state compact-empty">Create a draft from a dataset to review inferred ontology mappings.</div>';
+    el("ontologyGeneratorProperties").innerHTML = '<div class="empty-state compact-empty">No properties inferred yet</div>';
+    el("ontologyGeneratorPipeline").textContent = "";
+    el("ontologyGeneratorResult").textContent = state.ontologyGenerator.result ? compactJson(state.ontologyGenerator.result) : "";
+    return;
+  }
+  const draft = draftRow.draft || {};
+  if (!el("ontologyGeneratorDisplayNameInput").value) el("ontologyGeneratorDisplayNameInput").value = draft.display_name || "";
+  if (!el("ontologyGeneratorObjectTypeInput").value) el("ontologyGeneratorObjectTypeInput").value = draft.object_type_id || "";
+  const validation = draftRow.validation || {};
+  const statusClass = validation.status === "FAIL" ? "red" : validation.status === "WARN" ? "amber" : "green";
+  const issueRows = [...(validation.errors || []), ...(validation.warnings || [])];
+  el("ontologyGeneratorValidation").innerHTML = `
+    <div class="generator-status">
+      <span class="pill ${statusClass}">${escapeHtml(validation.status || draftRow.status || "DRAFT")}</span>
+      <strong>${escapeHtml(draft.display_name || draft.object_type_id || draftRow.id)}</strong>
+      <span>${escapeHtml(validation.summary?.properties ?? 0)} properties - ${escapeHtml(validation.summary?.records ?? 0)} records</span>
+    </div>
+    ${issueRows.map((issue) => `<div class="list-item"><strong>${escapeHtml(issue.code || "ISSUE")}</strong><span>${escapeHtml(issue.message || "")}</span></div>`).join("") || '<div class="list-item"><strong>No blocking issues</strong><span>Draft is ready to apply locally.</span></div>'}
+  `;
+  const properties = draft.properties || [];
+  el("ontologyGeneratorProperties").innerHTML = `
+    <table>
+      <thead><tr><th>Include</th><th>Source field</th><th>Property API name</th><th>Base type</th><th>Status</th><th>Required</th><th>Sample</th></tr></thead>
+      <tbody>
+        ${properties.map((prop, index) => `
+          <tr>
+            <td><input type="checkbox" ${prop.include === false ? "" : "checked"} disabled /></td>
+            <td><strong>${escapeHtml(prop.source_field || "")}</strong>${prop.generated ? '<br><span>generated</span>' : ""}</td>
+            <td>${escapeHtml(prop.api_name || prop.property_name || "")}</td>
+            <td>${escapeHtml(prop.base_type || "string")}</td>
+            <td>${escapeHtml(prop.status || "active")}</td>
+            <td>${prop.required ? "yes" : "no"}</td>
+            <td>${escapeHtml((prop.sample_values || []).slice(0, 2).join(", "))}</td>
+          </tr>
+        `).join("") || '<tr><td colspan="7">No properties inferred</td></tr>'}
+      </tbody>
+    </table>
+  `;
+  el("ontologyGeneratorPipeline").textContent = compactJson(draft.pipeline_graph || {});
+  el("ontologyGeneratorResult").textContent = state.ontologyGenerator.result ? compactJson(state.ontologyGenerator.result) : "";
+}
+
+async function createOntologyGeneratorDraft() {
+  const assetId = el("ontologyGeneratorAssetSelect").value;
+  if (!assetId) throw new Error("Choose a dataset");
+  const payload = {
+    asset_id: assetId,
+    display_name: el("ontologyGeneratorDisplayNameInput").value || null,
+    object_type_id: el("ontologyGeneratorObjectTypeInput").value || null,
+    include_actions: el("ontologyGeneratorActionsToggle").checked,
+    create_pipeline_graph: el("ontologyGeneratorPipelineToggle").checked
+  };
+  const draft = await api("/ontology-generator/drafts", { method: "POST", body: JSON.stringify(payload) });
+  state.ontologyGenerator.selectedDraftId = draft.id;
+  state.ontologyGenerator.selectedAssetId = draft.asset_id;
+  state.ontologyGenerator.result = { status: "DRAFT_CREATED", draft_id: draft.id };
+  await loadOntologyGeneratorDrafts();
+  renderOntologyPage();
+  showToast("Ontology generator draft created");
+}
+
+async function validateOntologyGeneratorDraft() {
+  const draftId = state.ontologyGenerator.selectedDraftId || el("ontologyDraftSelect").value;
+  if (!draftId) throw new Error("Create or select a draft");
+  state.ontologyGenerator.result = await api(`/ontology-generator/drafts/${encodeURIComponent(draftId)}/validate`, { method: "POST" });
+  await loadOntologyGeneratorDrafts();
+  renderOntologyPage();
+  showToast(state.ontologyGenerator.result.status || "Validated");
+}
+
+async function applyOntologyGeneratorDraft() {
+  const draftId = state.ontologyGenerator.selectedDraftId || el("ontologyDraftSelect").value;
+  if (!draftId) throw new Error("Create or select a draft");
+  state.ontologyGenerator.result = await api(`/ontology-generator/drafts/${encodeURIComponent(draftId)}/apply`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor: "workspace",
+      create_actions: el("ontologyGeneratorActionsToggle").checked,
+      create_pipeline_graph: el("ontologyGeneratorPipelineToggle").checked
+    })
+  });
+  await Promise.allSettled([refreshLogicCatalogs(), loadOntologyGeneratorDrafts(), refreshPipelineBuilder()]);
+  renderOntologyPage();
+  showToast("Ontology resources applied");
 }
 
 function renderApplicationsPage() {
@@ -557,6 +818,344 @@ function openGlobalSearch() {
 
 function closeGlobalSearch() {
   el("globalSearchOverlay").classList.add("hidden");
+}
+
+async function refreshSearchWorkspace() {
+  const input = el("platformSearchInput");
+  const kind = selectedValue("platformSearchKind");
+  state.platformSearch.query = input ? input.value : state.platformSearch.query;
+  state.platformSearch.kind = kind;
+  try {
+    const [results, commands] = await Promise.all([
+      api("/search/query", {
+        method: "POST",
+        body: JSON.stringify({
+          q: state.platformSearch.query || "",
+          kinds: kind ? [kind] : [],
+          limit: 50,
+          include_payload: true
+        })
+      }),
+      api("/search/commands")
+    ]);
+    state.platformSearch.results = results.results || [];
+    state.platformSearch.commands = commands.commands || [];
+    renderSearchWorkspace();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function renderSearchWorkspace() {
+  const input = el("platformSearchInput");
+  const kindSelect = el("platformSearchKind");
+  if (input && document.activeElement !== input) input.value = state.platformSearch.query || "";
+  if (kindSelect) kindSelect.value = state.platformSearch.kind || "";
+  const summary = el("platformSearchSummary");
+  if (summary) {
+    const kinds = new Set((state.platformSearch.results || []).map((row) => row.kind));
+    summary.innerHTML = `
+      <article><strong>${escapeHtml(String(state.platformSearch.results.length))}</strong><span>matching resources</span></article>
+      <article><strong>${escapeHtml(String(kinds.size))}</strong><span>resource kinds</span></article>
+      <article><strong>${escapeHtml(String(state.platformSearch.commands.length))}</strong><span>commands</span></article>
+    `;
+  }
+  const results = el("platformSearchResults");
+  if (results) {
+    const rows = state.platformSearch.results || [];
+    results.innerHTML = `
+      <table>
+        <thead><tr><th>Resource</th><th>Kind</th><th>Route</th><th>Score</th></tr></thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td><strong>${escapeHtml(row.title)}</strong><br><span>${escapeHtml(row.subtitle)}</span></td>
+              <td><span class="pill">${escapeHtml(row.kind)}</span></td>
+              <td>${escapeHtml(row.url)}</td>
+              <td>${escapeHtml(row.score)}</td>
+            </tr>
+          `).join("") || '<tr><td colspan="4">No matching resources. Bootstrap the sample domain or broaden the filter.</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }
+  const commands = el("platformSearchCommands");
+  if (commands) {
+    commands.innerHTML = (state.platformSearch.commands || []).map((command) => `
+      <button class="application-row" type="button" data-open-route="${escapeHtml(command.route)}">
+        <span class="app-tile-icon slate">${escapeHtml(command.id.slice(0, 2).toUpperCase())}</span>
+        <span><strong>${escapeHtml(command.title)}</strong><span>${escapeHtml(command.category)} - ${escapeHtml(command.route)}</span></span>
+      </button>
+    `).join("") || '<div class="empty-state compact-empty">No commands available</div>';
+  }
+}
+
+async function refreshGraphWorkspace() {
+  try {
+    state.platformGraph.overview = await api("/graph/overview?limit=200");
+    renderGraphWorkspace();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function renderGraphWorkspace() {
+  const overview = state.platformGraph.overview || { summary: {}, nodes: [], edges: [], node_count: 0, edge_count: 0 };
+  const summary = el("platformGraphSummary");
+  if (summary) {
+    const items = Object.entries(overview.summary || {});
+    summary.innerHTML = `
+      <article><strong>${escapeHtml(String(overview.node_count || 0))}</strong><span>nodes</span></article>
+      <article><strong>${escapeHtml(String(overview.edge_count || 0))}</strong><span>edges</span></article>
+      ${items.slice(0, 6).map(([kind, count]) => `<article><strong>${escapeHtml(String(count))}</strong><span>${escapeHtml(kind)}</span></article>`).join("")}
+    `;
+  }
+  const nodes = el("platformGraphNodes");
+  if (nodes) {
+    nodes.innerHTML = `
+      <table>
+        <thead><tr><th>Node</th><th>Kind</th><th>Resource</th></tr></thead>
+        <tbody>
+          ${(overview.nodes || []).slice(0, 80).map((node) => `
+            <tr>
+              <td><strong>${escapeHtml(node.label)}</strong><br><span>${escapeHtml(node.id)}</span></td>
+              <td><span class="pill">${escapeHtml(node.kind)}</span></td>
+              <td>${escapeHtml(node.resource_id)}</td>
+            </tr>
+          `).join("") || '<tr><td colspan="3">No graph nodes yet. Bootstrap data or create ontology resources.</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }
+  const edges = el("platformGraphEdges");
+  if (edges) {
+    edges.innerHTML = `
+      <table>
+        <thead><tr><th>Source</th><th>Relationship</th><th>Target</th></tr></thead>
+        <tbody>
+          ${(overview.edges || []).slice(0, 120).map((edge) => `
+            <tr>
+              <td>${escapeHtml(edge.source)}</td>
+              <td><strong>${escapeHtml(edge.label || edge.kind)}</strong></td>
+              <td>${escapeHtml(edge.target)}</td>
+            </tr>
+          `).join("") || '<tr><td colspan="3">No graph edges yet.</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }
+}
+
+async function refreshCommandCenterWorkspace() {
+  try {
+    const assetId = state.commandCenter.selectedAssetId || "asset_pump_4";
+    const [summary, validation] = await Promise.all([
+      api(`/scenarios/asset-reliability/summary?asset_id=${encodeURIComponent(assetId)}`),
+      api("/scenarios/asset-reliability/validation-dashboard")
+    ]);
+    state.commandCenter.summary = summary;
+    state.commandCenter.validation = validation;
+    renderCommandCenterWorkspace();
+  } catch (error) {
+    renderCommandCenterWorkspace();
+    showToast(error.message);
+  }
+}
+
+async function bootstrapCommandCenter() {
+  const button = el("bootstrapCommandCenterBtn");
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/scenarios/asset-reliability/bootstrap", {
+      method: "POST",
+      body: JSON.stringify({ actor: "workspace", run_pipelines: true, run_checks: true })
+    });
+    state.commandCenter.summary = result.summary;
+    state.commandCenter.validation = await api("/scenarios/asset-reliability/validation-dashboard");
+    state.commandCenter.triage = null;
+    state.commandCenter.actionResult = null;
+    renderCommandCenterWorkspace();
+    showToast("Asset reliability scenario bootstrapped");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function runCommandCenterTriage() {
+  const button = el("runCommandCenterTriageBtn");
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/scenarios/asset-reliability/run-triage", {
+      method: "POST",
+      body: JSON.stringify({
+        actor: "workspace",
+        asset_id: state.commandCenter.selectedAssetId || "asset_pump_4",
+        work_order_id: "wo_pump_urgent"
+      })
+    });
+    state.commandCenter.triage = result;
+    state.commandCenter.summary = result.summary;
+    state.commandCenter.validation = await api("/scenarios/asset-reliability/validation-dashboard");
+    renderCommandCenterWorkspace();
+    showToast("Triage complete; approval required");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function approveCommandCenterAction() {
+  const approval = state.commandCenter.triage?.approval || (state.commandCenter.summary?.approvals || []).find((item) => item.action_type_id === "escalate_work_order");
+  if (!approval) {
+    showToast("No staged escalation approval found");
+    return;
+  }
+  try {
+    const decision = await api(`/approvals/${approval.id}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ actor: "workspace", decision: "APPROVED", reason: "Approved from command center" })
+    });
+    const execution = await api("/actions/execute", {
+      method: "POST",
+      body: JSON.stringify({
+        action_type_id: approval.action_type_id,
+        parameters: approval.parameters,
+        idempotency_key: `command-center-${approval.id}`,
+        actor: "workspace",
+        approval_request_id: approval.id
+      })
+    });
+    state.commandCenter.actionResult = { decision, execution };
+    if (state.commandCenter.triage?.approval?.id === decision.id) {
+      state.commandCenter.triage.approval = decision;
+    }
+    await refreshCommandCenterWorkspace();
+    showToast("Escalation approved and executed");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function renderCommandCenterWorkspace() {
+  const summary = state.commandCenter.summary || {};
+  const kpis = summary.kpis || {};
+  const metricBox = el("commandCenterKpis");
+  if (metricBox) {
+    const metrics = [
+      ["High-risk assets", kpis.high_risk_assets ?? 0],
+      ["Open work orders", kpis.open_work_orders ?? 0],
+      ["Data contract", kpis.data_contract_status || "NOT_RUN"],
+      ["Model monitor", kpis.model_monitor_status || "NOT_RUN"],
+      ["Open approvals", kpis.open_approvals ?? 0],
+      ["Open incidents", kpis.open_incidents ?? 0]
+    ];
+    metricBox.innerHTML = metrics.map(([label, value]) => `<article><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></article>`).join("");
+  }
+
+  const riskList = el("commandCenterRiskList");
+  if (riskList) {
+    const rows = summary.high_risk_assets || summary.risk_findings || [];
+    riskList.innerHTML = `
+      <table>
+        <thead><tr><th>Asset</th><th>Status</th><th>Risk</th><th>Drivers</th></tr></thead>
+        <tbody>
+          ${rows.map((item) => {
+            const props = item.object?.properties || {};
+            const risk = item.risk || {};
+            return `
+              <tr data-command-asset="${escapeHtml(item.object_id)}">
+                <td><strong>${escapeHtml(props.name || item.object_id)}</strong><br><span>${escapeHtml(item.object_id)}</span></td>
+                <td>${escapeHtml(props.status || "-")}</td>
+                <td><span class="pill ${risk.band === "critical" || risk.band === "high" ? "red" : "green"}">${escapeHtml(risk.band || "-")} ${escapeHtml(risk.score ?? "")}</span></td>
+                <td>${escapeHtml((risk.drivers || []).map((driver) => driver.feature).join(", ") || "-")}</td>
+              </tr>
+            `;
+          }).join("") || '<tr><td colspan="4">No risk findings yet. Bootstrap the scenario.</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }
+
+  const selected = el("commandCenterSelectedAsset");
+  if (selected) {
+    const asset = summary.selected_asset || {};
+    const props = asset.properties || {};
+    selected.innerHTML = asset.id ? [
+      ["Asset", props.name || asset.id],
+      ["Status", props.status],
+      ["Criticality", props.criticality],
+      ["Vibration", props.vibration_mm_s],
+      ["Temperature", props.temperature_c],
+      ["Failure probability", props.predicted_failure_probability],
+      ["MGRS", props.mgrs]
+    ].map(([key, value]) => `<div class="kv"><span>${escapeHtml(key)}</span><strong>${escapeHtml(value ?? "-")}</strong></div>`).join("") : '<div class="empty-state compact-empty">No selected asset. Bootstrap the scenario.</div>';
+  }
+
+  const checks = el("commandCenterChecks");
+  if (checks) {
+    const dataContract = summary.data_contract || {};
+    const monitor = summary.model_monitor || {};
+    checks.innerHTML = `
+      <div class="kv"><span>Data contract</span><strong>${escapeHtml(dataContract.status || "NOT_RUN")}</strong></div>
+      <div class="kv"><span>Failed checks</span><strong>${escapeHtml(dataContract.summary?.failed ?? "-")}</strong></div>
+      <div class="kv"><span>Model monitor</span><strong>${escapeHtml(monitor.status || "NOT_RUN")}</strong></div>
+      <div class="kv"><span>Monitor alerts</span><strong>${escapeHtml((monitor.alerts || []).length)}</strong></div>
+    `;
+  }
+
+  const recommendation = el("commandCenterRecommendation");
+  if (recommendation) {
+    const triage = state.commandCenter.triage || {};
+    const session = triage.agent_session || {};
+    const approval = triage.approval || (summary.approvals || [])[0];
+    const actionResult = state.commandCenter.actionResult;
+    recommendation.innerHTML = session.id ? `
+      <div class="kv"><span>Recommendation</span><strong>${escapeHtml(session.plan?.recommendation || "-")}</strong></div>
+      <div class="kv"><span>Tool trace</span><strong>${escapeHtml((session.plan?.tool_trace || []).join(" -> "))}</strong></div>
+      <div class="kv"><span>Approval</span><strong>${escapeHtml(approval?.status || "-")} ${escapeHtml(approval?.id || "")}</strong></div>
+      <div class="kv"><span>Action</span><strong>${escapeHtml(approval?.action_type_id || "-")}</strong></div>
+      <div class="kv"><span>Execution</span><strong>${escapeHtml(actionResult?.execution?.status || "not executed")}</strong></div>
+    ` : '<div class="empty-state compact-empty">Run triage to create an agent recommendation and staged approval.</div>';
+  }
+
+  const report = el("commandCenterReport");
+  if (report) {
+    const latest = state.commandCenter.triage?.report || summary.latest_report;
+    report.textContent = latest?.body || "No report yet. Bootstrap or run triage.";
+  }
+
+  const timeline = el("commandCenterTimeline");
+  if (timeline) {
+    const rows = summary.timeline || [];
+    timeline.innerHTML = `
+      <table>
+        <thead><tr><th>When</th><th>Kind</th><th>Event</th></tr></thead>
+        <tbody>
+          ${rows.slice(0, 12).map((row) => `
+            <tr>
+              <td>${escapeHtml(row.created_at ? new Date(row.created_at * 1000).toLocaleString() : "-")}</td>
+              <td>${escapeHtml(row.kind)}</td>
+              <td><strong>${escapeHtml(row.title)}</strong><br><span>${escapeHtml(row.id)}</span></td>
+            </tr>
+          `).join("") || '<tr><td colspan="3">No timeline entries yet.</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }
+
+  const validation = el("commandCenterValidation");
+  if (validation) {
+    const dash = state.commandCenter.validation || {};
+    validation.innerHTML = `
+      <div class="kv"><span>Matrix rows</span><strong>${escapeHtml(dash.row_count ?? "-")}</strong></div>
+      <div class="kv"><span>MATCH</span><strong>${escapeHtml(dash.status_counts?.MATCH ?? 0)}</strong></div>
+      <div class="kv"><span>LOCAL_ANALOG</span><strong>${escapeHtml(dash.status_counts?.LOCAL_ANALOG ?? 0)}</strong></div>
+      <div class="kv"><span>P0/P1 gaps</span><strong>${escapeHtml((dash.priority_gaps || []).length)}</strong></div>
+    `;
+  }
 }
 
 function openApplication(appId) {
@@ -841,11 +1440,11 @@ function defaultPipelineDraft() {
     display_name: "Operations Pipeline",
     description: "Local Pipeline Builder DAG for dataset transforms and delivery.",
     nodes: [
-      { id: "input", type: "input_dataset", label: "Input dataset", config: { asset_id: assetId } },
-      { id: "filter", type: "filter", label: "Filter", config: { filters: { status: { not_equals: "closed" } } } },
-      { id: "project", type: "project", label: "Project", config: { columns: ["id", "name", "status", "criticality"] } },
-      { id: "unique_id", type: "unique_id", label: "Unique ID", config: { target_field: "id", source_fields: ["id", "name"] } },
-      { id: "output", type: "dataset_output", label: "Dataset output", config: { asset_id: "operations_pipeline_output" } }
+      { id: "input", type: "input_dataset", label: "Input dataset", position: { x: 80, y: 150 }, config: { asset_id: assetId } },
+      { id: "filter", type: "filter", label: "Filter", position: { x: 340, y: 150 }, config: { filters: { status: { not_equals: "closed" } } } },
+      { id: "project", type: "project", label: "Project", position: { x: 600, y: 150 }, config: { columns: ["id", "name", "status", "criticality"] } },
+      { id: "unique_id", type: "unique_id", label: "Unique ID", position: { x: 860, y: 150 }, config: { target_field: "id", source_fields: ["id", "name"] } },
+      { id: "output", type: "dataset_output", label: "Dataset output", position: { x: 1120, y: 150 }, config: { asset_id: "operations_pipeline_output" } }
     ],
     edges: [
       { source: "input", target: "filter" },
@@ -866,8 +1465,17 @@ async function loadDataAssets() {
   }
 }
 
+async function loadPipelineNodeTypes() {
+  try {
+    const catalog = await api("/pipeline-builder/node-types");
+    state.pipeline.nodeTypes = catalog.node_types || [];
+  } catch (_) {
+    state.pipeline.nodeTypes = PIPELINE_NODE_TYPES;
+  }
+}
+
 async function refreshPipelineBuilder() {
-  await loadDataAssets();
+  await Promise.allSettled([loadDataAssets(), loadPipelineNodeTypes()]);
   try {
     state.pipeline.graphs = await api("/pipeline-builder/graphs");
     if (!state.pipeline.selectedId && state.pipeline.graphs.length) state.pipeline.selectedId = state.pipeline.graphs[0].id;
@@ -912,10 +1520,11 @@ function renderPipelineBuilder() {
 }
 
 function renderPipelineNodeLibrary() {
-  el("pipelineNodeLibrary").innerHTML = PIPELINE_NODE_TYPES.map((node) => `
-    <button class="node-library-item" type="button" data-add-pipeline-node="${escapeHtml(node.type)}">
+  const nodes = state.pipeline.nodeTypes?.length ? state.pipeline.nodeTypes : PIPELINE_NODE_TYPES;
+  el("pipelineNodeLibrary").innerHTML = nodes.map((node) => `
+    <button class="node-library-item" type="button" draggable="true" data-add-pipeline-node="${escapeHtml(node.type)}">
       <strong>${escapeHtml(node.label)}</strong>
-      <span>${escapeHtml(node.type)}</span>
+      <span>${escapeHtml(node.category || node.type)} - ${escapeHtml(node.type)}</span>
     </button>
   `).join("");
 }
@@ -923,7 +1532,196 @@ function renderPipelineNodeLibrary() {
 function renderPipelineCanvas() {
   const draft = state.pipeline.draft || defaultPipelineDraft();
   const nodeOutputs = state.pipeline.preview?.node_outputs || {};
-  el("pipelineCanvas").innerHTML = draft.nodes.map((node, index) => {
+  if (!window.d3) {
+    el("pipelineCanvas").innerHTML = draft.nodes.map((node, index) => {
+      const output = nodeOutputs[node.id] || {};
+      const selected = state.pipeline.activeNodeId === node.id ? " selected" : "";
+      const inbound = draft.edges.filter((edge) => edge.target === node.id).map((edge) => edge.source).join(", ");
+      return `
+        <article class="pipeline-node${selected}" data-pipeline-node-id="${escapeHtml(node.id)}" style="--node-index:${index}">
+          <div class="widget-head"><strong>${escapeHtml(node.label || node.type)}</strong><span>${escapeHtml(node.type)}</span></div>
+          <span class="node-meta">in: ${escapeHtml(inbound || "start")} - rows: ${escapeHtml(output.row_count ?? "-")}</span>
+        </article>
+      `;
+    }).join("") || '<div class="empty-state">Add nodes to build a pipeline graph</div>';
+    return;
+  }
+  const canvas = el("pipelineCanvas");
+  canvas.innerHTML = "";
+  const width = Math.max(980, canvas.clientWidth || 980);
+  const height = Math.max(520, canvas.clientHeight || 520);
+  const validation = state.pipeline.validation || {};
+  const nodeIssueCounts = {};
+  [...(validation.errors || []), ...(validation.warnings || [])].forEach((issue) => {
+    if (issue.node_id) nodeIssueCounts[issue.node_id] = (nodeIssueCounts[issue.node_id] || 0) + 1;
+  });
+  normalizePipelineNodePositions(draft);
+  const nodeById = Object.fromEntries((draft.nodes || []).map((node) => [node.id, node]));
+  const svg = d3.select(canvas).append("svg")
+    .attr("class", "pipeline-svg")
+    .attr("viewBox", `0 0 ${width} ${height}`)
+    .attr("role", "img")
+    .attr("aria-label", "Pipeline graph canvas");
+  const viewport = svg.append("g").attr("class", "pipeline-viewport");
+  const linksLayer = viewport.append("g").attr("class", "pipeline-links");
+  const nodesLayer = viewport.append("g").attr("class", "pipeline-nodes");
+  svg.call(d3.zoom().scaleExtent([0.45, 1.8]).on("zoom", (event) => {
+    viewport.attr("transform", event.transform);
+  })).on("dblclick.zoom", null);
+
+  const edgePath = (edge) => {
+    const source = nodeById[edge.source];
+    const target = nodeById[edge.target];
+    if (!source || !target) return "";
+    const sx = (source.position?.x || 0) + 210;
+    const sy = (source.position?.y || 0) + 45;
+    const tx = target.position?.x || 0;
+    const ty = (target.position?.y || 0) + 45;
+    const mid = Math.max(40, (tx - sx) / 2);
+    return `M ${sx} ${sy} C ${sx + mid} ${sy}, ${tx - mid} ${ty}, ${tx} ${ty}`;
+  };
+
+  linksLayer.selectAll("path")
+    .data(draft.edges || [], (edge) => `${edge.source}->${edge.target}`)
+    .join("path")
+    .attr("class", (edge) => `pipeline-link${state.pipeline.activeEdgeId === `${edge.source}->${edge.target}` ? " selected" : ""}`)
+    .attr("d", edgePath)
+    .on("click", (event, edge) => {
+      event.stopPropagation();
+      state.pipeline.activeEdgeId = `${edge.source}->${edge.target}`;
+      state.pipeline.activeNodeId = "";
+      renderPipelineBuilder();
+    });
+
+  const nodeGroups = nodesLayer.selectAll("g.pipeline-svg-node")
+    .data(draft.nodes || [], (node) => node.id)
+    .join("g")
+    .attr("class", (node) => {
+      const selected = state.pipeline.activeNodeId === node.id ? " selected" : "";
+      const hasIssues = nodeIssueCounts[node.id] ? " issue" : "";
+      return `pipeline-svg-node${selected}${hasIssues}`;
+    })
+    .attr("transform", (node) => `translate(${node.position?.x || 0},${node.position?.y || 0})`)
+    .call(d3.drag()
+      .on("start", (event, node) => {
+        event.sourceEvent.stopPropagation();
+        state.pipeline.activeNodeId = node.id;
+        state.pipeline.activeEdgeId = "";
+      })
+      .on("drag", (event, node) => {
+        node.position = { x: Math.max(10, event.x), y: Math.max(10, event.y) };
+        d3.select(event.sourceEvent.target.closest("g.pipeline-svg-node")).attr("transform", `translate(${node.position.x},${node.position.y})`);
+        linksLayer.selectAll("path").attr("d", edgePath);
+      })
+      .on("end", () => renderPipelineConfig()));
+
+  nodeGroups.append("rect").attr("width", 220).attr("height", 92).attr("rx", 8);
+  nodeGroups.append("text").attr("class", "pipeline-svg-title").attr("x", 16).attr("y", 26).text((node) => node.label || node.type);
+  nodeGroups.append("text").attr("class", "pipeline-svg-type").attr("x", 16).attr("y", 46).text((node) => node.type);
+  nodeGroups.append("text").attr("class", "pipeline-svg-meta").attr("x", 16).attr("y", 70).text((node) => {
+    const output = nodeOutputs[node.id] || {};
+    const issue = nodeIssueCounts[node.id] ? `${nodeIssueCounts[node.id]} issue` : "ok";
+    return `rows ${output.row_count ?? "-"} - ${issue}`;
+  });
+  nodeGroups.append("circle")
+    .attr("class", "pipeline-port input")
+    .attr("cx", 0)
+    .attr("cy", 46)
+    .attr("r", 8)
+    .on("click", (event, node) => finishPipelineConnection(event, node.id));
+  nodeGroups.append("circle")
+    .attr("class", "pipeline-port output")
+    .attr("cx", 220)
+    .attr("cy", 46)
+    .attr("r", 8)
+    .on("click", (event, node) => startPipelineConnection(event, node.id));
+  nodeGroups.on("click", (event, node) => {
+    event.stopPropagation();
+    state.pipeline.activeNodeId = node.id;
+    state.pipeline.activeEdgeId = "";
+    renderPipelineBuilder();
+  });
+  svg.on("click", () => {
+    state.pipeline.activeEdgeId = "";
+    state.pipeline.activeNodeId = "";
+    renderPipelineBuilder();
+  });
+  if (!(draft.nodes || []).length) {
+    canvas.innerHTML = '<div class="empty-state">Drag a node from the library to start building a pipeline graph</div>';
+  }
+}
+
+function normalizePipelineNodePositions(draft) {
+  (draft.nodes || []).forEach((node, index) => {
+    if (!node.position) {
+      node.position = { x: 80 + (index % 4) * 260, y: 90 + Math.floor(index / 4) * 150 };
+    }
+  });
+}
+
+function startPipelineConnection(event, nodeId) {
+  event.stopPropagation();
+  state.pipeline.connectingFrom = nodeId;
+  showToast(`Connect ${nodeId} to an input port`);
+}
+
+function finishPipelineConnection(event, targetId) {
+  event.stopPropagation();
+  const sourceId = state.pipeline.connectingFrom;
+  if (!sourceId || sourceId === targetId) {
+    state.pipeline.connectingFrom = "";
+    return;
+  }
+  const draft = state.pipeline.draft || defaultPipelineDraft();
+  const exists = (draft.edges || []).some((edge) => edge.source === sourceId && edge.target === targetId);
+  if (!exists) {
+    draft.edges = [...(draft.edges || []), { source: sourceId, target: targetId }];
+  }
+  state.pipeline.connectingFrom = "";
+  state.pipeline.activeEdgeId = `${sourceId}->${targetId}`;
+  renderPipelineBuilder();
+}
+
+function autoLayoutPipelineGraph() {
+  const draft = state.pipeline.draft || defaultPipelineDraft();
+  normalizePipelineNodePositions(draft);
+  const incoming = {};
+  (draft.nodes || []).forEach((node) => { incoming[node.id] = 0; });
+  (draft.edges || []).forEach((edge) => { if (incoming[edge.target] !== undefined) incoming[edge.target] += 1; });
+  const levels = {};
+  const queue = (draft.nodes || []).filter((node) => incoming[node.id] === 0).map((node) => node.id);
+  queue.forEach((id) => { levels[id] = 0; });
+  while (queue.length) {
+    const source = queue.shift();
+    (draft.edges || []).filter((edge) => edge.source === source).forEach((edge) => {
+      levels[edge.target] = Math.max(levels[edge.target] || 0, (levels[source] || 0) + 1);
+      queue.push(edge.target);
+    });
+  }
+  const counts = {};
+  (draft.nodes || []).forEach((node, index) => {
+    const level = levels[node.id] ?? index;
+    const slot = counts[level] || 0;
+    counts[level] = slot + 1;
+    node.position = { x: 80 + level * 280, y: 80 + slot * 150 };
+  });
+  renderPipelineBuilder();
+}
+
+function openOntologyGeneratorFromPipeline() {
+  const draft = state.pipeline.draft || defaultPipelineDraft();
+  const active = draft.nodes.find((node) => node.id === state.pipeline.activeNodeId);
+  const input = draft.nodes.find((node) => node.type === "input_dataset");
+  state.ontologyGenerator.selectedAssetId = active?.config?.source_asset_id || input?.config?.asset_id || state.datasets[0]?.id || "";
+  const objectTypeId = active?.config?.object_type_id || "";
+  el("ontologyGeneratorObjectTypeInput").value = objectTypeId;
+  setView("ontology");
+}
+
+function renderPipelineCanvasListFallback() {
+  const draft = state.pipeline.draft || defaultPipelineDraft();
+  const nodeOutputs = state.pipeline.preview?.node_outputs || {};
+  return draft.nodes.map((node, index) => {
     const output = nodeOutputs[node.id] || {};
     const selected = state.pipeline.activeNodeId === node.id ? " selected" : "";
     const inbound = draft.edges.filter((edge) => edge.target === node.id).map((edge) => edge.source).join(", ");
@@ -944,6 +1742,14 @@ function renderPipelineConfig() {
     panel.classList.toggle("active", panel.dataset.pipelinePanelBody === state.pipeline.activePanel);
   });
   const draft = state.pipeline.draft || defaultPipelineDraft();
+  if (state.pipeline.activeEdgeId && !state.pipeline.activeNodeId) {
+    const [source, target] = state.pipeline.activeEdgeId.split("->");
+    el("pipelineConfig").innerHTML = `
+      <div class="list-item"><strong>Connection</strong><span>${escapeHtml(source)} -> ${escapeHtml(target)}</span></div>
+      <button class="btn full-width" data-remove-pipeline-edge="${escapeHtml(state.pipeline.activeEdgeId)}" type="button">Remove Connection</button>
+    `;
+    return;
+  }
   const node = draft.nodes.find((item) => item.id === state.pipeline.activeNodeId) || draft.nodes[0];
   if (node && !state.pipeline.activeNodeId) state.pipeline.activeNodeId = node.id;
   if (!node) {
@@ -951,15 +1757,90 @@ function renderPipelineConfig() {
     return;
   }
   const config = node.config || {};
-  const datasetControl = node.type === "input_dataset" || node.type === "dataset_output" || node.type === "output_dataset"
-    ? `<label class="field"><span>Dataset</span><select data-pipeline-node-field="asset_id">${datasetOptions(config.asset_id || config.dataset_id || "")}</select></label>`
-    : "";
+  const nodeTypes = state.pipeline.nodeTypes?.length ? state.pipeline.nodeTypes : PIPELINE_NODE_TYPES;
   el("pipelineConfig").innerHTML = `
     <label class="field"><span>Label</span><input data-pipeline-node-field="label" value="${escapeHtml(node.label || "")}" /></label>
-    <label class="field"><span>Type</span><select data-pipeline-node-field="type">${optionList(PIPELINE_NODE_TYPES.map((item) => ({ value: item.type, label: item.label })), node.type)}</select></label>
-    ${datasetControl}
+    <label class="field"><span>Type</span><select data-pipeline-node-field="type">${optionList(nodeTypes.map((item) => ({ value: item.type, label: item.label })), node.type)}</select></label>
+    ${renderPipelineTypedConfig(node, config)}
     <label class="field"><span>Config JSON</span><textarea data-pipeline-node-field="config" rows="8">${escapeHtml(compactJson(config))}</textarea></label>
+    <div id="pipelineNodePreview" class="node-preview-panel">${renderPipelineNodePreview(node.id)}</div>
     <button class="btn full-width" data-remove-pipeline-node="${escapeHtml(node.id)}" type="button">Remove Node</button>
+  `;
+}
+
+function renderPipelineTypedConfig(node, config) {
+  const type = node.type;
+  if (type === "input_dataset") {
+    return `<label class="field"><span>Dataset</span><select data-pipeline-config-field="asset_id">${datasetOptions(config.asset_id || config.dataset_id || "")}</select></label>`;
+  }
+  if (type === "dataset_output" || type === "output_dataset") {
+    return `<label class="field"><span>Output dataset</span><input data-pipeline-config-field="asset_id" value="${escapeHtml(config.asset_id || config.dataset_id || "")}" /></label>`;
+  }
+  if (type === "filter") {
+    return `<label class="field"><span>Filters JSON</span><textarea data-pipeline-config-field="filters" data-config-type="json" rows="4">${escapeHtml(compactJson(config.filters || {}))}</textarea></label>`;
+  }
+  if (type === "project" || type === "select") {
+    return `<label class="field"><span>Columns</span><input data-pipeline-config-field="columns" data-config-type="csv" value="${escapeHtml((config.columns || []).join(", "))}" /></label>`;
+  }
+  if (type === "rename") {
+    return `<label class="field"><span>Mapping JSON</span><textarea data-pipeline-config-field="mapping" data-config-type="json" rows="4">${escapeHtml(compactJson(config.mapping || config.rename || {}))}</textarea></label>`;
+  }
+  if (type === "join") {
+    return `
+      <label class="field"><span>Right dataset</span><select data-pipeline-config-field="right_asset_id">${datasetOptions(config.right_asset_id || "")}</select></label>
+      <label class="field"><span>Left key</span><input data-pipeline-config-field="left_key" value="${escapeHtml(config.left_key || "")}" /></label>
+      <label class="field"><span>Right key</span><input data-pipeline-config-field="right_key" value="${escapeHtml(config.right_key || "")}" /></label>
+      <label class="field"><span>Join type</span><select data-pipeline-config-field="join_type">${optionList(["inner", "left"], config.join_type || "inner")}</select></label>
+    `;
+  }
+  if (type === "union") {
+    return `<label class="field"><span>Union dataset</span><select data-pipeline-config-field="asset_id">${datasetOptions(config.asset_id || "")}</select></label>`;
+  }
+  if (type === "aggregate") {
+    return `
+      <label class="field"><span>Group by</span><input data-pipeline-config-field="group_by" data-config-type="csv" value="${escapeHtml((config.group_by || []).join(", "))}" /></label>
+      <label class="field"><span>Metrics JSON</span><textarea data-pipeline-config-field="metrics" data-config-type="json" rows="5">${escapeHtml(compactJson(config.metrics || []))}</textarea></label>
+    `;
+  }
+  if (type === "sort") {
+    return `
+      <label class="field"><span>Field</span><input data-pipeline-config-field="field" value="${escapeHtml(config.field || "")}" /></label>
+      <label class="field"><span>Direction</span><select data-pipeline-config-field="direction">${optionList(["asc", "desc"], config.direction || "asc")}</select></label>
+    `;
+  }
+  if (type === "limit") {
+    return `<label class="field"><span>Limit</span><input data-pipeline-config-field="limit" data-config-type="number" type="number" min="1" value="${escapeHtml(config.limit || config.count || 100)}" /></label>`;
+  }
+  if (type === "unique_id") {
+    return `
+      <label class="field"><span>Target field</span><input data-pipeline-config-field="target_field" value="${escapeHtml(config.target_field || "id")}" /></label>
+      <label class="field"><span>Source fields</span><input data-pipeline-config-field="source_fields" data-config-type="csv" value="${escapeHtml((config.source_fields || config.fields || []).join(", "))}" /></label>
+    `;
+  }
+  if (type === "llm_assist" || type === "llm") {
+    return `
+      <label class="field"><span>Prompt</span><input data-pipeline-config-field="prompt" value="${escapeHtml(config.prompt || "summarize")}" /></label>
+      <label class="field"><span>Source fields</span><input data-pipeline-config-field="source_fields" data-config-type="csv" value="${escapeHtml((config.source_fields || []).join(", "))}" /></label>
+      <label class="field"><span>Output field</span><input data-pipeline-config-field="output_field" value="${escapeHtml(config.output_field || "llm_summary")}" /></label>
+    `;
+  }
+  if (type === "ontology_output") {
+    return `
+      <label class="field"><span>Object type</span><select data-pipeline-config-field="object_type_id">${objectTypeOptions(config.object_type_id || "")}</select></label>
+      <label class="field"><span>ID field</span><input data-pipeline-config-field="id_field" value="${escapeHtml(config.id_field || "id")}" /></label>
+      <label class="field"><span>Mapping JSON</span><textarea data-pipeline-config-field="mapping" data-config-type="json" rows="5">${escapeHtml(compactJson(config.mapping || {}))}</textarea></label>
+      <button class="btn full-width" data-open-ontology-generator-from-pipeline type="button">Open Ontology Generator</button>
+    `;
+  }
+  return "";
+}
+
+function renderPipelineNodePreview(nodeId) {
+  const output = state.pipeline.preview?.node_outputs?.[nodeId];
+  if (!output) return '<div class="empty-state compact-empty">Preview this graph to inspect this node output.</div>';
+  return `
+    <div class="list-item"><strong>${escapeHtml(output.row_count)} rows</strong><span>${escapeHtml((output.schema?.fields || []).map((field) => field.name).join(", "))}</span></div>
+    <pre class="mini-output">${escapeHtml(compactJson(output.sample || []))}</pre>
   `;
 }
 
@@ -1036,16 +1917,1238 @@ async function deliverPipelineGraph() {
   showToast(`Delivered ${state.pipeline.delivery.records_out} rows`);
 }
 
-function addPipelineNode(type) {
+function setModelOpsTab(tabName) {
+  state.modelops.activeTab = tabName;
+  document.querySelectorAll("[data-modelops-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.modelopsTab === tabName);
+  });
+  document.querySelectorAll("[data-modelops-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.modelopsPanel === tabName);
+  });
+  const labels = {
+    objectives: "Objectives",
+    training: "Training & Submissions",
+    gates: "Evaluation Gates",
+    releases: "Releases & Deployments",
+    monitoring: "Monitoring",
+    inference: "Inference Playground"
+  };
+  if (el("modelOpsTitle")) el("modelOpsTitle").textContent = labels[tabName] || "ModelOps";
+}
+
+async function refreshModelOpsWorkspace() {
+  await Promise.allSettled([loadDataAssets(), loadModelOpsSummary(), loadModelObjectives(), loadModelDeployments(), loadModelMonitors()]);
+  const objectiveId = state.modelops.selectedObjectiveId || state.modelops.objectives[0]?.id || "";
+  state.modelops.selectedObjectiveId = objectiveId;
+  if (objectiveId) {
+    await Promise.allSettled([loadModelSubmissions(objectiveId), loadModelChecks(objectiveId), loadModelReleases(objectiveId)]);
+  }
+  const submissionId = state.modelops.selectedSubmissionId || state.modelops.submissions[0]?.id || "";
+  state.modelops.selectedSubmissionId = submissionId;
+  if (submissionId) await Promise.allSettled([loadModelEligibility(submissionId), loadModelCheckResults(submissionId)]);
+  const deploymentId = state.modelops.selectedDeploymentId || state.modelops.deployments[0]?.id || "";
+  state.modelops.selectedDeploymentId = deploymentId;
+  if (deploymentId) await loadPredictionLogs(deploymentId).catch(() => {});
+  renderModelOpsWorkspace();
+}
+
+async function loadModelOpsSummary() {
+  state.modelops.summary = await api("/modelops/summary");
+}
+
+async function loadModelObjectives() {
+  state.modelops.objectives = await api("/modeling/objectives");
+}
+
+async function loadModelSubmissions(objectiveId) {
+  state.modelops.submissions = objectiveId ? await api(`/modeling/objectives/${encodeURIComponent(objectiveId)}/submissions`) : [];
+}
+
+async function loadModelChecks(objectiveId) {
+  state.modelops.checks = objectiveId ? await api(`/modeling/objectives/${encodeURIComponent(objectiveId)}/checks`) : [];
+}
+
+async function loadModelCheckResults(submissionId) {
+  state.modelops.checkResults = submissionId ? await api(`/modeling/submissions/${encodeURIComponent(submissionId)}/check-results`) : [];
+}
+
+async function loadModelEligibility(submissionId) {
+  state.modelops.eligibility = submissionId ? await api(`/modeling/submissions/${encodeURIComponent(submissionId)}/release-eligibility`) : null;
+}
+
+async function loadModelReleases(objectiveId) {
+  state.modelops.releases = objectiveId ? await api(`/modeling/objectives/${encodeURIComponent(objectiveId)}/releases`) : [];
+}
+
+async function loadModelDeployments() {
+  state.modelops.deployments = await api("/modeling/deployments");
+}
+
+async function loadModelMonitors() {
+  state.modelops.monitors = await api("/modelops/monitors");
+  state.modelops.selectedMonitorId = state.modelops.selectedMonitorId || state.modelops.monitors[0]?.id || "";
+  if (state.modelops.selectedMonitorId) {
+    state.modelops.monitorRuns = await api(`/modelops/monitors/${encodeURIComponent(state.modelops.selectedMonitorId)}/runs`);
+  }
+}
+
+async function loadPredictionLogs(deploymentId) {
+  state.modelops.predictionLogs = deploymentId ? await api(`/modelops/deployments/${encodeURIComponent(deploymentId)}/prediction-logs`) : [];
+}
+
+function renderModelOpsWorkspace() {
+  setModelOpsTab(state.modelops.activeTab || "objectives");
+  renderModelOpsSelectors();
+  renderModelOpsSummary();
+  renderModelObjectiveList();
+  renderModelSubmissionList();
+  renderModelGatePanel();
+  renderModelReleasePanel();
+  renderModelMonitorPanel();
+  renderModelInferencePanel();
+  renderModelOpsRunList();
+  el("modelOpsOutput").textContent = compactJson({
+    objective: state.modelops.selectedObjectiveId,
+    submission: state.modelops.selectedSubmissionId,
+    deployment: state.modelops.selectedDeploymentId,
+    monitor: state.modelops.selectedMonitorId
+  });
+}
+
+function renderModelOpsSelectors() {
+  fillSelect(el("modelObjectiveSelect"), state.modelops.objectives.map((objective) => ({
+    value: objective.id,
+    label: objective.display_name ? `${objective.display_name} (${objective.id})` : objective.id
+  })), state.modelops.selectedObjectiveId, "Choose objective");
+  fillSelect(el("modelSubmissionSelect"), state.modelops.submissions.map((submission) => ({
+    value: submission.id,
+    label: `${submission.algorithm || submission.id} (${submission.id.slice(0, 8)})`
+  })), state.modelops.selectedSubmissionId, "Choose submission");
+  fillSelect(el("modelDeploymentSelect"), state.modelops.deployments.map((deployment) => ({
+    value: deployment.id,
+    label: `${deployment.id} - ${deployment.mode}`
+  })), state.modelops.selectedDeploymentId, "Choose deployment");
+  ["modelInputAssetSelect", "modelTrainingAssetSelect", "modelBaselineAssetSelect", "modelCurrentAssetSelect"].forEach((id) => {
+    fillSelect(el(id), state.datasets.map((asset) => ({
+      value: asset.id,
+      label: asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id
+    })), el(id)?.value || state.datasets[0]?.id || "", "Choose dataset");
+  });
+}
+
+function renderModelOpsSummary() {
+  const summary = state.modelops.summary || {};
+  el("modelOpsSummary").innerHTML = [
+    ["Objectives", summary.objectives || 0],
+    ["Submissions", summary.submissions || 0],
+    ["Deployments", summary.deployments || 0],
+    ["Monitors", summary.monitors || 0],
+    ["Prediction logs", summary.prediction_logs || 0]
+  ].map(([label, value]) => `<div class="list-item"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join("");
+}
+
+function renderModelObjectiveList() {
+  el("modelObjectiveList").innerHTML = state.modelops.objectives.map((objective) => `
+    <article class="modelops-card ${objective.id === state.modelops.selectedObjectiveId ? "selected" : ""}" data-model-objective="${escapeHtml(objective.id)}">
+      <div class="decision-card-head"><strong>${escapeHtml(objective.display_name || objective.id)}</strong><span class="risk-badge low">${escapeHtml(objective.problem_type)}</span></div>
+      <span>${escapeHtml(objective.target_field)} from ${escapeHtml((objective.feature_fields || []).join(", "))}</span>
+      <small>${escapeHtml(objective.input_asset_id || "no input dataset")}</small>
+    </article>
+  `).join("") || '<div class="empty-state">No modeling objectives</div>';
+}
+
+function renderModelSubmissionList() {
+  el("modelSubmissionList").innerHTML = state.modelops.submissions.map((submission) => `
+    <article class="modelops-card ${submission.id === state.modelops.selectedSubmissionId ? "selected" : ""}" data-model-submission="${escapeHtml(submission.id)}">
+      <div class="decision-card-head"><strong>${escapeHtml(submission.algorithm || submission.id)}</strong><span class="risk-badge ${submission.released ? "low" : "medium"}">${submission.released ? "released" : "draft"}</span></div>
+      <span>${escapeHtml(submission.trainer_type || "legacy")} - ${escapeHtml(submission.status)}</span>
+      <pre class="mini-output">${escapeHtml(compactJson(submission.metrics || {}))}</pre>
+    </article>
+  `).join("") || '<div class="empty-state">No submissions for this objective</div>';
+}
+
+function renderModelGatePanel() {
+  const checks = state.modelops.checks || [];
+  const results = state.modelops.checkResults || [];
+  const resultByCheck = Object.fromEntries(results.map((result) => [result.check_id, result]));
+  el("modelGatePanel").innerHTML = `
+    <div class="section-title">
+      <h2>Release Eligibility</h2>
+      <span class="risk-badge ${state.modelops.eligibility?.eligible ? "low" : "high"}">${state.modelops.eligibility?.eligible ? "eligible" : "blocked"}</span>
+    </div>
+    <div class="modelops-grid">
+      ${checks.map((check) => {
+        const result = resultByCheck[check.id];
+        return `<article class="modelops-card">
+          <strong>${escapeHtml(check.name)}</strong>
+          <span>${escapeHtml(check.check_type)} ${escapeHtml(check.metric || "")} ${escapeHtml(check.operator || "")} ${escapeHtml(check.threshold ?? "")}</span>
+          <span>${escapeHtml(result?.status || "not evaluated")}</span>
+          ${check.check_type === "manual" ? `<div class="button-row"><button class="btn small" data-model-check-decision="${escapeHtml(check.id)}" data-model-check-status="approved" type="button">Approve</button><button class="btn small" data-model-check-decision="${escapeHtml(check.id)}" data-model-check-status="rejected" type="button">Reject</button></div>` : ""}
+        </article>`;
+      }).join("") || '<div class="empty-state">No checks configured</div>'}
+    </div>
+  `;
+}
+
+function renderModelReleasePanel() {
+  const deployments = state.modelops.deployments.filter((deployment) => !state.modelops.selectedObjectiveId || deployment.objective_id === state.modelops.selectedObjectiveId);
+  el("modelReleasePanel").innerHTML = `
+    ${state.modelops.releases.map((release) => `
+      <article class="modelops-card">
+        <div class="decision-card-head"><strong>${escapeHtml(release.version)}</strong><span class="risk-badge low">${escapeHtml(release.environment)}</span></div>
+        <span>${escapeHtml(release.submission_id)}</span>
+      </article>
+    `).join("") || '<div class="empty-state">No releases for this objective</div>'}
+    ${deployments.map((deployment) => `
+      <article class="modelops-card ${deployment.id === state.modelops.selectedDeploymentId ? "selected" : ""}" data-model-deployment="${escapeHtml(deployment.id)}">
+        <div class="decision-card-head"><strong>${escapeHtml(deployment.id)}</strong><span class="risk-badge low">${escapeHtml(deployment.status)}</span></div>
+        <span>${escapeHtml(deployment.mode)} - ${escapeHtml(deployment.submission_id)}</span>
+      </article>
+    `).join("")}
+  `;
+}
+
+function renderModelMonitorPanel() {
+  el("modelMonitorPanel").innerHTML = state.modelops.monitors.map((monitor) => `
+    <article class="modelops-card ${monitor.id === state.modelops.selectedMonitorId ? "selected" : ""}" data-model-monitor="${escapeHtml(monitor.id)}">
+      <div class="decision-card-head"><strong>${escapeHtml(monitor.display_name || monitor.id)}</strong>${renderMonitorStatus(monitor.latest_run?.status)}</div>
+      <span>${escapeHtml(monitor.objective_id)} - ${escapeHtml((monitor.feature_fields || []).join(", "))}</span>
+      <small>baseline ${escapeHtml(monitor.baseline_asset_id)}</small>
+    </article>
+  `).join("") || '<div class="empty-state">No monitors configured</div>';
+}
+
+function renderMonitorStatus(status = "PASS") {
+  const cls = status === "FAIL" ? "critical" : status === "WARN" ? "medium" : "low";
+  return `<span class="risk-badge ${cls}">${escapeHtml(status || "PASS")}</span>`;
+}
+
+function renderModelInferencePanel() {
+  const logs = state.modelops.predictionLogs || [];
+  el("modelInferencePanel").innerHTML = `
+    <div class="section-title"><h2>Result</h2></div>
+    <pre class="mini-output tall">${escapeHtml(state.modelops.inferenceResult ? compactJson(state.modelops.inferenceResult) : "No inference run yet")}</pre>
+    <div class="section-title"><h2>Prediction Logs</h2></div>
+    <div class="builder-list">
+      ${logs.slice(0, 8).map((log) => `<div class="list-item"><strong>${escapeHtml(log.request_shape)}</strong><span>${escapeHtml(log.output_count)} predictions</span><span>${escapeHtml(new Date((log.created_at || 0) * 1000).toLocaleString())}</span></div>`).join("") || '<div class="empty-state compact-empty">No prediction logs</div>'}
+    </div>
+  `;
+}
+
+function renderModelOpsRunList() {
+  const runs = state.modelops.monitorRuns || state.modelops.summary?.latest_runs || [];
+  el("modelOpsRunList").innerHTML = runs.slice(0, 8).map((run) => `
+    <button class="builder-list-button" type="button" data-model-monitor-run="${escapeHtml(run.id)}">
+      <strong>${escapeHtml(run.status)}</strong>
+      <span>${escapeHtml(run.current_asset_id)} - ${escapeHtml((run.alerts || []).length)} alerts</span>
+    </button>
+  `).join("") || '<div class="empty-state compact-empty">No monitor runs</div>';
+}
+
+async function createModelObjective() {
+  const payload = {
+    id: el("modelObjectiveIdInput").value.trim() || undefined,
+    display_name: el("modelObjectiveNameInput").value.trim() || "Model Objective",
+    problem_type: el("modelProblemTypeSelect").value,
+    target_field: el("modelTargetFieldInput").value.trim(),
+    feature_fields: splitCsv(el("modelFeatureFieldsInput").value),
+    input_asset_id: el("modelInputAssetSelect").value || null
+  };
+  const created = await api("/modeling/objectives", { method: "POST", body: JSON.stringify(payload) });
+  state.modelops.selectedObjectiveId = created.id;
+  await refreshModelOpsWorkspace();
+  showToast("Model objective created");
+}
+
+async function trainSelectedModel() {
+  const objectiveId = state.modelops.selectedObjectiveId || el("modelObjectiveSelect").value;
+  if (!objectiveId) throw new Error("Choose an objective");
+  const payload = {
+    trainer_type: el("modelTrainerTypeSelect").value,
+    algorithm: el("modelAlgorithmInput").value.trim() || undefined,
+    training_dataset_id: el("modelTrainingAssetSelect").value || undefined,
+    target_column: el("modelTrainTargetInput").value.trim() || undefined,
+    eval_metric: el("modelEvalMetricInput").value.trim() || undefined,
+    quality_preset: el("modelQualityPresetSelect").value
+  };
+  const submission = await api(`/modeling/objectives/${encodeURIComponent(objectiveId)}/train`, { method: "POST", body: JSON.stringify(payload) });
+  state.modelops.selectedSubmissionId = submission.id;
+  await refreshModelOpsWorkspace();
+  showToast("Model submission trained");
+}
+
+async function createModelCheck() {
+  const objectiveId = state.modelops.selectedObjectiveId || el("modelObjectiveSelect").value;
+  if (!objectiveId) throw new Error("Choose an objective");
+  const type = el("modelCheckTypeSelect").value;
+  const payload = {
+    name: el("modelCheckNameInput").value.trim() || "quality_gate",
+    check_type: type
+  };
+  if (type === "automatic") {
+    payload.metric = el("modelCheckMetricInput").value.trim();
+    payload.operator = el("modelCheckOperatorSelect").value;
+    payload.threshold = Number(el("modelCheckThresholdInput").value || 0);
+  }
+  await api(`/modeling/objectives/${encodeURIComponent(objectiveId)}/checks`, { method: "POST", body: JSON.stringify(payload) });
+  await refreshModelOpsWorkspace();
+  showToast("Evaluation check created");
+}
+
+async function decideModelCheck(checkId, status) {
+  const submissionId = state.modelops.selectedSubmissionId || el("modelSubmissionSelect").value;
+  if (!submissionId) throw new Error("Choose a submission");
+  await api(`/modeling/submissions/${encodeURIComponent(submissionId)}/check-results`, {
+    method: "POST",
+    body: JSON.stringify({
+      check_id: checkId,
+      status,
+      reviewer: "workspace",
+      comment: `Decision from ModelOps workspace: ${status}`
+    })
+  });
+  await refreshModelOpsWorkspace();
+  showToast(`Check ${status}`);
+}
+
+async function createModelRelease() {
+  const objectiveId = state.modelops.selectedObjectiveId || el("modelObjectiveSelect").value;
+  const submissionId = state.modelops.selectedSubmissionId || el("modelSubmissionSelect").value;
+  if (!objectiveId || !submissionId) throw new Error("Choose an objective and submission");
+  await api(`/modeling/objectives/${encodeURIComponent(objectiveId)}/releases`, {
+    method: "POST",
+    body: JSON.stringify({
+      submission_id: submissionId,
+      version: el("modelReleaseVersionInput").value.trim() || "v1.0",
+      environment: el("modelReleaseEnvSelect").value,
+      notes: "Created from ModelOps workspace"
+    })
+  });
+  await refreshModelOpsWorkspace();
+  showToast("Release created");
+}
+
+async function createModelDeployment() {
+  const objectiveId = state.modelops.selectedObjectiveId || el("modelObjectiveSelect").value;
+  const submissionId = state.modelops.selectedSubmissionId || el("modelSubmissionSelect").value;
+  if (!objectiveId || !submissionId) throw new Error("Choose an objective and released submission");
+  const deployment = await api("/modeling/deployments", {
+    method: "POST",
+    body: JSON.stringify({ objective_id: objectiveId, submission_id: submissionId, mode: el("modelDeploymentModeSelect").value })
+  });
+  state.modelops.selectedDeploymentId = deployment.id;
+  await refreshModelOpsWorkspace();
+  showToast("Deployment created");
+}
+
+async function createModelMonitor() {
+  const objectiveId = state.modelops.selectedObjectiveId || el("modelObjectiveSelect").value;
+  if (!objectiveId) throw new Error("Choose an objective");
+  const monitor = await api("/modelops/monitors", {
+    method: "POST",
+    body: JSON.stringify({
+      display_name: el("modelMonitorNameInput").value.trim() || "Deployment Drift Monitor",
+      objective_id: objectiveId,
+      deployment_id: state.modelops.selectedDeploymentId || el("modelDeploymentSelect").value || null,
+      baseline_asset_id: el("modelBaselineAssetSelect").value,
+      feature_fields: splitCsv(el("modelMonitorFieldsInput").value),
+      prediction_field: el("modelPredictionFieldInput").value.trim() || "prediction",
+      target_field: el("modelMonitorTargetInput").value.trim() || null,
+      thresholds: parseJsonValue(el("modelMonitorThresholdsInput").value, {}, "Monitor thresholds")
+    })
+  });
+  state.modelops.selectedMonitorId = monitor.id;
+  await refreshModelOpsWorkspace();
+  showToast("Model monitor created");
+}
+
+async function runSelectedModelMonitor() {
+  const monitorId = state.modelops.selectedMonitorId || state.modelops.monitors[0]?.id;
+  if (!monitorId) throw new Error("Create or select a monitor");
+  const run = await api(`/modelops/monitors/${encodeURIComponent(monitorId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({ current_asset_id: el("modelCurrentAssetSelect").value })
+  });
+  state.modelops.selectedMonitorId = monitorId;
+  await refreshModelOpsWorkspace();
+  el("modelOpsOutput").textContent = compactJson(run);
+  showToast(`Monitor ${run.status}`);
+}
+
+async function runModelInference() {
+  const deploymentId = state.modelops.selectedDeploymentId || el("modelDeploymentSelect").value;
+  if (!deploymentId) throw new Error("Choose a deployment");
+  const records = parseJsonValue(el("modelInferenceInput").value, [], "Inference records");
+  const result = await api(`/modeling/deployments/${encodeURIComponent(deploymentId)}/infer`, {
+    method: "POST",
+    body: JSON.stringify({ inference_data: records })
+  });
+  state.modelops.inferenceResult = result;
+  await loadPredictionLogs(deploymentId).catch(() => {});
+  renderModelInferencePanel();
+  el("modelOpsOutput").textContent = compactJson(result);
+  showToast("Inference complete");
+}
+
+async function loadClassicPipelines() {
+  try {
+    state.classicPipelines = await api("/pipelines");
+  } catch (_) {
+    state.classicPipelines = [];
+  }
+}
+
+function setOpsTab(tabName) {
+  state.ops.activeTab = tabName;
+  document.querySelectorAll("[data-ops-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.opsTab === tabName);
+  });
+  document.querySelectorAll("[data-ops-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.opsPanel === tabName);
+  });
+  const labels = {
+    command: "Command Center",
+    alerts: "Alerts",
+    incidents: "Incidents",
+    runbooks: "Runbooks",
+    approvals: "Approvals",
+    reliability: "Reliability",
+    inbox: "Inbox"
+  };
+  if (el("opsTitle")) el("opsTitle").textContent = labels[tabName] || "Ops Control Plane";
+}
+
+async function refreshOpsWorkspace() {
+  await Promise.allSettled([
+    loadDataAssets(),
+    loadClassicPipelines(),
+    loadOpsSummary(),
+    loadOpsEvents(),
+    loadOpsAlertRules(),
+    loadOpsAlerts(),
+    loadOpsIncidents(),
+    loadOpsRunbooks(),
+    loadOpsInbox(),
+    loadOpsApprovals(),
+    loadReliabilitySummary(),
+    loadDataContracts(),
+    loadBackfills()
+  ]);
+  renderOpsWorkspace();
+}
+
+async function loadOpsSummary() { state.ops.summary = await api("/ops/summary"); }
+async function loadOpsEvents() { state.ops.events = await api("/ops/events?limit=50"); }
+async function loadOpsAlertRules() { state.ops.alertRules = await api("/ops/alert-rules"); }
+async function loadOpsAlerts() { state.ops.alerts = await api("/ops/alerts"); }
+async function loadOpsIncidents() { state.ops.incidents = await api("/ops/incidents"); }
+async function loadOpsRunbooks() { state.ops.runbooks = await api("/ops/runbooks"); }
+async function loadOpsInbox() { state.ops.inbox = await api("/ops/inbox"); }
+async function loadOpsApprovals() { state.ops.approvals = await api("/approvals"); }
+async function loadReliabilitySummary() { state.ops.reliability = await api("/reliability/summary"); }
+async function loadDataContracts() { state.ops.dataContracts = await api("/reliability/data-contracts"); }
+async function loadBackfills() { state.ops.backfills = await api("/reliability/backfills"); }
+
+function renderOpsWorkspace() {
+  setOpsTab(state.ops.activeTab || "command");
+  renderOpsSelectors();
+  renderOpsSummary();
+  renderOpsEvents();
+  renderOpsAlerts();
+  renderOpsIncidents();
+  renderOpsRunbooks();
+  renderOpsApprovals();
+  renderOpsReliability();
+  renderOpsInbox();
+  el("opsOutput").textContent = state.ops.output ? compactJson(state.ops.output) : compactJson({
+    alerts: state.ops.alerts.length,
+    incidents: state.ops.incidents.length,
+    runbooks: state.ops.runbooks.length,
+    contracts: state.ops.dataContracts.length
+  });
+}
+
+function renderOpsSelectors() {
+  state.ops.selectedIncidentId = state.ops.selectedIncidentId || state.ops.incidents[0]?.id || "";
+  state.ops.selectedRunbookId = state.ops.selectedRunbookId || state.ops.runbooks[0]?.id || "";
+  state.ops.selectedContractId = state.ops.selectedContractId || state.ops.dataContracts[0]?.id || "";
+  fillSelect(el("opsIncidentSelect"), state.ops.incidents.map((incident) => ({ value: incident.id, label: `${incident.display_name} (${incident.status})` })), state.ops.selectedIncidentId, "Choose incident");
+  fillSelect(el("opsRunbookSelect"), state.ops.runbooks.map((runbook) => ({ value: runbook.id, label: runbook.display_name || runbook.id })), state.ops.selectedRunbookId, "Choose runbook");
+  fillSelect(el("opsContractSelect"), state.ops.dataContracts.map((contract) => ({ value: contract.id, label: contract.display_name || contract.id })), state.ops.selectedContractId, "Choose contract");
+  ["opsContractAssetSelect", "opsContractRunAssetSelect"].forEach((id) => {
+    fillSelect(el(id), state.datasets.map((asset) => ({ value: asset.id, label: asset.display_name ? `${asset.display_name} (${asset.id})` : asset.id })), el(id)?.value || state.datasets[0]?.id || "", "Choose dataset");
+  });
+  fillSelect(el("opsBackfillPipelineSelect"), state.classicPipelines.map((pipeline) => ({ value: pipeline.id, label: pipeline.display_name ? `${pipeline.display_name} (${pipeline.id})` : pipeline.id })), el("opsBackfillPipelineSelect")?.value || state.classicPipelines[0]?.id || "", "Choose pipeline");
+}
+
+function renderOpsSummary() {
+  const summary = state.ops.summary || {};
+  el("opsSummaryCards").innerHTML = [
+    ["Events", summary.events || 0, "low"],
+    ["Open alerts", summary.open_alerts || 0, summary.open_alerts ? "high" : "low"],
+    ["Open incidents", summary.open_incidents || 0, summary.open_incidents ? "medium" : "low"],
+    ["Pending approvals", summary.pending_approvals || 0, summary.pending_approvals ? "high" : "low"],
+    ["Unread inbox", summary.unread_notifications || 0, summary.unread_notifications ? "medium" : "low"],
+  ].map(([label, value, cls]) => `
+    <article class="ops-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <em class="risk-badge ${escapeHtml(cls)}">${escapeHtml(cls)}</em>
+    </article>
+  `).join("");
+}
+
+function renderOpsEvents() {
+  el("opsEventList").innerHTML = (state.ops.events || []).slice(0, 12).map((event) => `
+    <div class="list-item">
+      <strong>${escapeHtml(event.title || event.event_type)}</strong>
+      <span>${escapeHtml(event.source)} - ${escapeHtml(event.event_type)}</span>
+      ${statusBadge(event.severity)}
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No operational events</div>';
+}
+
+function renderOpsAlerts() {
+  el("opsAlertRuleList").innerHTML = (state.ops.alertRules || []).map((rule) => `
+    <div class="list-item">
+      <strong>${escapeHtml(rule.display_name || rule.id)}</strong>
+      <span>${escapeHtml(rule.source || "any source")} - min ${escapeHtml(rule.min_severity)}</span>
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No alert rules</div>';
+  const alertHtml = (state.ops.alerts || []).slice(0, 20).map((alert) => `
+    <article class="modelops-card">
+      <div class="decision-card-head"><strong>${escapeHtml(alert.title)}</strong>${statusBadge(alert.severity)}</div>
+      <span>${escapeHtml(alert.status)} - ${escapeHtml(alert.source)} - ${escapeHtml(alert.subject_id || "")}</span>
+      <small>${escapeHtml(alert.message || alert.event_id)}</small>
+    </article>
+  `).join("") || '<div class="empty-state">No alerts. Create a rule and evaluate events.</div>';
+  if (el("opsAlertList")) el("opsAlertList").innerHTML = alertHtml;
+  if (el("opsCommandAlertList")) el("opsCommandAlertList").innerHTML = alertHtml;
+}
+
+function renderOpsIncidents() {
+  el("opsIncidentList").innerHTML = (state.ops.incidents || []).map((incident) => `
+    <article class="modelops-card ${incident.id === state.ops.selectedIncidentId ? "selected" : ""}" data-ops-incident="${escapeHtml(incident.id)}">
+      <div class="decision-card-head"><strong>${escapeHtml(incident.display_name)}</strong>${statusBadge(incident.severity)}</div>
+      <span>${escapeHtml(incident.status)} - ${escapeHtml(incident.owner || "unowned")}</span>
+      <small>${escapeHtml((incident.linked_objects || []).length)} objects - ${escapeHtml((incident.alert_ids || []).length)} alerts</small>
+    </article>
+  `).join("") || '<div class="empty-state">No incidents</div>';
+}
+
+function renderOpsRunbooks() {
+  el("opsRunbookList").innerHTML = (state.ops.runbooks || []).map((runbook) => `
+    <article class="modelops-card ${runbook.id === state.ops.selectedRunbookId ? "selected" : ""}" data-ops-runbook="${escapeHtml(runbook.id)}">
+      <div class="decision-card-head"><strong>${escapeHtml(runbook.display_name)}</strong><span class="risk-badge ${runbook.enabled ? "low" : "muted"}">${runbook.enabled ? "enabled" : "disabled"}</span></div>
+      <span>${escapeHtml((runbook.steps || []).length)} deterministic steps</span>
+      <small>${escapeHtml(runbook.id)}</small>
+    </article>
+  `).join("") || '<div class="empty-state">No runbooks</div>';
+  el("opsRunbookOutput").textContent = state.ops.output?.runbook ? compactJson(state.ops.output.runbook) : "No runbook execution yet";
+}
+
+function renderOpsApprovals() {
+  el("opsApprovalList").innerHTML = (state.ops.approvals || []).slice(0, 20).map((approval) => `
+    <div class="list-item">
+      <strong>${escapeHtml(approval.action_type_id)}</strong>
+      <span>${escapeHtml(approval.status)} - ${escapeHtml(approval.requester || "system")}</span>
+      <span>${escapeHtml(approval.id)}</span>
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No approvals</div>';
+}
+
+function renderOpsReliability() {
+  const summary = state.ops.reliability || {};
+  el("opsReliabilitySummary").innerHTML = `
+    <div class="modelops-grid">
+      <article class="modelops-card"><strong>Contracts</strong><span>${escapeHtml(summary.data_contracts || 0)}</span></article>
+      <article class="modelops-card"><strong>Backfills</strong><span>${escapeHtml(summary.backfills || 0)}</span></article>
+      <article class="modelops-card"><strong>Impact runs</strong><span>${escapeHtml(summary.lineage_impact_runs || 0)}</span></article>
+      <article class="modelops-card"><strong>Status</strong>${statusBadge(summary.status || "PASS")}</article>
+    </div>
+  `;
+  el("opsDataContractList").innerHTML = (state.ops.dataContracts || []).map((contract) => `
+    <article class="modelops-card ${contract.id === state.ops.selectedContractId ? "selected" : ""}" data-ops-contract="${escapeHtml(contract.id)}">
+      <div class="decision-card-head"><strong>${escapeHtml(contract.display_name)}</strong>${statusBadge(contract.latest_run?.status || "PASS")}</div>
+      <span>${escapeHtml(contract.asset_id)} - ${escapeHtml((contract.checks || []).length)} checks</span>
+    </article>
+  `).join("") || '<div class="empty-state">No data contracts</div>';
+  el("opsBackfillList").innerHTML = (state.ops.backfills || []).map((plan) => `
+    <div class="list-item">
+      <strong>${escapeHtml(plan.display_name)}</strong>
+      <span>${escapeHtml(plan.status)} - ${escapeHtml((plan.pipeline_ids || []).join(", "))}</span>
+      <button class="btn small" type="button" data-run-backfill="${escapeHtml(plan.id)}">Run</button>
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No backfill plans</div>';
+}
+
+function renderOpsInbox() {
+  el("opsInboxList").innerHTML = (state.ops.inbox || []).map((note) => `
+    <div class="candidate-row">
+      <div>
+        <strong>${escapeHtml(note.title)}</strong>
+        <span>${escapeHtml(note.status)} - ${escapeHtml(note.source)} - ${escapeHtml(note.severity)}</span>
+      </div>
+      <button class="btn small" type="button" data-ack-note="${escapeHtml(note.id)}">Ack</button>
+    </div>
+  `).join("") || '<div class="empty-state">No inbox notifications</div>';
+}
+
+function statusBadge(status = "PASS") {
+  const value = String(status || "PASS");
+  const lower = value.toLowerCase();
+  const cls = ["critical", "fail"].includes(lower) ? "critical"
+    : ["high", "warn", "warning", "medium", "open", "pending"].includes(lower) ? "medium"
+    : lower === "muted" ? "muted"
+    : "low";
+  return `<span class="risk-badge ${cls}">${escapeHtml(value)}</span>`;
+}
+
+async function createOpsAlertRule() {
+  const payload = {
+    display_name: el("opsAlertRuleNameInput").value.trim() || "High severity operations",
+    source: el("opsAlertRuleSourceInput").value.trim() || null,
+    event_type: el("opsAlertRuleEventInput").value.trim() || null,
+    min_severity: el("opsAlertRuleSeveritySelect").value,
+    expression: parseJsonValue(el("opsAlertRuleExpressionInput").value, {}, "Alert expression")
+  };
+  state.ops.output = await api("/ops/alert-rules", { method: "POST", body: JSON.stringify(payload) });
+  await refreshOpsWorkspace();
+  showToast("Alert rule created");
+}
+
+async function evaluateOpsAlerts() {
+  state.ops.output = await api("/ops/alerts/evaluate", { method: "POST", body: JSON.stringify({ limit: 500 }) });
+  await refreshOpsWorkspace();
+  showToast(`${state.ops.output.created_alerts} alerts created`);
+}
+
+async function createOpsIncident() {
+  const payload = {
+    display_name: el("opsIncidentNameInput").value.trim() || "Operations Incident",
+    description: el("opsIncidentDescriptionInput").value.trim() || null,
+    severity: el("opsIncidentSeveritySelect").value,
+    owner: el("opsIncidentOwnerInput").value.trim() || null,
+    linked_objects: parseJsonValue(el("opsIncidentObjectsInput").value, [], "Incident linked objects")
+  };
+  state.ops.output = await api("/ops/incidents", { method: "POST", body: JSON.stringify(payload) });
+  state.ops.selectedIncidentId = state.ops.output.id;
+  await refreshOpsWorkspace();
+  showToast("Incident created");
+}
+
+async function createOpsRunbook() {
+  const payload = {
+    display_name: el("opsRunbookNameInput").value.trim() || "Risk Triage Runbook",
+    description: "Created from Ops workspace",
+    steps: parseJsonValue(el("opsRunbookStepsInput").value, [], "Runbook steps")
+  };
+  state.ops.output = await api("/ops/runbooks", { method: "POST", body: JSON.stringify(payload) });
+  state.ops.selectedRunbookId = state.ops.output.id;
+  await refreshOpsWorkspace();
+  showToast("Runbook created");
+}
+
+async function executeOpsRunbook() {
+  const runbookId = state.ops.selectedRunbookId || el("opsRunbookSelect").value;
+  if (!runbookId) throw new Error("Choose a runbook");
+  const result = await api(`/ops/runbooks/${encodeURIComponent(runbookId)}/execute`, {
+    method: "POST",
+    body: JSON.stringify({
+      incident_id: state.ops.selectedIncidentId || el("opsIncidentSelect").value || null,
+      inputs: parseJsonValue(el("opsRunbookInputsInput").value, {}, "Runbook inputs"),
+      actor: "workspace"
+    })
+  });
+  state.ops.output = { runbook: result };
+  await refreshOpsWorkspace();
+  showToast(`Runbook ${result.status}`);
+}
+
+async function createDataContract() {
+  const payload = {
+    display_name: el("opsContractNameInput").value.trim() || "Dataset Contract",
+    asset_id: el("opsContractAssetSelect").value,
+    checks: parseJsonValue(el("opsContractChecksInput").value, [], "Contract checks")
+  };
+  state.ops.output = await api("/reliability/data-contracts", { method: "POST", body: JSON.stringify(payload) });
+  state.ops.selectedContractId = state.ops.output.id;
+  await refreshOpsWorkspace();
+  showToast("Data contract created");
+}
+
+async function runSelectedDataContract() {
+  const contractId = state.ops.selectedContractId || el("opsContractSelect").value;
+  if (!contractId) throw new Error("Choose a data contract");
+  state.ops.output = await api(`/reliability/data-contracts/${encodeURIComponent(contractId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({ asset_id: el("opsContractRunAssetSelect").value || null })
+  });
+  await refreshOpsWorkspace();
+  showToast(`Contract ${state.ops.output.status}`);
+}
+
+async function analyzeOpsLineageImpact() {
+  state.ops.output = await api("/reliability/lineage-impact", {
+    method: "POST",
+    body: JSON.stringify({
+      resource_kind: el("opsImpactKindSelect").value,
+      resource_id: el("opsImpactResourceInput").value.trim(),
+      direction: el("opsImpactDirectionSelect").value
+    })
+  });
+  await refreshOpsWorkspace();
+  showToast("Lineage impact analyzed");
+}
+
+async function createOpsBackfill() {
+  const pipelineId = el("opsBackfillPipelineSelect").value;
+  if (!pipelineId) throw new Error("Choose a pipeline");
+  state.ops.output = await api("/reliability/backfills", {
+    method: "POST",
+    body: JSON.stringify({
+      display_name: el("opsBackfillNameInput").value.trim() || "Pipeline Backfill",
+      pipeline_ids: [pipelineId],
+      asset_ids: []
+    })
+  });
+  await refreshOpsWorkspace();
+  showToast("Backfill plan created");
+}
+
+async function runOpsBackfill(planId) {
+  state.ops.output = await api(`/reliability/backfills/${encodeURIComponent(planId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({ actor: "workspace" })
+  });
+  await refreshOpsWorkspace();
+  showToast(`Backfill ${state.ops.output.status}`);
+}
+
+async function ackOpsNotification(notificationId) {
+  state.ops.output = await api(`/ops/inbox/${encodeURIComponent(notificationId)}/ack`, { method: "POST" });
+  await refreshOpsWorkspace();
+  showToast("Notification acknowledged");
+}
+
+function setInvestigationsTab(tabName) {
+  state.investigations.activeTab = tabName;
+  document.querySelectorAll("[data-investigation-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.investigationTab === tabName);
+  });
+  document.querySelectorAll("[data-investigation-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.investigationPanel === tabName);
+  });
+  const labels = {
+    board: "Case Board",
+    graph: "Entity Graph",
+    evidence: "Evidence",
+    timeline: "Timeline",
+    hypotheses: "Hypotheses",
+    report: "Report"
+  };
+  if (el("investigationTitle")) el("investigationTitle").textContent = labels[tabName] || "Investigations";
+}
+
+async function refreshInvestigationsWorkspace() {
+  await refreshLogicCatalogs();
+  state.investigations.list = await api("/investigations").catch(() => []);
+  state.investigations.selectedId = state.investigations.selectedId || state.investigations.list[0]?.id || "";
+  if (state.investigations.selectedId) {
+    await loadSelectedInvestigation(state.investigations.selectedId, false).catch(() => {});
+  }
+  renderInvestigationsWorkspace();
+}
+
+async function loadSelectedInvestigation(investigationId, render = true) {
+  state.investigations.selectedId = investigationId;
+  state.investigations.detail = await api(`/investigations/${encodeURIComponent(investigationId)}`);
+  state.investigations.graph = await api(`/investigations/${encodeURIComponent(investigationId)}/graph`).catch(() => null);
+  state.investigations.timeline = await api(`/investigations/${encodeURIComponent(investigationId)}/timeline`).catch(() => null);
+  if (render) renderInvestigationsWorkspace();
+}
+
+function renderInvestigationsWorkspace() {
+  setInvestigationsTab(state.investigations.activeTab || "board");
+  renderInvestigationList();
+  renderInvestigationDetail();
+  renderInvestigationGraph();
+  renderInvestigationEvidence();
+  renderInvestigationTimeline();
+  renderInvestigationHypotheses();
+  renderInvestigationReport();
+}
+
+function renderInvestigationList() {
+  el("investigationList").innerHTML = (state.investigations.list || []).map((item) => `
+    <button class="builder-list-button ${item.id === state.investigations.selectedId ? "selected" : ""}" type="button" data-investigation-id="${escapeHtml(item.id)}">
+      <strong>${escapeHtml(item.display_name)}</strong>
+      <span>${escapeHtml(item.status)} - ${escapeHtml((item.object_refs || []).length)} objects</span>
+    </button>
+  `).join("") || '<div class="empty-state compact-empty">No investigations</div>';
+}
+
+function renderInvestigationDetail() {
+  const detail = state.investigations.detail;
+  if (!detail) {
+    el("investigationBoard").innerHTML = '<div class="empty-state">Create or select an investigation</div>';
+    el("investigationOutput").textContent = "";
+    return;
+  }
+  const risks = Object.values(detail.risk || {}).filter(Boolean);
+  const highRisk = risks.filter((risk) => ["high", "critical"].includes(risk.band));
+  el("investigationBoard").innerHTML = `
+    <div class="modelops-grid">
+      <article class="modelops-card"><strong>${escapeHtml(detail.display_name)}</strong><span>${escapeHtml(detail.status)} - ${escapeHtml(detail.owner || "unowned")}</span></article>
+      <article class="modelops-card"><strong>Objects</strong><span>${escapeHtml((detail.objects || []).length)}</span></article>
+      <article class="modelops-card"><strong>Evidence</strong><span>${escapeHtml((detail.evidence || []).length)}</span></article>
+      <article class="modelops-card"><strong>High risk</strong><span>${escapeHtml(highRisk.length)}</span></article>
+    </div>
+  `;
+  el("investigationOutput").textContent = compactJson({
+    id: detail.id,
+    objects: detail.objects,
+    high_risk: highRisk.map((risk) => ({ band: risk.band, score: risk.score, explanation: risk.explanation }))
+  });
+}
+
+function renderInvestigationGraph() {
+  const graph = state.investigations.graph;
+  el("investigationGraph").innerHTML = graph ? `
+    <div class="graph-strip">
+      ${(graph.nodes || []).map((node) => `<span>${escapeHtml(node.kind)}:${escapeHtml(node.label || node.id)}</span>`).join("")}
+    </div>
+    <pre class="mini-output tall">${escapeHtml(compactJson(graph))}</pre>
+  ` : '<div class="empty-state">No graph loaded</div>';
+}
+
+function renderInvestigationEvidence() {
+  const evidence = state.investigations.detail?.evidence || [];
+  el("investigationEvidenceList").innerHTML = evidence.map((item) => `
+    <article class="modelops-card">
+      <strong>${escapeHtml(item.title)}</strong>
+      <span>${escapeHtml(item.source || "local")} - ${escapeHtml((item.tags || []).join(", "))}</span>
+      <pre class="mini-output">${escapeHtml(compactJson(item.payload || {}))}</pre>
+    </article>
+  `).join("") || '<div class="empty-state">No evidence</div>';
+}
+
+function renderInvestigationTimeline() {
+  const rows = state.investigations.timeline?.timeline || [];
+  el("investigationTimeline").innerHTML = rows.length ? `
+    <div class="timeline-list">
+      ${rows.map((item) => `<article><strong>${escapeHtml(item.title || item.kind)}</strong><span>${escapeHtml(item.kind)} - ${new Date((item.at || 0) * 1000).toLocaleString()}</span></article>`).join("")}
+    </div>
+  ` : '<div class="empty-state">No timeline loaded</div>';
+}
+
+function renderInvestigationHypotheses() {
+  const hypotheses = state.investigations.detail?.hypotheses || [];
+  el("investigationHypothesisList").innerHTML = hypotheses.map((item) => `
+    <article class="modelops-card">
+      <div class="decision-card-head"><strong>${escapeHtml(item.statement)}</strong>${statusBadge(item.status)}</div>
+      <span>confidence ${escapeHtml(item.confidence)} - evidence ${(item.linked_evidence_ids || []).length}</span>
+    </article>
+  `).join("") || '<div class="empty-state">No hypotheses</div>';
+}
+
+function renderInvestigationReport() {
+  const reports = state.investigations.detail?.reports || [];
+  const latest = state.investigations.output?.report || reports[0];
+  el("investigationReport").innerHTML = latest ? `<pre class="mini-output tall">${escapeHtml(latest.body || compactJson(latest))}</pre>` : '<div class="empty-state">No report generated</div>';
+}
+
+async function createInvestigation() {
+  const payload = {
+    display_name: el("investigationNameInput").value.trim() || "Operations Investigation",
+    description: el("investigationDescriptionInput").value.trim() || null,
+    owner: el("investigationOwnerInput").value.trim() || null,
+    object_refs: parseJsonValue(el("investigationObjectRefsInput").value, [], "Investigation object refs")
+  };
+  const created = await api("/investigations", { method: "POST", body: JSON.stringify(payload) });
+  state.investigations.selectedId = created.id;
+  await refreshInvestigationsWorkspace();
+  showToast("Investigation created");
+}
+
+async function addInvestigationEvidence() {
+  const investigationId = state.investigations.selectedId;
+  if (!investigationId) throw new Error("Select an investigation");
+  await api(`/investigations/${encodeURIComponent(investigationId)}/evidence`, {
+    method: "POST",
+    body: JSON.stringify({
+      title: el("evidenceTitleInput").value.trim() || "Evidence",
+      source: el("evidenceSourceInput").value.trim() || "workspace",
+      object_refs: parseJsonValue(el("evidenceObjectRefsInput").value, [], "Evidence object refs"),
+      payload: parseJsonValue(el("evidencePayloadInput").value, {}, "Evidence payload"),
+      tags: splitCsv(el("evidenceTagsInput").value)
+    })
+  });
+  await loadSelectedInvestigation(investigationId);
+  setInvestigationsTab("evidence");
+  showToast("Evidence added");
+}
+
+async function addInvestigationHypothesis() {
+  const investigationId = state.investigations.selectedId;
+  if (!investigationId) throw new Error("Select an investigation");
+  await api(`/investigations/${encodeURIComponent(investigationId)}/hypotheses`, {
+    method: "POST",
+    body: JSON.stringify({
+      statement: el("hypothesisStatementInput").value.trim() || "Operational risk is linked to the selected object",
+      confidence: Number(el("hypothesisConfidenceInput").value || 50),
+      linked_evidence_ids: splitCsv(el("hypothesisEvidenceInput").value)
+    })
+  });
+  await loadSelectedInvestigation(investigationId);
+  setInvestigationsTab("hypotheses");
+  showToast("Hypothesis added");
+}
+
+async function generateInvestigationReport() {
+  const investigationId = state.investigations.selectedId;
+  if (!investigationId) throw new Error("Select an investigation");
+  const report = await api(`/investigations/${encodeURIComponent(investigationId)}/report`, {
+    method: "POST",
+    body: JSON.stringify({ title: el("reportTitleInput").value.trim() || undefined })
+  });
+  state.investigations.output = { report };
+  await loadSelectedInvestigation(investigationId, false);
+  setInvestigationsTab("report");
+  renderInvestigationsWorkspace();
+  showToast("Report generated");
+}
+
+function splitCsv(value) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function setDecisionTab(tabName) {
+  state.decision.activeTab = tabName;
+  document.querySelectorAll("[data-decision-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.decisionTab === tabName);
+  });
+  document.querySelectorAll("[data-decision-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.decisionPanel === tabName);
+  });
+  const labels = {
+    risk: "Risk Board",
+    explain: "Explain Object",
+    timeline: "Timeline",
+    entity: "Entity Resolution",
+    scenario: "Scenario Simulator",
+    agent: "Agent Plan"
+  };
+  if (el("decisionTitle")) el("decisionTitle").textContent = labels[tabName] || "Decision Intelligence";
+}
+
+async function refreshDecisionWorkspace() {
+  await refreshLogicCatalogs();
+  await loadAgents();
+  const objectTypeId = el("decisionObjectTypeSelect")?.value || firstObjectType();
+  fillSelect(el("decisionObjectTypeSelect"), state.catalogs.objectTypes.map((obj) => ({
+    value: obj.id,
+    label: obj.display_name ? `${obj.display_name} (${obj.id})` : obj.id
+  })), objectTypeId || firstObjectType(), "Choose object type");
+  fillSelect(el("decisionAgentSelect"), state.catalogs.agents.map((agent) => ({
+    value: agent.id,
+    label: agent.display_name || agent.id
+  })), el("decisionAgentSelect")?.value || "", "Choose agent");
+  await loadDecisionRules();
+  if (!state.decision.evaluation) await runDecisionEvaluation(false).catch(() => renderDecisionWorkspace());
+  renderDecisionWorkspace();
+}
+
+async function loadDecisionRules() {
+  const objectTypeId = el("decisionObjectTypeSelect")?.value || firstObjectType();
+  if (!objectTypeId) return;
+  const [rules, scorecards] = await Promise.allSettled([
+    api(`/decision/rules?object_type_id=${encodeURIComponent(objectTypeId)}`),
+    api(`/decision/scorecards?object_type_id=${encodeURIComponent(objectTypeId)}`)
+  ]);
+  state.decision.rules = rules.status === "fulfilled" ? rules.value : [];
+  state.decision.scorecards = scorecards.status === "fulfilled" ? scorecards.value : [];
+}
+
+function renderDecisionWorkspace() {
+  setDecisionTab(state.decision.activeTab || "risk");
+  renderDecisionRules();
+  renderDecisionScorecards();
+  renderDecisionRiskBoard();
+  renderDecisionExplanation();
+  renderDecisionTimeline();
+  renderEntityCandidates();
+  el("decisionScenarioOutput").textContent = state.decision.scenario ? compactJson(state.decision.scenario) : "No scenario run yet";
+  el("decisionAgentPlan").textContent = state.decision.agentRun ? compactJson(state.decision.agentRun) : "No agent run yet";
+}
+
+function renderDecisionRules() {
+  const rules = state.decision.rules || [];
+  el("decisionRuleList").innerHTML = rules.map((rule) => `
+    <div class="list-item">
+      <strong>${escapeHtml(rule.display_name || rule.id)}</strong>
+      <span>${escapeHtml(rule.severity || "info")} - ${escapeHtml(rule.id)}</span>
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No rules. Bootstrap defaults or create rules through the API.</div>';
+}
+
+function renderDecisionScorecards() {
+  const scorecards = state.decision.scorecards || [];
+  el("decisionScorecardList").innerHTML = scorecards.map((scorecard) => `
+    <div class="list-item">
+      <strong>${escapeHtml(scorecard.display_name || scorecard.id)}</strong>
+      <span>${escapeHtml((scorecard.features || []).length)} features</span>
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No scorecards</div>';
+}
+
+function renderDecisionRiskBoard() {
+  const findings = state.decision.evaluation?.findings || [];
+  el("decisionSummary").textContent = state.decision.evaluation
+    ? `${state.decision.evaluation.object_count} objects evaluated`
+    : "Evaluate ontology objects against local deterministic rules";
+  if (!findings.length) {
+    el("decisionRiskBoard").innerHTML = '<div class="empty-state">No evaluated objects</div>';
+    el("decisionOutput").textContent = state.decision.evaluation ? compactJson(state.decision.evaluation) : "";
+    return;
+  }
+  const sorted = [...findings].sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0));
+  el("decisionRiskBoard").innerHTML = sorted.map((finding) => {
+    const props = finding.object?.properties || {};
+    const drivers = (finding.risk?.drivers || []).slice(0, 3).map((driver) => `<span>${escapeHtml(driver.feature || driver.rule_id || "driver")}</span>`).join("");
+    return `
+      <article class="decision-card" data-decision-object="${escapeHtml(finding.object_id)}">
+        <div class="decision-card-head">
+          <strong>${escapeHtml(props.name || props.title || finding.object_id)}</strong>
+          ${renderRiskBadge(finding.risk)}
+        </div>
+        <span>${escapeHtml(finding.object_id)} - ${escapeHtml(props.status || props.criticality || finding.object_type_id)}</span>
+        <div class="driver-row">${drivers || "<span>No drivers</span>"}</div>
+      </article>
+    `;
+  }).join("");
+  el("decisionOutput").textContent = compactJson({
+    status: state.decision.evaluation.status,
+    object_count: state.decision.evaluation.object_count,
+    high_risk: sorted.filter((item) => ["high", "critical"].includes(item.risk?.band)).map((item) => item.object_id)
+  });
+}
+
+function renderDecisionExplanation() {
+  const explanation = state.decision.explanation;
+  if (!explanation) {
+    el("decisionExplanation").innerHTML = '<div class="empty-state">Select or enter an object ID, then explain it</div>';
+    return;
+  }
+  const risk = explanation.risk || {};
+  el("decisionExplanation").innerHTML = `
+    <div class="decision-explain-head">
+      <div>
+        <strong>${escapeHtml(explanation.object?.id)}</strong>
+        <span>${escapeHtml(explanation.object?.object_type_id)}</span>
+      </div>
+      ${renderRiskBadge(risk)}
+    </div>
+    <p>${escapeHtml(explanation.explanation || risk.explanation || "")}</p>
+    <div class="driver-list">
+      ${(risk.drivers || []).map((driver) => `<div><strong>${escapeHtml(driver.feature || driver.rule_id || "driver")}</strong><span>weight ${escapeHtml(driver.weight ?? 0)}</span></div>`).join("") || '<div>No active drivers matched</div>'}
+    </div>
+    <pre class="mini-output">${escapeHtml(compactJson({
+      recommended_actions: explanation.recommended_actions,
+      duplicate_warnings: explanation.duplicate_warnings,
+      temporal_summary: explanation.temporal_summary
+    }))}</pre>
+  `;
+  el("decisionOutput").textContent = compactJson(explanation);
+}
+
+function renderDecisionTimeline() {
+  const rows = state.decision.timeline?.timeline || [];
+  if (!rows.length) {
+    el("decisionTimeline").innerHTML = '<div class="empty-state">No timeline loaded</div>';
+    return;
+  }
+  el("decisionTimeline").innerHTML = `
+    <div class="timeline-list">
+      ${rows.map((item) => `
+        <article>
+          <strong>${escapeHtml(item.event_type)}</strong>
+          <span>seq ${escapeHtml(item.seq)} - ${new Date((item.created_at || 0) * 1000).toLocaleString()}</span>
+          <pre class="mini-output">${escapeHtml(compactJson({ properties: item.properties, lineage: item.lineage }))}</pre>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderEntityCandidates() {
+  const candidates = state.decision.candidates || [];
+  el("entityCandidateList").innerHTML = candidates.map((candidate) => `
+    <div class="candidate-row">
+      <div>
+        <strong>${escapeHtml(candidate.object_ids?.join(" + ") || candidate.id)}</strong>
+        <span>confidence ${escapeHtml(candidate.score)} - ${escapeHtml(candidate.status)}</span>
+      </div>
+      <div class="button-row">
+        <button class="btn small" data-accept-candidate="${escapeHtml(candidate.id)}" type="button">Accept</button>
+        <button class="btn small" data-reject-candidate="${escapeHtml(candidate.id)}" type="button">Reject</button>
+      </div>
+    </div>
+  `).join("") || '<div class="empty-state compact-empty">No candidate queue</div>';
+}
+
+async function bootstrapDecisionRules() {
+  const objectTypeId = el("decisionObjectTypeSelect").value || firstObjectType();
+  await api("/decision/bootstrap", {
+    method: "POST",
+    body: JSON.stringify({ object_type_id: objectTypeId })
+  });
+  await loadDecisionRules();
+  renderDecisionWorkspace();
+  showToast("Decision rules bootstrapped");
+}
+
+async function runDecisionEvaluation(notify = true) {
+  const objectTypeId = el("decisionObjectTypeSelect").value || firstObjectType();
+  if (!objectTypeId) return;
+  state.decision.evaluation = await api("/decision/evaluate", {
+    method: "POST",
+    body: JSON.stringify({ object_type_id: objectTypeId, filters: {}, limit: 250, persist_run: true })
+  });
+  if (!el("decisionObjectIdInput").value && state.decision.evaluation.findings?.[0]) {
+    el("decisionObjectIdInput").value = state.decision.evaluation.findings[0].object_id;
+  }
+  setDecisionTab("risk");
+  renderDecisionWorkspace();
+  if (notify) showToast(`${state.decision.evaluation.object_count} objects evaluated`);
+}
+
+async function explainDecisionObject() {
+  const objectTypeId = el("decisionObjectTypeSelect").value || firstObjectType();
+  const objectId = el("decisionObjectIdInput").value.trim();
+  if (!objectTypeId || !objectId) {
+    showToast("Enter an object type and object ID");
+    return;
+  }
+  state.decision.explanation = await api(`/decision/objects/${encodeURIComponent(objectTypeId)}/${encodeURIComponent(objectId)}/explain`);
+  setDecisionTab("explain");
+  renderDecisionWorkspace();
+}
+
+async function loadDecisionTimeline() {
+  const objectTypeId = el("decisionObjectTypeSelect").value || firstObjectType();
+  const objectId = el("decisionObjectIdInput").value.trim();
+  if (!objectTypeId || !objectId) {
+    showToast("Enter an object type and object ID");
+    return;
+  }
+  state.decision.timeline = await api(`/temporal/objects/${encodeURIComponent(objectTypeId)}/${encodeURIComponent(objectId)}/timeline`);
+  setDecisionTab("timeline");
+  renderDecisionWorkspace();
+}
+
+async function runEntityResolution() {
+  const objectTypeId = el("decisionObjectTypeSelect").value || firstObjectType();
+  const fields = String(el("entityFieldsInput").value || "").split(",").map((item) => item.trim()).filter(Boolean);
+  state.decision.entityJob = await api("/entity-resolution/jobs", {
+    method: "POST",
+    body: JSON.stringify({ object_type_id: objectTypeId, fields, threshold: 70, limit: 1000 })
+  });
+  state.decision.candidates = state.decision.entityJob.candidates || [];
+  setDecisionTab("entity");
+  renderDecisionWorkspace();
+  showToast(`${state.decision.candidates.length} candidates`);
+}
+
+async function refreshEntityCandidates() {
+  if (!state.decision.entityJob?.id) return;
+  const result = await api(`/entity-resolution/jobs/${encodeURIComponent(state.decision.entityJob.id)}/candidates`);
+  state.decision.candidates = result.candidates || [];
+  renderDecisionWorkspace();
+}
+
+async function acceptEntityCandidate(candidateId) {
+  await api(`/entity-resolution/candidates/${encodeURIComponent(candidateId)}/accept`, {
+    method: "POST",
+    body: JSON.stringify({ actor: "workspace" })
+  });
+  await refreshEntityCandidates();
+}
+
+async function rejectEntityCandidate(candidateId) {
+  await api(`/entity-resolution/candidates/${encodeURIComponent(candidateId)}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ actor: "workspace", reason: "Rejected in Decision workspace" })
+  });
+  await refreshEntityCandidates();
+}
+
+async function runDecisionScenario() {
+  const selectedId = el("decisionObjectIdInput").value.trim();
+  const seeds = String(el("scenarioSeedsInput").value || selectedId).split(",").map((item) => item.trim()).filter(Boolean);
+  const overrides = parseJsonValue(el("scenarioOverridesInput").value, {}, "Scenario overrides");
+  state.decision.scenario = await api("/decision/scenarios", {
+    method: "POST",
+    body: JSON.stringify({
+      display_name: `Workspace Scenario ${new Date().toLocaleTimeString()}`,
+      seed_object_ids: seeds,
+      overrides,
+      propagation_rules: []
+    })
+  });
+  setDecisionTab("scenario");
+  renderDecisionWorkspace();
+  showToast("Scenario complete");
+}
+
+async function runDecisionAgent() {
+  const agentId = el("decisionAgentSelect").value;
+  if (!agentId) {
+    showToast("Choose an agent");
+    return;
+  }
+  state.decision.agentRun = await api(`/agents/${encodeURIComponent(agentId)}/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ user_prompt: el("decisionAgentPrompt").value, max_context_objects: 8 })
+  });
+  setDecisionTab("agent");
+  renderDecisionWorkspace();
+}
+
+function defaultPipelineNodeConfig(type) {
+  const draft = state.pipeline.draft || defaultPipelineDraft();
+  if (type === "input_dataset") return { asset_id: state.datasets[0]?.id || "" };
+  if (type === "dataset_output" || type === "output_dataset") return { asset_id: `${draft.display_name || "pipeline"}_output`.toLowerCase().replace(/[^a-z0-9_]+/g, "_") };
+  if (type === "filter") return { filters: {} };
+  if (type === "project" || type === "select") return { columns: [] };
+  if (type === "rename") return { mapping: {} };
+  if (type === "join") return { right_asset_id: state.datasets[1]?.id || "", left_key: "", right_key: "", join_type: "inner" };
+  if (type === "union") return { asset_id: state.datasets[1]?.id || "" };
+  if (type === "aggregate") return { group_by: [], metrics: [{ operation: "count", alias: "n" }] };
+  if (type === "sort") return { field: "", direction: "asc" };
+  if (type === "limit") return { limit: 100 };
+  if (type === "unique_id") return { target_field: "id", source_fields: [] };
+  if (type === "llm_assist") return { prompt: "summarize", source_fields: [], output_field: "llm_summary" };
+  if (type === "ontology_output") return { object_type_id: state.catalogs.objectTypes[0]?.id || "", id_field: "id", mapping: {} };
+  return {};
+}
+
+function addPipelineNode(type, position = null) {
   const draft = state.pipeline.draft || defaultPipelineDraft();
   const id = `${type}_${draft.nodes.length + 1}`;
-  const config = type === "input_dataset" ? { asset_id: state.datasets[0]?.id || "" }
-    : type === "dataset_output" ? { asset_id: `${draft.display_name || "pipeline"}_output`.toLowerCase().replace(/[^a-z0-9_]+/g, "_") }
-    : {};
+  const config = defaultPipelineNodeConfig(type);
   const previous = draft.nodes[draft.nodes.length - 1];
-  draft.nodes.push({ id, type, label: PIPELINE_NODE_TYPES.find((node) => node.type === type)?.label || type, config });
+  const catalog = state.pipeline.nodeTypes?.length ? state.pipeline.nodeTypes : PIPELINE_NODE_TYPES;
+  draft.nodes.push({
+    id,
+    type,
+    label: catalog.find((node) => node.type === type)?.label || type,
+    position: position || { x: 80 + (draft.nodes.length % 4) * 260, y: 90 + Math.floor(draft.nodes.length / 4) * 150 },
+    config
+  });
   if (previous) draft.edges.push({ source: previous.id, target: id });
   state.pipeline.activeNodeId = id;
+  state.pipeline.activeEdgeId = "";
   renderPipelineBuilder();
 }
 
@@ -1079,6 +3182,19 @@ async function runObjectExplorerQuery(notify = true) {
         selected_ids: state.objectExplorer.selectedObjectId ? [state.objectExplorer.selectedObjectId] : []
       })
     });
+    state.objectExplorer.riskById = {};
+    const ids = (state.objectExplorer.query.objects || []).map((obj) => obj.id);
+    if (ids.length) {
+      try {
+        const decision = await api("/decision/evaluate", {
+          method: "POST",
+          body: JSON.stringify({ object_type_id: objectTypeId, object_ids: ids, limit: ids.length, persist_run: false })
+        });
+        state.objectExplorer.riskById = Object.fromEntries((decision.findings || []).map((item) => [item.object_id, item.risk]));
+      } catch (_) {
+        state.objectExplorer.riskById = {};
+      }
+    }
     renderObjectExplorer();
     if (notify) showToast(`${state.objectExplorer.query.result_count} objects`);
   } catch (error) {
@@ -1131,15 +3247,21 @@ function renderExplorerResults() {
   }
   const columns = query.columns.slice(0, 8);
   el("explorerResults").innerHTML = `
-    <table><thead><tr><th></th><th>ID</th>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead>
+    <table><thead><tr><th></th><th>ID</th><th>Risk</th>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead>
     <tbody>${query.objects.map((obj) => `
       <tr data-explorer-object-id="${escapeHtml(obj.id)}" class="${state.objectExplorer.selectedObjectId === obj.id ? "selected" : ""}">
         <td><input type="checkbox" data-explorer-select-id="${escapeHtml(obj.id)}"${state.objectExplorer.selectedIds.includes(obj.id) ? " checked" : ""} /></td>
         <td><strong>${escapeHtml(obj.id)}</strong></td>
+        <td>${renderRiskBadge(state.objectExplorer.riskById[obj.id])}</td>
         ${columns.map((column) => `<td>${escapeHtml(runtimeCellValue(obj, column))}</td>`).join("")}
       </tr>
     `).join("")}</tbody></table>
   `;
+}
+
+function renderRiskBadge(risk) {
+  if (!risk) return '<span class="risk-badge muted">none</span>';
+  return `<span class="risk-badge ${escapeHtml(risk.band || "low")}">${escapeHtml(risk.band || "low")} ${escapeHtml(risk.score ?? 0)}</span>`;
 }
 
 function runtimeCellValue(obj, field) {
@@ -1168,15 +3290,21 @@ async function selectExplorerObject(objectId) {
   const objectTypeId = el("explorerObjectTypeSelect").value;
   try {
     const profile = await api(`/objects/${encodeURIComponent(objectTypeId)}/${encodeURIComponent(objectId)}/profile`);
+    let explanation = null;
+    try {
+      explanation = await api(`/decision/objects/${encodeURIComponent(objectTypeId)}/${encodeURIComponent(objectId)}/explain`);
+    } catch (_) {
+      explanation = null;
+    }
     el("explorerObjectPreview").className = "object-profile";
-    renderExplorerProfile(profile);
+    renderExplorerProfile(profile, explanation);
   } catch (error) {
     showToast(error.message);
   }
   renderExplorerResults();
 }
 
-function renderExplorerProfile(profile) {
+function renderExplorerProfile(profile, explanation = null) {
   const obj = profile.object || {};
   const props = obj.properties || {};
   const entries = [
@@ -1187,7 +3315,11 @@ function renderExplorerProfile(profile) {
     ["Criticality", props.criticality || ""],
     ["Links", `${profile.metrics?.inbound_link_count || 0} in / ${profile.metrics?.outbound_link_count || 0} out`]
   ];
-  el("explorerObjectPreview").innerHTML = entries.map(([key, value]) => `<div class="kv"><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+  const risk = explanation?.risk;
+  el("explorerObjectPreview").innerHTML = `
+    ${entries.map(([key, value]) => `<div class="kv"><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
+    ${risk ? `<div class="decision-inline"><strong>${renderRiskBadge(risk)}</strong><span>${escapeHtml(risk.explanation || "")}</span></div>` : ""}
+  `;
 }
 
 async function saveExploration() {
@@ -1321,7 +3453,8 @@ function handleExplorerFacetClick(event) {
 
 function handlePipelineNodeChange(event) {
   const field = event.target.dataset.pipelineNodeField;
-  if (!field) return;
+  const configField = event.target.dataset.pipelineConfigField;
+  if (!field && !configField) return;
   const node = state.pipeline.draft?.nodes?.find((item) => item.id === state.pipeline.activeNodeId);
   if (!node) return;
   try {
@@ -1329,8 +3462,19 @@ function handlePipelineNodeChange(event) {
       node.config = parseJsonValue(event.target.value, {}, "Node config");
     } else if (field === "asset_id") {
       node.config = { ...(node.config || {}), asset_id: event.target.value };
+    } else if (configField) {
+      const valueType = event.target.dataset.configType || "text";
+      let value = event.target.value;
+      if (valueType === "json") value = parseJsonValue(value, configField === "metrics" ? [] : {}, `${configField} JSON`);
+      if (valueType === "csv") value = value.split(",").map((item) => item.trim()).filter(Boolean);
+      if (valueType === "number") value = Number(value);
+      node.config = { ...(node.config || {}), [configField]: value };
     } else {
       node[field] = event.target.value;
+      if (field === "type") {
+        node.config = defaultPipelineNodeConfig(event.target.value);
+        node.label = (state.pipeline.nodeTypes?.length ? state.pipeline.nodeTypes : PIPELINE_NODE_TYPES).find((item) => item.type === event.target.value)?.label || event.target.value;
+      }
     }
     renderPipelineCanvas();
   } catch (error) {
@@ -1463,6 +3607,30 @@ function defaultLogicBlock(type) {
   if (type === "object_aggregate") {
     return { type, object_type_id: firstObjectType(), filters: "{}", op: "count", field: "", output: "aggregate" };
   }
+  if (type === "explain_object") {
+    return { type, object_type_id: firstObjectType(), object_id: "", output: "explanation" };
+  }
+  if (type === "score_risk") {
+    return { type, object_type_id: firstObjectType(), object_id: "", scorecard_ids: "", output: "risk" };
+  }
+  if (type === "run_scenario") {
+    return { type, seed_object_ids: "", overrides: "{}", propagation_rules: "[]", output: "scenario" };
+  }
+  if (type === "create_incident") {
+    return { type, display_name: "Logic Incident", description: "$prompt", severity: "medium", linked_objects: "[]", output: "incident" };
+  }
+  if (type === "evaluate_alert_rules") {
+    return { type, source: "", event_type: "", status: "", limit: 500, output: "alerts" };
+  }
+  if (type === "run_runbook") {
+    return { type, runbook_id: "", incident_id: "", inputs: "{}", output: "runbook" };
+  }
+  if (type === "run_data_contract") {
+    return { type, contract_id: "", asset_id: "", output: "data_contract" };
+  }
+  if (type === "analyze_lineage_impact") {
+    return { type, resource_kind: "dataset", resource_id: "", direction: "downstream", max_depth: 8, output: "lineage_impact" };
+  }
   if (type === "propose_action" || type === "apply_action") {
     return { type, action_type_id: firstActionType(), parameters: "{}", output: type === "apply_action" ? "applied_action" : "proposed_action" };
   }
@@ -1537,6 +3705,14 @@ function renderBlockBody(block) {
   if (block.type === "llm") return renderLlmBlock(block);
   if (block.type === "object_query") return renderObjectQueryBlock(block);
   if (block.type === "object_aggregate") return renderObjectAggregateBlock(block);
+  if (block.type === "explain_object") return renderDecisionLogicBlock(block, "explain");
+  if (block.type === "score_risk") return renderDecisionLogicBlock(block, "score");
+  if (block.type === "run_scenario") return renderScenarioLogicBlock(block);
+  if (block.type === "create_incident") return renderCreateIncidentBlock(block);
+  if (block.type === "evaluate_alert_rules") return renderEvaluateAlertsBlock(block);
+  if (block.type === "run_runbook") return renderRunbookLogicBlock(block);
+  if (block.type === "run_data_contract") return renderDataContractLogicBlock(block);
+  if (block.type === "analyze_lineage_impact") return renderLineageImpactLogicBlock(block);
   if (block.type === "propose_action" || block.type === "apply_action") return renderActionBlock(block);
   if (block.type === "pipeline_suggest") return renderPipelineBlock(block);
   if (block.type === "document_extract") return renderDocumentBlock(block);
@@ -1579,6 +3755,85 @@ function renderObjectAggregateBlock(block) {
       <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "aggregate")}" /></label>
     </div>
     <label class="field"><span>Filters JSON</span><textarea rows="3" data-block-field="filters">${escapeHtml(block.filters || "{}")}</textarea></label>
+  `;
+}
+
+function renderDecisionLogicBlock(block, mode) {
+  return `
+    <div class="block-grid three">
+      <label class="field"><span>Object Type</span><select data-block-field="object_type_id">${objectTypeOptions(block.object_type_id)}</select></label>
+      <label class="field"><span>Object ID</span><input data-block-field="object_id" value="${escapeHtml(block.object_id || "")}" placeholder="$object_id or asset_1" /></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || (mode === "score" ? "risk" : "explanation"))}" /></label>
+      ${mode === "score" ? `<label class="field"><span>Scorecard IDs</span><input data-block-field="scorecard_ids" value="${escapeHtml(block.scorecard_ids || "")}" placeholder="optional comma list" /></label>` : ""}
+    </div>
+  `;
+}
+
+function renderScenarioLogicBlock(block) {
+  return `
+    <div class="block-grid">
+      <label class="field"><span>Seed Object IDs</span><input data-block-field="seed_object_ids" value="${escapeHtml(block.seed_object_ids || "")}" placeholder="asset_1, asset_2 or $ids" /></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "scenario")}" /></label>
+    </div>
+    <label class="field"><span>Overrides JSON</span><textarea rows="4" data-block-field="overrides">${escapeHtml(block.overrides || "{}")}</textarea></label>
+    <label class="field"><span>Propagation Rules JSON</span><textarea rows="3" data-block-field="propagation_rules">${escapeHtml(block.propagation_rules || "[]")}</textarea></label>
+  `;
+}
+
+function renderCreateIncidentBlock(block) {
+  return `
+    <div class="block-grid three">
+      <label class="field"><span>Name</span><input data-block-field="display_name" value="${escapeHtml(block.display_name || "Logic Incident")}" /></label>
+      <label class="field"><span>Severity</span><select data-block-field="severity">${optionList(["info", "low", "medium", "high", "critical"], block.severity || "medium")}</select></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "incident")}" /></label>
+    </div>
+    <label class="field"><span>Description</span><textarea rows="3" data-block-field="description">${escapeHtml(block.description || "$prompt")}</textarea></label>
+    <label class="field"><span>Linked Objects JSON</span><textarea rows="3" data-block-field="linked_objects">${escapeHtml(block.linked_objects || "[]")}</textarea></label>
+  `;
+}
+
+function renderEvaluateAlertsBlock(block) {
+  return `
+    <div class="block-grid three">
+      <label class="field"><span>Source</span><input data-block-field="source" value="${escapeHtml(block.source || "")}" placeholder="optional" /></label>
+      <label class="field"><span>Event Type</span><input data-block-field="event_type" value="${escapeHtml(block.event_type || "")}" placeholder="optional" /></label>
+      <label class="field"><span>Status</span><input data-block-field="status" value="${escapeHtml(block.status || "")}" placeholder="optional" /></label>
+      <label class="field"><span>Limit</span><input type="number" data-block-field="limit" value="${escapeHtml(block.limit || 500)}" /></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "alerts")}" /></label>
+    </div>
+  `;
+}
+
+function renderRunbookLogicBlock(block) {
+  return `
+    <div class="block-grid three">
+      <label class="field"><span>Runbook ID</span><input data-block-field="runbook_id" value="${escapeHtml(block.runbook_id || "")}" /></label>
+      <label class="field"><span>Incident ID</span><input data-block-field="incident_id" value="${escapeHtml(block.incident_id || "")}" placeholder="optional or $incident.id" /></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "runbook")}" /></label>
+    </div>
+    <label class="field"><span>Inputs JSON</span><textarea rows="4" data-block-field="inputs">${escapeHtml(block.inputs || "{}")}</textarea></label>
+  `;
+}
+
+function renderDataContractLogicBlock(block) {
+  return `
+    <div class="block-grid three">
+      <label class="field"><span>Contract ID</span><input data-block-field="contract_id" value="${escapeHtml(block.contract_id || "")}" /></label>
+      <label class="field"><span>Asset ID</span><input data-block-field="asset_id" value="${escapeHtml(block.asset_id || "")}" placeholder="optional override" /></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "data_contract")}" /></label>
+    </div>
+  `;
+}
+
+function renderLineageImpactLogicBlock(block) {
+  return `
+    <div class="block-grid three">
+      <label class="field"><span>Resource Kind</span><select data-block-field="resource_kind">${optionList(["dataset", "pipeline", "object_type"], block.resource_kind || "dataset")}</select></label>
+      <label class="field"><span>Resource ID</span><input data-block-field="resource_id" value="${escapeHtml(block.resource_id || "")}" /></label>
+      <label class="field"><span>Direction</span><select data-block-field="direction">${optionList(["downstream", "upstream"], block.direction || "downstream")}</select></label>
+      <label class="field"><span>Max Depth</span><input type="number" data-block-field="max_depth" value="${escapeHtml(block.max_depth || 8)}" /></label>
+      <label class="field"><span>Output Variable</span><input data-block-field="output" value="${escapeHtml(block.output || "lineage_impact")}" /></label>
+    </div>
   `;
 }
 
@@ -1821,6 +4076,11 @@ function renderMap(fit = false) {
 
 function featureColor(feature) {
   const props = feature.properties || {};
+  const objectId = props.object_id || feature.id;
+  const band = state.featureRiskById[objectId]?.band;
+  if (band === "critical") return "#8f1f2b";
+  if (band === "high") return "#b43b3b";
+  if (band === "medium") return "#ad6b18";
   return state.layer?.style?.marker_color || (props.criticality === "high" ? "#b43b3b" : "#1d5f8f");
 }
 
@@ -1955,12 +4215,27 @@ async function loadLayerFeatures(layerId = el("layerSelect").value) {
 function setFeatures(features) {
   state.features = features;
   state.selectedFeature = null;
+  state.featureRiskById = {};
   el("featureCount").textContent = `${features.length} features`;
   el("mapTitle").textContent = state.layer?.display_name || "Operational Map";
   el("mapSubtitle").textContent = state.layer?.object_type_id || "Feature collection";
   renderFeatureTable(features);
   renderProfile(null);
   renderMap(true);
+  loadMapRiskOverlay(features).catch(() => {});
+}
+
+async function loadMapRiskOverlay(features) {
+  const objectTypeId = state.layer?.object_type_id || "asset";
+  const ids = features.map((feature) => feature.properties?.object_id || feature.id).filter(Boolean);
+  if (!objectTypeId || !ids.length) return;
+  const decision = await api("/decision/evaluate", {
+    method: "POST",
+    body: JSON.stringify({ object_type_id: objectTypeId, object_ids: ids, limit: ids.length, persist_run: false })
+  });
+  state.featureRiskById = Object.fromEntries((decision.findings || []).map((item) => [item.object_id, item.risk]));
+  renderFeatureTable(state.features);
+  renderMap(false);
 }
 
 function featurePoint(feature) {
@@ -2130,9 +4405,10 @@ function renderFeatureTable(features) {
   const rows = features.slice(0, 8).map((feature) => {
     const props = feature.properties || {};
     const selected = state.selectedFeature?.id === feature.id ? " selected" : "";
-    return `<tr class="${selected}" data-feature-id="${escapeHtml(feature.id)}"><td>${escapeHtml(props.object_id || feature.id)}</td><td>${escapeHtml(props.name || props.title || "")}</td><td>${escapeHtml(props.criticality || props.status || "")}</td></tr>`;
+    const objectId = props.object_id || feature.id;
+    return `<tr class="${selected}" data-feature-id="${escapeHtml(feature.id)}"><td>${escapeHtml(objectId)}</td><td>${escapeHtml(props.name || props.title || "")}</td><td>${escapeHtml(props.criticality || props.status || "")}</td><td>${renderRiskBadge(state.featureRiskById[objectId])}</td></tr>`;
   }).join("");
-  el("featureTable").innerHTML = `<table><thead><tr><th>ID</th><th>Name</th><th>State</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el("featureTable").innerHTML = `<table><thead><tr><th>ID</th><th>Name</th><th>State</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderProfile(profile) {
@@ -2494,6 +4770,81 @@ function buildLogicBlock(block) {
       output: block.output || "aggregate"
     };
   }
+  if (block.type === "explain_object") {
+    return {
+      type: "explain_object",
+      object_type_id: block.object_type_id,
+      object_id: block.object_id || "$object_id",
+      output: block.output || "explanation"
+    };
+  }
+  if (block.type === "score_risk") {
+    return {
+      type: "score_risk",
+      object_type_id: block.object_type_id,
+      object_id: block.object_id || "$object_id",
+      scorecard_ids: String(block.scorecard_ids || "").split(",").map((item) => item.trim()).filter(Boolean),
+      output: block.output || "risk"
+    };
+  }
+  if (block.type === "run_scenario") {
+    return {
+      type: "run_scenario",
+      seed_object_ids: block.seed_object_ids || "",
+      overrides: parseJsonValue(block.overrides, {}, "Scenario overrides"),
+      propagation_rules: parseJsonValue(block.propagation_rules, [], "Scenario propagation rules"),
+      output: block.output || "scenario"
+    };
+  }
+  if (block.type === "create_incident") {
+    return {
+      type: "create_incident",
+      display_name: block.display_name || "Logic Incident",
+      description: block.description || "$prompt",
+      severity: block.severity || "medium",
+      linked_objects: parseJsonValue(block.linked_objects, [], "Incident linked objects"),
+      output: block.output || "incident",
+      actor: "workspace"
+    };
+  }
+  if (block.type === "evaluate_alert_rules") {
+    return {
+      type: "evaluate_alert_rules",
+      source: block.source || null,
+      event_type: block.event_type || null,
+      status: block.status || null,
+      limit: Number(block.limit || 500),
+      output: block.output || "alerts"
+    };
+  }
+  if (block.type === "run_runbook") {
+    return {
+      type: "run_runbook",
+      runbook_id: block.runbook_id || "",
+      incident_id: block.incident_id || null,
+      inputs: parseJsonValue(block.inputs, {}, "Runbook inputs"),
+      output: block.output || "runbook",
+      actor: "workspace"
+    };
+  }
+  if (block.type === "run_data_contract") {
+    return {
+      type: "run_data_contract",
+      contract_id: block.contract_id || "",
+      asset_id: block.asset_id || null,
+      output: block.output || "data_contract"
+    };
+  }
+  if (block.type === "analyze_lineage_impact") {
+    return {
+      type: "analyze_lineage_impact",
+      resource_kind: block.resource_kind || "dataset",
+      resource_id: block.resource_id || "",
+      direction: block.direction || "downstream",
+      max_depth: Number(block.max_depth || 8),
+      output: block.output || "lineage_impact"
+    };
+  }
   if (block.type === "propose_action" || block.type === "apply_action") {
     return {
       type: block.type,
@@ -2643,6 +4994,27 @@ function normalizeLogicBlock(block) {
   if (block.type === "propose_action" || block.type === "apply_action") {
     return { ...defaultLogicBlock(block.type), ...block, parameters: compactJson(block.parameters || {}) };
   }
+  if (block.type === "explain_object" || block.type === "score_risk") {
+    return { ...defaultLogicBlock(block.type), ...block, scorecard_ids: Array.isArray(block.scorecard_ids) ? block.scorecard_ids.join(", ") : (block.scorecard_ids || "") };
+  }
+  if (block.type === "run_scenario") {
+    return {
+      ...defaultLogicBlock("run_scenario"),
+      ...block,
+      seed_object_ids: Array.isArray(block.seed_object_ids) ? block.seed_object_ids.join(", ") : (block.seed_object_ids || ""),
+      overrides: compactJson(block.overrides || {}),
+      propagation_rules: compactJson(block.propagation_rules || [])
+    };
+  }
+  if (block.type === "create_incident") {
+    return { ...defaultLogicBlock("create_incident"), ...block, linked_objects: compactJson(block.linked_objects || []) };
+  }
+  if (block.type === "run_runbook") {
+    return { ...defaultLogicBlock("run_runbook"), ...block, inputs: compactJson(block.inputs || {}) };
+  }
+  if (["evaluate_alert_rules", "run_data_contract", "analyze_lineage_impact"].includes(block.type)) {
+    return { ...defaultLogicBlock(block.type), ...block };
+  }
   if (block.type === "document_extract") {
     return { ...defaultLogicBlock("document_extract"), ...block, text: String(block.text || "").replace(/^\$/, ""), schema: compactJson(block.extraction_schema || {}) };
   }
@@ -2657,7 +5029,9 @@ function bindEvents() {
   el("filesNav").addEventListener("click", () => setView("files"));
   el("ontologyNav").addEventListener("click", () => setView("ontology"));
   el("applicationsNav").addEventListener("click", () => setView("applications"));
-  el("searchNav").addEventListener("click", openGlobalSearch);
+  el("searchNav").addEventListener("click", () => setView("search"));
+  el("graphNav").addEventListener("click", () => setView("graph"));
+  el("commandCenterNav").addEventListener("click", () => setView("command-center"));
   el("openSearchBtn").addEventListener("click", openGlobalSearch);
   el("homeSearchBtn").addEventListener("click", openGlobalSearch);
   el("assistLauncherBtn").addEventListener("click", () => setView("aip"));
@@ -2669,6 +5043,17 @@ function bindEvents() {
   el("filesSearchInput").addEventListener("input", renderFilesPage);
   el("objectTypeCatalogFilter").addEventListener("input", renderOntologyPage);
   el("appSearchInput").addEventListener("input", renderApplicationsPage);
+  el("platformSearchInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") refreshSearchWorkspace();
+  });
+  el("platformSearchKind").addEventListener("change", refreshSearchWorkspace);
+  el("platformSearchBtn").addEventListener("click", refreshSearchWorkspace);
+  el("platformSearchInlineBtn").addEventListener("click", refreshSearchWorkspace);
+  el("refreshGraphBtn").addEventListener("click", refreshGraphWorkspace);
+  el("refreshCommandCenterBtn").addEventListener("click", () => refreshCommandCenterWorkspace().catch((error) => showToast(error.message)));
+  el("bootstrapCommandCenterBtn").addEventListener("click", () => bootstrapCommandCenter().catch((error) => showToast(error.message)));
+  el("runCommandCenterTriageBtn").addEventListener("click", () => runCommandCenterTriage().catch((error) => showToast(error.message)));
+  el("approveCommandCenterBtn").addEventListener("click", () => approveCommandCenterAction().catch((error) => showToast(error.message)));
   el("globalSearchInput").addEventListener("input", (event) => {
     state.lastSearchQuery = event.target.value;
     renderGlobalSearchResults();
@@ -2700,8 +5085,23 @@ function bindEvents() {
       setView(viewButton.dataset.openView);
       return;
     }
+    const routeButton = event.target.closest("[data-open-route]");
+    if (routeButton) {
+      const route = routeButton.dataset.openRoute || "";
+      if (route.startsWith("/workspace/")) {
+        setView(routeViewFromPath(route));
+      } else {
+        showToast(route);
+      }
+      return;
+    }
     const resourceRow = event.target.closest("[data-resource-view]");
     if (resourceRow) setView(resourceRow.dataset.resourceView);
+    const commandAssetRow = event.target.closest("[data-command-asset]");
+    if (commandAssetRow) {
+      state.commandCenter.selectedAssetId = commandAssetRow.dataset.commandAsset;
+      refreshCommandCenterWorkspace().catch((error) => showToast(error.message));
+    }
   });
   document.querySelectorAll("[data-app-category]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2721,7 +5121,28 @@ function bindEvents() {
   el("aipNav").addEventListener("click", () => setView("aip"));
   el("workshopNav").addEventListener("click", () => setView("workshop"));
   el("object-explorerNav").addEventListener("click", () => setView("object-explorer"));
+  el("decisionNav").addEventListener("click", () => setView("decision"));
+  el("modelsNav").addEventListener("click", () => setView("models"));
+  el("opsNav").addEventListener("click", () => setView("ops"));
+  el("investigationsNav").addEventListener("click", () => setView("investigations"));
   el("pipelineNav").addEventListener("click", () => setView("pipeline"));
+  el("ontologyGeneratorAssetSelect").addEventListener("change", (event) => {
+    state.ontologyGenerator.selectedAssetId = event.target.value;
+  });
+  el("ontologyDraftSelect").addEventListener("change", (event) => {
+    state.ontologyGenerator.selectedDraftId = event.target.value;
+    state.ontologyGenerator.result = null;
+    renderOntologyPage();
+  });
+  el("ontologyGeneratorActionsToggle").addEventListener("change", (event) => {
+    state.ontologyGenerator.includeActions = event.target.checked;
+  });
+  el("ontologyGeneratorPipelineToggle").addEventListener("change", (event) => {
+    state.ontologyGenerator.createPipelineGraph = event.target.checked;
+  });
+  el("createOntologyDraftBtn").addEventListener("click", () => createOntologyGeneratorDraft().catch((error) => showToast(error.message)));
+  el("validateOntologyDraftBtn").addEventListener("click", () => validateOntologyGeneratorDraft().catch((error) => showToast(error.message)));
+  el("applyOntologyDraftBtn").addEventListener("click", () => applyOntologyGeneratorDraft().catch((error) => showToast(error.message)));
   el("bootstrapBtn").addEventListener("click", bootstrapDomain);
   el("validateBtn").addEventListener("click", validateOntology);
   el("refreshLayersBtn").addEventListener("click", refreshLayers);
@@ -2897,6 +5318,20 @@ function bindEvents() {
     const type = event.target.closest("[data-add-pipeline-node]")?.dataset.addPipelineNode;
     if (type) addPipelineNode(type);
   });
+  el("pipelineNodeLibrary").addEventListener("dragstart", (event) => {
+    const type = event.target.closest("[data-add-pipeline-node]")?.dataset.addPipelineNode;
+    if (type) event.dataTransfer.setData("text/pipeline-node-type", type);
+  });
+  el("pipelineCanvas").addEventListener("dragover", (event) => {
+    if (Array.from(event.dataTransfer.types || []).includes("text/pipeline-node-type")) event.preventDefault();
+  });
+  el("pipelineCanvas").addEventListener("drop", (event) => {
+    const type = event.dataTransfer.getData("text/pipeline-node-type");
+    if (!type) return;
+    event.preventDefault();
+    const rect = el("pipelineCanvas").getBoundingClientRect();
+    addPipelineNode(type, { x: Math.max(20, event.clientX - rect.left - 110), y: Math.max(20, event.clientY - rect.top - 46) });
+  });
   el("pipelineCanvas").addEventListener("click", (event) => {
     const nodeId = event.target.closest("[data-pipeline-node-id]")?.dataset.pipelineNodeId;
     if (!nodeId) return;
@@ -2907,11 +5342,24 @@ function bindEvents() {
   el("pipelineConfig").addEventListener("change", handlePipelineNodeChange);
   el("pipelineConfig").addEventListener("click", (event) => {
     const nodeId = event.target.dataset.removePipelineNode;
-    if (!nodeId) return;
-    state.pipeline.draft.nodes = state.pipeline.draft.nodes.filter((node) => node.id !== nodeId);
-    state.pipeline.draft.edges = state.pipeline.draft.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
-    state.pipeline.activeNodeId = state.pipeline.draft.nodes[0]?.id || "";
-    renderPipelineBuilder();
+    const edgeId = event.target.dataset.removePipelineEdge;
+    if (event.target.closest("[data-open-ontology-generator-from-pipeline]")) {
+      openOntologyGeneratorFromPipeline();
+      return;
+    }
+    if (edgeId) {
+      const [source, target] = edgeId.split("->");
+      state.pipeline.draft.edges = state.pipeline.draft.edges.filter((edge) => edge.source !== source || edge.target !== target);
+      state.pipeline.activeEdgeId = "";
+      renderPipelineBuilder();
+      return;
+    }
+    if (nodeId) {
+      state.pipeline.draft.nodes = state.pipeline.draft.nodes.filter((node) => node.id !== nodeId);
+      state.pipeline.draft.edges = state.pipeline.draft.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
+      state.pipeline.activeNodeId = state.pipeline.draft.nodes[0]?.id || "";
+      renderPipelineBuilder();
+    }
   });
   document.querySelectorAll("[data-pipeline-panel]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2920,9 +5368,149 @@ function bindEvents() {
     });
   });
   el("savePipelineGraphBtn").addEventListener("click", () => savePipelineGraph().catch((error) => showToast(error.message)));
+  el("autoLayoutPipelineBtn").addEventListener("click", autoLayoutPipelineGraph);
   el("validatePipelineGraphBtn").addEventListener("click", () => validatePipelineGraph().catch((error) => showToast(error.message)));
   el("previewPipelineGraphBtn").addEventListener("click", () => previewPipelineGraph().catch((error) => showToast(error.message)));
   el("deliverPipelineGraphBtn").addEventListener("click", () => deliverPipelineGraph().catch((error) => showToast(error.message)));
+  el("refreshModelOpsBtn").addEventListener("click", () => refreshModelOpsWorkspace().catch((error) => showToast(error.message)));
+  document.querySelectorAll("[data-modelops-tab]").forEach((button) => {
+    button.addEventListener("click", () => setModelOpsTab(button.dataset.modelopsTab));
+  });
+  el("modelObjectiveSelect").addEventListener("change", async (event) => {
+    state.modelops.selectedObjectiveId = event.target.value;
+    state.modelops.selectedSubmissionId = "";
+    await refreshModelOpsWorkspace();
+  });
+  el("modelSubmissionSelect").addEventListener("change", async (event) => {
+    state.modelops.selectedSubmissionId = event.target.value;
+    await refreshModelOpsWorkspace();
+  });
+  el("modelDeploymentSelect").addEventListener("change", async (event) => {
+    state.modelops.selectedDeploymentId = event.target.value;
+    await refreshModelOpsWorkspace();
+  });
+  el("createModelObjectiveBtn").addEventListener("click", () => createModelObjective().catch((error) => showToast(error.message)));
+  el("trainModelBtn").addEventListener("click", () => trainSelectedModel().catch((error) => showToast(error.message)));
+  el("createModelCheckBtn").addEventListener("click", () => createModelCheck().catch((error) => showToast(error.message)));
+  el("modelGatePanel").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-model-check-decision]");
+    if (!button) return;
+    decideModelCheck(button.dataset.modelCheckDecision, button.dataset.modelCheckStatus).catch((error) => showToast(error.message));
+  });
+  el("createModelReleaseBtn").addEventListener("click", () => createModelRelease().catch((error) => showToast(error.message)));
+  el("createModelDeploymentBtn").addEventListener("click", () => createModelDeployment().catch((error) => showToast(error.message)));
+  el("createModelMonitorBtn").addEventListener("click", () => createModelMonitor().catch((error) => showToast(error.message)));
+  el("runModelMonitorBtn").addEventListener("click", () => runSelectedModelMonitor().catch((error) => showToast(error.message)));
+  el("runModelInferenceBtn").addEventListener("click", () => runModelInference().catch((error) => showToast(error.message)));
+  el("modelObjectiveList").addEventListener("click", async (event) => {
+    const objectiveId = event.target.closest("[data-model-objective]")?.dataset.modelObjective;
+    if (!objectiveId) return;
+    state.modelops.selectedObjectiveId = objectiveId;
+    state.modelops.selectedSubmissionId = "";
+    await refreshModelOpsWorkspace();
+  });
+  el("modelSubmissionList").addEventListener("click", async (event) => {
+    const submissionId = event.target.closest("[data-model-submission]")?.dataset.modelSubmission;
+    if (!submissionId) return;
+    state.modelops.selectedSubmissionId = submissionId;
+    await refreshModelOpsWorkspace();
+  });
+  el("modelReleasePanel").addEventListener("click", async (event) => {
+    const deploymentId = event.target.closest("[data-model-deployment]")?.dataset.modelDeployment;
+    if (!deploymentId) return;
+    state.modelops.selectedDeploymentId = deploymentId;
+    await refreshModelOpsWorkspace();
+  });
+  el("modelMonitorPanel").addEventListener("click", async (event) => {
+    const monitorId = event.target.closest("[data-model-monitor]")?.dataset.modelMonitor;
+    if (!monitorId) return;
+    state.modelops.selectedMonitorId = monitorId;
+    await refreshModelOpsWorkspace();
+  });
+  el("refreshOpsBtn").addEventListener("click", () => refreshOpsWorkspace().catch((error) => showToast(error.message)));
+  document.querySelectorAll("[data-ops-tab]").forEach((button) => {
+    button.addEventListener("click", () => setOpsTab(button.dataset.opsTab));
+  });
+  el("evaluateOpsAlertsBtn").addEventListener("click", () => evaluateOpsAlerts().catch((error) => showToast(error.message)));
+  el("createOpsAlertRuleBtn").addEventListener("click", () => createOpsAlertRule().catch((error) => showToast(error.message)));
+  el("createOpsIncidentBtn").addEventListener("click", () => createOpsIncident().catch((error) => showToast(error.message)));
+  el("createOpsRunbookBtn").addEventListener("click", () => createOpsRunbook().catch((error) => showToast(error.message)));
+  el("executeOpsRunbookBtn").addEventListener("click", () => executeOpsRunbook().catch((error) => showToast(error.message)));
+  el("createDataContractBtn").addEventListener("click", () => createDataContract().catch((error) => showToast(error.message)));
+  el("runDataContractBtn").addEventListener("click", () => runSelectedDataContract().catch((error) => showToast(error.message)));
+  el("analyzeLineageImpactBtn").addEventListener("click", () => analyzeOpsLineageImpact().catch((error) => showToast(error.message)));
+  el("createBackfillBtn").addEventListener("click", () => createOpsBackfill().catch((error) => showToast(error.message)));
+  el("opsIncidentSelect").addEventListener("change", (event) => { state.ops.selectedIncidentId = event.target.value; renderOpsWorkspace(); });
+  el("opsRunbookSelect").addEventListener("change", (event) => { state.ops.selectedRunbookId = event.target.value; renderOpsWorkspace(); });
+  el("opsContractSelect").addEventListener("change", (event) => { state.ops.selectedContractId = event.target.value; renderOpsWorkspace(); });
+  el("opsIncidentList").addEventListener("click", (event) => {
+    const incidentId = event.target.closest("[data-ops-incident]")?.dataset.opsIncident;
+    if (!incidentId) return;
+    state.ops.selectedIncidentId = incidentId;
+    renderOpsWorkspace();
+  });
+  el("opsRunbookList").addEventListener("click", (event) => {
+    const runbookId = event.target.closest("[data-ops-runbook]")?.dataset.opsRunbook;
+    if (!runbookId) return;
+    state.ops.selectedRunbookId = runbookId;
+    renderOpsWorkspace();
+  });
+  el("opsDataContractList").addEventListener("click", (event) => {
+    const contractId = event.target.closest("[data-ops-contract]")?.dataset.opsContract;
+    if (!contractId) return;
+    state.ops.selectedContractId = contractId;
+    renderOpsWorkspace();
+  });
+  el("opsBackfillList").addEventListener("click", (event) => {
+    const planId = event.target.closest("[data-run-backfill]")?.dataset.runBackfill;
+    if (planId) runOpsBackfill(planId).catch((error) => showToast(error.message));
+  });
+  el("opsInboxList").addEventListener("click", (event) => {
+    const noteId = event.target.closest("[data-ack-note]")?.dataset.ackNote;
+    if (noteId) ackOpsNotification(noteId).catch((error) => showToast(error.message));
+  });
+  el("refreshInvestigationsBtn").addEventListener("click", () => refreshInvestigationsWorkspace().catch((error) => showToast(error.message)));
+  document.querySelectorAll("[data-investigation-tab]").forEach((button) => {
+    button.addEventListener("click", () => setInvestigationsTab(button.dataset.investigationTab));
+  });
+  el("createInvestigationBtn").addEventListener("click", () => createInvestigation().catch((error) => showToast(error.message)));
+  el("addEvidenceBtn").addEventListener("click", () => addInvestigationEvidence().catch((error) => showToast(error.message)));
+  el("addHypothesisBtn").addEventListener("click", () => addInvestigationHypothesis().catch((error) => showToast(error.message)));
+  el("generateReportBtn").addEventListener("click", () => generateInvestigationReport().catch((error) => showToast(error.message)));
+  el("investigationList").addEventListener("click", (event) => {
+    const investigationId = event.target.closest("[data-investigation-id]")?.dataset.investigationId;
+    if (investigationId) loadSelectedInvestigation(investigationId).catch((error) => showToast(error.message));
+  });
+  el("refreshDecisionBtn").addEventListener("click", () => refreshDecisionWorkspace().catch((error) => showToast(error.message)));
+  el("decisionObjectTypeSelect").addEventListener("change", async () => {
+    state.decision.evaluation = null;
+    state.decision.explanation = null;
+    state.decision.timeline = null;
+    await loadDecisionRules();
+    renderDecisionWorkspace();
+  });
+  document.querySelectorAll("[data-decision-tab]").forEach((button) => {
+    button.addEventListener("click", () => setDecisionTab(button.dataset.decisionTab));
+  });
+  el("bootstrapDecisionBtn").addEventListener("click", () => bootstrapDecisionRules().catch((error) => showToast(error.message)));
+  el("evaluateDecisionBtn").addEventListener("click", () => runDecisionEvaluation().catch((error) => showToast(error.message)));
+  el("explainDecisionBtn").addEventListener("click", () => explainDecisionObject().catch((error) => showToast(error.message)));
+  el("loadTimelineBtn").addEventListener("click", () => loadDecisionTimeline().catch((error) => showToast(error.message)));
+  el("runDecisionScenarioBtn").addEventListener("click", () => runDecisionScenario().catch((error) => showToast(error.message)));
+  el("runEntityResolutionBtn").addEventListener("click", () => runEntityResolution().catch((error) => showToast(error.message)));
+  el("runDecisionAgentBtn").addEventListener("click", () => runDecisionAgent().catch((error) => showToast(error.message)));
+  el("decisionRiskBoard").addEventListener("click", (event) => {
+    const objectId = event.target.closest("[data-decision-object]")?.dataset.decisionObject;
+    if (!objectId) return;
+    el("decisionObjectIdInput").value = objectId;
+    explainDecisionObject().catch((error) => showToast(error.message));
+  });
+  el("entityCandidateList").addEventListener("click", (event) => {
+    const acceptId = event.target.closest("[data-accept-candidate]")?.dataset.acceptCandidate;
+    const rejectId = event.target.closest("[data-reject-candidate]")?.dataset.rejectCandidate;
+    if (acceptId) acceptEntityCandidate(acceptId).catch((error) => showToast(error.message));
+    if (rejectId) rejectEntityCandidate(rejectId).catch((error) => showToast(error.message));
+  });
   window.addEventListener("resize", () => {
     if (state.map) {
       state.map.invalidateSize();
