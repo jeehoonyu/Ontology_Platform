@@ -44,9 +44,9 @@ for route in (
     assert_true(resp.status_code == 200, f"{route} loads", resp.status_code)
 
 html = client.get("/workspace/command-center").text
-assert_true("commandCenterImport" in html and "commandCenterProofTrail" in html, "command center has import and proof trail UI")
+assert_true("commandCenterImport" in html and "commandCenterProofTrail" in html and "commandCenterStepper" in html, "command center has guided import/proof trail UI")
 graph_html = client.get("/workspace/graph").text
-assert_true("platformGraphCanvas" in graph_html and "platformGraphFilters" in graph_html, "graph workspace has visual canvas UI")
+assert_true("platformGraphCanvas" in graph_html and "platformGraphFilters" in graph_html and "platformGraphSearchInput" in graph_html, "graph workspace has visual canvas UI")
 validation_html = client.get("/workspace/validation").text
 assert_true("validationView" in validation_html and "validationMatrix" in validation_html, "validation workspace is present")
 
@@ -71,6 +71,28 @@ json_job = ok(client.post("/imports/json", json={
     "content": "[{\"asset_id\":\"asset_json_1\",\"name\":\"JSON Pump\",\"status\":\"RUNNING\",\"criticality\":\"low\"}]",
 }), "create JSON import", expect=201)
 assert_true(json_job["status"] == "READY" and json_job["record_count"] == 1, "JSON import is ready", json_job)
+
+templates = ok(client.get("/imports/templates"), "list import templates")
+assert_true(any(template["id"] == "asset" for template in templates["templates"]), "asset import template exists", templates)
+sample_csv = client.get("/imports/templates/asset/sample?format=csv")
+assert_true(sample_csv.status_code == 200 and "asset_id" in sample_csv.text, "asset sample CSV downloads", sample_csv.text)
+file_job = ok(client.post(
+    "/imports/files?filename=file-assets.csv&display_name=File%20Asset%20Import&target_dataset_id=file_asset_dataset&template=asset",
+    content="asset_id,name,status,criticality\nasset_file_1,File Pump,RUNNING,medium\n",
+    headers={"content-type": "text/csv"},
+), "create file import", expect=201)
+assert_true(file_job["status"] == "READY" and file_job["template"] == "asset", "file import applies template", file_job)
+validated_file = ok(client.post(f"/imports/jobs/{file_job['id']}/validate", json={
+    "template": "asset",
+    "mapping": {"asset_id": "asset_id", "name": "name", "status": "status", "criticality": "criticality"},
+}), "validate file import mapping")
+assert_true(validated_file["validation"]["status"] == "READY" and validated_file["job"]["semantic_mapping"]["asset_id"] == "asset_id", "mapping validation succeeds", validated_file)
+draft_from_file = ok(client.post(f"/imports/jobs/{file_job['id']}/generate-ontology-draft", json={
+    "actor": "test",
+    "object_type_id": "file_asset",
+    "display_name": "File Asset",
+}), "generate ontology draft from file import")
+assert_true(draft_from_file["status"] == "DRAFT_CREATED" and draft_from_file["draft"]["object_type_id"] == "file_asset", "file import generated ontology draft", draft_from_file)
 
 promoted = ok(client.post("/imports/jobs/user_asset_csv_import/promote-to-dataset", json={
     "dataset_id": "user_asset_dataset",
@@ -125,13 +147,19 @@ assert_true(executed["status"] == "SUCCESS", "approved command-center action exe
 
 dashboard = ok(client.get("/scenarios/asset-reliability/validation-dashboard"), "validation dashboard")
 assert_true(dashboard["row_count"] >= 20 and not dashboard["priority_gaps"], "validation dashboard has no P0/P1 gaps", dashboard)
+migrations = ok(client.get("/system/migrations"), "migration metadata")
+assert_true(migrations["status"] == "PASS" and migrations["current_version"] >= 2, "migration metadata passes", migrations)
 schema_health = ok(client.get("/system/schema-health"), "schema health")
 assert_true(schema_health["status"] == "PASS" and "import_jobs" not in schema_health["missing_tables"], "schema health sees import table", schema_health)
 event_health = ok(client.get("/system/event-consistency"), "event consistency")
 assert_true(event_health["status"] in {"PASS", "WARN"} and event_health["counts"]["import_jobs"] >= 2, "event consistency includes imports", event_health)
+report = client.get("/scenarios/asset-reliability/report?format=markdown")
+assert_true(report.status_code == 200 and "Asset Reliability Command Center Report" in report.text, "scenario report exports markdown", report.text[:200])
 
 project_snapshot = ok(client.get("/project/export"), "project export")
 assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export returns snapshot", project_snapshot)
+for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "incidents", "investigation_reports"):
+    assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 imported = ok(client.post("/project/import", json={"snapshot": project_snapshot, "mode": "merge", "actor": "test"}), "project import merge")
 assert_true(imported["status"] == "IMPORTED", "project import completes", imported)
 

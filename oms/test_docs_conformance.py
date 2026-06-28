@@ -55,7 +55,7 @@ assert_true(matrix.exists(), "validation matrix exists", matrix)
 assert_true(report.exists(), "validation report exists", report)
 matrix_text = matrix.read_text(encoding="utf-8")
 report_text = report.read_text(encoding="utf-8")
-for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Validation dashboard", "Project export"):
+for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export"):
     assert_true(required in matrix_text, f"matrix includes {required}")
 assert_true("does not copy Palantir code" in report_text, "report states non-copying boundary")
 assert_true("not Palantir Foundry API compatibility" in report_text, "report states API boundary")
@@ -212,6 +212,8 @@ assert_true(scenario_triage["status"] == "APPROVAL_REQUIRED", "command-center tr
 assert_true(scenario_triage["risk"]["band"] == "critical", "command-center triage explains critical risk", scenario_triage["risk"])
 scenario_dashboard = ok(client.get("/scenarios/asset-reliability/validation-dashboard"), "asset reliability validation dashboard")
 assert_true(scenario_dashboard["row_count"] >= 20, "validation dashboard reads matrix", scenario_dashboard)
+scenario_report = client.get("/scenarios/asset-reliability/report?format=markdown")
+assert_true(scenario_report.status_code == 200 and "Evidence IDs" in scenario_report.text, "scenario report exports evidence markdown", scenario_report.text[:200])
 platform_event = ok(client.post("/events/publish", json={
     "source": "docs",
     "event_type": "conformance.object.reviewed",
@@ -267,12 +269,30 @@ promoted_import = ok(client.post("/imports/jobs/docs_asset_import/promote-to-dat
     "actor": "docs",
 }), "promote import to dataset")
 assert_true(promoted_import["dataset"]["id"] == "docs_asset_import_dataset", "promoted import creates dataset", promoted_import)
+templates = ok(client.get("/imports/templates"), "import templates")
+assert_true(any(row["id"] == "asset" for row in templates["templates"]), "import templates include asset", templates)
+file_import = ok(client.post(
+    "/imports/files?filename=docs-file-assets.csv&display_name=Docs%20File%20Assets&target_dataset_id=docs_file_assets&template=asset",
+    content="asset_id,name\nasset_docs_file,Docs File Asset\n",
+    headers={"content-type": "text/csv"},
+), "file upload import", expect=201)
+assert_true(file_import["template"] == "asset" and file_import["status"] == "READY", "file import validates with template", file_import)
+generated_from_import = ok(client.post(f"/imports/jobs/{file_import['id']}/generate-ontology-draft", json={
+    "actor": "docs",
+    "object_type_id": "docs_file_asset",
+    "display_name": "Docs File Asset",
+}), "generate ontology draft from import")
+assert_true(generated_from_import["draft"]["object_type_id"] == "docs_file_asset", "import-to-ontology draft created", generated_from_import)
 schema_health = ok(client.get("/system/schema-health"), "system schema health")
 assert_true(schema_health["status"] == "PASS", "system schema health passes", schema_health)
+migrations = ok(client.get("/system/migrations"), "system migrations")
+assert_true(migrations["status"] == "PASS" and migrations["current_version"] >= 2, "system migrations pass", migrations)
 event_consistency = ok(client.get("/system/event-consistency"), "system event consistency")
 assert_true(event_consistency["counts"]["import_jobs"] >= 1, "event consistency sees import jobs", event_consistency)
 project_snapshot = ok(client.get("/project/export"), "project export snapshot")
 assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export includes datasets", project_snapshot)
+for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "incidents", "investigation_reports"):
+    assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 
 
 # ---------------------------------------------------------------------------
