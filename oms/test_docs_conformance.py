@@ -55,7 +55,7 @@ assert_true(matrix.exists(), "validation matrix exists", matrix)
 assert_true(report.exists(), "validation report exists", report)
 matrix_text = matrix.read_text(encoding="utf-8")
 report_text = report.read_text(encoding="utf-8")
-for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator"):
+for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Validation dashboard", "Project export"):
     assert_true(required in matrix_text, f"matrix includes {required}")
 assert_true("does not copy Palantir code" in report_text, "report states non-copying boundary")
 assert_true("not Palantir Foundry API compatibility" in report_text, "report states API boundary")
@@ -69,6 +69,7 @@ for route in (
     "/workspace/search",
     "/workspace/graph",
     "/workspace/command-center",
+    "/workspace/validation",
     "/workspace/models",
     "/workspace/decision",
     "/workspace/ops",
@@ -199,7 +200,7 @@ asset_after_action = ok(client.get("/objects/asset/asset_pump_4"), "read escalat
 assert_true(asset_after_action["properties"]["flagged"] is True, "action mutation persisted", asset_after_action)
 
 root = ok(client.get("/"), "root capability catalog")
-for capability in ("unified_event_bus", "global_search", "policy_simulation", "shared_activity_timeline", "platform_graph_overview"):
+for capability in ("unified_event_bus", "global_search", "policy_simulation", "shared_activity_timeline", "platform_graph_overview", "data_imports", "validation_dashboard", "project_snapshot", "schema_health", "event_consistency"):
     assert_true(capability in root["capabilities"], f"root advertises {capability}", root["capabilities"])
 assert_true("asset_reliability_command_center" in root["capabilities"], "root advertises asset reliability MVP", root["capabilities"])
 assert_true("ontology_generator" in root["capabilities"], "root advertises ontology generator", root["capabilities"])
@@ -252,6 +253,26 @@ activity = ok(client.get("/activity/objects/asset/asset_pump_4/timeline"), "shar
 assert_true(activity["timeline"], "shared activity timeline has entries", activity)
 platform_graph = ok(client.get("/graph/overview"), "platform graph overview")
 assert_true(platform_graph["node_count"] >= 3 and platform_graph["edge_count"] >= 1, "platform graph includes ontology resources", platform_graph)
+csv_import = ok(client.post("/imports/csv", json={
+    "id": "docs_asset_import",
+    "filename": "docs-assets.csv",
+    "display_name": "Docs Asset Import",
+    "target_dataset_id": "docs_asset_import_dataset",
+    "content": "asset_id,name,status,criticality,score\nasset_docs_import,Docs Import Asset,RUNNING,low,15\n",
+}), "CSV import job", expect=201)
+assert_true(csv_import["status"] == "READY" and csv_import["schema"]["field_count"] >= 5, "CSV import infers schema", csv_import)
+promoted_import = ok(client.post("/imports/jobs/docs_asset_import/promote-to-dataset", json={
+    "dataset_id": "docs_asset_import_dataset",
+    "display_name": "Docs Asset Import Dataset",
+    "actor": "docs",
+}), "promote import to dataset")
+assert_true(promoted_import["dataset"]["id"] == "docs_asset_import_dataset", "promoted import creates dataset", promoted_import)
+schema_health = ok(client.get("/system/schema-health"), "system schema health")
+assert_true(schema_health["status"] == "PASS", "system schema health passes", schema_health)
+event_consistency = ok(client.get("/system/event-consistency"), "system event consistency")
+assert_true(event_consistency["counts"]["import_jobs"] >= 1, "event consistency sees import jobs", event_consistency)
+project_snapshot = ok(client.get("/project/export"), "project export snapshot")
+assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export includes datasets", project_snapshot)
 
 
 # ---------------------------------------------------------------------------

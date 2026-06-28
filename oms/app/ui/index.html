@@ -24,6 +24,7 @@
         <div class="side-section">
           <span>Applications</span>
           <button id="commandCenterNav" class="side-nav-item" type="button"><span>CC</span>Command Center</button>
+          <button id="validationNav" class="side-nav-item" type="button"><span>V</span>Validation</button>
           <button id="graphNav" class="side-nav-item" type="button"><span>G</span>Platform Graph</button>
           <button id="workshopNav" class="side-nav-item" type="button"><span>W</span>Workshop</button>
           <button id="object-explorerNav" class="side-nav-item" type="button"><span>OE</span>Object Explorer</button>
@@ -318,6 +319,19 @@
             <button id="refreshGraphBtn" class="btn primary" type="button">Refresh</button>
           </div>
           <section id="platformGraphSummary" class="ops-metric-grid"></section>
+          <section class="platform-graph-layout">
+            <section class="panel-section platform-graph-main">
+              <div class="section-title">
+                <h2>Visual graph</h2>
+                <div id="platformGraphFilters" class="filter-pills"></div>
+              </div>
+              <div id="platformGraphCanvas" class="platform-graph-canvas"></div>
+            </section>
+            <aside class="panel-section">
+              <div class="section-title"><h2>Inspector</h2></div>
+              <div id="platformGraphInspector" class="object-profile"></div>
+            </aside>
+          </section>
           <section class="platform-split">
             <section class="panel-section">
               <div class="section-title"><h2>Nodes</h2></div>
@@ -344,6 +358,40 @@
           </div>
 
           <section id="commandCenterKpis" class="ops-metric-grid"></section>
+
+          <section class="command-proof-grid">
+            <section class="panel-section">
+              <div class="section-title"><h2>First-run checklist</h2></div>
+              <div id="commandCenterChecklist" class="checklist"></div>
+            </section>
+            <section class="panel-section command-main">
+              <div class="section-title"><h2>Proof trail</h2></div>
+              <div id="commandCenterProofTrail" class="proof-trail"></div>
+            </section>
+          </section>
+
+          <section id="commandCenterImport" class="panel-section command-import-panel">
+            <div class="section-title">
+              <h2>Bring your own data</h2>
+              <div class="button-row">
+                <button id="importCommandCenterCsvBtn" class="btn small" type="button">Import CSV</button>
+                <button id="importCommandCenterJsonBtn" class="btn small" type="button">Import JSON</button>
+                <button id="promoteCommandCenterImportBtn" class="btn small primary" type="button">Promote Dataset</button>
+              </div>
+            </div>
+            <div class="import-grid">
+              <div class="stack compact">
+                <label class="field"><span>Filename</span><input id="commandCenterImportName" value="asset-import.csv" /></label>
+                <label class="field"><span>Display name</span><input id="commandCenterImportDisplayName" value="User Asset Import" /></label>
+                <label class="field"><span>Dataset ID</span><input id="commandCenterImportDatasetId" value="user_asset_import" /></label>
+                <textarea id="commandCenterCsvInput" rows="8">asset_id,name,status,criticality,vibration_mm_s,temperature_c
+asset_user_1,User Pump,DEGRADED,high,9.7,91.2</textarea>
+                <textarea id="commandCenterJsonInput" rows="8">[{"asset_id":"asset_user_json_1","name":"JSON Pump","status":"RUNNING","criticality":"medium","vibration_mm_s":3.5}]</textarea>
+              </div>
+              <div id="commandCenterImportJobs" class="table-wrap platform-table"></div>
+              <pre id="commandCenterImportResult" class="mini-output tall"></pre>
+            </div>
+          </section>
 
           <section class="command-center-grid">
             <section class="panel-section command-main">
@@ -376,7 +424,10 @@
             </section>
 
             <section class="panel-section command-main">
-              <div class="section-title"><h2>Incident Report</h2></div>
+              <div class="section-title">
+                <h2>Incident Report</h2>
+                <button id="exportCommandCenterReportBtn" class="btn small" type="button">Export</button>
+              </div>
               <pre id="commandCenterReport" class="mini-output tall"></pre>
             </section>
 
@@ -388,6 +439,38 @@
             <section class="panel-section">
               <div class="section-title"><h2>Validation Dashboard</h2></div>
               <div id="commandCenterValidation" class="object-profile"></div>
+            </section>
+          </section>
+        </section>
+
+        <section id="validationView" class="platform-page hidden">
+          <div class="page-heading">
+            <div>
+              <span class="breadcrumb">Trust / Validation</span>
+              <h1>Validation & Trust Dashboard</h1>
+            </div>
+            <div class="button-row">
+              <button id="refreshValidationBtn" class="btn primary" type="button">Refresh</button>
+              <button id="exportProjectSnapshotBtn" class="btn" type="button">Export Snapshot</button>
+            </div>
+          </div>
+          <section id="validationSummary" class="ops-metric-grid"></section>
+          <section class="validation-layout">
+            <section class="panel-section validation-main">
+              <div class="section-title"><h2>Conformance matrix</h2></div>
+              <div id="validationMatrix" class="table-wrap platform-table"></div>
+            </section>
+            <aside class="panel-section">
+              <div class="section-title"><h2>Runtime health</h2></div>
+              <div id="validationHealth" class="object-profile"></div>
+            </aside>
+            <aside class="panel-section">
+              <div class="section-title"><h2>Priority gaps</h2></div>
+              <div id="validationGaps" class="stack compact"></div>
+            </aside>
+            <section class="panel-section validation-main">
+              <div class="section-title"><h2>Project snapshot</h2></div>
+              <pre id="validationSnapshot" class="mini-output tall"></pre>
             </section>
           </section>
         </section>
