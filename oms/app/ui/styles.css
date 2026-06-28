@@ -1322,6 +1322,191 @@ kbd {
   min-width: 0;
 }
 
+.platform-graph-layout,
+.command-proof-grid,
+.validation-layout {
+  max-width: 1320px;
+  margin: 14px auto;
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+
+.platform-graph-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+}
+
+.platform-graph-main,
+.validation-main {
+  min-width: 0;
+}
+
+.platform-graph-canvas {
+  min-height: 460px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8faf9;
+  overflow: hidden;
+  display: grid;
+  place-items: stretch;
+}
+
+.platform-graph-canvas svg {
+  width: 100%;
+  height: 460px;
+  display: block;
+}
+
+.platform-graph-links line {
+  stroke: #9ca9a5;
+  stroke-opacity: 0.72;
+}
+
+.platform-graph-node {
+  cursor: pointer;
+}
+
+.platform-graph-node circle {
+  stroke: #fff;
+  stroke-width: 2px;
+  filter: drop-shadow(0 3px 5px rgba(31, 38, 44, 0.22));
+}
+
+.platform-graph-node.active circle {
+  stroke: #111820;
+  stroke-width: 3px;
+}
+
+.platform-graph-node text {
+  fill: #1f2830;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.platform-graph-node .muted-svg {
+  fill: #687077;
+  font-size: 10px;
+}
+
+.filter-pills,
+.proof-trail,
+.checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toggle-chip {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #fff;
+  font-size: 12px;
+  color: #4b5660;
+}
+
+.toggle-chip input {
+  width: auto;
+  margin: 0;
+}
+
+.command-proof-grid {
+  grid-template-columns: minmax(260px, 0.55fr) minmax(0, 1fr);
+}
+
+.checklist {
+  flex-direction: column;
+}
+
+.checklist-item {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+}
+
+.checklist-item > span {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.checklist-item.done > span {
+  border-color: #2f6d4f;
+  background: #e5f2eb;
+  color: #2f6d4f;
+}
+
+.checklist-item strong,
+.checklist-item small {
+  display: block;
+}
+
+.checklist-item small {
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.proof-trail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.proof-step {
+  min-height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.proof-step strong,
+.proof-step span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.command-import-panel {
+  max-width: 1320px;
+  margin: 14px auto;
+}
+
+.import-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr) minmax(280px, 420px);
+  gap: 12px;
+  align-items: start;
+}
+
+.import-grid textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.validation-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+}
+
 .app-catalog-shell {
   max-width: 1040px;
   height: min(720px, calc(100vh - 98px));
@@ -2122,7 +2307,11 @@ tr.selected {
 
   .home-grid,
   .app-catalog-shell,
-  .ontology-generator-grid {
+  .ontology-generator-grid,
+  .platform-graph-layout,
+  .command-proof-grid,
+  .import-grid,
+  .validation-layout {
     grid-template-columns: 1fr;
   }
 
@@ -2205,6 +2394,10 @@ tr.selected {
   .detail-panel,
   .platform-split,
   .command-center-grid,
+  .platform-graph-layout,
+  .command-proof-grid,
+  .import-grid,
+  .validation-layout,
   .ontology-generator-grid,
   .split-grid,
   .block-grid,

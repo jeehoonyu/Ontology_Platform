@@ -8,7 +8,9 @@ Current result:
 
 - Breadth: strong coverage across ontology, actions, AIP Logic, Workshop, Object Explorer, Pipeline Builder, GIS, data health, modeling, ModelOps, decision intelligence, ops, investigations, reliability, security, governance, global search, eventing, policies, timelines, and graph overview.
 - Outcome proof: the Asset Reliability Command Center provides one complete local workflow from raw maintenance data to governed operational decision, incident, and report.
-- Authoring fidelity: Pipeline Builder now has a D3 drag/connect canvas, and Ontology Manager has a dataset-to-object-type generator for reviewed local ontology resources.
+- Authoring fidelity: Pipeline Builder now has a D3 drag/connect canvas, Ontology Manager has a dataset-to-object-type generator, and the Platform Graph has a D3 relationship canvas with filters and inspection.
+- User data path: CSV/JSON import jobs infer schemas, preview records, record validation errors, and promote reviewed data into local datasets for the Ontology Generator and Command Center workflow.
+- Trust dashboard: `/workspace/validation` surfaces matrix status, priority gaps, runtime schema health, event consistency, and project snapshot evidence.
 - Fidelity: high for local behavioral workflows; intentionally different for hosted infrastructure, proprietary UI internals, and LLM/model routing.
 - Evidence: `foundry-docs/VALIDATION_MATRIX.md`, `oms/test_docs_conformance.py`, and existing focused tests.
 
@@ -24,8 +26,9 @@ Current result:
 | Ontology Generator | High local analog | Dataset schema inference, primary/title key selection, profile/action scaffolding, generated pipeline graph |
 | GIS and Map | High | GeoJSON overlays, MGRS, radius/geofence, map layers |
 | ModelOps | Medium-high | Objectives, training, eval gates, releases, deployments, inference logs, drift monitors |
-| Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, graph overview |
-| Operational MVP | High | Asset Reliability Command Center bootstrap, triage, approval, action execution, incident, report, validation dashboard |
+| Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, visual graph overview |
+| Operational MVP | High | Asset Reliability Command Center bootstrap/import, proof trail, triage, approval, action execution, incident, report, validation dashboard |
+| Data import and project portability | Medium-high | CSV/JSON import jobs, schema inference, promote-to-dataset, audit/ops events, JSON snapshot export/import |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
 | Security/governance | Medium | Local roles, markings, restricted views, scanners, retention, audit |
 
@@ -64,6 +67,7 @@ python test_modelops.py
 python test_ops_investigations_reliability.py
 python test_unified_platform.py
 python test_asset_reliability_command_center.py
+python test_productized_platform.py
 python test_ontology_generator_pipeline_canvas.py
 python test_foundry_gis_features.py
 python test_ontology_validation.py
@@ -73,8 +77,8 @@ python test_docs_conformance.py
 
 ## Next Priorities
 
-1. Add browser screenshot capture for `/workspace/command-center`, `/workspace/pipeline`, and `/workspace/ontology` when Playwright or Chrome control is available.
-2. Upgrade `/workspace/graph` from tabular overview to a real interactive visual graph canvas.
-3. Add CSV/import connectors so the command-center scenario and Ontology Generator can use user-provided datasets.
-4. Expand visual conformance notes for Workshop, Pipeline Builder, Object Explorer, Ontology Generator, and Map using user-provided screenshots.
+1. Add browser screenshot capture for `/workspace/command-center`, `/workspace/pipeline`, `/workspace/ontology`, `/workspace/graph`, and `/workspace/validation` when Playwright or Chrome control is available.
+2. Add file-picker upload support on top of the current paste-based CSV/JSON import UI.
+3. Add snapshot restore coverage for more secondary resources such as workshops, saved explorations, model monitors, incidents, investigations, and reports.
+4. Expand visual conformance notes for Workshop, Pipeline Builder, Object Explorer, Ontology Generator, Graph, Validation, and Map using user-provided screenshots.
 5. Keep public source links current because Palantir documentation changes over time.
