@@ -697,7 +697,7 @@ def apply_restricted_view(
 # ---------------------------------------------------------------------------
 
 @router.post("/governance/scan", response_model=ScanResponse)
-def governance_scan(body: ScanRequest) -> ScanResponse:
+def governance_scan(body: ScanRequest, db: Session = Depends(get_db)) -> ScanResponse:
     findings: List[ScanFinding] = []
     for record in body.records:
         for field, value in record.items():
@@ -706,6 +706,21 @@ def governance_scan(body: ScanRequest) -> ScanResponse:
             matched_patterns = _scan_value(value)
             for pattern_name in matched_patterns:
                 findings.append(ScanFinding(field=field, pattern=pattern_name))
+    try:
+        from . import ops_control
+        ops_control.record_ops_event(
+            db,
+            source="security",
+            event_type="governance.scan",
+            severity="high" if findings else "info",
+            title="Governance scan completed",
+            subject_type="governance_scan",
+            subject_id=uuid.uuid4().hex,
+            payload={"finding_count": len(findings), "findings": [finding.model_dump() for finding in findings[:50]]},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
     return ScanResponse(findings=findings)
 
 
