@@ -1,0 +1,80 @@
+# Docs-Grounded Validation Report
+
+## Summary
+
+This repository implements a local deterministic analog of public Palantir Foundry/AIP concepts. It does not copy Palantir code, claim proprietary API compatibility, or reproduce managed Foundry infrastructure. Validation is based on public docs, the local `foundry-docs` and `foundry-docs-full` corpus, and executable behavior tests.
+
+Current result:
+
+- Breadth: strong coverage across ontology, actions, AIP Logic, Workshop, Object Explorer, Pipeline Builder, GIS, data health, modeling, ModelOps, decision intelligence, ops, investigations, reliability, security, governance, global search, eventing, policies, timelines, and graph overview.
+- Outcome proof: the Asset Reliability Command Center provides one complete local workflow from raw maintenance data to governed operational decision, incident, and report.
+- Authoring fidelity: Pipeline Builder now has a D3 drag/connect canvas, and Ontology Manager has a dataset-to-object-type generator for reviewed local ontology resources.
+- Fidelity: high for local behavioral workflows; intentionally different for hosted infrastructure, proprietary UI internals, and LLM/model routing.
+- Evidence: `foundry-docs/VALIDATION_MATRIX.md`, `oms/test_docs_conformance.py`, and existing focused tests.
+
+## Domain Scores
+
+| Domain | Fidelity | Evidence |
+|---|---:|---|
+| Ontology and actions | High | Object/link/action CRUD, validation, approvals, audit, snapshots |
+| AIP Logic and agents | Medium-high | Blocks, variables, object tools, proposed actions, deterministic LLM substitute |
+| Workshop | High | Variables, widgets, events, live render, publish, restore |
+| Object Explorer | High | Query, facets, histograms, profiles, saved explorations, actions |
+| Pipeline and DataOps | High | D3 DAG canvas, validate/preview/deliver, ontology outputs, transactions, data expectations, lineage impact |
+| Ontology Generator | High local analog | Dataset schema inference, primary/title key selection, profile/action scaffolding, generated pipeline graph |
+| GIS and Map | High | GeoJSON overlays, MGRS, radius/geofence, map layers |
+| ModelOps | Medium-high | Objectives, training, eval gates, releases, deployments, inference logs, drift monitors |
+| Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, graph overview |
+| Operational MVP | High | Asset Reliability Command Center bootstrap, triage, approval, action execution, incident, report, validation dashboard |
+| Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
+| Security/governance | Medium | Local roles, markings, restricted views, scanners, retention, audit |
+
+## Known Limitations
+
+- This is not Palantir Foundry API compatibility. Endpoint names and payloads are local.
+- LLM and model behavior is deterministic. There is no hosted model catalog, GPU runtime, model router, or paid external API dependency.
+- Pipeline Builder compiles to local Python logic and local datasets, not Spark-backed Foundry transforms.
+- UI workspaces are Foundry-style local approximations, not copied Foundry frontends.
+- Private tenant pages are not automated validation sources unless the user provides screenshots or exported documents.
+- Browser screenshot validation depends on available local browser tooling. If unavailable, route smoke checks are still required and visual checks are marked manual.
+
+## Validation Commands
+
+Run the primary docs conformance test:
+
+```bash
+cd oms
+python test_docs_conformance.py
+```
+
+Run the matrix summary helper:
+
+```bash
+cd oms
+python validate_docs_conformance.py
+```
+
+Recommended focused regression set:
+
+```bash
+cd oms
+python test_deep_foundry_programs.py
+python test_decision_intelligence.py
+python test_modelops.py
+python test_ops_investigations_reliability.py
+python test_unified_platform.py
+python test_asset_reliability_command_center.py
+python test_ontology_generator_pipeline_canvas.py
+python test_foundry_gis_features.py
+python test_ontology_validation.py
+python test_aip_logic.py
+python test_docs_conformance.py
+```
+
+## Next Priorities
+
+1. Add browser screenshot capture for `/workspace/command-center`, `/workspace/pipeline`, and `/workspace/ontology` when Playwright or Chrome control is available.
+2. Upgrade `/workspace/graph` from tabular overview to a real interactive visual graph canvas.
+3. Add CSV/import connectors so the command-center scenario and Ontology Generator can use user-provided datasets.
+4. Expand visual conformance notes for Workshop, Pipeline Builder, Object Explorer, Ontology Generator, and Map using user-provided screenshots.
+5. Keep public source links current because Palantir documentation changes over time.
