@@ -94,6 +94,28 @@ class ImportGenerateDraftRequest(BaseModel):
     promote_dataset_id: Optional[str] = None
 
 
+class ImportTransformStep(BaseModel):
+    op: str
+    source: Optional[str] = None
+    target: Optional[str] = None
+    field: Optional[str] = None
+    target_type: Optional[str] = None
+    mapping: Dict[str, Any] = Field(default_factory=dict)
+    from_unit: Optional[str] = None
+    to_unit: Optional[str] = None
+    factor: Optional[float] = None
+    offset: float = 0.0
+    latitude_field: Optional[str] = None
+    longitude_field: Optional[str] = None
+    keys: List[str] = Field(default_factory=list)
+
+
+class ImportTransformRequest(BaseModel):
+    steps: List[ImportTransformStep] = Field(default_factory=list)
+    preview_only: bool = False
+    actor: str = "workspace"
+
+
 IMPORT_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "asset": {
         "display_name": "Asset",
@@ -469,6 +491,197 @@ def _records_for_dataset(job: ImportJob) -> List[Dict[str, Any]]:
     return job.records or []
 
 
+def _coerce_value(value: Any, target_type: str) -> Any:
+    if value is None:
+        return None
+    target = (target_type or "string").lower()
+    if target in {"string", "str"}:
+        return str(value)
+    if target in {"number", "float", "double"}:
+        if isinstance(value, bool):
+            raise ValueError("boolean is not numeric")
+        return float(value)
+    if target in {"integer", "int", "long"}:
+        if isinstance(value, bool):
+            raise ValueError("boolean is not integer")
+        return int(float(value))
+    if target in {"boolean", "bool"}:
+        if isinstance(value, bool):
+            return value
+        lowered = str(value).strip().lower()
+        if lowered in {"true", "1", "yes", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "n"}:
+            return False
+        raise ValueError("value is not boolean-like")
+    if target == "json":
+        if isinstance(value, (dict, list)):
+            return value
+        return json.loads(str(value))
+    return value
+
+
+def _normalize_timestamp(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    # Keep the runtime dependency-free: normalize common ISO-like timestamps
+    # into a stable UTC-ish string instead of requiring dateutil.
+    normalized = text.replace(" ", "T")
+    if normalized.endswith("Z") or re.search(r"[+-]\d{2}:?\d{2}$", normalized):
+        return normalized
+    return f"{normalized}Z"
+
+
+def _unit_factor(from_unit: Optional[str], to_unit: Optional[str], explicit_factor: Optional[float]) -> tuple[float, float]:
+    if explicit_factor is not None:
+        return float(explicit_factor), 0.0
+    src = (from_unit or "").lower()
+    dst = (to_unit or "").lower()
+    if src in {"f", "fahrenheit"} and dst in {"c", "celsius"}:
+        return 5.0 / 9.0, -32.0 * 5.0 / 9.0
+    if src in {"c", "celsius"} and dst in {"f", "fahrenheit"}:
+        return 9.0 / 5.0, 32.0
+    if src in {"ips", "in_s", "inch_per_second"} and dst in {"mm_s", "mms", "millimeter_per_second"}:
+        return 25.4, 0.0
+    if src in {"mm_s", "mms", "millimeter_per_second"} and dst in {"ips", "in_s", "inch_per_second"}:
+        return 1.0 / 25.4, 0.0
+    return 1.0, 0.0
+
+
+def _decode_mgrs_point(value: Any) -> Optional[Dict[str, Any]]:
+    if value in (None, ""):
+        return None
+    from .runtime import decode_mgrs
+
+    decoded = decode_mgrs(str(value))
+    return {"type": "Point", "coordinates": [decoded["longitude"], decoded["latitude"]]}
+
+
+def _apply_transform_steps(records: List[Dict[str, Any]], steps: List[ImportTransformStep]) -> Dict[str, Any]:
+    rows = [dict(row or {}) for row in records]
+    warnings: List[Dict[str, Any]] = []
+    duplicate_rows: List[Dict[str, Any]] = []
+    applied: List[Dict[str, Any]] = []
+
+    for index, step in enumerate(steps):
+        op = (step.op or "").strip().lower().replace("-", "_")
+        applied.append(step.model_dump(exclude_none=True))
+        try:
+            if op in {"rename", "map_column"}:
+                source = step.source or step.field
+                target = step.target
+                if not source or not target:
+                    raise ValueError("rename requires source and target")
+                for row in rows:
+                    if source in row:
+                        row[target] = row.pop(source)
+            elif op in {"coerce", "type_coerce"}:
+                field = step.field or step.source
+                if not field or not step.target_type:
+                    raise ValueError("coerce requires field and target_type")
+                for row_number, row in enumerate(rows, start=1):
+                    try:
+                        row[field] = _coerce_value(row.get(field), step.target_type)
+                    except Exception as exc:  # noqa: BLE001 - returned as user-facing validation evidence.
+                        warnings.append({"code": "COERCE_FAILED", "step": index, "row": row_number, "field": field, "message": str(exc)})
+            elif op == "enum_cleanup":
+                field = step.field or step.source
+                if not field:
+                    raise ValueError("enum_cleanup requires field")
+                mapping = {str(k).strip().lower(): v for k, v in (step.mapping or {}).items()}
+                for row in rows:
+                    value = row.get(field)
+                    if value is None:
+                        continue
+                    key = str(value).strip().lower()
+                    row[field] = mapping.get(key, key)
+            elif op in {"parse_timestamp", "timestamp"}:
+                source = step.source or step.field
+                target = step.target or source
+                if not source or not target:
+                    raise ValueError("parse_timestamp requires source or field")
+                for row in rows:
+                    row[target] = _normalize_timestamp(row.get(source))
+            elif op in {"normalize_unit", "unit_normalize"}:
+                source = step.source or step.field
+                target = step.target or source
+                if not source or not target:
+                    raise ValueError("normalize_unit requires source or field")
+                factor, default_offset = _unit_factor(step.from_unit, step.to_unit, step.factor)
+                offset = step.offset if step.factor is not None else default_offset
+                for row_number, row in enumerate(rows, start=1):
+                    value = row.get(source)
+                    if value is None:
+                        row[target] = None
+                        continue
+                    try:
+                        row[target] = (float(value) * factor) + offset
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append({"code": "UNIT_NORMALIZE_FAILED", "step": index, "row": row_number, "field": source, "message": str(exc)})
+            elif op in {"derive_point", "latlon_to_point"}:
+                lat_field = step.latitude_field or "latitude"
+                lon_field = step.longitude_field or "longitude"
+                target = step.target or "geometry"
+                for row_number, row in enumerate(rows, start=1):
+                    lat = row.get(lat_field)
+                    lon = row.get(lon_field)
+                    if lat in (None, "") or lon in (None, ""):
+                        continue
+                    try:
+                        row[target] = {"type": "Point", "coordinates": [float(lon), float(lat)]}
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append({"code": "POINT_DERIVE_FAILED", "step": index, "row": row_number, "message": str(exc)})
+            elif op in {"mgrs_to_point", "mgrs"}:
+                source = step.source or step.field or "mgrs"
+                target = step.target or "geometry"
+                for row_number, row in enumerate(rows, start=1):
+                    try:
+                        point = _decode_mgrs_point(row.get(source))
+                        if point:
+                            row[target] = point
+                    except Exception as exc:  # noqa: BLE001
+                        warnings.append({"code": "MGRS_DECODE_FAILED", "step": index, "row": row_number, "field": source, "message": str(exc)})
+            elif op in {"deduplicate", "dedupe"}:
+                keys = step.keys or ([step.field] if step.field else [])
+                if not keys:
+                    raise ValueError("deduplicate requires keys")
+                seen = set()
+                deduped: List[Dict[str, Any]] = []
+                for row_number, row in enumerate(rows, start=1):
+                    fingerprint = tuple(_jsonable_key(row.get(key)) for key in keys)
+                    if fingerprint in seen:
+                        duplicate_rows.append({"row": row_number, "keys": keys, "fingerprint": list(fingerprint)})
+                        continue
+                    seen.add(fingerprint)
+                    deduped.append(row)
+                rows = deduped
+            else:
+                raise ValueError(f"Unsupported transform op '{step.op}'")
+        except ValueError as exc:
+            warnings.append({"code": "TRANSFORM_STEP_SKIPPED", "step": index, "op": step.op, "message": str(exc)})
+
+    return {
+        "records": rows,
+        "warnings": warnings,
+        "duplicate_rows": duplicate_rows,
+        "applied_steps": applied,
+        "preview_rows": rows[:25],
+        "schema": _infer_schema(rows),
+        "summary": {
+            "input_records": len(records),
+            "output_records": len(rows),
+            "steps": len(steps),
+            "warnings": len(warnings),
+            "duplicates_removed": len(duplicate_rows),
+        },
+    }
+
+
 def _source_type_from_filename(filename: Optional[str], content_type: str = "") -> str:
     lowered = (filename or "").lower()
     if lowered.endswith(".json") or "json" in content_type.lower():
@@ -722,6 +935,45 @@ def get_import_job(job_id: str, include_records: bool = False, db: Session = Dep
     return _job_dict(job, include_records=include_records)
 
 
+@router.get("/imports/jobs/{job_id}/mapping-suggestions")
+def import_mapping_suggestions(job_id: str, template: str = Query("asset"), db: Session = Depends(get_db)):
+    _ensure_tables(db)
+    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+    template_spec = _template_or_404(template)
+    fields = _field_order(job.records or [])
+    mapping = _suggest_mapping(fields, template)
+    suggestions = []
+    normalized_fields = {_normalize_field(field): field for field in fields}
+    for target, spec in template_spec["fields"].items():
+        source = mapping.get(target)
+        reason = "matched target or alias" if source else "no matching source field"
+        confidence = 0.95 if source and _normalize_field(source) == _normalize_field(target) else (0.8 if source else 0.0)
+        candidates = []
+        for candidate in [target, *spec.get("aliases", [])]:
+            matched = normalized_fields.get(_normalize_field(candidate))
+            if matched and matched not in candidates:
+                candidates.append(matched)
+        suggestions.append({
+            "target": target,
+            "source": source,
+            "required": target in template_spec.get("required", []),
+            "type": spec.get("type", "string"),
+            "confidence": confidence,
+            "reason": reason,
+            "candidates": candidates,
+        })
+    return {
+        "job_id": job.id,
+        "template": template,
+        "template_display_name": template_spec["display_name"],
+        "fields": fields,
+        "mapping": mapping,
+        "suggestions": suggestions,
+    }
+
+
 @router.patch("/imports/jobs/{job_id}")
 def patch_import_job(job_id: str, body: ImportJobPatchRequest, db: Session = Depends(get_db)):
     _ensure_tables(db)
@@ -774,6 +1026,78 @@ def validate_import_job(job_id: str, body: ImportValidateRequest, db: Session = 
     db.commit()
     db.refresh(job)
     return {"validation": validation, "job": _job_dict(job)}
+
+
+@router.post("/imports/jobs/{job_id}/apply-transforms")
+def apply_import_transforms(job_id: str, body: ImportTransformRequest, db: Session = Depends(get_db)):
+    _ensure_tables(db)
+    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+    if job.status == "PROMOTED" and not body.preview_only:
+        raise HTTPException(status_code=409, detail="Promoted import jobs are immutable. Use preview_only or create a new import.")
+    transformed = _apply_transform_steps(job.records or [], body.steps)
+    if body.preview_only:
+        return {
+            "status": "PREVIEW",
+            "job_id": job.id,
+            "preview_rows": transformed["preview_rows"],
+            "schema": transformed["schema"],
+            "warnings": transformed["warnings"],
+            "duplicate_rows": transformed["duplicate_rows"],
+            "summary": transformed["summary"],
+        }
+
+    schema = dict(job.inferred_schema or {})
+    previous_transforms = list(schema.get("transformations") or [])
+    schema["transformations"] = previous_transforms + transformed["applied_steps"]
+    schema["transform_summary"] = transformed["summary"]
+    schema["transform_warnings"] = transformed["warnings"]
+    schema["duplicate_rows"] = transformed["duplicate_rows"]
+    schema["fields"] = transformed["schema"]["fields"]
+    schema["field_count"] = transformed["schema"]["field_count"]
+    schema["record_count"] = transformed["schema"]["record_count"]
+    job.records = transformed["records"]
+    job.preview_rows = transformed["preview_rows"]
+    job.inferred_schema = schema
+    job.validation_errors = []
+    job.status = "READY"
+    template = schema.get("template")
+    if template:
+        validation = _validate_job_template(job, str(template), schema.get("semantic_mapping") or None)
+        _apply_validation(job, validation)
+        schema = dict(job.inferred_schema or {})
+        schema["transformations"] = previous_transforms + transformed["applied_steps"]
+        schema["transform_summary"] = transformed["summary"]
+        schema["transform_warnings"] = transformed["warnings"]
+        schema["duplicate_rows"] = transformed["duplicate_rows"]
+        job.inferred_schema = schema
+    job.updated_at = _now()
+    _audit(db, body.actor, "import.job.transforms_applied", "import_job", job.id, {
+        "summary": transformed["summary"],
+        "warnings": transformed["warnings"],
+    })
+    ops_control.record_ops_event(
+        db,
+        source="imports",
+        event_type="import.job.transforms_applied",
+        severity="warn" if transformed["warnings"] else "info",
+        title=f"Import transforms applied: {job.display_name}",
+        subject_type="import_job",
+        subject_id=job.id,
+        payload={"summary": transformed["summary"], "warnings": transformed["warnings"]},
+    )
+    db.commit()
+    db.refresh(job)
+    return {
+        "status": "TRANSFORMED",
+        "job": _job_dict(job),
+        "preview_rows": transformed["preview_rows"],
+        "schema": transformed["schema"],
+        "warnings": transformed["warnings"],
+        "duplicate_rows": transformed["duplicate_rows"],
+        "summary": transformed["summary"],
+    }
 
 
 @router.post("/imports/jobs/{job_id}/promote-to-dataset")

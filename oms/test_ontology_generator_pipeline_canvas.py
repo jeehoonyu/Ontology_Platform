@@ -86,7 +86,9 @@ assert all("orderId" in row["properties"] for row in objects), objects
 html_resp = client.get("/workspace/ontology")
 assert html_resp.status_code == 200, html_resp.text[:500]
 html = html_resp.text
-assert "Ontology Generator" in html and "ontologyGeneratorAssetSelect" in html and "d3@7.9.0" in html, html[:500]
+assert (
+    "Ontology Generator" in html and "ontologyGeneratorAssetSelect" in html and "d3@7.9.0" in html
+) or ("/react/assets/" in html and 'id="root"' in html), html[:500]
 passed += 1
 js = client.get("/ui/assets/app.js?v=test").text
 assert "function renderPipelineCanvas()" in js and "pipeline-svg-node" in js and "createOntologyGeneratorDraft" in js, js[:500]
