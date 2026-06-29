@@ -55,7 +55,7 @@ assert_true(matrix.exists(), "validation matrix exists", matrix)
 assert_true(report.exists(), "validation report exists", report)
 matrix_text = matrix.read_text(encoding="utf-8")
 report_text = report.read_text(encoding="utf-8")
-for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export"):
+for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export"):
     assert_true(required in matrix_text, f"matrix includes {required}")
 assert_true("does not copy Palantir code" in report_text, "report states non-copying boundary")
 assert_true("not Palantir Foundry API compatibility" in report_text, "report states API boundary")
@@ -69,6 +69,7 @@ for route in (
     "/workspace/search",
     "/workspace/graph",
     "/workspace/command-center",
+    "/workspace/imports",
     "/workspace/validation",
     "/workspace/models",
     "/workspace/decision",
@@ -200,7 +201,7 @@ asset_after_action = ok(client.get("/objects/asset/asset_pump_4"), "read escalat
 assert_true(asset_after_action["properties"]["flagged"] is True, "action mutation persisted", asset_after_action)
 
 root = ok(client.get("/"), "root capability catalog")
-for capability in ("unified_event_bus", "global_search", "policy_simulation", "shared_activity_timeline", "platform_graph_overview", "data_imports", "validation_dashboard", "project_snapshot", "schema_health", "event_consistency"):
+for capability in ("unified_event_bus", "global_search", "policy_simulation", "shared_activity_timeline", "platform_graph_overview", "data_imports", "import_transforms", "mapping_suggestions", "hybrid_connector_preview", "stream_replay", "react_vite_frontend", "validation_dashboard", "project_snapshot", "project_validation", "schema_health", "event_consistency"):
     assert_true(capability in root["capabilities"], f"root advertises {capability}", root["capabilities"])
 assert_true("asset_reliability_command_center" in root["capabilities"], "root advertises asset reliability MVP", root["capabilities"])
 assert_true("ontology_generator" in root["capabilities"], "root advertises ontology generator", root["capabilities"])
@@ -277,21 +278,58 @@ file_import = ok(client.post(
     headers={"content-type": "text/csv"},
 ), "file upload import", expect=201)
 assert_true(file_import["template"] == "asset" and file_import["status"] == "READY", "file import validates with template", file_import)
+mapping_suggestions = ok(client.get(f"/imports/jobs/{file_import['id']}/mapping-suggestions?template=asset"), "import mapping suggestions")
+assert_true(mapping_suggestions["mapping"]["asset_id"] == "asset_id", "mapping suggestions match uploaded asset fields", mapping_suggestions)
+transform_preview = ok(client.post(f"/imports/jobs/{file_import['id']}/apply-transforms", json={
+    "preview_only": True,
+    "steps": [{"op": "deduplicate", "keys": ["asset_id"]}],
+}), "import transform preview")
+assert_true(transform_preview["status"] == "PREVIEW" and transform_preview["summary"]["steps"] == 1, "transform preview returns summary", transform_preview)
 generated_from_import = ok(client.post(f"/imports/jobs/{file_import['id']}/generate-ontology-draft", json={
     "actor": "docs",
     "object_type_id": "docs_file_asset",
     "display_name": "Docs File Asset",
 }), "generate ontology draft from import")
 assert_true(generated_from_import["draft"]["object_type_id"] == "docs_file_asset", "import-to-ontology draft created", generated_from_import)
+ok(client.post("/connections/sources", json={
+    "id": "docs_rest_source",
+    "display_name": "Docs REST Source",
+    "source_type": "rest",
+    "config": {"base_url": "http://localhost:9000/docs", "sample_records": [{"asset_id": "asset_docs_connector", "name": "Docs Connector Asset"}]},
+}), "create docs connector source")
+connector_preview = ok(client.post("/connections/sources/docs_rest_source/preview", json={"limit": 5}), "docs connector preview")
+assert_true(connector_preview["record_count"] == 1 and connector_preview["status"] == "READY", "connector preview is deterministic", connector_preview)
+connector_job = ok(client.post("/connections/sources/docs_rest_source/generate-import-job", json={
+    "id": "docs_connector_import",
+    "template": "asset",
+    "target_dataset_id": "docs_connector_dataset",
+    "actor": "docs",
+}), "connector source generates import job")
+assert_true(connector_job["job"]["template"] == "asset", "connector import job is template mapped", connector_job)
+ok(client.post("/streams", json={
+    "id": "docs_stream",
+    "display_name": "Docs Stream",
+    "schema": {"sample_records": [{"event_id": "docs_stream_sample", "asset_id": "asset_pump_4", "ts": 1782684300}]},
+}), "create docs stream")
+stream_replay = ok(client.post("/streams/docs_stream/replay", json={
+    "actor": "docs",
+    "archive_to_dataset": True,
+    "target_asset_id": "docs_stream_archive",
+    "timestamp_field": "ts",
+    "records": [{"event_id": "docs_stream_1", "asset_id": "asset_pump_4", "ts": 1782684300}],
+}), "stream replay")
+assert_true(stream_replay["published"] == 1 and stream_replay["archived"] == 1, "stream replay publishes and archives", stream_replay)
 schema_health = ok(client.get("/system/schema-health"), "system schema health")
 assert_true(schema_health["status"] == "PASS", "system schema health passes", schema_health)
 migrations = ok(client.get("/system/migrations"), "system migrations")
-assert_true(migrations["status"] == "PASS" and migrations["current_version"] >= 2, "system migrations pass", migrations)
+assert_true(migrations["status"] == "PASS" and migrations["current_version"] >= 3 and migrations["migrations"][-1]["applied_at"], "system migrations pass", migrations)
 event_consistency = ok(client.get("/system/event-consistency"), "system event consistency")
 assert_true(event_consistency["counts"]["import_jobs"] >= 1, "event consistency sees import jobs", event_consistency)
+project_validation = ok(client.get("/project/validate"), "project validation")
+assert_true(project_validation["sections"]["snapshot_coverage"]["status"] == "PASS", "project validation includes snapshot coverage", project_validation)
 project_snapshot = ok(client.get("/project/export"), "project export snapshot")
 assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export includes datasets", project_snapshot)
-for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "incidents", "investigation_reports"):
+for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "connection_sources", "streams", "stream_records", "incidents", "investigation_reports"):
     assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 
 
@@ -459,7 +497,11 @@ order_events = ok(client.get("/objects/order_event"), "read generated order even
 assert_true(any(row["id"] == "o1" and row["properties"]["orderId"] == "o1" for row in order_events), "generated objects use mapped primary key", order_events)
 ontology_html = client.get("/workspace/ontology").text
 pipeline_html = client.get("/workspace/pipeline").text
-assert_true("Ontology Generator" in ontology_html and "d3@7.9.0" in pipeline_html, "workspace HTML includes generator and D3 canvas library")
+assert_true(
+    ("Ontology Generator" in ontology_html and "d3@7.9.0" in pipeline_html)
+    or ("/react/assets/" in ontology_html and "/react/assets/" in pipeline_html),
+    "workspace HTML includes generator/canvas shell",
+)
 
 workshop = ok(client.post("/apps/workshop", json={
     "id": "docs_workshop",

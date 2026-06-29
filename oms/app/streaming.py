@@ -8,7 +8,7 @@ from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, ops_control
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy ORM models
@@ -136,6 +136,18 @@ class StreamMetricsRead(BaseModel):
     records_per_second: float
 
 
+class StreamReplayRequest(BaseModel):
+    records: List[Dict[str, Any]] = Field(default_factory=list)
+    timestamp_field: Optional[str] = None
+    start_ts: Optional[int] = None
+    interval_seconds: int = Field(default=1, ge=0)
+    target_asset_id: Optional[str] = None
+    archive_to_dataset: bool = False
+    create_target_asset: bool = True
+    target_display_name: Optional[str] = None
+    actor: str = "workspace"
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -154,7 +166,7 @@ def _get_stream_or_404(stream_id: str, db: Session) -> Stream:
     return stream
 
 
-# POST /streams — create a stream
+# POST /streams - create a stream
 @router.post("/streams", response_model=StreamRead)
 def create_stream(body: StreamCreate, db: Session = Depends(get_db)):
     stream_id = body.id or uuid.uuid4().hex
@@ -176,21 +188,21 @@ def create_stream(body: StreamCreate, db: Session = Depends(get_db)):
     return StreamRead.from_orm_obj(db_stream)
 
 
-# GET /streams — list all streams
+# GET /streams - list all streams
 @router.get("/streams", response_model=List[StreamRead])
 def list_streams(db: Session = Depends(get_db)):
     streams = db.query(Stream).order_by(Stream.created_at.desc()).all()
     return [StreamRead.from_orm_obj(s) for s in streams]
 
 
-# GET /streams/{id} — get a single stream
+# GET /streams/{id} - get a single stream
 @router.get("/streams/{stream_id}", response_model=StreamRead)
 def get_stream(stream_id: str, db: Session = Depends(get_db)):
     stream = _get_stream_or_404(stream_id, db)
     return StreamRead.from_orm_obj(stream)
 
 
-# POST /streams/{id}/publish — append records to the stream
+# POST /streams/{id}/publish - append records to the stream
 @router.post("/streams/{stream_id}/publish", response_model=PublishResponse)
 def publish_to_stream(
     stream_id: str,
@@ -213,7 +225,7 @@ def publish_to_stream(
     return PublishResponse(published=len(body.records))
 
 
-# GET /streams/{id}/records — retrieve recent records
+# GET /streams/{id}/records - retrieve recent records
 @router.get("/streams/{stream_id}/records", response_model=List[StreamRecordRead])
 def get_stream_records(
     stream_id: str,
@@ -232,7 +244,7 @@ def get_stream_records(
     return rows
 
 
-# POST /streams/{id}/archive — copy stream payloads into a DataAsset and log it
+# POST /streams/{id}/archive - copy stream payloads into a DataAsset and log it
 @router.post("/streams/{stream_id}/archive", response_model=ArchiveResponse)
 def archive_stream(
     stream_id: str,
@@ -274,11 +286,112 @@ def archive_stream(
             },
         )
     )
+    ops_control.record_ops_event(
+        db,
+        source="streaming",
+        event_type="stream.archived",
+        severity="info",
+        title=f"Stream archived to dataset {body.target_asset_id}",
+        subject_type="stream",
+        subject_id=stream_id,
+        payload={"target_asset_id": body.target_asset_id, "archived": len(new_records)},
+    )
     db.commit()
     return ArchiveResponse(archived=len(new_records))
 
 
-# POST /streams/{id}/archive-policy — store an auto-archive policy on the stream
+@router.post("/streams/{stream_id}/replay")
+def replay_stream(stream_id: str, body: StreamReplayRequest, db: Session = Depends(get_db)):
+    stream = _get_stream_or_404(stream_id, db)
+    now = body.start_ts if body.start_ts is not None else _now()
+    records = [dict(row or {}) for row in body.records]
+    if not records:
+        cfg_records = []
+        if isinstance(stream.schema_, dict):
+            cfg_records = stream.schema_.get("sample_records") or stream.schema_.get("sample") or []
+        records = [dict(row) for row in cfg_records if isinstance(row, dict)]
+    if not records:
+        raise HTTPException(status_code=400, detail="Replay requires records or stream schema sample_records")
+
+    created_records: List[StreamRecord] = []
+    for index, payload in enumerate(records):
+        ts = now + (index * body.interval_seconds)
+        if body.timestamp_field and payload.get(body.timestamp_field) not in (None, ""):
+            try:
+                ts = int(payload[body.timestamp_field])
+            except (TypeError, ValueError):
+                ts = now + (index * body.interval_seconds)
+        row = StreamRecord(
+            id=uuid.uuid4().hex,
+            stream_id=stream_id,
+            payload=payload,
+            ts=ts,
+            created_at=now,
+        )
+        created_records.append(row)
+        db.add(row)
+
+    archived = 0
+    target_asset_id = body.target_asset_id
+    if body.archive_to_dataset and target_asset_id:
+        asset = db.query(models.DataAsset).filter(models.DataAsset.id == target_asset_id).first()
+        if not asset and body.create_target_asset:
+            asset = models.DataAsset(
+                id=target_asset_id,
+                display_name=body.target_display_name or f"{stream.display_name} Replay Archive",
+                description=f"Archived replay records from stream {stream.id}.",
+                kind="dataset",
+                asset_schema={"source_stream_id": stream.id, "record_count": len(records)},
+                records=[],
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(asset)
+        if not asset:
+            raise HTTPException(status_code=404, detail=f"DataAsset '{target_asset_id}' not found")
+        asset.records = list(asset.records or []) + records
+        asset.updated_at = now
+        archived = len(records)
+
+    db.add(
+        models_action.AuditLog(
+            id=uuid.uuid4().hex,
+            actor=body.actor,
+            event_type="stream.replayed",
+            subject_type="stream",
+            subject_id=stream_id,
+            payload={
+                "published": len(records),
+                "archived": archived,
+                "target_asset_id": target_asset_id,
+                "first_ts": created_records[0].ts,
+                "last_ts": created_records[-1].ts,
+            },
+        )
+    )
+    ops_control.record_ops_event(
+        db,
+        source="streaming",
+        event_type="stream.replayed",
+        severity="info",
+        title=f"Stream replayed {len(records)} record(s)",
+        subject_type="stream",
+        subject_id=stream_id,
+        payload={"published": len(records), "archived": archived, "target_asset_id": target_asset_id},
+    )
+    db.commit()
+    return {
+        "stream_id": stream_id,
+        "published": len(records),
+        "archived": archived,
+        "target_asset_id": target_asset_id,
+        "first_ts": created_records[0].ts,
+        "last_ts": created_records[-1].ts,
+        "record_ids": [row.id for row in created_records],
+    }
+
+
+# POST /streams/{id}/archive-policy - store an auto-archive policy on the stream
 @router.post("/streams/{stream_id}/archive-policy", response_model=ArchivePolicyRead)
 def set_archive_policy(
     stream_id: str,
@@ -314,7 +427,7 @@ def set_archive_policy(
     )
 
 
-# GET /streams/{id}/archive-policy — read the configured policy
+# GET /streams/{id}/archive-policy - read the configured policy
 @router.get("/streams/{stream_id}/archive-policy", response_model=ArchivePolicyRead)
 def get_archive_policy(stream_id: str, db: Session = Depends(get_db)):
     stream = _get_stream_or_404(stream_id, db)
@@ -326,7 +439,7 @@ def get_archive_policy(stream_id: str, db: Session = Depends(get_db)):
     )
 
 
-# POST /streams/{id}/apply-archive-policy — archive records exceeding the policy
+# POST /streams/{id}/apply-archive-policy - archive records exceeding the policy
 @router.post("/streams/{stream_id}/apply-archive-policy", response_model=ApplyArchivePolicyResponse)
 def apply_archive_policy(
     stream_id: str,
@@ -394,7 +507,7 @@ def apply_archive_policy(
     )
 
 
-# GET /streams/{id}/metrics — record throughput metrics over record timestamps
+# GET /streams/{id}/metrics - record throughput metrics over record timestamps
 @router.get("/streams/{stream_id}/metrics", response_model=StreamMetricsRead)
 def get_stream_metrics(stream_id: str, db: Session = Depends(get_db)):
     _get_stream_or_404(stream_id, db)

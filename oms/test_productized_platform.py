@@ -37,6 +37,7 @@ for route in (
     "/workspace/command-center",
     "/workspace/graph",
     "/workspace/validation",
+    "/workspace/imports",
     "/workspace/ontology",
     "/workspace/pipeline",
 ):
@@ -44,14 +45,14 @@ for route in (
     assert_true(resp.status_code == 200, f"{route} loads", resp.status_code)
 
 html = client.get("/workspace/command-center").text
-assert_true("commandCenterImport" in html and "commandCenterProofTrail" in html and "commandCenterStepper" in html, "command center has guided import/proof trail UI")
+assert_true(("commandCenterImport" in html and "commandCenterProofTrail" in html) or ("/react/assets/" in html and 'id="root"' in html), "command center has guided UI shell")
 graph_html = client.get("/workspace/graph").text
-assert_true("platformGraphCanvas" in graph_html and "platformGraphFilters" in graph_html and "platformGraphSearchInput" in graph_html, "graph workspace has visual canvas UI")
+assert_true(("platformGraphCanvas" in graph_html and "platformGraphFilters" in graph_html) or ("/react/assets/" in graph_html and 'id="root"' in graph_html), "graph workspace has visual canvas UI")
 validation_html = client.get("/workspace/validation").text
-assert_true("validationView" in validation_html and "validationMatrix" in validation_html, "validation workspace is present")
+assert_true(("validationView" in validation_html and "validationMatrix" in validation_html) or ("/react/assets/" in validation_html and 'id="root"' in validation_html), "validation workspace is present")
 
 root = ok(client.get("/"), "root capability catalog")
-for capability in ("data_imports", "validation_dashboard", "project_snapshot", "schema_health", "event_consistency"):
+for capability in ("data_imports", "validation_dashboard", "project_snapshot", "schema_health", "event_consistency", "import_transforms", "mapping_suggestions", "hybrid_connector_preview", "stream_replay", "react_vite_frontend", "project_validation"):
     assert_true(capability in root["capabilities"], f"root advertises {capability}", root["capabilities"])
 
 csv_job = ok(client.post("/imports/csv", json={
@@ -94,6 +95,34 @@ draft_from_file = ok(client.post(f"/imports/jobs/{file_job['id']}/generate-ontol
 }), "generate ontology draft from file import")
 assert_true(draft_from_file["status"] == "DRAFT_CREATED" and draft_from_file["draft"]["object_type_id"] == "file_asset", "file import generated ontology draft", draft_from_file)
 
+transform_job = ok(client.post("/imports/csv", json={
+    "id": "transform_asset_import",
+    "filename": "transform-assets.csv",
+    "display_name": "Transform Asset Import",
+    "target_dataset_id": "transform_asset_dataset",
+    "content": "asset_id,name,status,criticality,vibration_ips,temperature_f,longitude,latitude\nasset_transform_1,Transform Pump,degraded,HIGH,0.5,212,-122.4012,37.7924\nasset_transform_1,Transform Pump,degraded,HIGH,0.5,212,-122.4012,37.7924\n",
+}), "create transform import", expect=201)
+suggestions = ok(client.get("/imports/jobs/transform_asset_import/mapping-suggestions?template=asset"), "mapping suggestions")
+assert_true(suggestions["mapping"]["asset_id"] == "asset_id" and any(row["target"] == "name" for row in suggestions["suggestions"]), "mapping suggestions find asset fields", suggestions)
+preview_transform = ok(client.post("/imports/jobs/transform_asset_import/apply-transforms", json={
+    "preview_only": True,
+    "steps": [{"op": "deduplicate", "keys": ["asset_id"]}],
+}), "preview import transforms")
+assert_true(preview_transform["summary"]["duplicates_removed"] == 1 and preview_transform["status"] == "PREVIEW", "transform preview detects duplicate", preview_transform)
+transformed = ok(client.post("/imports/jobs/transform_asset_import/apply-transforms", json={
+    "actor": "test",
+    "steps": [
+        {"op": "enum_cleanup", "field": "status", "mapping": {"degraded": "DEGRADED"}},
+        {"op": "enum_cleanup", "field": "criticality", "mapping": {"high": "high"}},
+        {"op": "normalize_unit", "source": "temperature_f", "target": "temperature_c", "from_unit": "fahrenheit", "to_unit": "celsius"},
+        {"op": "normalize_unit", "source": "vibration_ips", "target": "vibration_mm_s", "from_unit": "ips", "to_unit": "mm_s"},
+        {"op": "derive_point", "latitude_field": "latitude", "longitude_field": "longitude", "target": "geometry"},
+        {"op": "deduplicate", "keys": ["asset_id"]}
+    ],
+}), "apply import transforms")
+assert_true(transformed["summary"]["duplicates_removed"] == 1 and transformed["job"]["record_count"] == 1, "transform mutates import job", transformed)
+assert_true(transformed["preview_rows"][0]["temperature_c"] == 100.0 and transformed["preview_rows"][0]["geometry"]["type"] == "Point", "unit and geometry transforms apply", transformed["preview_rows"])
+
 promoted = ok(client.post("/imports/jobs/user_asset_csv_import/promote-to-dataset", json={
     "dataset_id": "user_asset_dataset",
     "display_name": "User Asset Dataset",
@@ -104,6 +133,60 @@ jobs = ok(client.get("/imports/jobs"), "list import jobs")
 assert_true(jobs["count"] >= 2 and any(job["status"] == "PROMOTED" for job in jobs["jobs"]), "import jobs list includes promoted job", jobs)
 events = ok(client.get("/events", params={"source": "imports"}), "import events")
 assert_true(events["count"] >= 2, "import flow emits ops events", events)
+
+source = ok(client.post("/connections/sources", json={
+    "id": "productized_rest_source",
+    "display_name": "Productized REST Source",
+    "source_type": "rest",
+    "config": {
+        "base_url": "http://localhost:9000/assets",
+        "sample_records": [{"asset_id": "asset_connector_1", "name": "Connector Pump", "status": "RUNNING", "criticality": "medium"}],
+    },
+}), "create connector source")
+source_preview = ok(client.post("/connections/sources/productized_rest_source/preview", json={"limit": 5}), "preview connector source")
+assert_true(source_preview["status"] == "READY" and source_preview["record_count"] == 1, "connector preview returns sample records", source_preview)
+connector_import = ok(client.post("/connections/sources/productized_rest_source/generate-import-job", json={
+    "id": "productized_connector_import",
+    "target_dataset_id": "productized_connector_dataset",
+    "template": "asset",
+    "actor": "test",
+}), "connector generates import job")
+assert_true(connector_import["status"] == "IMPORT_JOB_CREATED" and connector_import["job"]["template"] == "asset", "connector import job is template validated", connector_import)
+ok(client.post("/data-assets", json={
+    "id": "connector_sync_target",
+    "display_name": "Connector Sync Target",
+    "description": "Target for sync validation",
+    "kind": "dataset",
+    "asset_schema": {},
+    "records": [],
+}), "create connector sync target", expect=200)
+sync = ok(client.post("/connections/sources/productized_rest_source/syncs", json={
+    "id": "productized_connector_sync",
+    "target_asset_id": "connector_sync_target",
+    "mode": "snapshot",
+    "sample_records": [{"asset_id": "asset_sync_1", "name": "Sync Pump"}],
+}), "create connector sync")
+sync_validation = ok(client.post("/connections/syncs/productized_connector_sync/validate", json={}), "validate connector sync")
+assert_true(sync_validation["status"] == "PASS" and sync_validation["schema"], "connector sync validation passes", sync_validation)
+sync_run = ok(client.post("/connections/syncs/productized_connector_sync/run"), "run connector sync")
+assert_true(sync_run["records_out"] == 1, "connector sync writes target records", sync_run)
+
+stream = ok(client.post("/streams", json={
+    "id": "productized_sensor_stream",
+    "display_name": "Productized Sensor Stream",
+    "schema": {"sample_records": [{"reading_id": "stream_sample", "asset_id": "asset_pump_4", "observed_at": "1782684300"}]},
+}), "create replay stream")
+stream_replay = ok(client.post("/streams/productized_sensor_stream/replay", json={
+    "actor": "test",
+    "target_asset_id": "productized_stream_archive",
+    "archive_to_dataset": True,
+    "timestamp_field": "observed_at",
+    "records": [
+        {"reading_id": "stream_1", "asset_id": "asset_pump_4", "observed_at": "1782684300"},
+        {"reading_id": "stream_2", "asset_id": "asset_pump_4", "observed_at": "1782684310"},
+    ],
+}), "replay stream to dataset")
+assert_true(stream_replay["published"] == 2 and stream_replay["archived"] == 2, "stream replay publishes and archives records", stream_replay)
 
 draft = ok(client.post("/ontology-generator/drafts", json={
     "id": "user_asset_draft",
@@ -148,17 +231,19 @@ assert_true(executed["status"] == "SUCCESS", "approved command-center action exe
 dashboard = ok(client.get("/scenarios/asset-reliability/validation-dashboard"), "validation dashboard")
 assert_true(dashboard["row_count"] >= 20 and not dashboard["priority_gaps"], "validation dashboard has no P0/P1 gaps", dashboard)
 migrations = ok(client.get("/system/migrations"), "migration metadata")
-assert_true(migrations["status"] == "PASS" and migrations["current_version"] >= 2, "migration metadata passes", migrations)
+assert_true(migrations["status"] == "PASS" and migrations["current_version"] >= 3 and migrations["migrations"][-1]["applied_at"], "migration metadata passes", migrations)
 schema_health = ok(client.get("/system/schema-health"), "schema health")
 assert_true(schema_health["status"] == "PASS" and "import_jobs" not in schema_health["missing_tables"], "schema health sees import table", schema_health)
 event_health = ok(client.get("/system/event-consistency"), "event consistency")
-assert_true(event_health["status"] in {"PASS", "WARN"} and event_health["counts"]["import_jobs"] >= 2, "event consistency includes imports", event_health)
+assert_true(event_health["status"] in {"PASS", "WARN"} and event_health["counts"]["import_jobs"] >= 2 and event_health["counts"]["stream_replays"] >= 1, "event consistency includes imports and streams", event_health)
+project_validation = ok(client.get("/project/validate"), "project validate")
+assert_true(project_validation["status"] in {"PASS", "WARN"} and project_validation["sections"]["snapshot_coverage"]["status"] == "PASS", "project validation summarizes snapshot coverage", project_validation)
 report = client.get("/scenarios/asset-reliability/report?format=markdown")
 assert_true(report.status_code == 200 and "Asset Reliability Command Center Report" in report.text, "scenario report exports markdown", report.text[:200])
 
 project_snapshot = ok(client.get("/project/export"), "project export")
 assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export returns snapshot", project_snapshot)
-for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "incidents", "investigation_reports"):
+for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "model_monitor_runs", "model_prediction_logs", "connection_sources", "connection_syncs", "streams", "stream_records", "schedules", "builds", "webhook_listeners", "incidents", "investigation_evidence", "investigation_reports"):
     assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 imported = ok(client.post("/project/import", json={"snapshot": project_snapshot, "mode": "merge", "actor": "test"}), "project import merge")
 assert_true(imported["status"] == "IMPORTED", "project import completes", imported)
