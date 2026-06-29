@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -143,7 +143,11 @@ models_action.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Ontology Artificial Intelligence Platform")
 UI_DIR = Path(__file__).resolve().parent / "ui"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIST_DIR = REPO_ROOT / "frontend" / "dist"
 app.mount("/ui/assets", StaticFiles(directory=str(UI_DIR)), name="ui-assets")
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/react", StaticFiles(directory=str(FRONTEND_DIST_DIR)), name="react-assets")
 
 # Mount the new Foundry tool-equivalent routers. Each module exposes `router`.
 for _ext_module in (
@@ -226,16 +230,23 @@ def _not_found(resource: str, resource_id: str):
     raise HTTPException(status_code=404, detail=f"{resource} '{resource_id}' not found")
 
 
-@app.get("/workspace", include_in_schema=False)
-def serve_workspace():
+def _workspace_shell(legacy: bool = False):
+    react_index = FRONTEND_DIST_DIR / "index.html"
+    if react_index.exists() and not legacy:
+        return FileResponse(react_index)
     return FileResponse(UI_DIR / "index.html")
+
+
+@app.get("/workspace", include_in_schema=False)
+def serve_workspace(request: Request):
+    return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
 
 @app.get("/workspace/{view}", include_in_schema=False)
-def serve_workspace_view(view: str):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "validation"}:
+def serve_workspace_view(view: str, request: Request):
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "imports", "validation"}:
         _not_found("Workspace", view)
-    return FileResponse(UI_DIR / "index.html")
+    return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
 @app.get("/")
 def read_root():
@@ -281,8 +292,14 @@ def read_root():
             "data_imports",
             "file_imports",
             "semantic_import_mapping",
+            "import_transforms",
+            "mapping_suggestions",
+            "hybrid_connector_preview",
+            "stream_replay",
+            "react_vite_frontend",
             "validation_dashboard",
             "project_snapshot",
+            "project_validation",
             "schema_health",
             "event_consistency",
             "migration_metadata",

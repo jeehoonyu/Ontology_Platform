@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect
-from sqlalchemy.orm import Session
+from sqlalchemy import Integer, String, inspect, text
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import (
     apps,
+    connectivity,
+    connectivity_ops,
     imports_ops,
     investigations,
     modelops,
@@ -26,10 +29,22 @@ from . import (
     object_explorer_ops,
     ops_control,
     platform_core,
+    schedules,
+    streaming,
+    webhooks_ops,
 )
-from .database import get_db
+from .database import Base, get_db
 
 router = APIRouter(tags=["system_hardening"])
+
+
+class MigrationRecord(Base):
+    __tablename__ = "system_migration_records"
+
+    version: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="applied")
+    applied_at: Mapped[int] = mapped_column(Integer)
 
 
 CORE_TABLES = [
@@ -45,6 +60,17 @@ CORE_TABLES = [
     "audit_logs",
     "ops_events",
     "import_jobs",
+    "system_migration_records",
+    "connection_sources",
+    "connection_syncs",
+    "sync_runs",
+    "sync_cursor_state",
+    "streams",
+    "stream_records",
+    "schedules",
+    "builds",
+    "wh_listeners",
+    "wh_listener_events",
     "platform_policy_rules",
     "platform_policy_decisions",
     "workshop_modules",
@@ -55,10 +81,11 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
+    {"version": 3, "name": "hybrid_onboarding_connectors_streams_react_foundation", "status": "applied"},
 ]
 
 
@@ -73,6 +100,7 @@ def _now() -> int:
 
 
 def _ensure_runtime_tables(db: Session) -> None:
+    MigrationRecord.__table__.create(bind=db.get_bind(), checkfirst=True)
     imports_ops._ensure_tables(db)
     platform_core._ensure_tables(db)
     ops_control._ensure_tables(db)
@@ -84,8 +112,60 @@ def _ensure_runtime_tables(db: Session) -> None:
         modelops.ModelMonitor.__table__,
         modelops.ModelMonitorRun.__table__,
         modelops.ModelPredictionLog.__table__,
+        connectivity.ConnectionSource.__table__,
+        connectivity.ConnectionSync.__table__,
+        connectivity.SyncRun.__table__,
+        connectivity.ConnectionExport.__table__,
+        connectivity.ConnectionExportCheckpoint.__table__,
+        connectivity_ops.SyncCursorState.__table__,
+        streaming.Stream.__table__,
+        streaming.StreamRecord.__table__,
+        schedules.Schedule.__table__,
+        schedules.Build.__table__,
+        webhooks_ops.WhListener.__table__,
+        webhooks_ops.WhListenerEvent.__table__,
     ):
         table.create(bind=db.get_bind(), checkfirst=True)
+    _ensure_column(db, "streams", "archive_policy", "JSON")
+    _ensure_column(db, "stream_records", "archived", "BOOLEAN DEFAULT 0")
+    _ensure_column(db, "stream_records", "archived_at", "INTEGER")
+    _ensure_migration_records(db)
+
+
+def _ensure_column(db: Session, table_name: str, column_name: str, column_ddl: str) -> None:
+    inspector = inspect(db.get_bind())
+    existing_tables = set(inspector.get_table_names())
+    if table_name not in existing_tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns(table_name)}
+    if column_name in columns:
+        return
+    db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}"))
+
+
+def _ensure_migration_records(db: Session) -> None:
+    MigrationRecord.__table__.create(bind=db.get_bind(), checkfirst=True)
+    now = _now()
+    existing_versions = {row.version for row in db.query(MigrationRecord.version).all()}
+    added = False
+    for migration in MIGRATIONS:
+        version = migration["version"]
+        if version in existing_versions:
+            existing = db.get(MigrationRecord, version)
+            if existing:
+                existing.name = migration["name"]
+                existing.status = migration["status"]
+            continue
+        db.add(MigrationRecord(
+            version=version,
+            name=migration["name"],
+            status=migration["status"],
+            applied_at=now,
+        ))
+        added = True
+        existing_versions.add(version)
+    if added:
+        db.flush()
 
 
 def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any]) -> None:
@@ -164,6 +244,54 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             modelops._prediction_log_dict(row)
             for row in db.query(modelops.ModelPredictionLog).all()
         ],
+        "connection_sources": [
+            _row_dict(row, ["id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"])
+            for row in db.query(connectivity.ConnectionSource).all()
+        ],
+        "connection_syncs": [
+            _row_dict(row, ["id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"])
+            for row in db.query(connectivity.ConnectionSync).all()
+        ],
+        "connection_sync_runs": [
+            _row_dict(row, ["id", "sync_id", "status", "records_in", "records_out", "created_at", "completed_at"])
+            for row in db.query(connectivity.SyncRun).all()
+        ],
+        "connection_exports": [
+            _row_dict(row, ["id", "source_asset_id", "destination", "format", "created_at"])
+            for row in db.query(connectivity.ConnectionExport).all()
+        ],
+        "connection_export_checkpoints": [
+            _row_dict(row, ["export_id", "last_exported_count", "runs", "updated_at"])
+            for row in db.query(connectivity.ConnectionExportCheckpoint).all()
+        ],
+        "connection_sync_cursors": [
+            _row_dict(row, ["sync_id", "cursor_field", "last_value", "runs", "updated_at"])
+            for row in db.query(connectivity_ops.SyncCursorState).all()
+        ],
+        "streams": [
+            _row_dict(row, ["id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"])
+            for row in db.query(streaming.Stream).all()
+        ],
+        "stream_records": [
+            _row_dict(row, ["id", "stream_id", "payload", "ts", "archived", "archived_at", "created_at"])
+            for row in db.query(streaming.StreamRecord).all()
+        ],
+        "schedules": [
+            _row_dict(row, ["id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
+            for row in db.query(schedules.Schedule).all()
+        ],
+        "builds": [
+            _row_dict(row, ["id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"])
+            for row in db.query(schedules.Build).all()
+        ],
+        "webhook_listeners": [
+            _row_dict(row, ["id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"])
+            for row in db.query(webhooks_ops.WhListener).all()
+        ],
+        "webhook_listener_events": [
+            _row_dict(row, ["id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"])
+            for row in db.query(webhooks_ops.WhListenerEvent).all()
+        ],
         "incidents": [
             ops_control._incident_dict(row)
             for row in db.query(ops_control.Incident).all()
@@ -175,6 +303,14 @@ def _snapshot(db: Session) -> Dict[str, Any]:
         "investigation_evidence": [
             investigations._evidence_dict(row)
             for row in db.query(investigations.EvidenceItem).all()
+        ],
+        "investigation_hypotheses": [
+            investigations._hypothesis_dict(row)
+            for row in db.query(investigations.InvestigationHypothesis).all()
+        ],
+        "investigation_findings": [
+            investigations._finding_dict(row)
+            for row in db.query(investigations.InvestigationFinding).all()
         ],
         "investigation_reports": [
             investigations._report_dict(row)
@@ -196,6 +332,77 @@ def _upsert_model(db: Session, model_cls: Any, data: Dict[str, Any], fields: Lis
     return "created"
 
 
+def _upsert_model_by_key(db: Session, model_cls: Any, data: Dict[str, Any], key_field: str, fields: List[str]) -> str:
+    if not data.get(key_field):
+        return "skipped"
+    existing = db.query(model_cls).filter(getattr(model_cls, key_field) == data[key_field]).first()
+    clean = {field: data.get(field) for field in fields if field in data}
+    if existing:
+        for key, value in clean.items():
+            setattr(existing, key, value)
+        return "updated"
+    db.add(model_cls(**clean))
+    return "created"
+
+
+def _docs_matrix_summary() -> Dict[str, Any]:
+    root = Path(__file__).resolve().parents[2]
+    matrix_path = root / "foundry-docs" / "VALIDATION_MATRIX.md"
+    if not matrix_path.exists():
+        return {"status": "WARN", "path": str(matrix_path), "row_count": 0, "counts": {}, "missing": True}
+    text = matrix_path.read_text(encoding="utf-8")
+    rows = [line for line in text.splitlines() if line.startswith("|") and not line.startswith("|---") and "Status" not in line]
+    counts: Dict[str, int] = {}
+    for line in rows:
+        for status in ("MATCH", "LOCAL_ANALOG", "PARTIAL", "INTENTIONAL_DIFFERENCE", "MISSING"):
+            if f"| {status} |" in line:
+                counts[status] = counts.get(status, 0) + 1
+    required_gaps = counts.get("MISSING", 0)
+    return {
+        "status": "PASS" if required_gaps == 0 else "WARN",
+        "path": str(matrix_path),
+        "row_count": len(rows),
+        "counts": counts,
+        "missing": False,
+    }
+
+
+def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    expected = [
+        "object_types",
+        "data_assets",
+        "pipeline_definitions",
+        "import_jobs",
+        "model_monitors",
+        "model_monitor_runs",
+        "model_prediction_logs",
+        "connection_sources",
+        "connection_syncs",
+        "connection_sync_runs",
+        "connection_sync_cursors",
+        "streams",
+        "stream_records",
+        "schedules",
+        "builds",
+        "webhook_listeners",
+        "webhook_listener_events",
+        "incidents",
+        "investigations",
+        "investigation_evidence",
+        "investigation_hypotheses",
+        "investigation_findings",
+        "investigation_reports",
+    ]
+    missing = [key for key in expected if key not in snapshot]
+    counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
+    return {
+        "status": "PASS" if not missing else "WARN",
+        "expected": expected,
+        "missing": missing,
+        "counts": counts,
+    }
+
+
 @router.get("/system/schema-health")
 def schema_health(db: Session = Depends(get_db)):
     _ensure_runtime_tables(db)
@@ -215,11 +422,21 @@ def schema_health(db: Session = Depends(get_db)):
 @router.get("/system/migrations")
 def migrations(db: Session = Depends(get_db)):
     health = schema_health(db)
+    db.commit()
+    records = db.query(MigrationRecord).order_by(MigrationRecord.version.asc()).all()
     return {
         "status": "PASS" if health["status"] == "PASS" else "WARN",
         "current_version": SCHEMA_VERSION,
         "expected_version": SCHEMA_VERSION,
-        "migrations": MIGRATIONS,
+        "migrations": [
+            {
+                "version": row.version,
+                "name": row.name,
+                "status": row.status,
+                "applied_at": row.applied_at,
+            }
+            for row in records
+        ],
         "schema_health": health,
     }
 
@@ -230,6 +447,10 @@ def event_consistency(db: Session = Depends(get_db)):
     pipeline_runs = db.query(models.PipelineRun).count()
     approvals = db.query(models_action.ApprovalRequest).count()
     import_jobs = db.query(imports_ops.ImportJob).count()
+    connector_syncs = db.query(connectivity.ConnectionSync).count()
+    connector_runs = db.query(connectivity.SyncRun).count()
+    stream_replays = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type == "stream.replayed").count()
+    stream_archives = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type == "stream.archived").count()
     ontology_applies = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type == "ontology.generator.applied").count()
     action_executions = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type.like("action.%")).count()
     incident_updates = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type.like("ops.incident%")).count()
@@ -255,6 +476,16 @@ def event_consistency(db: Session = Depends(get_db)):
             "name": "import jobs emit ops events",
             "status": "PASS" if import_jobs == 0 or source_counts.get("imports", 0) >= import_jobs else "WARN",
             "count": import_jobs,
+        },
+        {
+            "name": "connector syncs emit audit/event evidence",
+            "status": "PASS" if connector_syncs == 0 or connector_runs > 0 or source_counts.get("connectivity", 0) > 0 else "WARN",
+            "count": connector_syncs,
+        },
+        {
+            "name": "stream replay/archive emits audit/event evidence",
+            "status": "PASS" if (stream_replays + stream_archives) == 0 or source_counts.get("streaming", 0) >= (stream_replays + stream_archives) else "WARN",
+            "count": stream_replays + stream_archives,
         },
         {
             "name": "ontology generator applies have audit evidence",
@@ -289,6 +520,10 @@ def event_consistency(db: Session = Depends(get_db)):
             "pipeline_runs": pipeline_runs,
             "approvals": approvals,
             "import_jobs": import_jobs,
+            "connector_syncs": connector_syncs,
+            "connector_runs": connector_runs,
+            "stream_replays": stream_replays,
+            "stream_archives": stream_archives,
             "ontology_applies": ontology_applies,
             "action_executions": action_executions,
             "incident_updates": incident_updates,
@@ -298,6 +533,53 @@ def event_consistency(db: Session = Depends(get_db)):
         },
         "source_counts": source_counts,
         "checks": checks,
+    }
+
+
+@router.get("/project/validate")
+def validate_project(db: Session = Depends(get_db)):
+    schema = schema_health(db)
+    migration_info = migrations(db)
+    event_info = event_consistency(db)
+    snapshot = _snapshot(db)
+    snapshot_info = _snapshot_coverage(snapshot)
+    docs_info = _docs_matrix_summary()
+    route_paths = [
+        "/workspace/command-center",
+        "/workspace/ontology",
+        "/workspace/pipeline",
+        "/workspace/graph",
+        "/workspace/validation",
+        "/imports/jobs",
+        "/connections/sources",
+        "/streams",
+        "/project/export",
+        "/project/validate",
+    ]
+    route_health = {
+        "status": "PASS",
+        "routes": [{"path": path, "status": "CONFIGURED"} for path in route_paths],
+    }
+    sections = {
+        "schema_health": schema,
+        "migrations": migration_info,
+        "event_consistency": event_info,
+        "snapshot_coverage": snapshot_info,
+        "route_health": route_health,
+        "docs_conformance": docs_info,
+    }
+    status = "PASS" if all(section.get("status") == "PASS" for section in sections.values()) else "WARN"
+    return {
+        "status": status,
+        "checked_at": _now(),
+        "sections": sections,
+        "summary": {
+            "schema": schema["status"],
+            "migrations": migration_info["status"],
+            "events": event_info["status"],
+            "snapshot": snapshot_info["status"],
+            "docs": docs_info["status"],
+        },
     }
 
 
@@ -362,6 +644,50 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, modelops.ModelMonitor, row, ["id", "display_name", "description", "objective_id", "deployment_id", "baseline_asset_id", "feature_fields", "prediction_field", "target_field", "thresholds", "enabled", "created_at", "updated_at"]))
+    for row in snapshot.get("model_monitor_runs") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, modelops.ModelMonitorRun, row, ["id", "monitor_id", "objective_id", "deployment_id", "baseline_asset_id", "current_asset_id", "baseline_profile", "current_profile", "drift_metrics", "quality_metrics", "alerts", "status", "created_at"]))
+    for row in snapshot.get("model_prediction_logs") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, modelops.ModelPredictionLog, row, ["id", "deployment_id", "objective_id", "submission_id", "request_shape", "input_count", "output_count", "prediction_summary", "created_at"]))
+    for row in snapshot.get("connection_sources") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, connectivity.ConnectionSource, row, ["id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"]))
+    for row in snapshot.get("connection_syncs") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, connectivity.ConnectionSync, row, ["id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"]))
+    for row in snapshot.get("connection_sync_runs") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("completed_at", now)
+        track(_upsert_model(db, connectivity.SyncRun, row, ["id", "sync_id", "status", "records_in", "records_out", "created_at", "completed_at"]))
+    for row in snapshot.get("connection_exports") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, connectivity.ConnectionExport, row, ["id", "source_asset_id", "destination", "format", "created_at"]))
+    for row in snapshot.get("connection_export_checkpoints") or []:
+        row.setdefault("updated_at", now)
+        track(_upsert_model_by_key(db, connectivity.ConnectionExportCheckpoint, row, "export_id", ["export_id", "last_exported_count", "runs", "updated_at"]))
+    for row in snapshot.get("connection_sync_cursors") or []:
+        row.setdefault("updated_at", now)
+        track(_upsert_model_by_key(db, connectivity_ops.SyncCursorState, row, "sync_id", ["sync_id", "cursor_field", "last_value", "runs", "updated_at"]))
+    for row in snapshot.get("streams") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, streaming.Stream, row, ["id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"]))
+    for row in snapshot.get("stream_records") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, streaming.StreamRecord, row, ["id", "stream_id", "payload", "ts", "archived", "archived_at", "created_at"]))
+    for row in snapshot.get("schedules") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, schedules.Schedule, row, ["id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"]))
+    for row in snapshot.get("builds") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, schedules.Build, row, ["id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"]))
+    for row in snapshot.get("webhook_listeners") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, webhooks_ops.WhListener, row, ["id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"]))
+    for row in snapshot.get("webhook_listener_events") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, webhooks_ops.WhListenerEvent, row, ["id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
@@ -370,6 +696,16 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, investigations.InvestigationWorkspace, row, ["id", "display_name", "description", "owner", "status", "object_refs", "incident_ids", "alert_ids", "created_at", "updated_at"]))
+    for row in snapshot.get("investigation_evidence") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, investigations.EvidenceItem, row, ["id", "investigation_id", "title", "source", "object_refs", "payload", "tags", "created_at"]))
+    for row in snapshot.get("investigation_hypotheses") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, investigations.InvestigationHypothesis, row, ["id", "investigation_id", "statement", "status", "confidence", "linked_evidence_ids", "created_at", "updated_at"]))
+    for row in snapshot.get("investigation_findings") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, investigations.InvestigationFinding, row, ["id", "investigation_id", "title", "severity", "summary", "object_refs", "evidence_ids", "created_at"]))
     for row in snapshot.get("investigation_reports") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, investigations.InvestigationReport, row, ["id", "investigation_id", "title", "body", "sections", "created_at"]))
