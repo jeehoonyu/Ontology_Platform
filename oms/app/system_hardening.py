@@ -367,6 +367,30 @@ def _docs_matrix_summary() -> Dict[str, Any]:
     }
 
 
+def _docs_matrix_rows() -> List[Dict[str, str]]:
+    root = Path(__file__).resolve().parents[2]
+    matrix_path = root / "foundry-docs" / "VALIDATION_MATRIX.md"
+    if not matrix_path.exists():
+        return []
+    rows: List[Dict[str, str]] = []
+    for raw_line in matrix_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|") or "---" in line or line.startswith("| Domain "):
+            continue
+        cells = [cell.strip().strip("`") for cell in line.strip("|").split("|")]
+        if len(cells) == 7:
+            rows.append({
+                "domain": cells[0],
+                "source": cells[1],
+                "behavior": cells[2],
+                "evidence": cells[3],
+                "status": cells[4],
+                "gap": cells[5],
+                "priority": cells[6],
+            })
+    return rows
+
+
 def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     expected = [
         "object_types",
@@ -555,6 +579,11 @@ def validate_project(db: Session = Depends(get_db)):
         "/streams",
         "/project/export",
         "/project/validate",
+        "/project/readiness",
+        "/project/demo/bootstrap",
+        "/ui-state/command-center",
+        "/ui-state/imports",
+        "/ui-state/validation",
     ]
     route_health = {
         "status": "PASS",
@@ -580,6 +609,106 @@ def validate_project(db: Session = Depends(get_db)):
             "snapshot": snapshot_info["status"],
             "docs": docs_info["status"],
         },
+    }
+
+
+@router.get("/project/readiness")
+def project_readiness(db: Session = Depends(get_db)):
+    validation = validate_project(db)
+    sections = validation.get("sections") or {}
+    checks = [
+        {"id": "schema", "label": "Schema health", "status": (sections.get("schema_health") or {}).get("status", "WARN"), "href": "/system/schema-health"},
+        {"id": "migrations", "label": "Migration metadata", "status": (sections.get("migrations") or {}).get("status", "WARN"), "href": "/system/migrations"},
+        {"id": "events", "label": "Event consistency", "status": (sections.get("event_consistency") or {}).get("status", "WARN"), "href": "/system/event-consistency"},
+        {"id": "snapshot", "label": "Snapshot coverage", "status": (sections.get("snapshot_coverage") or {}).get("status", "WARN"), "href": "/project/export"},
+        {"id": "docs", "label": "Docs conformance", "status": (sections.get("docs_conformance") or {}).get("status", "WARN"), "href": "/workspace/validation"},
+        {"id": "routes", "label": "Evaluator routes", "status": (sections.get("route_health") or {}).get("status", "WARN"), "href": "/workspace/command-center"},
+    ]
+    failing = [check for check in checks if check["status"] != "PASS"]
+    return {
+        "status": "READY" if not failing else "NEEDS_ATTENTION",
+        "checked_at": validation.get("checked_at", _now()),
+        "summary": {
+            "pass_count": len(checks) - len(failing),
+            "warn_count": len(failing),
+            "total_count": len(checks),
+            "project_validation": validation.get("status"),
+        },
+        "checks": checks,
+        "recommended_actions": [
+            {"id": check["id"], "label": f"Review {check['label']}", "href": check["href"]}
+            for check in failing
+        ] or [{"id": "open_demo", "label": "Open Command Center", "href": "/workspace/command-center"}],
+        "last_updated": validation.get("checked_at", _now()),
+    }
+
+
+@router.get("/ui-state/validation")
+def validation_ui_state(db: Session = Depends(get_db)):
+    validation = validate_project(db)
+    rows = _docs_matrix_rows()
+    status_counts: Dict[str, int] = {}
+    for row in rows:
+        status = row.get("status", "UNKNOWN")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    priority_gaps = [row for row in rows if row.get("priority") in {"P0", "P1"} and row.get("status") in {"PARTIAL", "MISSING"}]
+    sections = validation.get("sections") or {}
+    validation_sections = [
+        {
+            "id": "runtime",
+            "title": "Runtime health",
+            "status": validation.get("status"),
+            "description": "Schema, migrations, event consistency, snapshot coverage, and configured evaluator routes.",
+            "metrics": validation.get("summary", {}),
+            "rows": [
+                {"check": key.replace("_", " "), "status": value.get("status")}
+                for key, value in sections.items()
+                if isinstance(value, dict)
+            ],
+            "href": "/project/validate",
+        },
+        {
+            "id": "docs",
+            "title": "Docs conformance matrix",
+            "status": (sections.get("docs_conformance") or {}).get("status", "WARN"),
+            "description": "Behavioral conformance against public docs and local documentation, not proprietary API parity.",
+            "metrics": {"row_count": len(rows), **status_counts},
+            "rows": rows,
+            "href": "/workspace/validation",
+        },
+        {
+            "id": "gaps",
+            "title": "Required gaps",
+            "status": "PASS" if not priority_gaps else "WARN",
+            "description": "P0/P1 rows that still need implementation or explicit scoping.",
+            "metrics": {"gap_count": len(priority_gaps)},
+            "rows": priority_gaps,
+            "href": "/workspace/validation",
+        },
+    ]
+    return {
+        "summary": {
+            "status": validation.get("status"),
+            "docs_row_count": len(rows),
+            "status_counts": status_counts,
+            "required_gap_count": len(priority_gaps),
+            "checked_at": validation.get("checked_at"),
+        },
+        "primary_actions": [
+            {"id": "refresh", "label": "Refresh validation", "method": "GET", "path": "/ui-state/validation"},
+            {"id": "project_readiness", "label": "Check project readiness", "method": "GET", "path": "/project/readiness"},
+        ],
+        "sections": validation_sections,
+        "evidence_links": [
+            {"kind": "docs_matrix", "id": "VALIDATION_MATRIX", "href": "/workspace/validation"},
+            {"kind": "project_validation", "id": "project_validate", "href": "/project/validate"},
+        ],
+        "warnings": [
+            {"id": row["domain"], "message": row["gap"], "severity": "warn"}
+            for row in priority_gaps
+        ],
+        "rows": rows,
+        "last_updated": validation.get("checked_at", _now()),
     }
 
 

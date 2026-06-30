@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
-import type { JsonObject, TableRow } from "../../types";
+import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
 
 export function Panel({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -12,6 +12,25 @@ export function Panel({ title, action, children }: { title: string; action?: Rea
       {children}
     </section>
   );
+}
+
+export function LoadingState({ label = "Loading workspace data..." }: { label?: string }) {
+  return <div className="state-block loading-state">{label}</div>;
+}
+
+export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+  return (
+    <div className="state-block empty-state-card">
+      <strong>{title}</strong>
+      {description ? <span>{description}</span> : null}
+      {action ? <div className="button-row">{action}</div> : null}
+    </div>
+  );
+}
+
+export function ErrorBanner({ message }: { message?: string }) {
+  if (!message) return null;
+  return <div className="state-block error-state">{message}</div>;
 }
 
 export function StatusBadge({ value }: { value?: string | number | null }) {
@@ -27,6 +46,20 @@ export function StatusBadge({ value }: { value?: string | number | null }) {
     >
       {text}
     </span>
+  );
+}
+
+export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
+  if (!warnings?.length) return null;
+  return (
+    <div className="warning-list">
+      {warnings.map((warning) => (
+        <article key={warning.id}>
+          <StatusBadge value={warning.severity || "info"} />
+          <span>{warning.message}</span>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -75,6 +108,44 @@ export function Metric({ label, value }: { label: string; value: unknown }) {
       <strong>{formatValue(value)}</strong>
       <span>{label}</span>
     </article>
+  );
+}
+
+export function SectionCards({ sections, onNavigate }: { sections?: UiSection[]; onNavigate?: (href: string) => void }) {
+  if (!sections?.length) return <EmptyState title="No sections available" description="Run the sample workflow or refresh the workspace." />;
+  return (
+    <div className="section-card-grid">
+      {sections.map((section) => (
+        <article key={section.id} className="section-card">
+          <header>
+            <div>
+              <strong>{section.title}</strong>
+              {section.description ? <span>{section.description}</span> : null}
+            </div>
+            <StatusBadge value={section.status || "available"} />
+          </header>
+          {section.metrics ? <KeyValueGrid data={section.metrics} /> : null}
+          {section.href ? (
+            <button onClick={() => onNavigate?.(section.href || "")}>Open evidence</button>
+          ) : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function EvidenceList({ links }: { links?: EvidenceLink[] }) {
+  const safeLinks = (links || []).filter((link) => link.id);
+  if (!safeLinks.length) return <div className="empty">No evidence links yet.</div>;
+  return (
+    <ol className="proof-trail evidence-list">
+      {safeLinks.map((link) => (
+        <li key={`${link.kind}-${link.id}`}>
+          <span>{link.kind.replace(/_/g, " ")}</span>
+          <a href={link.href}>{link.id}</a>
+        </li>
+      ))}
+    </ol>
   );
 }
 
