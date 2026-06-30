@@ -12,8 +12,9 @@ Current result:
 - User data path: CSV/JSON import jobs infer schemas, preview records, validate template mappings, upload local files without extra dependencies, and promote reviewed data into local datasets for the Ontology Generator and Command Center workflow.
 - Onboarding depth: import jobs now support mapping suggestions, type coercion, enum cleanup, timestamp normalization, unit normalization, derived geo points, MGRS-to-point conversion, duplicate detection, connector preview, connector-to-import generation, sync validation, and deterministic stream replay.
 - Frontend direction: a React/Vite/TypeScript shell now serves typed core evaluator workspaces when built, with reusable contracts for pipeline, ontology, imports, command center, graph, and validation while the legacy static UI remains as a migration fallback.
-- Guided evaluator flow: Command Center now has workflow-state, a stepper, clickable proof trail, import-to-ontology draft generation, backend-backed report export, and linked evidence IDs.
+- Guided evaluator flow: Command Center now has UI-state, workflow-state, a persistent flow indicator, evaluator summary, clean state/warning cards, clickable proof trail, import-to-ontology draft generation, backend-backed report export, and linked evidence IDs.
 - Trust dashboard: `/workspace/validation` and `/project/validate` surface matrix status, priority gaps, runtime schema health, persisted migration records, event consistency, route health, and extended project snapshot evidence.
+- Readiness: `/project/readiness`, `/ui-state/imports`, and `/ui-state/validation` expose human-facing checks and sections for technical evaluators.
 - Fidelity: high for local behavioral workflows; intentionally different for hosted infrastructure, proprietary UI internals, and LLM/model routing.
 - Evidence: `foundry-docs/VALIDATION_MATRIX.md`, `oms/test_docs_conformance.py`, and existing focused tests.
 
@@ -30,9 +31,9 @@ Current result:
 | GIS and Map | High | GeoJSON overlays, MGRS, radius/geofence, map layers |
 | ModelOps | Medium-high | Objectives, training, eval gates, releases, deployments, inference logs, drift monitors |
 | Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, visual graph overview |
-| Operational MVP | High | Asset Reliability Command Center bootstrap/import, workflow-state, proof trail, triage, approval, action execution, incident, report, validation dashboard |
+| Operational MVP | High | Asset Reliability Command Center bootstrap/import, UI-state, workflow-state, evaluator summary, proof trail, triage, approval, action execution, incident, report, validation dashboard |
 | Data import and project portability | High local analog | CSV/JSON/file import jobs, semantic mapping, transforms, connector previews, stream replay, import-to-ontology drafts, audit/ops events, extended JSON snapshot export/import |
-| Frontend product foundation | Medium-high | Typed React/Vite core evaluator shell, split workspaces/components, close-analog pipeline workbench, ontology manager, and legacy fallback |
+| Frontend product foundation | Medium-high | Typed React/Vite core evaluator shell, persistent flow indicator, split workspaces/components, clean state primitives, close-analog pipeline workbench, ontology manager, and legacy fallback |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
 | Security/governance | Medium | Local roles, markings, restricted views, scanners, retention, audit |
 
@@ -74,6 +75,7 @@ python test_ops_investigations_reliability.py
 python test_unified_platform.py
 python test_asset_reliability_command_center.py
 python test_productized_platform.py
+python test_human_ui_readiness.py
 python test_ontology_generator_pipeline_canvas.py
 python test_ui_state_pipeline_ontology.py
 python test_foundry_gis_features.py

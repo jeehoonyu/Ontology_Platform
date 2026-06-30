@@ -926,6 +926,107 @@ def list_import_jobs(
     return {"count": len(rows), "jobs": [_job_dict(row) for row in rows]}
 
 
+@router.get("/ui-state/imports")
+def imports_ui_state(db: Session = Depends(get_db)):
+    _ensure_tables(db)
+    jobs = db.query(ImportJob).order_by(ImportJob.updated_at.desc()).limit(50).all()
+    job_payloads = [_job_dict(row) for row in jobs]
+    status_counts: Dict[str, int] = {}
+    for row in jobs:
+        status_counts[row.status] = status_counts.get(row.status, 0) + 1
+    templates = [
+        {
+            "id": template_id,
+            "display_name": template["display_name"],
+            "object_type_id": template["object_type_id"],
+            "required": template["required"],
+            "field_count": len(template["fields"]),
+        }
+        for template_id, template in IMPORT_TEMPLATES.items()
+    ]
+    warnings = [
+        {
+            "id": f"{job.id}_validation",
+            "job_id": job.id,
+            "message": f"{job.display_name} has {len(job.validation_errors or [])} validation issue(s).",
+            "severity": "warn",
+        }
+        for job in jobs
+        if job.validation_errors
+    ]
+    promoted_jobs = [job for job in jobs if job.status == "PROMOTED"]
+    latest_job = jobs[0] if jobs else None
+    sections = [
+        {
+            "id": "upload",
+            "title": "Upload or paste records",
+            "status": "complete" if jobs else "active",
+            "description": "Create a reviewable import job before data reaches a dataset.",
+            "metrics": {"job_count": len(jobs), "template_count": len(templates)},
+            "rows": job_payloads[:8],
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "mapping",
+            "title": "Map and validate",
+            "status": "complete" if any(job.status in {"READY", "PROMOTED"} for job in jobs) else "available",
+            "description": "Apply semantic templates, required-field checks, and type warnings.",
+            "metrics": {"ready": status_counts.get("READY", 0), "invalid": status_counts.get("INVALID", 0)},
+            "rows": warnings or [{"message": "No validation warnings for recent import jobs.", "status": "PASS"}],
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "transform",
+            "title": "Clean and enrich",
+            "status": "available" if jobs else "blocked",
+            "description": "Normalize units, enums, timestamps, MGRS/geometry, and duplicates before promotion.",
+            "metrics": {"recent_job": getattr(latest_job, "id", None), "transformed": sum(1 for job in jobs if (job.inferred_schema or {}).get("transformations"))},
+            "rows": [
+                {"operation": "enum cleanup", "supported": True},
+                {"operation": "unit normalization", "supported": True},
+                {"operation": "MGRS or lat/lon geometry", "supported": True},
+                {"operation": "duplicate detection", "supported": True},
+            ],
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "promote",
+            "title": "Promote to dataset",
+            "status": "complete" if promoted_jobs else ("available" if jobs else "blocked"),
+            "description": "Create a local DataAsset that can feed ontology generation and pipelines.",
+            "metrics": {"promoted": len(promoted_jobs), "dataset_count": db.query(models.DataAsset).count()},
+            "rows": [{"job_id": job.id, "dataset_id": job.target_dataset_id, "status": job.status} for job in promoted_jobs[:8]],
+            "href": "/workspace/ontology",
+        },
+    ]
+    return {
+        "summary": {
+            "job_count": len(jobs),
+            "template_count": len(templates),
+            "status_counts": status_counts,
+            "latest_job_id": getattr(latest_job, "id", None),
+        },
+        "primary_actions": [
+            {"id": "create_csv", "label": "Import CSV", "method": "POST", "path": "/imports/csv"},
+            {"id": "upload_file", "label": "Upload file", "method": "POST", "path": "/imports/files"},
+            {"id": "generate_draft", "label": "Generate ontology draft", "method": "POST", "path": "/imports/jobs/{job_id}/generate-ontology-draft"},
+        ],
+        "sections": sections,
+        "evidence_links": [
+            {"kind": "import_job", "id": job.id, "href": f"/imports/jobs/{job.id}"}
+            for job in jobs[:12]
+        ] + [
+            {"kind": "data_asset", "id": job.target_dataset_id, "href": "/workspace/ontology"}
+            for job in promoted_jobs[:12]
+            if job.target_dataset_id
+        ],
+        "warnings": warnings,
+        "templates": templates,
+        "jobs": job_payloads,
+        "last_updated": max([job.updated_at for job in jobs], default=_now()),
+    }
+
+
 @router.get("/imports/jobs/{job_id}")
 def get_import_job(job_id: str, include_records: bool = False, db: Session = Depends(get_db)):
     _ensure_tables(db)

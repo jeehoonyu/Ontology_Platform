@@ -1,5 +1,7 @@
 import { api, postJson } from "../api";
 import type {
+  CommandCenterUiState,
+  ImportsUiState,
   JsonObject,
   NodePreview,
   NodeSuggestions,
@@ -11,11 +13,37 @@ import type {
   PipelineNodeDetails,
   PipelineOutputsState,
   PipelineUiState,
+  ProjectReadiness,
+  ValidationUiState,
   WorkflowState
 } from "../types";
 
 export function getWorkflowState(): Promise<WorkflowState> {
   return api<WorkflowState>("/scenarios/asset-reliability/workflow-state");
+}
+
+export function getCommandCenterState(): Promise<CommandCenterUiState> {
+  return api<CommandCenterUiState>("/ui-state/command-center");
+}
+
+export function bootstrapProjectDemo(): Promise<JsonObject> {
+  return postJson<JsonObject>("/project/demo/bootstrap", { actor: "react", run_pipelines: true, run_checks: true });
+}
+
+export function resetProjectDemo(): Promise<JsonObject> {
+  return postJson<JsonObject>("/project/demo/reset", { actor: "react", run_pipelines: true, run_checks: true });
+}
+
+export function getImportsState(): Promise<ImportsUiState> {
+  return api<ImportsUiState>("/ui-state/imports");
+}
+
+export function getValidationState(): Promise<ValidationUiState> {
+  return api<ValidationUiState>("/ui-state/validation");
+}
+
+export function getProjectReadiness(): Promise<ProjectReadiness> {
+  return api<ProjectReadiness>("/project/readiness");
 }
 
 export function getPipelineState(): Promise<PipelineUiState> {

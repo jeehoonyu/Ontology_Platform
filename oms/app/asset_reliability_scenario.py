@@ -71,6 +71,12 @@ class ScenarioBootstrapRequest(BaseModel):
     run_checks: bool = True
 
 
+class ProjectDemoRequest(BaseModel):
+    actor: str = "workspace"
+    run_pipelines: bool = True
+    run_checks: bool = True
+
+
 class ScenarioTriageRequest(BaseModel):
     actor: str = "workspace"
     asset_id: str = HIGH_RISK_ASSET_ID
@@ -935,6 +941,123 @@ def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[
     }
 
 
+def _step_status(workflow: Dict[str, Any], step_id: str) -> str:
+    for step in workflow.get("steps", []):
+        if step.get("id") == step_id:
+            return str(step.get("status") or "available")
+    return "available"
+
+
+def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    workflow = _workflow_state(db, asset_id=asset_id)
+    summary = workflow.get("summary") or {}
+    kpis = summary.get("kpis") or {}
+    high_risk_assets = summary.get("high_risk_assets") or []
+    top_risk = high_risk_assets[0] if high_risk_assets else ((summary.get("risk_findings") or [{}])[0] if summary.get("risk_findings") else {})
+    top_risk_score = top_risk.get("risk") or {}
+    selected_asset = summary.get("selected_asset") or {}
+    selected_work_order = summary.get("selected_work_order") or {}
+    approvals = summary.get("approvals") or []
+    incidents = summary.get("incidents") or []
+    report = summary.get("latest_report") or {}
+    data_contract = summary.get("data_contract") or {}
+    model_monitor = summary.get("model_monitor") or {}
+    warnings: List[Dict[str, Any]] = []
+    if not selected_asset:
+        warnings.append({"id": "sample_data_missing", "message": "Start with sample data to populate the evaluator workflow.", "severity": "info"})
+    if data_contract.get("status") in {"WARN", "FAIL"}:
+        warnings.append({"id": "data_quality", "message": f"Data contract status is {data_contract.get('status')}.", "severity": "warn"})
+    if model_monitor.get("status") in {"WARN", "FAIL"}:
+        warnings.append({"id": "model_monitor", "message": f"Model monitor status is {model_monitor.get('status')}.", "severity": "warn"})
+    if approvals and approvals[0].get("status") == "PENDING":
+        warnings.append({"id": "approval_pending", "message": "A governed action is staged and waiting for approval.", "severity": "high"})
+    risk_drivers = top_risk_score.get("drivers") or []
+    recommended_actions = top_risk_score.get("recommended_actions") or []
+    recommendation = (
+        recommended_actions[0]
+        if recommended_actions
+        else "Escalate the work order and keep the incident open until reliability signals return to baseline."
+    )
+    evaluator_summary = {
+        "title": "Reliability decision summary",
+        "decision": "Approval required" if approvals else ("Run triage" if selected_asset else "Bootstrap sample data"),
+        "recommendation": recommendation,
+        "why": top_risk_score.get("explanation") or "The workflow combines pipeline evidence, ontology objects, risk scoring, checks, approvals, and report output.",
+        "selected_asset": selected_asset.get("id"),
+        "risk_band": top_risk_score.get("band", "not_scored"),
+        "risk_score": top_risk_score.get("score"),
+        "drivers": risk_drivers,
+        "next_action": workflow.get("next_action"),
+    }
+    sections = [
+        {
+            "id": "start",
+            "title": "Start or import data",
+            "status": _step_status(workflow, "bootstrap"),
+            "description": "Load the deterministic asset reliability scenario or bring in your own records.",
+            "metrics": {"asset_count": kpis.get("asset_count", 0), "open_work_orders": kpis.get("open_work_orders", 0)},
+            "rows": [{"asset": selected_asset.get("id"), "work_order": selected_work_order.get("id"), "status": selected_asset.get("properties", {}).get("status")}],
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "risk",
+            "title": "Risk and checks",
+            "status": "complete" if top_risk_score else "available",
+            "description": "Risk, data quality, and model monitor evidence used by the triage recommendation.",
+            "metrics": {
+                "risk_band": top_risk_score.get("band", "not_scored"),
+                "risk_score": top_risk_score.get("score", 0),
+                "data_contract": kpis.get("data_contract_status", "NOT_RUN"),
+                "model_monitor": kpis.get("model_monitor_status", "NOT_RUN"),
+            },
+            "rows": [
+                {"check": "Risk explanation", "status": top_risk_score.get("band", "not_scored"), "detail": top_risk_score.get("explanation")},
+                {"check": "Data contract", "status": data_contract.get("status", "NOT_RUN"), "detail": data_contract.get("summary", {})},
+                {"check": "Model monitor", "status": model_monitor.get("status", "NOT_RUN"), "detail": model_monitor.get("alerts", [])},
+            ],
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "approval",
+            "title": "Approval and action",
+            "status": _step_status(workflow, "approval"),
+            "description": "High-risk operational changes are staged for human approval instead of mutating directly.",
+            "metrics": {"open_approvals": kpis.get("open_approvals", 0), "open_incidents": kpis.get("open_incidents", 0)},
+            "rows": approvals[:6],
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "report",
+            "title": "Incident and report",
+            "status": _step_status(workflow, "report"),
+            "description": "Export the decision narrative with linked evidence IDs.",
+            "metrics": {"incident_count": len(incidents), "latest_report": report.get("id")},
+            "rows": incidents[:6],
+            "href": "/scenarios/asset-reliability/report?format=markdown",
+        },
+    ]
+    return {
+        "summary": {
+            "scenario_id": SCENARIO_ID,
+            "asset_id": asset_id,
+            "current_step": workflow.get("current_step"),
+            "completed_step_count": len(workflow.get("completed_steps") or []),
+            "kpis": kpis,
+        },
+        "primary_actions": [
+            {"id": "bootstrap", "label": "Start with sample data", "method": "POST", "path": "/project/demo/bootstrap"},
+            {"id": "triage", "label": "Run reliability triage", "method": "POST", "path": "/scenarios/asset-reliability/run-triage"},
+            {"id": "report", "label": "Export proof report", "method": "GET", "path": "/scenarios/asset-reliability/report?format=markdown"},
+        ],
+        "sections": sections,
+        "evidence_links": workflow.get("evidence_links", []),
+        "warnings": warnings,
+        "last_updated": _now(),
+        "workflow": workflow,
+        "evaluator_summary": evaluator_summary,
+    }
+
+
 def _ensure_investigation(db: Session) -> investigations.InvestigationWorkspace:
     investigations._ensure_tables(db)
     workspace = db.get(investigations.InvestigationWorkspace, INVESTIGATION_ID)
@@ -1246,6 +1369,42 @@ def asset_reliability_summary(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Ses
 @router.get("/scenarios/asset-reliability/workflow-state")
 def asset_reliability_workflow_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
     return _workflow_state(db, asset_id=asset_id)
+
+
+@router.get("/ui-state/command-center")
+def command_center_ui_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+    return _command_center_ui_state(db, asset_id=asset_id)
+
+
+@router.post("/project/demo/bootstrap")
+def bootstrap_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db)):
+    result = bootstrap_asset_reliability(
+        ScenarioBootstrapRequest(actor=body.actor, run_pipelines=body.run_pipelines, run_checks=body.run_checks),
+        db,
+    )
+    return {
+        "status": "READY",
+        "mode": "idempotent_bootstrap",
+        "scenario": result,
+        "workflow_state": _workflow_state(db),
+        "ui_state": _command_center_ui_state(db),
+    }
+
+
+@router.post("/project/demo/reset")
+def reset_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db)):
+    result = bootstrap_asset_reliability(
+        ScenarioBootstrapRequest(actor=body.actor, run_pipelines=body.run_pipelines, run_checks=body.run_checks),
+        db,
+    )
+    return {
+        "status": "READY",
+        "mode": "idempotent_reset",
+        "note": "Local demo reset is non-destructive: it re-upserts the sample workflow and leaves unrelated user data intact.",
+        "scenario": result,
+        "workflow_state": _workflow_state(db),
+        "ui_state": _command_center_ui_state(db),
+    }
 
 
 @router.post("/scenarios/asset-reliability/run-triage")
