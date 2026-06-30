@@ -341,6 +341,103 @@ def _canvas_payload(db: Session, graph: PipelineBuilderGraph, *, selected_node_i
     }
 
 
+def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str) -> Dict[str, Any]:
+    _index, node = _find_node(graph, node_id)
+    canvas = _canvas_payload(db, graph, selected_node_id=node_id)
+    selected = canvas.get("selected_node")
+    preview: Dict[str, Any] = {
+        "status": "NOT_AVAILABLE",
+        "row_count": 0,
+        "rows": [],
+        "columns": [],
+        "schema": {"fields": []},
+    }
+    try:
+        execution = _execute_graph(db, graph, write_ontology=False)
+        output = execution.get("node_outputs", {}).get(node_id, {})
+        schema = output.get("schema", {"fields": []})
+        preview = {
+            "status": "PREVIEW_READY" if output else "NOT_AVAILABLE",
+            "row_count": output.get("row_count", 0),
+            "rows": output.get("sample", []),
+            "columns": schema.get("fields", []),
+            "schema": schema,
+        }
+    except HTTPException as exc:
+        preview = {
+            "status": "ERROR",
+            "row_count": 0,
+            "rows": [],
+            "columns": [],
+            "schema": {"fields": []},
+            "error": exc.detail,
+        }
+    node_type = _node_type(node)
+    context_actions = [
+        {"id": "transform", "label": "Transform", "node_type": "filter"},
+        {"id": "split", "label": "Split", "node_type": "project"},
+        {"id": "join", "label": "Join", "node_type": "join"},
+        {"id": "union", "label": "Union", "node_type": "union"},
+        {"id": "use_llm", "label": "Use LLM", "node_type": "llm_assist"},
+        {"id": "generate", "label": "Generate", "node_type": "unique_id"},
+        {"id": "explain", "label": "Explain", "node_type": "llm_assist"},
+        {"id": "add_output", "label": "Add output", "node_type": "dataset_output"},
+    ]
+    return {
+        "graph_id": graph.id,
+        "node_id": node_id,
+        "node": selected or {
+            "id": node_id,
+            "label": node.get("label") or node_id,
+            "type": node_type,
+            "config": _config(node),
+            "position": _node_position(node, _index),
+        },
+        "metadata": {
+            "type": node_type,
+            "config": _config(node),
+            "upstream": _predecessors(graph).get(node_id, []),
+            "downstream": [_edge_target(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id],
+        },
+        "preview": preview,
+        "context_actions": context_actions,
+        "suggestions": _node_suggestions_payload(db, graph, node_id),
+    }
+
+
+def _node_suggestions_payload(db: Session, graph: PipelineBuilderGraph, node_id: str) -> Dict[str, Any]:
+    _index, node = _find_node(graph, node_id)
+    node_type = _node_type(node)
+    validation = _validate_graph(db, graph)
+    preview: Dict[str, Any] = {}
+    try:
+        execution = _execute_graph(db, graph, write_ontology=False)
+        preview = execution.get("node_outputs", {}).get(node_id, {})
+    except HTTPException:
+        preview = {}
+    field_names = [field.get("name") for field in (preview.get("schema") or {}).get("fields", []) if field.get("name")]
+    suggestions: List[Dict[str, Any]] = []
+    if node_type in {"input_dataset", "dataset_input"}:
+        if {"latitude", "longitude"} <= set(field_names):
+            suggestions.append({"id": "derive_geo", "label": "Derive point geometry", "node_type": "project", "config": {"fields": field_names}})
+        suggestions.append({"id": "clean_columns", "label": "Add transformation", "node_type": "rename", "config": {"mapping": {}}})
+    if node_type == "join":
+        suggestions.append({"id": "review_join_keys", "label": "Review join keys", "node_type": "join", "config": _config(node)})
+    if node_type not in {"dataset_output", "output_dataset", "ontology_output"}:
+        suggestions.append({"id": "add_output", "label": "Add output", "node_type": "dataset_output", "config": {"asset_id": f"{graph.id}_output"}})
+    for error in validation.get("errors", []):
+        if error.get("node_id") == node_id:
+            suggestions.append({"id": f"fix_{error['code'].lower()}", "label": error.get("message"), "severity": "error"})
+    return {
+        "graph_id": graph.id,
+        "node_id": node_id,
+        "suggestions": suggestions,
+        "insertable_node_types": NODE_TYPE_CATALOG,
+        "warnings": validation.get("warnings", []),
+        "errors": [error for error in validation.get("errors", []) if error.get("node_id") in {None, node_id}],
+    }
+
+
 def _validate_graph(db: Session, graph: PipelineBuilderGraph) -> Dict[str, Any]:
     nodes = graph.nodes or []
     edges = graph.edges or []
@@ -779,6 +876,31 @@ def pipeline_canvas_state(graph_id: str, selected_node_id: Optional[str] = None,
     return _canvas_payload(db, graph, selected_node_id=selected_node_id)
 
 
+@router.get("/ui-state/pipeline/{graph_id}/nodes/{node_id}/details")
+def pipeline_node_details(graph_id: str, node_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    return _node_details_payload(db, graph, node_id)
+
+
+@router.get("/ui-state/pipeline/{graph_id}/outputs")
+def pipeline_outputs_state(graph_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    canvas = _canvas_payload(db, graph)
+    return {
+        "graph_id": graph.id,
+        "outputs": canvas.get("outputs", {}),
+        "validation": canvas.get("validation", {}),
+        "legend": canvas.get("legend", []),
+        "actions": canvas.get("actions", []),
+        "summary": {
+            "output_count": len(canvas.get("outputs", {}).get("nodes", []) or []),
+            "output_node_count": len(canvas.get("outputs", {}).get("nodes", []) or []),
+            "build_count": len(canvas.get("outputs", {}).get("builds", []) or []),
+            "status": canvas.get("validation", {}).get("status", graph.status),
+        },
+    }
+
+
 @router.patch("/pipeline-builder/graphs/{graph_id}", response_model=PipelineGraphRead)
 def update_graph(graph_id: str, body: PipelineGraphUpdate, db: Session = Depends(get_db)):
     graph = _get_graph(db, graph_id)
@@ -890,36 +1012,7 @@ def preview_pipeline_node(graph_id: str, node_id: str, body: PipelineNodePreview
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/suggestions")
 def suggest_pipeline_node_actions(graph_id: str, node_id: str, db: Session = Depends(get_db)):
     graph = _get_graph(db, graph_id)
-    _index, node = _find_node(graph, node_id)
-    node_type = _node_type(node)
-    validation = _validate_graph(db, graph)
-    preview: Dict[str, Any] = {}
-    try:
-        execution = _execute_graph(db, graph, write_ontology=False)
-        preview = execution.get("node_outputs", {}).get(node_id, {})
-    except HTTPException:
-        preview = {}
-    field_names = [field.get("name") for field in (preview.get("schema") or {}).get("fields", []) if field.get("name")]
-    suggestions: List[Dict[str, Any]] = []
-    if node_type in {"input_dataset", "dataset_input"}:
-        if {"latitude", "longitude"} <= set(field_names):
-            suggestions.append({"id": "derive_geo", "label": "Derive point geometry", "node_type": "project", "config": {"fields": field_names}})
-        suggestions.append({"id": "clean_columns", "label": "Add transformation", "node_type": "rename", "config": {"mapping": {}}})
-    if node_type == "join":
-        suggestions.append({"id": "review_join_keys", "label": "Review join keys", "node_type": "join", "config": _config(node)})
-    if node_type not in {"dataset_output", "output_dataset", "ontology_output"}:
-        suggestions.append({"id": "add_output", "label": "Add output", "node_type": "dataset_output", "config": {"asset_id": f"{graph.id}_output"}})
-    for error in validation.get("errors", []):
-        if error.get("node_id") == node_id:
-            suggestions.append({"id": f"fix_{error['code'].lower()}", "label": error.get("message"), "severity": "error"})
-    return {
-        "graph_id": graph.id,
-        "node_id": node_id,
-        "suggestions": suggestions,
-        "insertable_node_types": NODE_TYPE_CATALOG,
-        "warnings": validation.get("warnings", []),
-        "errors": [error for error in validation.get("errors", []) if error.get("node_id") in {None, node_id}],
-    }
+    return _node_suggestions_payload(db, graph, node_id)
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/validate")

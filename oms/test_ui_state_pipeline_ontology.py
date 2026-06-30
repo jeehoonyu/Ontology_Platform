@@ -71,6 +71,15 @@ node_suggestions = ok(client.post(f"/pipeline-builder/graphs/{graph_id}/nodes/in
 assert node_suggestions["insertable_node_types"], node_suggestions
 assert any(item["node_type"] in {"rename", "project"} for item in node_suggestions["suggestions"]), node_suggestions["suggestions"]
 
+node_details = ok(client.get(f"/ui-state/pipeline/{graph_id}/nodes/input/details"), "node details")
+assert node_details["node_id"] == "input", node_details
+assert node_details["preview"]["row_count"] == 2, node_details["preview"]
+assert any(action["id"] == "use_llm" for action in node_details["context_actions"]), node_details["context_actions"]
+
+output_summary = ok(client.get(f"/ui-state/pipeline/{graph_id}/outputs"), "pipeline output rail")
+assert output_summary["summary"]["output_node_count"] >= 1, output_summary["summary"]
+assert output_summary["validation"]["status"] in {"READY", "VALID", "ERROR"}, output_summary["validation"]
+
 inserted = ok(client.post(f"/pipeline-builder/graphs/{graph_id}/nodes/input/insert-after", json={
     "node_type": "filter",
     "label": "Filter detections",
@@ -98,6 +107,13 @@ assert "overview" in manager["navigation"] and "history" in manager["navigation"
 walkthrough = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/walkthrough"), "ontology walkthrough")
 assert walkthrough["current_step_id"] == "object_type_overview", walkthrough
 assert len(walkthrough["steps"]) >= 4, walkthrough["steps"]
+
+properties_section = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/sections/properties"), "ontology properties section")
+assert properties_section["section_id"] == "properties", properties_section
+assert len(properties_section["rows"]) >= 4, properties_section["rows"]
+
+security_section = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/sections/security"), "ontology security section")
+assert security_section["summary"]["visibility"], security_section
 
 metadata = ok(client.patch("/ontology/object-types/correlated_intelligence/metadata", json={
     "plural_name": "Correlated Intelligences",

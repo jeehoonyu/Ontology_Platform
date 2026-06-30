@@ -879,6 +879,334 @@ pre {
   font-weight: 800;
 }
 
+.workbench-page {
+  margin: -22px;
+  min-height: calc(100vh - 1px);
+  background: #edf1f4;
+}
+
+.pipeline-workbench-page .builder-shell {
+  min-height: 100vh;
+  grid-template-columns: minmax(760px, 1fr) 330px;
+  gap: 0;
+}
+
+.pipeline-workbench-page .builder-main {
+  border-right: 1px solid #cfd8dc;
+}
+
+.pipeline-workbench-page .workspace-header,
+.manager-topbar {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+.pipeline-workbench-page .toolbar-strip {
+  border-left: 0;
+  border-right: 0;
+}
+
+.pipeline-workbench-page .pipeline-body {
+  grid-template-columns: 0 minmax(0, 1fr) 38px;
+  min-height: calc(100vh - 326px);
+  border-left: 0;
+  border-right: 0;
+}
+
+.pipeline-workbench-page .node-library {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+}
+
+.pipeline-workbench-page .pipeline-canvas {
+  min-height: calc(100vh - 326px);
+}
+
+.pipeline-utility-rail {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 12px 6px;
+  background: #f9fbfc;
+  border-left: 1px solid #d7dedf;
+}
+
+.pipeline-utility-rail button,
+.canvas-controls button,
+.node-context-menu button {
+  border-radius: 4px;
+}
+
+.canvas-controls {
+  position: absolute;
+  left: 10px;
+  bottom: 14px;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+}
+
+.canvas-controls button {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  background: #ffffff;
+}
+
+.canvas-legend {
+  position: absolute;
+  right: 16px;
+  top: 14px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto));
+  gap: 7px 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #d4dde2;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(18, 31, 42, 0.08);
+}
+
+.canvas-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #44515b;
+  font-size: 12px;
+}
+
+.canvas-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.node-context-menu {
+  position: absolute;
+  z-index: 6;
+  width: 132px;
+  display: grid;
+  gap: 0;
+  padding: 4px;
+  background: #ffffff;
+  border: 1px solid #cfd8dc;
+  box-shadow: 0 8px 22px rgba(18, 31, 42, 0.14);
+}
+
+.node-context-menu button {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border-color: transparent;
+  padding: 6px 7px;
+  color: #354753;
+  text-align: left;
+  background: transparent;
+}
+
+.node-context-menu button:hover {
+  background: #edf6fb;
+}
+
+.node-context-menu span {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  background: #e8f2f8;
+  color: #166896;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.context-action-use_llm span,
+.context-action-explain span {
+  background: #efeaff;
+  color: #6f4bd8;
+}
+
+.context-action-union span {
+  background: #ffeaf1;
+  color: #bb406c;
+}
+
+.context-action-add_output span {
+  background: #fff3d9;
+  color: #9a6800;
+}
+
+.pipeline-node.join {
+  border-top: 8px solid #249267;
+}
+
+.pipeline-node.llm_assist,
+.pipeline-node.unique_id {
+  border-top: 8px solid #7b61ff;
+}
+
+.pipeline-node.dataset_output,
+.pipeline-node.ontology_output {
+  border-top: 8px solid #1688b8;
+}
+
+.bottom-drawer {
+  min-height: 260px;
+  max-height: 36vh;
+  overflow: auto;
+}
+
+.bottom-drawer th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f5f8fa;
+}
+
+.drawer-split {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
+  margin: 12px;
+}
+
+.pipeline-workbench-page .output-rail {
+  background: #ffffff;
+  padding: 10px;
+  overflow: auto;
+}
+
+.pipeline-workbench-page .output-rail .panel {
+  box-shadow: none;
+  border-radius: 5px;
+  margin-bottom: 10px;
+}
+
+.legacy-button.compact {
+  padding: 6px 8px;
+}
+
+.manager-topbar {
+  height: 48px;
+  display: grid;
+  grid-template-columns: 360px minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #d7dedf;
+}
+
+.manager-topbar > div:first-child {
+  display: grid;
+  gap: 1px;
+}
+
+.manager-topbar span {
+  color: #64717a;
+  font-size: 12px;
+}
+
+.ontology-workbench-page .ontology-layout {
+  grid-template-columns: 360px 250px minmax(0, 1fr);
+  gap: 0;
+  min-height: calc(100vh - 86px);
+}
+
+.ontology-workbench-page .walkthrough-panel {
+  border-radius: 0;
+  min-height: calc(100vh - 86px);
+  overflow: auto;
+}
+
+.walkthrough-tabs,
+.walkthrough-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.walkthrough-tabs button,
+.walkthrough-actions button {
+  color: #dbe8ef;
+  background: #22313d;
+  border-color: #334a5b;
+  border-radius: 4px;
+}
+
+.walkthrough-tabs button.active {
+  background: #334a5b;
+}
+
+.walkthrough-links {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.walkthrough-links a {
+  color: #8ec9ff;
+}
+
+.manager-resource-nav {
+  padding: 10px;
+  background: #f8fafb;
+  border-right: 1px solid #d7dedf;
+  overflow: auto;
+}
+
+.manager-resource-nav .panel {
+  padding: 10px;
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+.manager-surface {
+  padding: 16px;
+  overflow: auto;
+}
+
+.manager-chip-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.manager-meta-layout {
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+}
+
+.ontology-workbench-page .manager-header-card,
+.ontology-workbench-page .manager-grid .panel,
+.ontology-workbench-page .manager-nav {
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+.ontology-utility-bar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: #ffffff;
+  border-top: 1px solid #d7dedf;
+}
+
+.ontology-utility-bar button {
+  border-color: transparent;
+  background: transparent;
+  color: #46535d;
+  padding: 6px 8px;
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -899,8 +1227,27 @@ pre {
   .stepper,
   .builder-shell,
   .pipeline-body,
+  .pipeline-workbench-page .pipeline-body,
   .ontology-layout,
+  .ontology-workbench-page .ontology-layout,
+  .manager-topbar,
+  .drawer-split,
   .manager-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workbench-page {
+    margin: 0;
+  }
+
+  .pipeline-workbench-page .node-library {
+    width: auto;
+    padding: 10px;
+    overflow: auto;
+    border-right: 1px solid #d7dedf;
+  }
+
+  .pipeline-utility-rail {
+    display: none;
   }
 }

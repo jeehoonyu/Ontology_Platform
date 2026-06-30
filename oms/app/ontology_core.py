@@ -487,6 +487,84 @@ def _object_type_walkthrough(db: Session, object_type_id: str) -> Dict[str, Any]
     }
 
 
+def _object_type_section_state(db: Session, object_type_id: str, section_id: str) -> Dict[str, Any]:
+    state = _object_type_manager_state(db, object_type_id)
+    section = section_id.strip().lower().replace("-", "_")
+    object_type = state["object_type"]
+    cards = state["cards"]
+    if section == "overview":
+        return {
+            "object_type_id": object_type_id,
+            "section_id": section,
+            "title": "Overview",
+            "summary": object_type,
+            "rows": [
+                {"field": "Plural name", "value": object_type["plural_name"]},
+                {"field": "Description", "value": object_type.get("description")},
+                {"field": "API name", "value": object_type["api_name"]},
+                {"field": "RID", "value": object_type["rid"]},
+            ],
+        }
+    if section == "status":
+        return {
+            "object_type_id": object_type_id,
+            "section_id": section,
+            "title": "Status",
+            "summary": {
+                "status": object_type["status"],
+                "visibility": object_type["visibility"],
+                "index_status": object_type["index_status"],
+                "edits": object_type["edits"],
+            },
+            "rows": [],
+        }
+    card_map = {
+        "properties": "properties",
+        "action_types": "action_types",
+        "actions": "action_types",
+        "link_types": "link_types",
+        "links": "link_types",
+        "datasources": "datasources",
+        "observability": "observability",
+        "dependents": "dependents",
+    }
+    if section in card_map:
+        card = cards[card_map[section]]
+        if isinstance(card, dict) and "rows" in card:
+            rows = card.get("rows", [])
+            summary = {key: value for key, value in card.items() if key != "rows"}
+        else:
+            rows = []
+            summary = card
+        return {
+            "object_type_id": object_type_id,
+            "section_id": section,
+            "title": section.replace("_", " ").title(),
+            "summary": summary,
+            "rows": rows,
+        }
+    supplemental = {
+        "security": {"summary": {"visibility": object_type["visibility"], "groups": object_type.get("groups", [])}, "rows": []},
+        "capabilities": {"summary": {"action_types": cards["action_types"]["count"], "link_types": cards["link_types"]["count"]}, "rows": []},
+        "object_views": {"summary": {"configured": False}, "rows": []},
+        "interfaces": {"summary": {"configured": False}, "rows": []},
+        "materializations": {"summary": {"datasource_count": cards["datasources"]["count"]}, "rows": cards["datasources"].get("rows", [])},
+        "automations": {"summary": {"configured": False}, "rows": []},
+        "usage": {"summary": {"object_count": cards["observability"].get("object_count", 0)}, "rows": cards["dependents"].get("rows", [])},
+        "history": {"summary": {"updated_at": object_type["updated_at"], "created_at": object_type["created_at"]}, "rows": []},
+    }
+    if section not in supplemental:
+        raise HTTPException(status_code=404, detail=f"Ontology section '{section_id}' not found")
+    payload = supplemental[section]
+    return {
+        "object_type_id": object_type_id,
+        "section_id": section,
+        "title": section.replace("_", " ").title(),
+        "summary": payload["summary"],
+        "rows": payload["rows"],
+    }
+
+
 @router.get("/ui-state/ontology")
 def ontology_ui_state(db: Session = Depends(get_db)):
     object_types = db.query(models.ObjectType).order_by(models.ObjectType.updated_at.desc()).all()
@@ -525,6 +603,11 @@ def ontology_object_type_ui_state(object_type_id: str, db: Session = Depends(get
 @router.get("/ui-state/ontology/object-types/{object_type_id}/walkthrough")
 def ontology_object_type_walkthrough(object_type_id: str, db: Session = Depends(get_db)):
     return _object_type_walkthrough(db, object_type_id)
+
+
+@router.get("/ui-state/ontology/object-types/{object_type_id}/sections/{section_id}")
+def ontology_object_type_section(object_type_id: str, section_id: str, db: Session = Depends(get_db)):
+    return _object_type_section_state(db, object_type_id, section_id)
 
 
 @router.patch("/ontology/object-types/{object_type_id}/metadata")
