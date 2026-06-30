@@ -4,9 +4,12 @@ import type {
   NodePreview,
   NodeSuggestions,
   OntologyManagerState,
+  OntologySectionState,
   OntologyUiState,
   OntologyWalkthrough,
   PipelineCanvasState,
+  PipelineNodeDetails,
+  PipelineOutputsState,
   PipelineUiState,
   WorkflowState
 } from "../types";
@@ -52,6 +55,16 @@ export function suggestPipelineNode(graphId: string, nodeId: string): Promise<No
   );
 }
 
+export function getPipelineNodeDetails(graphId: string, nodeId: string): Promise<PipelineNodeDetails> {
+  return api<PipelineNodeDetails>(
+    `/ui-state/pipeline/${encodeURIComponent(graphId)}/nodes/${encodeURIComponent(nodeId)}/details`
+  );
+}
+
+export function getPipelineOutputs(graphId: string): Promise<PipelineOutputsState> {
+  return api<PipelineOutputsState>(`/ui-state/pipeline/${encodeURIComponent(graphId)}/outputs`);
+}
+
 export function getOntologyState(): Promise<OntologyUiState> {
   return api<OntologyUiState>("/ui-state/ontology");
 }
@@ -62,6 +75,12 @@ export function getOntologyObjectType(objectTypeId: string): Promise<OntologyMan
 
 export function getOntologyWalkthrough(objectTypeId: string): Promise<OntologyWalkthrough> {
   return api<OntologyWalkthrough>(`/ui-state/ontology/object-types/${encodeURIComponent(objectTypeId)}/walkthrough`);
+}
+
+export function getOntologySection(objectTypeId: string, sectionId: string): Promise<OntologySectionState> {
+  return api<OntologySectionState>(
+    `/ui-state/ontology/object-types/${encodeURIComponent(objectTypeId)}/sections/${encodeURIComponent(sectionId)}`
+  );
 }
 
 export function updateOntologyMetadata(objectTypeId: string, patch: JsonObject): Promise<OntologyManagerState> {
