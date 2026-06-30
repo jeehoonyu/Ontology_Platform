@@ -846,6 +846,95 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
     }
 
 
+def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    summary = _summarize(db, asset_id=asset_id)
+    try:
+        from . import imports_ops, ontology_generator, pipeline_builder_ops
+        latest_import = db.query(imports_ops.ImportJob).order_by(imports_ops.ImportJob.updated_at.desc()).first()
+        latest_draft = db.query(ontology_generator.OntologyGeneratorDraft).order_by(ontology_generator.OntologyGeneratorDraft.updated_at.desc()).first()
+        latest_graph = db.query(pipeline_builder_ops.PipelineBuilderGraph).order_by(pipeline_builder_ops.PipelineBuilderGraph.updated_at.desc()).first()
+    except Exception:
+        latest_import = latest_draft = latest_graph = None
+    latest_run = db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).first()
+    latest_approval = db.query(models_action.ApprovalRequest).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    report = summary.get("latest_report")
+    selected_asset = summary.get("selected_asset") or {}
+    steps = [
+        {
+            "id": "bootstrap",
+            "label": "Start with sample data",
+            "status": "complete" if selected_asset else "active",
+            "evidence_id": selected_asset.get("id"),
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "import",
+            "label": "Import or connect data",
+            "status": "complete" if latest_import else "available",
+            "evidence_id": getattr(latest_import, "id", None),
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "ontology",
+            "label": "Generate ontology",
+            "status": "complete" if latest_draft or selected_asset else "available",
+            "evidence_id": getattr(latest_draft, "object_type_id", None) or selected_asset.get("object_type_id"),
+            "href": "/workspace/ontology",
+        },
+        {
+            "id": "pipeline",
+            "label": "Deliver pipeline",
+            "status": "complete" if latest_run else "available",
+            "evidence_id": getattr(latest_run, "id", None),
+            "href": "/workspace/pipeline",
+            "graph_id": getattr(latest_graph, "id", None),
+        },
+        {
+            "id": "triage",
+            "label": "Run reliability triage",
+            "status": "complete" if summary.get("approvals") else ("available" if selected_asset else "blocked"),
+            "evidence_id": (summary.get("approvals") or [{}])[0].get("id") if summary.get("approvals") else None,
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "approval",
+            "label": "Approve governed action",
+            "status": "complete" if latest_approval and latest_approval.status != models_action.ApprovalStatus.PENDING.value else ("active" if latest_approval else "available"),
+            "evidence_id": getattr(latest_approval, "id", None),
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "report",
+            "label": "Export proof report",
+            "status": "complete" if report else "available",
+            "evidence_id": (report or {}).get("id"),
+            "href": "/scenarios/asset-reliability/report?format=markdown",
+        },
+    ]
+    blocked = next((step for step in steps if step["status"] == "blocked"), None)
+    active = next((step for step in steps if step["status"] == "active"), None)
+    next_step = active or next((step for step in steps if step["status"] == "available"), None)
+    return {
+        "scenario_id": SCENARIO_ID,
+        "asset_id": asset_id,
+        "current_step": (next_step or steps[-1])["id"],
+        "completed_steps": [step["id"] for step in steps if step["status"] == "complete"],
+        "blocked_step": blocked,
+        "next_action": next_step,
+        "steps": steps,
+        "evidence_links": [
+            {"kind": "asset", "id": selected_asset.get("id"), "href": "/workspace/object-explorer?legacy=1"},
+            {"kind": "import_job", "id": getattr(latest_import, "id", None), "href": "/workspace/imports"},
+            {"kind": "ontology_object_type", "id": selected_asset.get("object_type_id"), "href": "/workspace/ontology"},
+            {"kind": "pipeline_graph", "id": getattr(latest_graph, "id", None), "href": "/workspace/pipeline"},
+            {"kind": "pipeline_run", "id": getattr(latest_run, "id", None), "href": "/workspace/pipeline"},
+            {"kind": "approval", "id": getattr(latest_approval, "id", None), "href": "/workspace/command-center"},
+            {"kind": "report", "id": (report or {}).get("id"), "href": "/scenarios/asset-reliability/report?format=markdown"},
+        ],
+        "summary": summary,
+    }
+
+
 def _ensure_investigation(db: Session) -> investigations.InvestigationWorkspace:
     investigations._ensure_tables(db)
     workspace = db.get(investigations.InvestigationWorkspace, INVESTIGATION_ID)
@@ -1152,6 +1241,11 @@ def bootstrap_asset_reliability(body: ScenarioBootstrapRequest = ScenarioBootstr
 @router.get("/scenarios/asset-reliability/summary")
 def asset_reliability_summary(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
     return _summarize(db, asset_id=asset_id)
+
+
+@router.get("/scenarios/asset-reliability/workflow-state")
+def asset_reliability_workflow_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+    return _workflow_state(db, asset_id=asset_id)
 
 
 @router.post("/scenarios/asset-reliability/run-triage")
