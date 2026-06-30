@@ -188,6 +188,29 @@ class ObjectTypeUpdate(BaseModel):
     properties: Optional[Dict[str, Any]] = None
 
 
+class ObjectTypeManagerMetadataRequest(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    plural_name: Optional[str] = None
+    aliases: Optional[List[str]] = None
+    point_of_contact: Optional[str] = None
+    contributors: Optional[List[str]] = None
+    status: Optional[str] = None
+    visibility: Optional[str] = None
+    edits_enabled: Optional[bool] = None
+    groups: Optional[List[str]] = None
+
+
+class ObjectTypeIndexRequest(BaseModel):
+    actor: str = "ontology_manager"
+
+
+class ObjectTypeOpenFromPipelineRequest(BaseModel):
+    graph_id: str
+    node_id: Optional[str] = None
+    actor: str = "ontology_manager"
+
+
 class ActionLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -305,6 +328,272 @@ def get_full_object_type(object_type_id: str, db: Session = Depends(get_db)):
         "base_properties": obj_type.properties,
         "profile": ProfileRead.model_validate(profile).model_dump() if profile else None,
     }
+
+
+def _manager_metadata(obj_type: models.ObjectType, profile: Optional[ObjectTypeProfile]) -> Dict[str, Any]:
+    base_properties = obj_type.properties if isinstance(obj_type.properties, dict) else {}
+    manager = base_properties.get("__manager") if isinstance(base_properties.get("__manager"), dict) else {}
+    return {
+        "id": obj_type.id,
+        "rid": manager.get("rid") or f"ri.local.ontology.object-type.{obj_type.id}",
+        "display_name": obj_type.display_name,
+        "description": obj_type.description,
+        "plural_name": (profile.plural_name if profile else None) or manager.get("plural_name") or f"{obj_type.display_name}s",
+        "api_name": (profile.api_name if profile else None) or manager.get("api_name") or obj_type.id,
+        "aliases": manager.get("aliases", []),
+        "point_of_contact": manager.get("point_of_contact", "local-owner"),
+        "contributors": manager.get("contributors", []),
+        "ontology": manager.get("ontology", "local"),
+        "status": manager.get("status", "Example"),
+        "visibility": manager.get("visibility", "Normal"),
+        "index_status": manager.get("index_status", "not_indexed"),
+        "edits": "Enabled" if manager.get("edits_enabled", True) else "Disabled",
+        "groups": (profile.groups if profile else None) or manager.get("groups", []),
+        "created_at": obj_type.created_at,
+        "updated_at": obj_type.updated_at,
+    }
+
+
+def _property_rows(obj_type: models.ObjectType, profile: Optional[ObjectTypeProfile]) -> List[Dict[str, Any]]:
+    if profile and isinstance(profile.properties, dict) and profile.properties:
+        return [
+            {
+                "name": name,
+                "api_name": name,
+                "base_type": spec.get("base_type", "string") if isinstance(spec, dict) else "string",
+                "status": spec.get("status", "active") if isinstance(spec, dict) else "active",
+                "required": bool(spec.get("required")) if isinstance(spec, dict) else False,
+                "description": spec.get("description") if isinstance(spec, dict) else None,
+            }
+            for name, spec in profile.properties.items()
+        ]
+    properties = obj_type.properties if isinstance(obj_type.properties, dict) else {}
+    return [
+        {"name": name, "api_name": name, "base_type": (spec or {}).get("type", "string") if isinstance(spec, dict) else "string", "status": "active", "required": False}
+        for name, spec in properties.items()
+        if not str(name).startswith("__")
+    ]
+
+
+def _references_object_type(payload: Any, object_type_id: str) -> bool:
+    if isinstance(payload, dict):
+        return any(_references_object_type(value, object_type_id) for value in payload.values())
+    if isinstance(payload, list):
+        return any(_references_object_type(value, object_type_id) for value in payload)
+    return str(payload) == object_type_id
+
+
+def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, Any]:
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    profile = db.get(ObjectTypeProfile, object_type_id)
+    metadata = _manager_metadata(obj_type, profile)
+    properties = _property_rows(obj_type, profile)
+    action_types = [
+        {
+            "id": action.id,
+            "display_name": action.display_name,
+            "description": action.description,
+            "parameter_count": len(action.parameters or {}),
+        }
+        for action in db.query(models.ActionType).all()
+        if _references_object_type(action.rules or {}, object_type_id) or object_type_id in str(action.id)
+    ]
+    link_types = [
+        {
+            "id": link.id,
+            "display_name": link.display_name,
+            "source_object_type_id": link.source_object_type_id,
+            "target_object_type_id": link.target_object_type_id,
+            "cardinality": link.cardinality,
+        }
+        for link in db.query(models.LinkType).filter(
+            (models.LinkType.source_object_type_id == object_type_id) | (models.LinkType.target_object_type_id == object_type_id)
+        ).all()
+    ]
+    object_count = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id).count()
+    source_asset_ids = sorted({
+        row.source_asset_id
+        for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id).all()
+        if row.source_asset_id
+    })
+    pipeline_dependents: List[Dict[str, Any]] = []
+    try:
+        from . import pipeline_builder_ops
+        for graph in db.query(pipeline_builder_ops.PipelineBuilderGraph).all():
+            for node in graph.nodes or []:
+                config = node.get("config") or {}
+                if config.get("object_type_id") == object_type_id:
+                    pipeline_dependents.append({"type": "pipeline_graph", "id": graph.id, "display_name": graph.display_name, "node_id": node.get("id")})
+    except Exception:
+        pipeline_dependents = []
+    return {
+        "object_type": metadata,
+        "navigation": [
+            "overview",
+            "properties",
+            "security",
+            "datasources",
+            "observability",
+            "capabilities",
+            "object_views",
+            "interfaces",
+            "materializations",
+            "automations",
+            "usage",
+            "history",
+        ],
+        "cards": {
+            "properties": {"count": len(properties), "rows": properties},
+            "action_types": {"count": len(action_types), "rows": action_types},
+            "link_types": {"count": len(link_types), "rows": link_types},
+            "datasources": {"count": len(source_asset_ids), "rows": [{"asset_id": asset_id} for asset_id in source_asset_ids]},
+            "observability": {"object_count": object_count, "index_status": metadata["index_status"], "data_health": "configured" if object_count else "not_configured"},
+            "dependents": {"count": len(pipeline_dependents), "rows": pipeline_dependents},
+        },
+        "primary_actions": [
+            {"id": "update_metadata", "label": "Update metadata", "method": "PATCH", "path": f"/ontology/object-types/{object_type_id}/metadata"},
+            {"id": "index", "label": "Index", "method": "POST", "path": f"/ontology/object-types/{object_type_id}/index"},
+            {"id": "open_from_pipeline", "label": "Open from pipeline", "method": "POST", "path": f"/ontology/object-types/{object_type_id}/open-from-pipeline"},
+        ],
+        "last_updated": obj_type.updated_at,
+    }
+
+
+def _object_type_walkthrough(db: Session, object_type_id: str) -> Dict[str, Any]:
+    state = _object_type_manager_state(db, object_type_id)
+    manager = (db.get(models.ObjectType, object_type_id).properties or {}).get("__manager", {})
+    current_resource = manager.get("last_opened_pipeline_graph_id") or object_type_id
+    steps = [
+        {"id": "pipeline_inputs", "title": "Inspect input datasets", "resource": current_resource, "status": "complete"},
+        {"id": "pipeline_join", "title": "Review geospatial or semantic join", "resource": current_resource, "status": "complete" if state["cards"]["dependents"]["count"] else "available"},
+        {"id": "post_join_filters", "title": "Review transforms and filters", "resource": current_resource, "status": "available"},
+        {"id": "object_type_overview", "title": "Verify object type overview", "resource": object_type_id, "status": "active"},
+        {"id": "properties", "title": "Confirm properties and keys", "resource": object_type_id, "status": "available"},
+        {"id": "publish", "title": "Index and publish for downstream apps", "resource": object_type_id, "status": "available"},
+    ]
+    return {
+        "object_type_id": object_type_id,
+        "title": f"Build {state['object_type']['display_name']} workflow",
+        "current_step_id": "object_type_overview",
+        "current_resource_id": current_resource,
+        "steps": steps,
+        "links": [
+            {"label": "Pipeline Builder", "path": "/workspace/pipeline"},
+            {"label": "Ontology Manager", "path": f"/workspace/ontology?object_type_id={object_type_id}"},
+            {"label": "Validation", "path": "/workspace/validation"},
+        ],
+    }
+
+
+@router.get("/ui-state/ontology")
+def ontology_ui_state(db: Session = Depends(get_db)):
+    object_types = db.query(models.ObjectType).order_by(models.ObjectType.updated_at.desc()).all()
+    selected = object_types[0] if object_types else None
+    return {
+        "summary": {
+            "object_type_count": len(object_types),
+            "selected_object_type_id": selected.id if selected else None,
+            "draft_count": 0,
+        },
+        "primary_actions": [
+            {"id": "create_draft", "label": "Generate ontology draft", "method": "POST", "path": "/ontology-generator/drafts"},
+            {"id": "index", "label": "Index object type", "method": "POST", "path": "/ontology/object-types/{object_type_id}/index"},
+        ],
+        "object_types": [
+            {
+                "id": obj.id,
+                "display_name": obj.display_name,
+                "description": obj.description,
+                "updated_at": obj.updated_at,
+                "property_count": len([key for key in (obj.properties or {}).keys() if not str(key).startswith("__")]),
+            }
+            for obj in object_types
+        ],
+        "selected_object_type": _object_type_manager_state(db, selected.id) if selected else None,
+        "empty_state": None if selected else {"title": "No object types yet", "action": "Generate an ontology draft from an imported dataset."},
+        "last_updated": max([obj.updated_at for obj in object_types], default=_now()),
+    }
+
+
+@router.get("/ui-state/ontology/object-types/{object_type_id}")
+def ontology_object_type_ui_state(object_type_id: str, db: Session = Depends(get_db)):
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.get("/ui-state/ontology/object-types/{object_type_id}/walkthrough")
+def ontology_object_type_walkthrough(object_type_id: str, db: Session = Depends(get_db)):
+    return _object_type_walkthrough(db, object_type_id)
+
+
+@router.patch("/ontology/object-types/{object_type_id}/metadata")
+def update_object_type_metadata(object_type_id: str, body: ObjectTypeManagerMetadataRequest, db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    if body.display_name is not None:
+        obj_type.display_name = body.display_name
+    if body.description is not None:
+        obj_type.description = body.description
+    properties = dict(obj_type.properties or {})
+    manager = dict(properties.get("__manager") or {})
+    patch = body.model_dump(exclude_unset=True)
+    for key in ("aliases", "point_of_contact", "contributors", "status", "visibility", "edits_enabled"):
+        if key in patch:
+            manager[key] = patch[key]
+    if body.plural_name is not None:
+        manager["plural_name"] = body.plural_name
+    properties["__manager"] = manager
+    obj_type.properties = properties
+    obj_type.updated_at = _now()
+    profile = db.get(ObjectTypeProfile, object_type_id)
+    if profile:
+        if body.plural_name is not None:
+            profile.plural_name = body.plural_name
+        if body.groups is not None:
+            profile.groups = body.groups
+        profile.updated_at = _now()
+    _audit(db, "ontology_manager", "ontology.object_type.metadata_updated", "object_type", object_type_id, patch)
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.post("/ontology/object-types/{object_type_id}/index")
+def index_object_type(object_type_id: str, body: ObjectTypeIndexRequest = ObjectTypeIndexRequest(), db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    properties = dict(obj_type.properties or {})
+    manager = dict(properties.get("__manager") or {})
+    manager["index_status"] = "indexed"
+    manager["indexed_at"] = _now()
+    properties["__manager"] = manager
+    obj_type.properties = properties
+    obj_type.updated_at = _now()
+    _audit(db, body.actor, "ontology.object_type.indexed", "object_type", object_type_id, {"index_status": "indexed"})
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.post("/ontology/object-types/{object_type_id}/open-from-pipeline")
+def open_object_type_from_pipeline(object_type_id: str, body: ObjectTypeOpenFromPipelineRequest, db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    from . import pipeline_builder_ops
+    pipeline_builder_ops._get_graph(db, body.graph_id)
+    properties = dict(obj_type.properties or {})
+    manager = dict(properties.get("__manager") or {})
+    manager["last_opened_pipeline_graph_id"] = body.graph_id
+    if body.node_id:
+        manager["last_opened_pipeline_node_id"] = body.node_id
+    properties["__manager"] = manager
+    obj_type.properties = properties
+    obj_type.updated_at = _now()
+    _audit(db, body.actor, "ontology.object_type.opened_from_pipeline", "object_type", object_type_id, {"graph_id": body.graph_id, "node_id": body.node_id})
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
 
 
 # ---------------------------------------------------------------------------
