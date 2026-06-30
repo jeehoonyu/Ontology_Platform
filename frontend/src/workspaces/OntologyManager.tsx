@@ -5,7 +5,8 @@ import {
   getOntologySection,
   getOntologyState,
   getOntologyWalkthrough,
-  indexObjectType
+  indexObjectType,
+  updateOntologyMetadata
 } from "../api/workspaceState";
 import { DataTable, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "../components/data/DataDisplay";
 import { useAsyncState } from "../hooks/useAsyncState";
@@ -111,6 +112,12 @@ export function OntologyManager() {
     setRefreshKey((key) => key + 1);
   }
 
+  async function saveMetadata(patch: JsonObject) {
+    if (!selectedId) return;
+    setManager(await updateOntologyMetadata(selectedId, patch));
+    setRefreshKey((key) => key + 1);
+  }
+
   return (
     <section className="workbench-page ontology-workbench-page">
       <header className="manager-topbar">
@@ -162,7 +169,7 @@ export function OntologyManager() {
           </Panel>
         </aside>
         <section className="manager-surface">
-          {manager ? <ManagerSurface manager={manager} sectionState={sectionState} onIndex={markIndexed} /> : (
+          {manager ? <ManagerSurface manager={manager} sectionState={sectionState} onIndex={markIndexed} onSaveMetadata={saveMetadata} /> : (
             <div className="empty">Generate or select an object type to inspect manager details.</div>
           )}
         </section>
@@ -211,12 +218,28 @@ function WalkthroughRail({ walkthrough }: { walkthrough: OntologyWalkthrough | n
 function ManagerSurface({
   manager,
   sectionState,
-  onIndex
+  onIndex,
+  onSaveMetadata
 }: {
   manager: OntologyManagerState;
   sectionState: OntologySectionState | null;
   onIndex: () => void;
+  onSaveMetadata: (patch: JsonObject) => Promise<void>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [pluralName, setPluralName] = useState(manager.object_type.plural_name);
+  const [description, setDescription] = useState(manager.object_type.description || "");
+
+  useEffect(() => {
+    setPluralName(manager.object_type.plural_name);
+    setDescription(manager.object_type.description || "");
+  }, [manager.object_type.id, manager.object_type.plural_name, manager.object_type.description]);
+
+  async function save() {
+    await onSaveMetadata({ plural_name: pluralName, description });
+    setEditing(false);
+  }
+
   return (
     <>
       <div className="manager-header-card">
@@ -233,9 +256,28 @@ function ManagerSurface({
         <div className="button-row">
           <button>Actions</button>
           <button>Open in</button>
+          <button onClick={() => setEditing((value) => !value)}>{editing ? "Cancel edit" : "Edit metadata"}</button>
           <button onClick={onIndex}>Index</button>
         </div>
       </div>
+      {editing ? (
+        <Panel title="Edit Object Type Metadata">
+          <div className="metadata-edit-grid">
+            <label>
+              <span>Plural name</span>
+              <input value={pluralName} onChange={(event) => setPluralName(event.target.value)} />
+            </label>
+            <label>
+              <span>Description</span>
+              <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+            </label>
+            <div className="button-row">
+              <button onClick={save}>Save metadata</button>
+              <button onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          </div>
+        </Panel>
+      ) : null}
       <div className="manager-grid manager-meta-layout">
         <Panel title="Overview">
           <KeyValueGrid data={{

@@ -35,6 +35,7 @@ export function PipelineBuilder() {
   const [outputs, setOutputs] = useState<PipelineOutputsState | null>(null);
   const [zoom, setZoom] = useState(0.86);
   const [quickAddType, setQuickAddType] = useState("filter");
+  const [actionStatus, setActionStatus] = useState("Select a node, insert transforms from edges or the node menu, then preview or deploy.");
   const state = useAsyncState<PipelineUiState>(getPipelineState, [refreshKey]);
 
   useEffect(() => {
@@ -91,7 +92,9 @@ export function PipelineBuilder() {
 
   async function run(action: "validate" | "preview" | "deliver") {
     if (!selectedGraphId) return;
-    await postJson(`/pipeline-builder/graphs/${encodeURIComponent(selectedGraphId)}/${action}`, { actor: "react" });
+    setActionStatus(`${action === "deliver" ? "Deploying" : action === "validate" ? "Checking proposal" : "Preparing preview"}...`);
+    const result = await postJson(`/pipeline-builder/graphs/${encodeURIComponent(selectedGraphId)}/${action}`, { actor: "react" });
+    setActionStatus(`${action} completed: ${formatValue((result as { status?: unknown }).status || "ok")}`);
     setRefreshKey((key) => key + 1);
   }
 
@@ -101,6 +104,7 @@ export function PipelineBuilder() {
     const nextCanvas = await insertPipelineNode(selectedGraphId, nodeId, nodeType);
     setCanvas(nextCanvas);
     setSelectedNodeId(nextCanvas.selected_node?.id || nodeId);
+    setActionStatus(`Inserted ${nodeType} after ${nodeId}. Preview the selected node below.`);
     setRefreshKey((key) => key + 1);
   }
 
@@ -108,6 +112,7 @@ export function PipelineBuilder() {
     if (!selectedGraphId || !canvas) return;
     const positions = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
     setCanvas(await savePipelineLayout(selectedGraphId, positions));
+    setActionStatus("Layout saved for this graph.");
   }
 
   function handleNodeDrop(event: DragEvent<HTMLDivElement>) {
@@ -137,9 +142,14 @@ export function PipelineBuilder() {
             </>}
           />
           <Toolbar groups={canvas?.toolbar_groups || state.value?.selected_canvas?.toolbar_groups || []} />
+          <div className="workbench-status-strip">
+            <StatusBadge value={canvas?.validation.status || "loading"} />
+            <span>{actionStatus}</span>
+          </div>
           <div className="pipeline-body">
             <aside className="node-library">
               <h2>Add data / transforms</h2>
+              <p>Drag a node onto the canvas, click a node type to set the edge insert action, or use the selected-node menu.</p>
               {(state.value?.node_library || []).map((item) => (
                 <button
                   key={item.type}
@@ -177,6 +187,15 @@ export function PipelineBuilder() {
           />
         </section>
         <aside className="output-rail">
+          <Panel title="Selected Node">
+            {details ? <KeyValueGrid data={{
+              id: details.node_id,
+              type: details.metadata.type,
+              upstream: formatValue(details.metadata.upstream),
+              downstream: formatValue(details.metadata.downstream),
+              preview_rows: details.preview.row_count,
+            }} /> : <div className="empty">Select a node to inspect lineage, config, and preview details.</div>}
+          </Panel>
           <Panel title="Pipeline Outputs" action={<button onClick={() => insertAfter("dataset_output")}>Add</button>}>
             <input className="compact-input" placeholder="Search outputs..." />
             <div className="cards tight">

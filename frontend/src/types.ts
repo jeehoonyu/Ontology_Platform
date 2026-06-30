@@ -22,6 +22,31 @@ export interface EvidenceLink {
   href: string;
 }
 
+export interface UiWarning {
+  id: string;
+  message: string;
+  severity?: string;
+}
+
+export interface UiSection {
+  id: string;
+  title: string;
+  status?: string;
+  description?: string;
+  metrics?: StatusSummary;
+  rows?: TableRow[];
+  href?: string;
+}
+
+export interface HumanUiState {
+  summary: StatusSummary;
+  primary_actions: ActionLink[];
+  sections: UiSection[];
+  evidence_links: EvidenceLink[];
+  warnings: UiWarning[];
+  last_updated: number;
+}
+
 export interface WorkflowStep {
   id: string;
   label: string;
@@ -51,6 +76,29 @@ export interface CommandCenterSummary {
   alerts?: TableRow[];
   approvals?: TableRow[];
   latest_report?: JsonObject | null;
+}
+
+export interface CommandCenterUiState extends HumanUiState {
+  workflow: WorkflowState;
+  evaluator_summary: JsonObject;
+}
+
+export interface ImportsUiState extends HumanUiState {
+  templates: TableRow[];
+  jobs: TableRow[];
+}
+
+export interface ValidationUiState extends HumanUiState {
+  rows: TableRow[];
+}
+
+export interface ProjectReadiness {
+  status: string;
+  checked_at: number;
+  summary: StatusSummary;
+  checks: TableRow[];
+  recommended_actions: TableRow[];
+  last_updated: number;
 }
 
 export interface PipelineGraph {

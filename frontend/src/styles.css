@@ -1207,6 +1207,250 @@ pre {
   padding: 6px 8px;
 }
 
+.platform-flow {
+  position: sticky;
+  top: -22px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin: -22px -22px 18px;
+  padding: 10px 18px;
+  background: rgba(247, 250, 251, 0.96);
+  border-bottom: 1px solid #d7dedf;
+  backdrop-filter: blur(10px);
+}
+
+.flow-stage {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #53626c;
+  text-decoration: none;
+  border: 1px solid #d7dedf;
+  background: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.flow-stage span {
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e7eef2;
+  color: #364653;
+  font-size: 11px;
+}
+
+.flow-stage.active {
+  border-color: #1e6a96;
+  color: #17344a;
+  background: #edf8ff;
+}
+
+.flow-stage.complete span,
+.flow-stage.active span {
+  background: #17344a;
+  color: #ffffff;
+}
+
+.state-block {
+  border: 1px solid #d6e0e4;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 14px;
+  background: #ffffff;
+}
+
+.loading-state {
+  color: #53626c;
+  background: linear-gradient(90deg, #ffffff, #f4f8fa, #ffffff);
+}
+
+.error-state {
+  border-color: #efb6aa;
+  color: #8e2c18;
+  background: #fff2ef;
+}
+
+.empty-state-card {
+  display: grid;
+  gap: 8px;
+  color: #53626c;
+  background: #f8fbfc;
+}
+
+.empty-state-card strong {
+  color: #17344a;
+}
+
+.warning-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.warning-list article {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #ead39b;
+  border-radius: 8px;
+  background: #fff9ea;
+}
+
+.hero-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.6fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.hero-summary > div,
+.decision-card {
+  background: #ffffff;
+  border: 1px solid #d7dedf;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.hero-summary h2 {
+  font-size: 22px;
+  margin: 4px 0 8px;
+}
+
+.hero-summary p,
+.decision-card span,
+.section-card span,
+.empty-state-card span {
+  color: #64717a;
+}
+
+.eyebrow {
+  color: #64717a;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.decision-card {
+  display: grid;
+  gap: 9px;
+}
+
+.decision-card strong {
+  font-size: 18px;
+}
+
+.workspace-summary-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-card {
+  display: grid;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid #d7dedf;
+  border-radius: 8px;
+  padding: 14px;
+  min-width: 0;
+}
+
+.section-card header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.section-card header div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.section-card button {
+  justify-self: start;
+}
+
+.graph-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.5fr);
+  gap: 14px;
+}
+
+.graph-node-buttons {
+  margin-top: 10px;
+}
+
+.workbench-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 7px 10px;
+  color: #53626c;
+  background: #ffffff;
+  border-bottom: 1px solid #d7dedf;
+}
+
+.pipeline-workbench-page .pipeline-body {
+  grid-template-columns: 236px minmax(0, 1fr) 38px;
+}
+
+.pipeline-workbench-page .node-library {
+  width: auto;
+  padding: 10px;
+  overflow: auto;
+  border-right: 1px solid #d7dedf;
+}
+
+.node-library p {
+  color: #64717a;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.metadata-edit-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.metadata-edit-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.metadata-edit-grid label span {
+  color: #64717a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.metadata-edit-grid input,
+.metadata-edit-grid textarea {
+  width: 100%;
+  border: 1px solid #cfd8dc;
+  border-radius: 7px;
+  padding: 9px 10px;
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1224,6 +1468,10 @@ pre {
 
   .two-col,
   .metrics,
+  .workspace-summary-row,
+  .section-card-grid,
+  .hero-summary,
+  .graph-workspace-grid,
   .stepper,
   .builder-shell,
   .pipeline-body,
