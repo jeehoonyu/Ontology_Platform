@@ -149,6 +149,31 @@ export interface NodeSuggestions {
   errors: TableRow[];
 }
 
+export interface PipelineContextAction {
+  id: string;
+  label: string;
+  node_type: string;
+}
+
+export interface PipelineNodeDetails {
+  graph_id: string;
+  node_id: string;
+  node: PipelineNode;
+  metadata: JsonObject;
+  preview: NodePreview;
+  context_actions: PipelineContextAction[];
+  suggestions: NodeSuggestions;
+}
+
+export interface PipelineOutputsState {
+  graph_id: string;
+  outputs: JsonObject;
+  validation: PipelineCanvasState["validation"];
+  legend: PipelineCanvasState["legend"];
+  actions: ActionLink[];
+  summary: StatusSummary;
+}
+
 export interface OntologyObjectSummary {
   id: string;
   display_name: string;
@@ -197,6 +222,14 @@ export interface OntologyWalkthrough {
   current_resource_id: string;
   steps: Array<{ id: string; title: string; resource: string; status: string }>;
   links: Array<{ label: string; path: string }>;
+}
+
+export interface OntologySectionState {
+  object_type_id: string;
+  section_id: string;
+  title: string;
+  summary: JsonObject;
+  rows: TableRow[];
 }
 
 export interface OntologyUiState {
