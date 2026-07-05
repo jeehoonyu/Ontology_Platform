@@ -141,6 +141,11 @@ class PipelineInsertNodeRequest(BaseModel):
     position: Optional[Dict[str, float]] = None
 
 
+class PipelineCreateNodeRequest(PipelineInsertNodeRequest):
+    connect_from_node_id: Optional[str] = None
+    actor: str = "pipeline_builder"
+
+
 class PipelineLayoutRequest(BaseModel):
     positions: Dict[str, Dict[str, float]] = Field(default_factory=dict)
     nodes: List[Dict[str, Any]] = Field(default_factory=list)
@@ -230,11 +235,53 @@ def _node_catalog_by_type() -> Dict[str, Dict[str, Any]]:
     return {item["type"]: item for item in NODE_TYPE_CATALOG}
 
 
+def _audit_graph(db: Session, actor: str, event_type: str, graph: PipelineBuilderGraph, payload: Dict[str, Any]) -> None:
+    db.add(models_action.AuditLog(
+        id=_new_id(),
+        actor=actor or "pipeline_builder",
+        event_type=event_type,
+        subject_type="pipeline_builder_graph",
+        subject_id=graph.id,
+        payload=payload,
+    ))
+
+
 def _find_node(graph: PipelineBuilderGraph, node_id: str) -> Tuple[int, Dict[str, Any]]:
     for index, node in enumerate(graph.nodes or []):
         if _node_id(node, index) == node_id:
             return index, node
     raise HTTPException(status_code=404, detail=f"Pipeline node '{node_id}' not found")
+
+
+def _unique_node_id(graph: PipelineBuilderGraph, node_type: str, requested_id: Optional[str] = None) -> str:
+    existing_ids = {_node_id(node, index) for index, node in enumerate(graph.nodes or [])}
+    new_id = requested_id or f"{node_type}_{len(existing_ids) + 1}"
+    base_id = new_id
+    suffix = 2
+    while new_id in existing_ids:
+        new_id = f"{base_id}_{suffix}"
+        suffix += 1
+    return new_id
+
+
+def _node_from_request(graph: PipelineBuilderGraph, body: PipelineInsertNodeRequest, default_position: Dict[str, float]) -> Dict[str, Any]:
+    node_type = str(body.node_type or "").strip()
+    if node_type not in NODE_TYPES:
+        raise HTTPException(status_code=422, detail=f"Unsupported node type '{node_type}'")
+    new_id = _unique_node_id(graph, node_type, body.node_id)
+    position = body.position or default_position
+    catalog = _node_catalog_by_type().get(node_type, {})
+    return {
+        "id": new_id,
+        "type": node_type,
+        "label": body.label or catalog.get("label") or new_id,
+        "position": {"x": float(position.get("x", 0)), "y": float(position.get("y", 0))},
+        "config": body.config or {},
+    }
+
+
+def _edge_exists(edges: List[Dict[str, Any]], source: str, target: str) -> bool:
+    return any(_edge_source(edge) == source and _edge_target(edge) == target for edge in edges)
 
 
 def _canvas_payload(db: Session, graph: PipelineBuilderGraph, *, selected_node_id: Optional[str] = None) -> Dict[str, Any]:
@@ -936,53 +983,109 @@ def update_graph_layout(graph_id: str, body: PipelineLayoutRequest, db: Session 
         updated_nodes.append(next_node)
     graph.nodes = updated_nodes
     graph.updated_at = _now()
+    _audit_graph(db, "pipeline_builder", "pipeline_builder.graph.layout_updated", graph, {"positions": positions})
     db.commit()
     db.refresh(graph)
     return _canvas_payload(db, graph)
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/nodes")
+def create_pipeline_node(graph_id: str, body: PipelineCreateNodeRequest, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    new_node = _node_from_request(graph, body, {"x": 180, "y": 180})
+    next_edges = [copy.deepcopy(edge) for edge in graph.edges or []]
+    if body.connect_from_node_id:
+        _find_node(graph, body.connect_from_node_id)
+        next_edges.append({
+            "source": body.connect_from_node_id,
+            "target": new_node["id"],
+            "source_port": "output",
+            "target_port": "input",
+        })
+    graph.nodes = [copy.deepcopy(node) for node in graph.nodes or []] + [new_node]
+    graph.edges = next_edges
+    graph.updated_at = _now()
+    _audit_graph(db, body.actor, "pipeline_builder.node.created", graph, {
+        "node_id": new_node["id"],
+        "node_type": new_node["type"],
+        "position": new_node["position"],
+        "connect_from_node_id": body.connect_from_node_id,
+    })
+    db.commit()
+    db.refresh(graph)
+    return _canvas_payload(db, graph, selected_node_id=new_node["id"])
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/insert-after")
 def insert_node_after(graph_id: str, node_id: str, body: PipelineInsertNodeRequest, db: Session = Depends(get_db)):
     graph = _get_graph(db, graph_id)
     source_index, source_node = _find_node(graph, node_id)
-    node_type = str(body.node_type or "").strip()
-    if node_type not in NODE_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unsupported node type '{node_type}'")
-    existing_ids = {_node_id(node, index) for index, node in enumerate(graph.nodes or [])}
-    new_id = body.node_id or f"{node_type}_{len(existing_ids) + 1}"
-    base_id = new_id
-    suffix = 2
-    while new_id in existing_ids:
-        new_id = f"{base_id}_{suffix}"
-        suffix += 1
     source_position = _node_position(source_node, source_index)
-    position = body.position or {"x": source_position["x"] + 260, "y": source_position["y"]}
-    catalog = _node_catalog_by_type().get(node_type, {})
-    new_node = {
-        "id": new_id,
-        "type": node_type,
-        "label": body.label or catalog.get("label") or new_id,
-        "position": {"x": float(position.get("x", 0)), "y": float(position.get("y", 0))},
-        "config": body.config or {},
-    }
+    new_node = _node_from_request(graph, body, {"x": source_position["x"] + 260, "y": source_position["y"]})
     outgoing = [edge for edge in graph.edges or [] if _edge_source(edge) == node_id]
     preserved_edges = [edge for edge in graph.edges or [] if _edge_source(edge) != node_id]
-    next_edges = preserved_edges + [{"source": node_id, "target": new_id, "source_port": "output", "target_port": "input"}]
+    next_edges = preserved_edges + [{"source": node_id, "target": new_node["id"], "source_port": "output", "target_port": "input"}]
     if outgoing:
         for edge in outgoing:
             next_edges.append({
                 **copy.deepcopy(edge),
-                "source": new_id,
-                "from": new_id if "from" in edge else edge.get("from"),
+                "source": new_node["id"],
+                "from": new_node["id"] if "from" in edge else edge.get("from"),
                 "target": _edge_target(edge),
                 "to": _edge_target(edge) if "to" in edge else edge.get("to"),
             })
     graph.nodes = (graph.nodes or []) + [new_node]
     graph.edges = next_edges
     graph.updated_at = _now()
+    _audit_graph(db, "pipeline_builder", "pipeline_builder.node.inserted", graph, {
+        "node_id": new_node["id"],
+        "node_type": new_node["type"],
+        "inserted_after": node_id,
+    })
     db.commit()
     db.refresh(graph)
-    return _canvas_payload(db, graph, selected_node_id=new_id)
+    return _canvas_payload(db, graph, selected_node_id=new_node["id"])
+
+
+@router.delete("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}")
+def delete_pipeline_node(graph_id: str, node_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    _find_node(graph, node_id)
+    incoming = [copy.deepcopy(edge) for edge in graph.edges or [] if _edge_target(edge) == node_id]
+    outgoing = [copy.deepcopy(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id]
+    next_edges = [
+        copy.deepcopy(edge)
+        for edge in graph.edges or []
+        if _edge_source(edge) != node_id and _edge_target(edge) != node_id
+    ]
+    reconnected = False
+    if len(incoming) == 1 and len(outgoing) == 1:
+        source = _edge_source(incoming[0])
+        target = _edge_target(outgoing[0])
+        if source and target and source != target and not _edge_exists(next_edges, source, target):
+            next_edges.append({
+                "source": source,
+                "target": target,
+                "source_port": incoming[0].get("source_port") or "output",
+                "target_port": outgoing[0].get("target_port") or "input",
+            })
+            reconnected = True
+    graph.nodes = [
+        copy.deepcopy(node)
+        for index, node in enumerate(graph.nodes or [])
+        if _node_id(node, index) != node_id
+    ]
+    graph.edges = next_edges
+    graph.updated_at = _now()
+    _audit_graph(db, "pipeline_builder", "pipeline_builder.node.deleted", graph, {
+        "node_id": node_id,
+        "incoming_edges": len(incoming),
+        "outgoing_edges": len(outgoing),
+        "reconnected": reconnected,
+    })
+    db.commit()
+    db.refresh(graph)
+    return _canvas_payload(db, graph)
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/preview")

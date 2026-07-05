@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { DataTable, KeyValueGrid, StatusBadge } from "../data/DataDisplay";
 import { asString, classNames, formatValue } from "../../utils/format";
 import type {
@@ -19,7 +19,9 @@ export function PipelineCanvas({
   onDrop,
   onDragOver,
   onInsertEdge,
-  onContextInsert
+  onContextInsert,
+  onMoveNode,
+  onDeleteNode
 }: {
   canvas: PipelineCanvasState | null;
   zoom: number;
@@ -30,12 +32,63 @@ export function PipelineCanvas({
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onInsertEdge: () => void;
   onContextInsert: (nodeType: string) => void;
+  onMoveNode: (nodeId: string, position: { x: number; y: number }, commit: boolean) => void;
+  onDeleteNode: (nodeId: string) => void;
 }) {
+  const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
+  const [dropActive, setDropActive] = useState(false);
   const nodes = canvas?.nodes || [];
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const selectedNode = byId.get(selectedNodeId);
+  const toCanvasPoint = (event: ReactPointerEvent<HTMLElement>) => {
+    const container = event.currentTarget.closest(".pipeline-canvas") as HTMLDivElement | null;
+    const rect = container?.getBoundingClientRect();
+    return {
+      x: ((event.clientX - (rect?.left || 0) + (container?.scrollLeft || 0)) / zoom),
+      y: ((event.clientY - (rect?.top || 0) + (container?.scrollTop || 0)) / zoom)
+    };
+  };
+
+  function startNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: PipelineNode) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = toCanvasPoint(event);
+    setDragging({ nodeId: node.id, offsetX: point.x - node.position.x, offsetY: point.y - node.position.y });
+    onSelect(node.id);
+  }
+
+  function moveNode(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!dragging) return;
+    const point = toCanvasPoint(event);
+    onMoveNode(dragging.nodeId, {
+      x: Math.max(0, point.x - dragging.offsetX),
+      y: Math.max(0, point.y - dragging.offsetY)
+    }, false);
+  }
+
+  function endNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!dragging) return;
+    const point = toCanvasPoint(event);
+    onMoveNode(dragging.nodeId, {
+      x: Math.max(0, point.x - dragging.offsetX),
+      y: Math.max(0, point.y - dragging.offsetY)
+    }, true);
+    setDragging(null);
+  }
+
   return (
-    <div className="pipeline-canvas" onDrop={onDrop} onDragOver={onDragOver}>
+    <div
+      className={classNames("pipeline-canvas", dropActive && "drag-active")}
+      onDrop={(event) => {
+        setDropActive(false);
+        onDrop(event);
+      }}
+      onDragOver={(event) => {
+        setDropActive(true);
+        onDragOver(event);
+      }}
+      onDragLeave={() => setDropActive(false)}
+    >
       <div className="canvas-controls">
         <button title="Zoom in">+</button>
         <button title="Zoom out">-</button>
@@ -85,7 +138,18 @@ export function PipelineCanvas({
             </button>
           );
         })}
-        {nodes.map((node) => <PipelineNodeCard key={node.id} node={node} selected={selectedNodeId === node.id} onSelect={onSelect} />)}
+        {nodes.map((node) => (
+          <PipelineNodeCard
+            key={node.id}
+            node={node}
+            selected={selectedNodeId === node.id}
+            dragging={dragging?.nodeId === node.id}
+            onSelect={onSelect}
+            onPointerDown={startNodeDrag}
+            onPointerMove={moveNode}
+            onPointerUp={endNodeDrag}
+          />
+        ))}
         {selectedNode ? (
           <div className="node-context-menu" style={{ left: selectedNode.position.x + 190, top: selectedNode.position.y - 2 }}>
             {(details?.context_actions || []).map((action) => (
@@ -94,6 +158,10 @@ export function PipelineCanvas({
                 {action.label}
               </button>
             ))}
+            <button className="context-action-delete" onClick={() => onDeleteNode(selectedNode.id)}>
+              <span>D</span>
+              Delete node
+            </button>
           </div>
         ) : null}
       </div>
@@ -101,12 +169,31 @@ export function PipelineCanvas({
   );
 }
 
-function PipelineNodeCard({ node, selected, onSelect }: { node: PipelineNode; selected: boolean; onSelect: (nodeId: string) => void }) {
+function PipelineNodeCard({
+  node,
+  selected,
+  dragging,
+  onSelect,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp
+}: {
+  node: PipelineNode;
+  selected: boolean;
+  dragging: boolean;
+  onSelect: (nodeId: string) => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, node: PipelineNode) => void;
+  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+}) {
   return (
     <button
-      className={classNames("pipeline-node", node.category, node.type, selected && "selected", node.status === "ERROR" && "error")}
+      className={classNames("pipeline-node", node.category, node.type, selected && "selected", dragging && "dragging", node.status === "ERROR" && "error")}
       style={{ left: node.position.x, top: node.position.y }}
       onClick={() => onSelect(node.id)}
+      onPointerDown={(event) => onPointerDown(event, node)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
     >
       <strong>{node.label}</strong>
       <small>{node.row_count ?? 0} rows</small>

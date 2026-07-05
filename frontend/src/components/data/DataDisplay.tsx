@@ -2,9 +2,9 @@ import { useMemo, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
 
-export function Panel({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+export function Panel({ title, action, children, className }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className="panel">
+    <section className={classNames("panel", className)}>
       <header className="panel-header">
         <h2>{title}</h2>
         {action}
@@ -79,7 +79,10 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
         </thead>
         <tbody>
           {safeRows.slice(0, 40).map((row, index) => (
-            <tr key={index}>{columns.map((column) => <td key={column}>{formatValue(row[column])}</td>)}</tr>
+            <tr key={index}>{columns.map((column) => {
+              const value = formatValue(row[column]);
+              return <td key={column} title={value}>{value}</td>;
+            })}</tr>
           ))}
         </tbody>
       </table>
@@ -171,12 +174,20 @@ export function RelationshipStrip({ rows, fallback }: { rows: TableRow[]; fallba
   );
 }
 
+export function DeveloperEvidence({ title = "Developer evidence", children }: { title?: string; children: ReactNode }) {
+  return (
+    <details className="developer-evidence">
+      <summary>{title}</summary>
+      <div>{children}</div>
+    </details>
+  );
+}
+
 export function DebugJson({ title, value }: { title: string; value: unknown }) {
   if (!value) return null;
   return (
-    <details className="debug-json">
-      <summary>{title}</summary>
+    <DeveloperEvidence title={title}>
       <pre>{JSON.stringify(value, null, 2)}</pre>
-    </details>
+    </DeveloperEvidence>
   );
 }

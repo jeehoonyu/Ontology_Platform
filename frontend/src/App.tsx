@@ -11,7 +11,7 @@ import {
 import { MiniGraph } from "./components/canvas/PipelineCanvas";
 import {
   DataTable,
-  DebugJson,
+  DeveloperEvidence,
   EmptyState,
   ErrorBanner,
   EvidenceList,
@@ -29,6 +29,14 @@ import { asRows, asString, classNames } from "./utils/format";
 import { currentWorkspaceView, navigate } from "./utils/navigation";
 import { OntologyManager } from "./workspaces/OntologyManager";
 import { PipelineBuilder } from "./workspaces/PipelineBuilder";
+import { ControlPanel } from "./workspaces/ControlPanel";
+import { Security } from "./workspaces/Security";
+import { Automate } from "./workspaces/Automate";
+import { DataMedia } from "./workspaces/DataMedia";
+import { Vertex } from "./workspaces/Vertex";
+import { Fusion } from "./workspaces/Fusion";
+import { Analytics } from "./workspaces/Analytics";
+import { Delivery } from "./workspaces/Delivery";
 import type {
   CommandCenterSummary,
   CommandCenterUiState,
@@ -40,7 +48,7 @@ import type {
   WorkflowState
 } from "./types";
 
-const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "graph", "validation"]);
+const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "graph", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"]);
 
 const NAV_ITEMS = [
   { id: "command-center", label: "Command Center", hint: "Guided asset reliability workflow" },
@@ -48,10 +56,57 @@ const NAV_ITEMS = [
   { id: "ontology", label: "Ontology Manager", hint: "Generate and manage object types" },
   { id: "pipeline", label: "Pipeline Builder", hint: "Canvas, previews, outputs" },
   { id: "graph", label: "Platform Graph", hint: "Inspect relationships and evidence" },
-  { id: "validation", label: "Validation", hint: "Trust, conformance, schema health" }
+  { id: "validation", label: "Validation", hint: "Trust, conformance, schema health" },
+  { id: "data-media", label: "Data & Media", hint: "Upload files, datasets, media" },
+  { id: "automate", label: "Automate", hint: "Automations, conditions, effects, runs" },
+  { id: "security", label: "Security & Governance", hint: "Markings, CBAC, projects, cipher" },
+  { id: "control-panel", label: "Control Panel", hint: "Orgs, users, groups, roles, tokens" },
+  { id: "vertex", label: "Vertex", hint: "Graph explorer: expand, layout, merge" },
+  { id: "fusion", label: "Fusion", hint: "Spreadsheet: cells, formulas, lookups" },
+  { id: "analytics", label: "Analytics", hint: "Object Explorer charts + Contour boards" },
+  { id: "delivery", label: "Delivery", hint: "Marketplace, DevOps, code & compute" }
 ];
 
 const LEGACY_ITEMS = ["aip", "map", "workshop", "object-explorer", "models", "decision", "ops", "investigations"];
+
+const ENDPOINT_INVENTORY: TableRow[] = [
+  {
+    route: "/workspace/command-center",
+    ui_state: "/ui-state/command-center",
+    primary_actions: "/project/demo/bootstrap, /scenarios/asset-reliability/run-triage",
+    evidence: "/scenarios/asset-reliability/report, /project/readiness"
+  },
+  {
+    route: "/workspace/imports",
+    ui_state: "/ui-state/imports",
+    primary_actions: "/imports/csv, /imports/jobs/{id}/apply-transforms, /connections/sources/{id}/preview, /streams/{id}/replay",
+    evidence: "/imports/jobs, /imports/templates"
+  },
+  {
+    route: "/workspace/ontology",
+    ui_state: "/ui-state/ontology",
+    primary_actions: "/ontology-generator/drafts, /ontology-generator/drafts/{id}/apply, /ontology/object-types/{id}/properties",
+    evidence: "/ui-state/ontology/object-types/{id}/walkthrough"
+  },
+  {
+    route: "/workspace/pipeline",
+    ui_state: "/ui-state/pipeline",
+    primary_actions: "/pipeline-builder/graphs/{id}/nodes, /pipeline-builder/graphs/{id}/layout, /pipeline-builder/graphs/{id}/deliver",
+    evidence: "/ui-state/pipeline/{id}/canvas, /ui-state/pipeline/{id}/outputs"
+  },
+  {
+    route: "/workspace/graph",
+    ui_state: "/graph/overview",
+    primary_actions: "search/filter/select local graph nodes",
+    evidence: "/graph/overview"
+  },
+  {
+    route: "/workspace/validation",
+    ui_state: "/ui-state/validation",
+    primary_actions: "/project/validate, /project/readiness",
+    evidence: "/system/migrations, /system/schema-health, docs conformance matrix"
+  }
+];
 
 interface ImportJob extends TableRow {
   id?: string;
@@ -77,6 +132,7 @@ interface GraphOverview {
 
 export function App() {
   const [view, setView] = useState(currentWorkspaceView(CORE_VIEWS));
+  const backendReadiness = useAsyncState<ProjectReadiness>(getProjectReadiness, []);
   useEffect(() => {
     const handler = () => setView(currentWorkspaceView(CORE_VIEWS));
     window.addEventListener("popstate", handler);
@@ -108,13 +164,45 @@ export function App() {
       </aside>
       <main className="workspace">
         <PlatformFlow currentView={view} />
+        <BackendConnection readiness={backendReadiness.value} loading={backendReadiness.loading} error={backendReadiness.error} />
         {view === "command-center" && <CommandCenter />}
         {view === "imports" && <DataOnboarding />}
         {view === "ontology" && <OntologyManager />}
         {view === "pipeline" && <PipelineBuilder />}
         {view === "graph" && <GraphWorkspace />}
         {view === "validation" && <ValidationWorkspace />}
+        {view === "data-media" && <DataMedia />}
+        {view === "automate" && <Automate />}
+        {view === "security" && <Security />}
+        {view === "control-panel" && <ControlPanel />}
+        {view === "vertex" && <Vertex />}
+        {view === "fusion" && <Fusion />}
+        {view === "analytics" && <Analytics />}
+        {view === "delivery" && <Delivery />}
       </main>
+    </div>
+  );
+}
+
+function BackendConnection({ readiness, loading, error }: { readiness: ProjectReadiness | null; loading: boolean; error: string }) {
+  const status = error ? "OFFLINE" : loading ? "CHECKING" : readiness?.status || "UNKNOWN";
+  return (
+    <div className={classNames("backend-connection", error && "offline", status === "READY" && "ready")}>
+      <div className="backend-connection-main">
+        <StatusBadge value={status} />
+        <span>{error ? `Backend connection failed: ${error}` : `Backend connection: ${status}`}</span>
+        {readiness?.summary ? (
+          <small>
+            {asString(readiness.summary.ready_checks, "0")}/{asString(readiness.summary.check_count, "0")} checks ready
+          </small>
+        ) : null}
+      </div>
+      {readiness ? (
+        <DeveloperEvidence title="Developer evidence: readiness checks">
+          <DataTable rows={readiness.checks || []} />
+          <DataTable rows={readiness.recommended_actions || []} empty="No recommended actions." />
+        </DeveloperEvidence>
+      ) : null}
     </div>
   );
 }
@@ -218,7 +306,11 @@ function CommandCenter() {
         if (href.startsWith("/workspace/")) navigate(href.replace("/workspace/", ""));
         else window.location.href = href;
       }} />
-      <DebugJson title="Latest Run Output" value={lastRun} />
+      {lastRun ? (
+        <DeveloperEvidence title="Developer evidence: latest action result">
+          <KeyValueGrid data={lastRun} />
+        </DeveloperEvidence>
+      ) : null}
       {!ui.value && !ui.loading && <div className="notice">Bootstrap the sample scenario to populate the Command Center.</div>}
     </Page>
   );
@@ -325,6 +417,7 @@ function DataOnboarding() {
   return (
     <Page title="Data Onboarding" subtitle="Upload, map, transform, connect, and replay data before promotion.">
       <ErrorBanner message={importsUi.error} />
+      {(importsUi.loading || jobs.loading) && <LoadingState label="Loading import endpoints..." />}
       <WarningList warnings={importsUi.value?.warnings} />
       <div className="workspace-summary-row">
         <Metric label="Import jobs" value={importsUi.value?.summary.job_count ?? 0} />
@@ -387,6 +480,8 @@ function GraphWorkspace() {
   });
   return (
     <Page title="Platform Graph" subtitle="Searchable overview of datasets, pipelines, objects, incidents, and reports.">
+      <ErrorBanner message={graph.error} />
+      {graph.loading && <LoadingState label="Loading platform graph..." />}
       <div className="button-row top-actions">
         <input className="compact-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search graph nodes..." />
         <button onClick={() => setQuery("")}>Clear</button>
@@ -427,6 +522,7 @@ function ValidationWorkspace() {
     <Page title="Validation and Trust" subtitle="Executable evidence for schema health, migrations, events, snapshots, and docs conformance.">
       <div className="button-row top-actions"><button onClick={() => setRefreshKey((key) => key + 1)}>Refresh</button></div>
       <ErrorBanner message={validationUi.error || readiness.error} />
+      {(project.loading || validationUi.loading || readiness.loading) && <LoadingState label="Loading validation evidence..." />}
       <WarningList warnings={validationUi.value?.warnings} />
       <div className="grid metrics">
         <Metric label="Project" value={project.value?.status || "loading"} />
@@ -451,6 +547,9 @@ function ValidationWorkspace() {
           <DataTable rows={filteredRows} />
         </Panel>
       </div>
+      <DeveloperEvidence title="Developer evidence: UI endpoint inventory">
+        <DataTable rows={ENDPOINT_INVENTORY} />
+      </DeveloperEvidence>
     </Page>
   );
 }

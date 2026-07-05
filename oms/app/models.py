@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean
+from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -55,6 +55,8 @@ class ObjectInstance(Base):
     hold current state materialized from pipelines, user edits, or agent actions.
     """
     __tablename__ = "object_instances"
+    # Composite index for the common type-scoped + ordered/paginated scan.
+    __table_args__ = (Index("ix_object_instances_type_created", "object_type_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
@@ -99,6 +101,10 @@ class DataAsset(Base):
     kind: Mapped[str] = mapped_column(String, default="dataset")
     asset_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     records: Mapped[list] = mapped_column(JSON, default=list)
+    # Storage URI of the raw uploaded file (when ingested via /data-assets/{id}/upload)
+    # and the format it was parsed from. Nullable so inline-JSON assets stay valid.
+    file_ref: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_format: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # csv|json|jsonl|parquet
     created_at: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[int] = mapped_column(Integer)
 
