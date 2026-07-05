@@ -55,3 +55,7 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+
+# Local object storage (uploaded files)
+storage/
+oms/storage/

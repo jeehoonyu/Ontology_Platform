@@ -244,7 +244,7 @@ def serve_workspace(request: Request):
 
 @app.get("/workspace/{view}", include_in_schema=False)
 def serve_workspace_view(view: str, request: Request):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "imports", "validation"}:
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "imports", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"}:
         _not_found("Workspace", view)
     return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
@@ -559,6 +559,9 @@ def search_object_sets(request: schemas.ObjectSetQuery, db: Session = Depends(ge
             object_type_id=request.object_type_id,
             filters=request.filters,
             limit=request.limit,
+            offset=request.offset,
+            cursor=request.cursor,
+            with_total=request.with_total,
             include_lineage=request.include_lineage,
         )
     except ValueError as exc:

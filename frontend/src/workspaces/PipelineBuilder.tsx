@@ -1,6 +1,8 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { postJson } from "../api";
 import {
+  createPipelineNode,
+  deletePipelineNode,
   getPipelineCanvas,
   getPipelineNodeDetails,
   getPipelineOutputs,
@@ -108,6 +110,58 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
+  async function addNodeAtDrop(event: DragEvent<HTMLDivElement>, nodeType: string) {
+    if (!selectedGraphId) return;
+    const container = event.currentTarget;
+    const rect = container.getBoundingClientRect();
+    const position = {
+      x: Math.max(0, (event.clientX - rect.left + container.scrollLeft) / zoom - 86),
+      y: Math.max(0, (event.clientY - rect.top + container.scrollTop) / zoom - 28)
+    };
+    setActionStatus(`Adding ${nodeType} at ${Math.round(position.x)}, ${Math.round(position.y)}...`);
+    const nextCanvas = await createPipelineNode(selectedGraphId, nodeType, position, selectedNodeId || undefined);
+    setCanvas(nextCanvas);
+    setSelectedNodeId(nextCanvas.selected_node?.id || selectedNodeId);
+    setActionStatus(`Added ${nodeType} at drop location. Layout is saved.`);
+    setRefreshKey((key) => key + 1);
+  }
+
+  function moveNode(nodeId: string, position: { x: number; y: number }, commit: boolean) {
+    setCanvas((current) => {
+      if (!current) return current;
+      const nodes = current.nodes.map((node) => node.id === nodeId ? { ...node, position } : node);
+      return {
+        ...current,
+        nodes,
+        selected_node: current.selected_node?.id === nodeId ? { ...current.selected_node, position } : current.selected_node
+      };
+    });
+    if (commit && selectedGraphId && canvas) {
+      const positions = Object.fromEntries(canvas.nodes.map((node) => [
+        node.id,
+        node.id === nodeId ? position : node.position
+      ]));
+      setActionStatus(`Saving ${nodeId} position...`);
+      void savePipelineLayout(selectedGraphId, positions)
+        .then((nextCanvas) => {
+          setCanvas(nextCanvas);
+          setActionStatus(`Saved ${nodeId} position.`);
+          setRefreshKey((key) => key + 1);
+        })
+        .catch((error: Error) => setActionStatus(`Could not save layout: ${error.message}`));
+    }
+  }
+
+  async function removeNode(nodeId = selectedNodeId) {
+    if (!selectedGraphId || !nodeId) return;
+    setActionStatus(`Deleting ${nodeId}...`);
+    const nextCanvas = await deletePipelineNode(selectedGraphId, nodeId);
+    setCanvas(nextCanvas);
+    setSelectedNodeId(nextCanvas.selected_node?.id || "");
+    setActionStatus(`Deleted ${nodeId}. Incident edges were removed and simple paths were reconnected.`);
+    setRefreshKey((key) => key + 1);
+  }
+
   async function saveLayout() {
     if (!selectedGraphId || !canvas) return;
     const positions = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
@@ -118,7 +172,7 @@ export function PipelineBuilder() {
   function handleNodeDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     const nodeType = event.dataTransfer.getData("application/x-node-type");
-    if (nodeType) void insertAfter(nodeType);
+    if (nodeType) void addNodeAtDrop(event, nodeType);
   }
 
   const outputRows = asRows((outputs?.outputs || canvas?.outputs)?.nodes);
@@ -135,7 +189,8 @@ export function PipelineBuilder() {
               <button onClick={() => setZoom((value) => Math.max(0.55, value - 0.08))}>-</button>
               <button onClick={() => setZoom(0.86)}>Fit</button>
               <button onClick={() => setZoom((value) => Math.min(1.35, value + 0.08))}>+</button>
-              <button onClick={saveLayout}>Saved</button>
+              <button onClick={saveLayout}>Save layout</button>
+              <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
               <button onClick={() => run("validate")}>Propose</button>
               <button onClick={() => run("deliver")}>Deploy</button>
               <a className="legacy-button compact" href="/workspace/pipeline?legacy=1">Legacy</a>
@@ -173,6 +228,8 @@ export function PipelineBuilder() {
               onDragOver={(event) => event.preventDefault()}
               onInsertEdge={() => insertAfter(quickAddType)}
               onContextInsert={(nodeType) => insertAfter(nodeType)}
+              onMoveNode={moveNode}
+              onDeleteNode={removeNode}
             />
             <aside className="pipeline-utility-rail" aria-label="Pipeline utility rail">
               {["R", "S", "L", "B", "C", "D"].map((item) => <button key={item}>{item}</button>)}
