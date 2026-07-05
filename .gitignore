@@ -32,6 +32,7 @@ MANIFEST
 env/
 venv/
 venv312/
+node_modules/
 ENV/
 env.bak/
 venv.bak/
@@ -54,3 +55,7 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+
+# Local object storage (uploaded files)
+storage/
+oms/storage/

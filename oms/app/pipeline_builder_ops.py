@@ -133,6 +133,29 @@ class PipelineDeliverRequest(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PipelineInsertNodeRequest(BaseModel):
+    node_type: str = "filter"
+    node_id: Optional[str] = None
+    label: Optional[str] = None
+    config: Dict[str, Any] = Field(default_factory=dict)
+    position: Optional[Dict[str, float]] = None
+
+
+class PipelineCreateNodeRequest(PipelineInsertNodeRequest):
+    connect_from_node_id: Optional[str] = None
+    actor: str = "pipeline_builder"
+
+
+class PipelineLayoutRequest(BaseModel):
+    positions: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    nodes: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PipelineNodePreviewRequest(BaseModel):
+    limit: int = 50
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -144,6 +167,33 @@ def _new_id() -> str:
 @router.get("/pipeline-builder/node-types")
 def list_node_types():
     return {"node_types": NODE_TYPE_CATALOG}
+
+
+@router.get("/ui-state/pipeline")
+def pipeline_ui_state(db: Session = Depends(get_db)):
+    graphs = db.query(PipelineBuilderGraph).order_by(PipelineBuilderGraph.updated_at.desc()).all()
+    selected = graphs[0] if graphs else None
+    return {
+        "summary": {
+            "graph_count": len(graphs),
+            "node_type_count": len(NODE_TYPE_CATALOG),
+            "selected_graph_id": selected.id if selected else None,
+        },
+        "primary_actions": [
+            {"id": "create_graph", "label": "Create graph", "method": "POST", "path": "/pipeline-builder/graphs"},
+            {"id": "add_data", "label": "Add data", "method": "POST", "path": "/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/insert-after"},
+            {"id": "validate", "label": "Validate", "method": "POST", "path": "/pipeline-builder/graphs/{graph_id}/validate"},
+            {"id": "deliver", "label": "Deliver", "method": "POST", "path": "/pipeline-builder/graphs/{graph_id}/deliver"},
+        ],
+        "graphs": [PipelineGraphRead.model_validate(graph).model_dump() for graph in graphs],
+        "node_library": NODE_TYPE_CATALOG,
+        "selected_canvas": _canvas_payload(db, selected) if selected else None,
+        "empty_state": None if selected else {
+            "title": "No pipeline graph yet",
+            "action": "Generate an ontology draft or create a graph from imported data.",
+        },
+        "last_updated": max([graph.updated_at for graph in graphs], default=_now()),
+    }
 
 
 def _get_graph(db: Session, graph_id: str) -> PipelineBuilderGraph:
@@ -163,6 +213,276 @@ def _node_id(node: Dict[str, Any], index: int) -> str:
 
 def _config(node: Dict[str, Any]) -> Dict[str, Any]:
     return node.get("config") or {k: v for k, v in node.items() if k not in {"id", "type", "operation", "label"}}
+
+
+def _edge_source(edge: Dict[str, Any]) -> str:
+    return str(edge.get("source") or edge.get("from") or "")
+
+
+def _edge_target(edge: Dict[str, Any]) -> str:
+    return str(edge.get("target") or edge.get("to") or "")
+
+
+def _node_position(node: Dict[str, Any], index: int) -> Dict[str, float]:
+    position = node.get("position") if isinstance(node.get("position"), dict) else {}
+    return {
+        "x": float(position.get("x", 120 + index * 260)),
+        "y": float(position.get("y", 160 + (index % 3) * 120)),
+    }
+
+
+def _node_catalog_by_type() -> Dict[str, Dict[str, Any]]:
+    return {item["type"]: item for item in NODE_TYPE_CATALOG}
+
+
+def _audit_graph(db: Session, actor: str, event_type: str, graph: PipelineBuilderGraph, payload: Dict[str, Any]) -> None:
+    db.add(models_action.AuditLog(
+        id=_new_id(),
+        actor=actor or "pipeline_builder",
+        event_type=event_type,
+        subject_type="pipeline_builder_graph",
+        subject_id=graph.id,
+        payload=payload,
+    ))
+
+
+def _find_node(graph: PipelineBuilderGraph, node_id: str) -> Tuple[int, Dict[str, Any]]:
+    for index, node in enumerate(graph.nodes or []):
+        if _node_id(node, index) == node_id:
+            return index, node
+    raise HTTPException(status_code=404, detail=f"Pipeline node '{node_id}' not found")
+
+
+def _unique_node_id(graph: PipelineBuilderGraph, node_type: str, requested_id: Optional[str] = None) -> str:
+    existing_ids = {_node_id(node, index) for index, node in enumerate(graph.nodes or [])}
+    new_id = requested_id or f"{node_type}_{len(existing_ids) + 1}"
+    base_id = new_id
+    suffix = 2
+    while new_id in existing_ids:
+        new_id = f"{base_id}_{suffix}"
+        suffix += 1
+    return new_id
+
+
+def _node_from_request(graph: PipelineBuilderGraph, body: PipelineInsertNodeRequest, default_position: Dict[str, float]) -> Dict[str, Any]:
+    node_type = str(body.node_type or "").strip()
+    if node_type not in NODE_TYPES:
+        raise HTTPException(status_code=422, detail=f"Unsupported node type '{node_type}'")
+    new_id = _unique_node_id(graph, node_type, body.node_id)
+    position = body.position or default_position
+    catalog = _node_catalog_by_type().get(node_type, {})
+    return {
+        "id": new_id,
+        "type": node_type,
+        "label": body.label or catalog.get("label") or new_id,
+        "position": {"x": float(position.get("x", 0)), "y": float(position.get("y", 0))},
+        "config": body.config or {},
+    }
+
+
+def _edge_exists(edges: List[Dict[str, Any]], source: str, target: str) -> bool:
+    return any(_edge_source(edge) == source and _edge_target(edge) == target for edge in edges)
+
+
+def _canvas_payload(db: Session, graph: PipelineBuilderGraph, *, selected_node_id: Optional[str] = None) -> Dict[str, Any]:
+    catalog = _node_catalog_by_type()
+    validation = _validate_graph(db, graph)
+    execution: Optional[Dict[str, Any]] = None
+    if validation["status"] == "VALID":
+        try:
+            execution = _execute_graph(db, graph, write_ontology=False)
+        except HTTPException:
+            execution = None
+    node_outputs = (execution or {}).get("node_outputs", {})
+    node_errors: Dict[str, List[Dict[str, Any]]] = {}
+    for error in validation.get("errors", []):
+        if error.get("node_id"):
+            node_errors.setdefault(str(error["node_id"]), []).append(error)
+
+    nodes = []
+    for index, node in enumerate(graph.nodes or []):
+        node_id = _node_id(node, index)
+        node_type = _node_type(node)
+        catalog_item = catalog.get(node_type, {})
+        output = node_outputs.get(node_id, {})
+        config = _config(node)
+        nodes.append({
+            "id": node_id,
+            "label": node.get("label") or catalog_item.get("label") or node_id,
+            "type": node_type,
+            "category": catalog_item.get("category", "unknown"),
+            "description": catalog_item.get("description", ""),
+            "position": _node_position(node, index),
+            "config": config,
+            "ports": {
+                "inputs": ["left", "right"] if node_type == "join" else (["input"] if node_type not in {"input_dataset", "dataset_input"} else []),
+                "outputs": ["output"] if node_type not in {"dataset_output", "output_dataset", "ontology_output"} else [],
+            },
+            "status": "ERROR" if node_errors.get(node_id) else ("READY" if output else "CONFIGURE"),
+            "errors": node_errors.get(node_id, []),
+            "row_count": output.get("row_count"),
+            "schema": output.get("schema", {"fields": []}),
+            "sample": output.get("sample", []),
+        })
+
+    edges = [
+        {
+            "id": str(edge.get("id") or f"{_edge_source(edge)}__{_edge_target(edge)}"),
+            "source": _edge_source(edge),
+            "target": _edge_target(edge),
+            "source_port": edge.get("source_port") or "output",
+            "target_port": edge.get("target_port") or "input",
+        }
+        for edge in graph.edges or []
+    ]
+    selected_id = selected_node_id or (nodes[0]["id"] if nodes else None)
+    selected = next((node for node in nodes if node["id"] == selected_id), None)
+    builds = [
+        {
+            "id": build.id,
+            "status": build.status,
+            "run_id": build.run_id,
+            "output_asset_id": build.output_asset_id,
+            "row_count": (build.preview or {}).get("row_count"),
+            "created_at": build.created_at,
+        }
+        for build in db.query(PipelineBuilderBuild).filter(PipelineBuilderBuild.graph_id == graph.id).order_by(PipelineBuilderBuild.created_at.desc()).limit(5).all()
+    ]
+    output_nodes = [node for node in nodes if node["type"] in {"dataset_output", "output_dataset", "ontology_output"}]
+    return {
+        "graph": PipelineGraphRead.model_validate(graph).model_dump(),
+        "toolbar_groups": [
+            {"id": "tools", "label": "Tools", "actions": ["pan", "select", "remove"]},
+            {"id": "layout", "label": "Layout", "actions": ["auto_layout", "fit_to_view"]},
+            {"id": "data", "label": "Add data", "actions": ["input_dataset", "connector_source", "stream_archive"]},
+            {"id": "transform", "label": "Transform", "actions": ["filter", "project", "rename", "join", "union", "aggregate", "sort", "limit", "unique_id"]},
+            {"id": "aip", "label": "AIP", "actions": ["llm_assist"]},
+            {"id": "deploy", "label": "Deploy", "actions": ["validate", "preview", "deliver"]},
+        ],
+        "node_library": NODE_TYPE_CATALOG,
+        "legend": [
+            {"category": "input", "label": "Raw Input", "color": "#7d8b99"},
+            {"category": "transform", "label": "Transform", "color": "#d49b00"},
+            {"category": "ai", "label": "AIP", "color": "#7b61ff"},
+            {"category": "output", "label": "Output", "color": "#1388b8"},
+        ],
+        "nodes": nodes,
+        "edges": edges,
+        "selected_node": selected,
+        "bottom_tabs": ["selection_preview", "preview", "transformations", "suggestions", "pipeline_warnings"],
+        "outputs": {
+            "nodes": output_nodes,
+            "builds": builds,
+            "mapped_columns": (execution or {}).get("metrics", {}).get("records_out"),
+            "target_ontology": (graph.parameters or {}).get("target_ontology") or "local",
+            "output_folder": (graph.parameters or {}).get("output_folder"),
+        },
+        "validation": validation,
+        "lineage": (execution or {}).get("lineage", {}),
+        "metrics": (execution or {}).get("metrics", {}),
+        "actions": [
+            {"id": "validate", "label": "Validate", "method": "POST", "path": f"/pipeline-builder/graphs/{graph.id}/validate"},
+            {"id": "preview", "label": "Preview", "method": "POST", "path": f"/pipeline-builder/graphs/{graph.id}/preview"},
+            {"id": "deliver", "label": "Deliver", "method": "POST", "path": f"/pipeline-builder/graphs/{graph.id}/deliver"},
+        ],
+    }
+
+
+def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str) -> Dict[str, Any]:
+    _index, node = _find_node(graph, node_id)
+    canvas = _canvas_payload(db, graph, selected_node_id=node_id)
+    selected = canvas.get("selected_node")
+    preview: Dict[str, Any] = {
+        "status": "NOT_AVAILABLE",
+        "row_count": 0,
+        "rows": [],
+        "columns": [],
+        "schema": {"fields": []},
+    }
+    try:
+        execution = _execute_graph(db, graph, write_ontology=False)
+        output = execution.get("node_outputs", {}).get(node_id, {})
+        schema = output.get("schema", {"fields": []})
+        preview = {
+            "status": "PREVIEW_READY" if output else "NOT_AVAILABLE",
+            "row_count": output.get("row_count", 0),
+            "rows": output.get("sample", []),
+            "columns": schema.get("fields", []),
+            "schema": schema,
+        }
+    except HTTPException as exc:
+        preview = {
+            "status": "ERROR",
+            "row_count": 0,
+            "rows": [],
+            "columns": [],
+            "schema": {"fields": []},
+            "error": exc.detail,
+        }
+    node_type = _node_type(node)
+    context_actions = [
+        {"id": "transform", "label": "Transform", "node_type": "filter"},
+        {"id": "split", "label": "Split", "node_type": "project"},
+        {"id": "join", "label": "Join", "node_type": "join"},
+        {"id": "union", "label": "Union", "node_type": "union"},
+        {"id": "use_llm", "label": "Use LLM", "node_type": "llm_assist"},
+        {"id": "generate", "label": "Generate", "node_type": "unique_id"},
+        {"id": "explain", "label": "Explain", "node_type": "llm_assist"},
+        {"id": "add_output", "label": "Add output", "node_type": "dataset_output"},
+    ]
+    return {
+        "graph_id": graph.id,
+        "node_id": node_id,
+        "node": selected or {
+            "id": node_id,
+            "label": node.get("label") or node_id,
+            "type": node_type,
+            "config": _config(node),
+            "position": _node_position(node, _index),
+        },
+        "metadata": {
+            "type": node_type,
+            "config": _config(node),
+            "upstream": _predecessors(graph).get(node_id, []),
+            "downstream": [_edge_target(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id],
+        },
+        "preview": preview,
+        "context_actions": context_actions,
+        "suggestions": _node_suggestions_payload(db, graph, node_id),
+    }
+
+
+def _node_suggestions_payload(db: Session, graph: PipelineBuilderGraph, node_id: str) -> Dict[str, Any]:
+    _index, node = _find_node(graph, node_id)
+    node_type = _node_type(node)
+    validation = _validate_graph(db, graph)
+    preview: Dict[str, Any] = {}
+    try:
+        execution = _execute_graph(db, graph, write_ontology=False)
+        preview = execution.get("node_outputs", {}).get(node_id, {})
+    except HTTPException:
+        preview = {}
+    field_names = [field.get("name") for field in (preview.get("schema") or {}).get("fields", []) if field.get("name")]
+    suggestions: List[Dict[str, Any]] = []
+    if node_type in {"input_dataset", "dataset_input"}:
+        if {"latitude", "longitude"} <= set(field_names):
+            suggestions.append({"id": "derive_geo", "label": "Derive point geometry", "node_type": "project", "config": {"fields": field_names}})
+        suggestions.append({"id": "clean_columns", "label": "Add transformation", "node_type": "rename", "config": {"mapping": {}}})
+    if node_type == "join":
+        suggestions.append({"id": "review_join_keys", "label": "Review join keys", "node_type": "join", "config": _config(node)})
+    if node_type not in {"dataset_output", "output_dataset", "ontology_output"}:
+        suggestions.append({"id": "add_output", "label": "Add output", "node_type": "dataset_output", "config": {"asset_id": f"{graph.id}_output"}})
+    for error in validation.get("errors", []):
+        if error.get("node_id") == node_id:
+            suggestions.append({"id": f"fix_{error['code'].lower()}", "label": error.get("message"), "severity": "error"})
+    return {
+        "graph_id": graph.id,
+        "node_id": node_id,
+        "suggestions": suggestions,
+        "insertable_node_types": NODE_TYPE_CATALOG,
+        "warnings": validation.get("warnings", []),
+        "errors": [error for error in validation.get("errors", []) if error.get("node_id") in {None, node_id}],
+    }
 
 
 def _validate_graph(db: Session, graph: PipelineBuilderGraph) -> Dict[str, Any]:
@@ -597,6 +917,37 @@ def get_graph(graph_id: str, db: Session = Depends(get_db)):
     return _get_graph(db, graph_id)
 
 
+@router.get("/ui-state/pipeline/{graph_id}/canvas")
+def pipeline_canvas_state(graph_id: str, selected_node_id: Optional[str] = None, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    return _canvas_payload(db, graph, selected_node_id=selected_node_id)
+
+
+@router.get("/ui-state/pipeline/{graph_id}/nodes/{node_id}/details")
+def pipeline_node_details(graph_id: str, node_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    return _node_details_payload(db, graph, node_id)
+
+
+@router.get("/ui-state/pipeline/{graph_id}/outputs")
+def pipeline_outputs_state(graph_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    canvas = _canvas_payload(db, graph)
+    return {
+        "graph_id": graph.id,
+        "outputs": canvas.get("outputs", {}),
+        "validation": canvas.get("validation", {}),
+        "legend": canvas.get("legend", []),
+        "actions": canvas.get("actions", []),
+        "summary": {
+            "output_count": len(canvas.get("outputs", {}).get("nodes", []) or []),
+            "output_node_count": len(canvas.get("outputs", {}).get("nodes", []) or []),
+            "build_count": len(canvas.get("outputs", {}).get("builds", []) or []),
+            "status": canvas.get("validation", {}).get("status", graph.status),
+        },
+    }
+
+
 @router.patch("/pipeline-builder/graphs/{graph_id}", response_model=PipelineGraphRead)
 def update_graph(graph_id: str, body: PipelineGraphUpdate, db: Session = Depends(get_db)):
     graph = _get_graph(db, graph_id)
@@ -608,6 +959,163 @@ def update_graph(graph_id: str, body: PipelineGraphUpdate, db: Session = Depends
     db.commit()
     db.refresh(graph)
     return graph
+
+
+@router.patch("/pipeline-builder/graphs/{graph_id}/layout")
+def update_graph_layout(graph_id: str, body: PipelineLayoutRequest, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    positions = dict(body.positions or {})
+    for item in body.nodes or []:
+        node_id = str(item.get("id") or item.get("node_id") or "")
+        position = item.get("position") if isinstance(item.get("position"), dict) else item
+        if node_id:
+            positions[node_id] = {
+                "x": float(position.get("x", 0)),
+                "y": float(position.get("y", 0)),
+            }
+    updated_nodes = []
+    for index, node in enumerate(graph.nodes or []):
+        node_id = _node_id(node, index)
+        next_node = copy.deepcopy(node)
+        if node_id in positions:
+            position = positions[node_id]
+            next_node["position"] = {"x": float(position.get("x", 0)), "y": float(position.get("y", 0))}
+        updated_nodes.append(next_node)
+    graph.nodes = updated_nodes
+    graph.updated_at = _now()
+    _audit_graph(db, "pipeline_builder", "pipeline_builder.graph.layout_updated", graph, {"positions": positions})
+    db.commit()
+    db.refresh(graph)
+    return _canvas_payload(db, graph)
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/nodes")
+def create_pipeline_node(graph_id: str, body: PipelineCreateNodeRequest, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    new_node = _node_from_request(graph, body, {"x": 180, "y": 180})
+    next_edges = [copy.deepcopy(edge) for edge in graph.edges or []]
+    if body.connect_from_node_id:
+        _find_node(graph, body.connect_from_node_id)
+        next_edges.append({
+            "source": body.connect_from_node_id,
+            "target": new_node["id"],
+            "source_port": "output",
+            "target_port": "input",
+        })
+    graph.nodes = [copy.deepcopy(node) for node in graph.nodes or []] + [new_node]
+    graph.edges = next_edges
+    graph.updated_at = _now()
+    _audit_graph(db, body.actor, "pipeline_builder.node.created", graph, {
+        "node_id": new_node["id"],
+        "node_type": new_node["type"],
+        "position": new_node["position"],
+        "connect_from_node_id": body.connect_from_node_id,
+    })
+    db.commit()
+    db.refresh(graph)
+    return _canvas_payload(db, graph, selected_node_id=new_node["id"])
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/insert-after")
+def insert_node_after(graph_id: str, node_id: str, body: PipelineInsertNodeRequest, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    source_index, source_node = _find_node(graph, node_id)
+    source_position = _node_position(source_node, source_index)
+    new_node = _node_from_request(graph, body, {"x": source_position["x"] + 260, "y": source_position["y"]})
+    outgoing = [edge for edge in graph.edges or [] if _edge_source(edge) == node_id]
+    preserved_edges = [edge for edge in graph.edges or [] if _edge_source(edge) != node_id]
+    next_edges = preserved_edges + [{"source": node_id, "target": new_node["id"], "source_port": "output", "target_port": "input"}]
+    if outgoing:
+        for edge in outgoing:
+            next_edges.append({
+                **copy.deepcopy(edge),
+                "source": new_node["id"],
+                "from": new_node["id"] if "from" in edge else edge.get("from"),
+                "target": _edge_target(edge),
+                "to": _edge_target(edge) if "to" in edge else edge.get("to"),
+            })
+    graph.nodes = (graph.nodes or []) + [new_node]
+    graph.edges = next_edges
+    graph.updated_at = _now()
+    _audit_graph(db, "pipeline_builder", "pipeline_builder.node.inserted", graph, {
+        "node_id": new_node["id"],
+        "node_type": new_node["type"],
+        "inserted_after": node_id,
+    })
+    db.commit()
+    db.refresh(graph)
+    return _canvas_payload(db, graph, selected_node_id=new_node["id"])
+
+
+@router.delete("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}")
+def delete_pipeline_node(graph_id: str, node_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    _find_node(graph, node_id)
+    incoming = [copy.deepcopy(edge) for edge in graph.edges or [] if _edge_target(edge) == node_id]
+    outgoing = [copy.deepcopy(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id]
+    next_edges = [
+        copy.deepcopy(edge)
+        for edge in graph.edges or []
+        if _edge_source(edge) != node_id and _edge_target(edge) != node_id
+    ]
+    reconnected = False
+    if len(incoming) == 1 and len(outgoing) == 1:
+        source = _edge_source(incoming[0])
+        target = _edge_target(outgoing[0])
+        if source and target and source != target and not _edge_exists(next_edges, source, target):
+            next_edges.append({
+                "source": source,
+                "target": target,
+                "source_port": incoming[0].get("source_port") or "output",
+                "target_port": outgoing[0].get("target_port") or "input",
+            })
+            reconnected = True
+    graph.nodes = [
+        copy.deepcopy(node)
+        for index, node in enumerate(graph.nodes or [])
+        if _node_id(node, index) != node_id
+    ]
+    graph.edges = next_edges
+    graph.updated_at = _now()
+    _audit_graph(db, "pipeline_builder", "pipeline_builder.node.deleted", graph, {
+        "node_id": node_id,
+        "incoming_edges": len(incoming),
+        "outgoing_edges": len(outgoing),
+        "reconnected": reconnected,
+    })
+    db.commit()
+    db.refresh(graph)
+    return _canvas_payload(db, graph)
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/preview")
+def preview_pipeline_node(graph_id: str, node_id: str, body: PipelineNodePreviewRequest = PipelineNodePreviewRequest(), db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    _find_node(graph, node_id)
+    execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=False)
+    output = execution["node_outputs"].get(node_id)
+    if output is None:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' did not produce preview rows")
+    limit = max(1, min(int(body.limit), 500))
+    rows = output.get("sample", [])[:limit]
+    schema = output.get("schema", {"fields": []})
+    return {
+        "graph_id": graph.id,
+        "node_id": node_id,
+        "status": "PREVIEW_READY",
+        "row_count": output.get("row_count", 0),
+        "rows": rows,
+        "schema": schema,
+        "columns": schema.get("fields", []),
+        "lineage": execution.get("lineage", {}),
+        "metrics": execution.get("metrics", {}),
+    }
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/suggestions")
+def suggest_pipeline_node_actions(graph_id: str, node_id: str, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    return _node_suggestions_payload(db, graph, node_id)
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/validate")

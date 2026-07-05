@@ -539,6 +539,20 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         subject_id=object_type_id,
         payload={"draft_id": row.id, "graph_id": graph_id, "actions": created_actions},
     ))
+    try:
+        from . import ops_control
+        ops_control.record_ops_event(
+            db,
+            source="ontology_generator",
+            event_type="ontology.generator.applied",
+            severity="info",
+            title=f"Ontology draft {row.id} applied",
+            subject_type="object_type",
+            subject_id=object_type_id,
+            payload={"draft_id": row.id, "graph_id": graph_id, "actions": created_actions},
+        )
+    except Exception:
+        pass
     row.status = "APPLIED"
     row.validation = validation
     row.updated_at = now

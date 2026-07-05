@@ -339,7 +339,13 @@ To complete the public Foundry tool surface, the platform adds 18 self-contained
 - `dev_toolchain.py` — Code Repositories, Workspaces, Workbook: `/code-repositories` (branches, files, commits, `.../checks/run`, `.../merge`), `/code-workspaces(.../status)`, `/code-workbooks(.../run)`.
 - `notepad.py` — Notepad documents & reports with live ontology embeds: `/notepad/documents`, `.../blocks`, `.../render`, `.../export`.
 
-> With these two modules added, **every tool documented in `foundry-docs-full/` has a working local equivalent** (100% breadth). The app exposes **248 routes** across **75 tables**; `oms/test_foundry_tools.py` covers the new surface with **95 endpoint assertions** (all green alongside the 7 scenario tests).
+> With these two modules added, **every tool documented in `foundry-docs-full/` has a working local equivalent** (100% breadth). The app now exposes **~796 routes** across **~209 tables**, verified by **70 test files (all green)** — see `foundry-docs/COVERAGE.md` for the full pass-by-pass ledger.
+
+## Enhancements — query pagination, real file upload, operator UI
+
+- **Object-set query pushdown + pagination.** `POST /object-sets/search` narrows simple equality predicates in SQL (`json_extract`) before the Python filter pass (identical results, faster), and supports `offset` / opaque `cursor` pagination with an opt-in `with_total` (set `with_total: false` to skip the full-scan count). The response adds `next_cursor`.
+- **Real file upload + object storage.** `POST /data-assets/{id}/upload` ingests **CSV / JSON / JSONL / Parquet** (multipart) into `records` with an inferred `asset_schema`, keeping the raw file in object storage; `GET /data-assets/{id}/download` returns it. `POST /media-sets/{id}/items/upload` stores binary media; `GET /media-items/{id}/content` streams it. Storage root is configurable via `STORAGE_DIR` (default `./storage`). Requires `python-multipart`; Parquet needs the optional `pyarrow`.
+- **React operator workspaces.** The React shell (served at `/workspace`) gains eight new operator UIs over the API: **Control Panel** (orgs/users/groups/roles/tokens), **Security & Governance** (markings/CBAC/projects/cipher), **Automate**, **Data & Media** (file upload), **Vertex** (graph explorer), **Fusion** (spreadsheet), **Analytics** (Object Explorer charts + Contour), and **Delivery** (Marketplace/DevOps/code). Build with `cd frontend && npm ci && npm run build`; the built bundle is served by the FastAPI process.
 
 > Note on local environment: the bundled `oms/venv` was created for Python 3.13 on another machine and does not run here. Use Python 3.12 (`venv312`) or recreate the venv with `python -m venv venv && pip install -r requirements.txt`. The full suite runs with: `for t in test_*.py; do python $t; done`.
 
