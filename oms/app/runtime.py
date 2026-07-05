@@ -1,3 +1,4 @@
+import base64
 import copy
 import hashlib
 import json
@@ -7,6 +8,7 @@ import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models, models_action
@@ -637,6 +639,45 @@ def _link_to_dict(link: models.LinkInstance) -> Dict[str, Any]:
     }
 
 
+# Fields that live at the top level of an object row (not inside `properties`),
+# and a conservative identifier pattern — used to decide which equality predicates
+# can be safely narrowed in SQL.
+_SAFE_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RESERVED_TOP = {"id", "object_type_id", "source_asset_id", "created_at", "updated_at", "lineage", "properties"}
+
+
+def _pushdown_equalities(db: Session, normalized_filters: List[Dict[str, Any]]):
+    """SQLAlchemy conditions that narrow the candidate set for simple top-level
+    equality predicates via SQLite ``json_extract``.
+
+    This is ONLY a pre-filter: the Python pass in ``_query_object_rows`` re-checks
+    every candidate with ``_compare_filter``, so the returned rows are identical to a
+    pure-Python filter no matter what the pre-filter returns. Because a row that
+    matches in Python also satisfies these equality conditions (consistent scalar
+    semantics between Python ``==`` and SQLite ``json_extract`` equality), the
+    pre-filter is always a superset of the true matches. Non-SQLite dialects skip it
+    (correct, just unoptimized) — Postgres JSONB pushdown is a later hardening step.
+    """
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:
+        dialect = None
+    if dialect != "sqlite":
+        return []
+    conds = []
+    for item in normalized_filters:
+        if item["op"] not in {"equals", "eq", "=="}:
+            continue
+        field = item["field"]
+        value = item.get("value")
+        if not isinstance(field, str) or not _SAFE_FIELD.match(field) or field in _RESERVED_TOP:
+            continue
+        if not isinstance(value, (str, int, float, bool)):  # excludes None / list / dict
+            continue
+        conds.append(func.json_extract(models.ObjectInstance.properties, "$." + field) == value)
+    return conds
+
+
 def _query_object_rows(
     db: Session,
     *,
@@ -647,10 +688,16 @@ def _query_object_rows(
     if not object_type:
         raise ValueError(f"ObjectType '{object_type_id}' not found")
 
-    rows = db.query(models.ObjectInstance).filter(
-        models.ObjectInstance.object_type_id == object_type_id
-    ).all()
     normalized_filters = _normalize_filters(filters)
+
+    query = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.object_type_id == object_type_id
+    )
+    # Narrow candidates in SQL for simple equality predicates; Python confirms below.
+    for cond in _pushdown_equalities(db, normalized_filters):
+        query = query.filter(cond)
+    rows = query.all()
+
     if not normalized_filters:
         return rows
 
@@ -669,24 +716,69 @@ def _query_object_rows(
     return matched
 
 
+def _encode_cursor(offset: int) -> str:
+    return base64.urlsafe_b64encode(f"o:{int(offset)}".encode()).decode()
+
+
+def _decode_cursor(cursor: Optional[str]) -> int:
+    if not cursor:
+        return 0
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        if raw.startswith("o:"):
+            return max(0, int(raw[2:]))
+    except Exception:
+        pass
+    return 0
+
+
 def query_object_set(
     db: Session,
     *,
     object_type_id: str,
     filters: Optional[Any] = None,
     limit: int = 100,
+    offset: int = 0,
+    cursor: Optional[str] = None,
+    with_total: bool = True,
     include_lineage: bool = True,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
+    start = _decode_cursor(cursor) if cursor else max(0, int(offset or 0))
     bounded_limit = max(0, min(int(limit), 10000))
-    selected = rows[:bounded_limit] if bounded_limit else []
-    return {
+    normalized = _normalize_filters(filters)
+
+    if not normalized:
+        # No residual predicates -> paginate in SQL. Order-free offset/limit on SQLite
+        # returns rowid (insertion) order, matching the previous ``.all()[:limit]`` output
+        # for the default call, so results stay backward compatible.
+        if not db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first():
+            raise ValueError(f"ObjectType '{object_type_id}' not found")
+        base = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id == object_type_id
+        )
+        total = base.count() if with_total else None
+        selected = base.offset(start).limit(bounded_limit).all() if bounded_limit else []
+    else:
+        rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
+        total = len(rows) if with_total else None
+        selected = rows[start:start + bounded_limit] if bounded_limit else []
+
+    next_cursor = (
+        _encode_cursor(start + len(selected))
+        if bounded_limit and len(selected) == bounded_limit
+        and (total is None or start + len(selected) < total)
+        else None
+    )
+    response: Dict[str, Any] = {
         "object_type_id": object_type_id,
         "filters": filters or {},
-        "total": len(rows),
         "count": len(selected),
         "objects": [_object_to_dict(row, include_lineage=include_lineage) for row in selected],
+        "next_cursor": next_cursor,
     }
+    if with_total:
+        response["total"] = total
+    return response
 
 
 def aggregate_object_set(

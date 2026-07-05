@@ -67,14 +67,18 @@ class ObjectSetQuery(BaseModel):
     object_type_id: str
     filters: Any = Field(default_factory=dict)
     limit: int = 100
+    offset: int = 0
+    cursor: Optional[str] = None
+    with_total: bool = True
     include_lineage: bool = True
 
 class ObjectSetResponse(BaseModel):
     object_type_id: str
     filters: Any = Field(default_factory=dict)
-    total: int
+    total: Optional[int] = None  # omitted when with_total=false (avoids a full-scan count)
     count: int
     objects: List[Dict[str, Any]] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
 
 class ObjectSetAggregateRequest(BaseModel):
     object_type_id: str

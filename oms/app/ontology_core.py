@@ -24,6 +24,7 @@ from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import String, Integer, JSON
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -75,6 +76,7 @@ FOUNDRY_BASE_TYPES: Dict[str, Dict[str, Any]] = {
 # Documented guidance: primary keys must be stable & high-cardinality.
 PK_ALLOWED = {"string", "integer", "long", "short", "byte", "decimal", "date", "timestamp", "boolean"}
 PROPERTY_STATUSES = {"active", "experimental", "deprecated"}
+LOCAL_SCHEMA_TYPES = {"any", "string", "integer", "number", "boolean", "array", "object", "json", "geometry", "geojson"}
 
 PASCAL_RE = re.compile(r"^[A-Z][A-Za-z0-9]{0,99}$")   # object type API names
 CAMEL_RE = re.compile(r"^[a-z][A-Za-z0-9]{0,99}$")    # property API names
@@ -208,6 +210,33 @@ class ObjectTypeIndexRequest(BaseModel):
 class ObjectTypeOpenFromPipelineRequest(BaseModel):
     graph_id: str
     node_id: Optional[str] = None
+    actor: str = "ontology_manager"
+
+
+class ObjectTypePropertyCreate(BaseModel):
+    name: str
+    base_type: str = "string"
+    status: str = "active"
+    required: bool = False
+    description: Optional[str] = None
+    render_hint: Optional[str] = None
+    shared_property_type_id: Optional[str] = None
+    actor: str = "ontology_manager"
+
+
+class ObjectTypePropertyPatch(BaseModel):
+    name: Optional[str] = None
+    base_type: Optional[str] = None
+    status: Optional[str] = None
+    required: Optional[bool] = None
+    description: Optional[str] = None
+    render_hint: Optional[str] = None
+    shared_property_type_id: Optional[str] = None
+    actor: str = "ontology_manager"
+
+
+class ObjectTypePropertyOrderRequest(BaseModel):
+    order: List[str] = Field(default_factory=list)
     actor: str = "ontology_manager"
 
 
@@ -355,24 +384,150 @@ def _manager_metadata(obj_type: models.ObjectType, profile: Optional[ObjectTypeP
 
 
 def _property_rows(obj_type: models.ObjectType, profile: Optional[ObjectTypeProfile]) -> List[Dict[str, Any]]:
-    if profile and isinstance(profile.properties, dict) and profile.properties:
+    if profile and isinstance(profile.properties, dict):
         return [
             {
+                "order": index,
                 "name": name,
                 "api_name": name,
                 "base_type": spec.get("base_type", "string") if isinstance(spec, dict) else "string",
                 "status": spec.get("status", "active") if isinstance(spec, dict) else "active",
                 "required": bool(spec.get("required")) if isinstance(spec, dict) else False,
                 "description": spec.get("description") if isinstance(spec, dict) else None,
+                "source": "profile",
+                "can_edit": True,
+                "can_delete": name != profile.primary_key,
             }
-            for name, spec in profile.properties.items()
+            for index, (name, spec) in enumerate(profile.properties.items(), start=1)
         ]
     properties = obj_type.properties if isinstance(obj_type.properties, dict) else {}
     return [
-        {"name": name, "api_name": name, "base_type": (spec or {}).get("type", "string") if isinstance(spec, dict) else "string", "status": "active", "required": False}
-        for name, spec in properties.items()
+        {
+            "order": index,
+            "name": name,
+            "api_name": name,
+            "base_type": ((spec or {}).get("base_type") or (spec or {}).get("type") or "string") if isinstance(spec, dict) else "string",
+            "status": (spec or {}).get("status", "active") if isinstance(spec, dict) else "active",
+            "required": bool((spec or {}).get("required")) if isinstance(spec, dict) else False,
+            "description": (spec or {}).get("description") if isinstance(spec, dict) else None,
+            "source": "object_type",
+            "can_edit": True,
+            "can_delete": True,
+        }
+        for index, (name, spec) in enumerate(properties.items(), start=1)
         if not str(name).startswith("__")
     ]
+
+
+def _allowed_property_types() -> set:
+    return set(FOUNDRY_BASE_TYPES) | LOCAL_SCHEMA_TYPES
+
+
+def _runtime_schema_type(base_type: str) -> str:
+    if base_type in {"byte", "short", "integer", "long"}:
+        return "integer"
+    if base_type in {"float", "double", "decimal"}:
+        return "number"
+    if base_type == "boolean":
+        return "boolean"
+    if base_type == "array":
+        return "array"
+    if base_type in {"geopoint", "geoshape", "geometry", "geojson"}:
+        return "geojson"
+    if base_type in {"struct", "object", "json"}:
+        return "object" if base_type == "struct" else base_type
+    if base_type in LOCAL_SCHEMA_TYPES:
+        return base_type
+    return "string"
+
+
+def _validate_property_name(name: str) -> List[str]:
+    if not name or not str(name).strip():
+        return ["Property name is required"]
+    if str(name).startswith("__"):
+        return ["Property names starting with '__' are reserved for manager metadata"]
+    return validate_api_name(str(name), "camel")
+
+
+def _stored_property_spec(
+    *,
+    base_type: str,
+    status: str,
+    required: bool,
+    description: Optional[str],
+    render_hint: Optional[str],
+    shared_property_type_id: Optional[str],
+    profile_backed: bool,
+) -> Dict[str, Any]:
+    spec: Dict[str, Any] = {
+        "base_type": base_type,
+        "status": status,
+        "required": bool(required),
+    }
+    if not profile_backed:
+        spec["type"] = _runtime_schema_type(base_type)
+    if description is not None:
+        spec["description"] = description
+    if render_hint is not None:
+        spec["render_hint"] = render_hint
+    if shared_property_type_id is not None:
+        spec["shared_property_type_id"] = shared_property_type_id
+    return spec
+
+
+def _property_store(obj_type: models.ObjectType, profile: Optional[ObjectTypeProfile]) -> tuple[Dict[str, Any], bool]:
+    if profile and isinstance(profile.properties, dict):
+        return dict(profile.properties or {}), True
+    return {
+        key: value
+        for key, value in dict(obj_type.properties or {}).items()
+        if not str(key).startswith("__")
+    }, False
+
+
+def _write_property_store(
+    obj_type: models.ObjectType,
+    profile: Optional[ObjectTypeProfile],
+    next_properties: Dict[str, Any],
+    *,
+    profile_backed: bool,
+) -> None:
+    now = _now()
+    if profile_backed and profile:
+        profile.properties = next_properties
+        flag_modified(profile, "properties")
+        profile.updated_at = now
+    else:
+        existing = dict(obj_type.properties or {})
+        manager = existing.get("__manager") if isinstance(existing.get("__manager"), dict) else None
+        visible = dict(next_properties)
+        if manager:
+            visible["__manager"] = manager
+        obj_type.properties = visible
+        flag_modified(obj_type, "properties")
+    obj_type.updated_at = now
+
+
+def _property_primary_key(obj_type: models.ObjectType, profile: Optional[ObjectTypeProfile]) -> Optional[str]:
+    if profile and profile.primary_key:
+        return profile.primary_key
+    manager = (obj_type.properties or {}).get("__manager", {}) if isinstance(obj_type.properties, dict) else {}
+    if isinstance(manager, dict):
+        primary_key = manager.get("primary_key") or manager.get("source_primary_key")
+        return str(primary_key) if primary_key else None
+    return None
+
+
+def _validate_property_spec(name: str, base_type: str, status: str, existing_names: set, *, original_name: Optional[str] = None) -> None:
+    errors = [] if original_name == name else _validate_property_name(name)
+    if name in existing_names and name != original_name:
+        errors.append(f"Property '{name}' already exists")
+    if base_type not in _allowed_property_types():
+        errors.append(f"Property '{name}' has unsupported base type '{base_type}'")
+    if status not in PROPERTY_STATUSES:
+        errors.append(f"Property '{name}' has invalid status '{status}'")
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
 
 
 def _references_object_type(payload: Any, object_type_id: str) -> bool:
@@ -454,6 +609,10 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
         },
         "primary_actions": [
             {"id": "update_metadata", "label": "Update metadata", "method": "PATCH", "path": f"/ontology/object-types/{object_type_id}/metadata"},
+            {"id": "add_property", "label": "Add property", "method": "POST", "path": f"/ontology/object-types/{object_type_id}/properties"},
+            {"id": "update_property", "label": "Update property", "method": "PATCH", "path": f"/ontology/object-types/{object_type_id}/properties/{{property_name}}"},
+            {"id": "archive_property", "label": "Archive property", "method": "DELETE", "path": f"/ontology/object-types/{object_type_id}/properties/{{property_name}}"},
+            {"id": "reorder_properties", "label": "Reorder properties", "method": "PATCH", "path": f"/ontology/object-types/{object_type_id}/properties/order"},
             {"id": "index", "label": "Index", "method": "POST", "path": f"/ontology/object-types/{object_type_id}/index"},
             {"id": "open_from_pipeline", "label": "Open from pipeline", "method": "POST", "path": f"/ontology/object-types/{object_type_id}/open-from-pipeline"},
         ],
@@ -675,6 +834,141 @@ def open_object_type_from_pipeline(object_type_id: str, body: ObjectTypeOpenFrom
     obj_type.properties = properties
     obj_type.updated_at = _now()
     _audit(db, body.actor, "ontology.object_type.opened_from_pipeline", "object_type", object_type_id, {"graph_id": body.graph_id, "node_id": body.node_id})
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.post("/ontology/object-types/{object_type_id}/properties")
+def add_object_type_property(object_type_id: str, body: ObjectTypePropertyCreate, db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    profile = db.get(ObjectTypeProfile, object_type_id)
+    properties, profile_backed = _property_store(obj_type, profile)
+    name = str(body.name).strip()
+    _validate_property_spec(name, body.base_type, body.status, set(properties.keys()))
+    properties[name] = _stored_property_spec(
+        base_type=body.base_type,
+        status=body.status,
+        required=body.required,
+        description=body.description,
+        render_hint=body.render_hint,
+        shared_property_type_id=body.shared_property_type_id,
+        profile_backed=profile_backed,
+    )
+    _write_property_store(obj_type, profile, properties, profile_backed=profile_backed)
+    _audit(db, body.actor, "ontology.object_type.property_created", "object_type", object_type_id, {
+        "property_name": name,
+        "base_type": body.base_type,
+        "profile_backed": profile_backed,
+    })
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.patch("/ontology/object-types/{object_type_id}/properties/order")
+def reorder_object_type_properties(object_type_id: str, body: ObjectTypePropertyOrderRequest, db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    profile = db.get(ObjectTypeProfile, object_type_id)
+    properties, profile_backed = _property_store(obj_type, profile)
+    requested = [str(name).strip() for name in body.order if str(name).strip()]
+    unknown = [name for name in requested if name not in properties]
+    if unknown:
+        raise HTTPException(status_code=422, detail=[f"Unknown property in order: {name}" for name in unknown])
+    ordered_names = requested + [name for name in properties.keys() if name not in requested]
+    next_properties = {name: properties[name] for name in ordered_names}
+    _write_property_store(obj_type, profile, next_properties, profile_backed=profile_backed)
+    _audit(db, body.actor, "ontology.object_type.properties_reordered", "object_type", object_type_id, {
+        "order": ordered_names,
+        "profile_backed": profile_backed,
+    })
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.patch("/ontology/object-types/{object_type_id}/properties/{property_name}")
+def update_object_type_property(object_type_id: str, property_name: str, body: ObjectTypePropertyPatch, db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    profile = db.get(ObjectTypeProfile, object_type_id)
+    properties, profile_backed = _property_store(obj_type, profile)
+    if property_name not in properties:
+        raise HTTPException(status_code=404, detail=f"Property '{property_name}' not found")
+    primary_key = _property_primary_key(obj_type, profile)
+    patch = body.model_dump(exclude_unset=True)
+    next_name = str(patch.get("name") or property_name).strip()
+    if primary_key == property_name and next_name != property_name:
+        raise HTTPException(status_code=422, detail=[f"Primary key property '{property_name}' cannot be renamed"])
+    existing = properties[property_name] if isinstance(properties[property_name], dict) else {}
+    base_type = str(patch.get("base_type") or existing.get("base_type") or existing.get("type") or "string")
+    status = str(patch.get("status") or existing.get("status") or "active")
+    _validate_property_spec(next_name, base_type, status, set(properties.keys()), original_name=property_name)
+    required = bool(patch["required"]) if "required" in patch else bool(existing.get("required"))
+    description = patch["description"] if "description" in patch else existing.get("description")
+    render_hint = patch["render_hint"] if "render_hint" in patch else existing.get("render_hint")
+    shared_property_type_id = patch["shared_property_type_id"] if "shared_property_type_id" in patch else existing.get("shared_property_type_id")
+    next_spec = _stored_property_spec(
+        base_type=base_type,
+        status=status,
+        required=required,
+        description=description,
+        render_hint=render_hint,
+        shared_property_type_id=shared_property_type_id,
+        profile_backed=profile_backed,
+    )
+    next_properties: Dict[str, Any] = {}
+    for name, spec in properties.items():
+        if name == property_name:
+            next_properties[next_name] = next_spec
+        else:
+            next_properties[name] = spec
+    if profile and profile.title_key == property_name:
+        profile.title_key = next_name
+    _write_property_store(obj_type, profile, next_properties, profile_backed=profile_backed)
+    _audit(db, body.actor, "ontology.object_type.property_updated", "object_type", object_type_id, {
+        "property_name": property_name,
+        "next_property_name": next_name,
+        "profile_backed": profile_backed,
+    })
+    db.commit()
+    return _object_type_manager_state(db, object_type_id)
+
+
+@router.delete("/ontology/object-types/{object_type_id}/properties/{property_name}")
+def archive_object_type_property(object_type_id: str, property_name: str, db: Session = Depends(get_db)):
+    obj_type = db.get(models.ObjectType, object_type_id)
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    profile = db.get(ObjectTypeProfile, object_type_id)
+    properties, profile_backed = _property_store(obj_type, profile)
+    if property_name not in properties:
+        raise HTTPException(status_code=404, detail=f"Property '{property_name}' not found")
+    primary_key = _property_primary_key(obj_type, profile)
+    if primary_key == property_name:
+        raise HTTPException(status_code=422, detail=[f"Primary key property '{property_name}' cannot be archived"])
+    archived_spec = properties[property_name]
+    next_properties = {name: spec for name, spec in properties.items() if name != property_name}
+    _write_property_store(obj_type, profile, next_properties, profile_backed=profile_backed)
+    object_properties = dict(obj_type.properties or {})
+    manager = dict(object_properties.get("__manager") or {})
+    archived = dict(manager.get("archived_properties") or {})
+    archived[property_name] = {
+        "archived_at": _now(),
+        "profile_backed": profile_backed,
+        "spec": archived_spec,
+    }
+    manager["archived_properties"] = archived
+    object_properties["__manager"] = manager
+    obj_type.properties = object_properties
+    obj_type.updated_at = _now()
+    _audit(db, "ontology_manager", "ontology.object_type.property_archived", "object_type", object_type_id, {
+        "property_name": property_name,
+        "profile_backed": profile_backed,
+        "values_preserved": True,
+    })
     db.commit()
     return _object_type_manager_state(db, object_type_id)
 

@@ -18,6 +18,19 @@ export function asRows(value: unknown): TableRow[] {
 
 export function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    if (!value.length) return "0 items";
+    if (value.length <= 3 && value.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item))) {
+      return value.map((item) => asString(item)).join(", ");
+    }
+    return `${value.length} items`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const label = record.display_name || record.name || record.title || record.label || record.id;
+    if (label !== undefined) return asString(label);
+    const keys = Object.keys(record);
+    return keys.length ? `${keys.length} fields` : "empty";
+  }
   return String(value);
 }

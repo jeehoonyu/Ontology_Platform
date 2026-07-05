@@ -42,6 +42,9 @@ class MediaItem(Base):
     filename: Mapped[str] = mapped_column(String, nullable=False)
     mime_type: Mapped[str] = mapped_column(String, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # Storage URI of the uploaded binary (when ingested via .../items/upload). Nullable
+    # so text-only / metadata-only media items remain valid.
+    storage_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     text_content: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     item_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))

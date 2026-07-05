@@ -9,17 +9,21 @@ transaction log (enabling **time-travel** and **incremental** deltas). This modu
 adds that model additively over existing `data_assets` ids. Deterministic; local.
 """
 import copy
+import csv
+import io
+import json
 import time
 import uuid
 from typing import Optional, List, Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import Response
 from sqlalchemy import String, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, storage
 
 router = APIRouter(tags=["datasets"])
 
@@ -273,3 +277,140 @@ def get_dataset_schema(dataset_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"No schema declared for dataset '{dataset_id}'")
     return DatasetSchemaRead(dataset_id=row.dataset_id, columns=row.columns,
                              created_at=row.created_at, updated_at=row.updated_at)
+
+
+# ---------------------------------------------------------------------------
+# Real file upload/download — CSV / JSON / JSONL / Parquet -> records + schema.
+# ---------------------------------------------------------------------------
+
+def _coerce_cell(v: Any) -> Any:
+    """Best-effort scalar coercion for CSV cells (bool / int / float / null / str)."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == "":
+        return None
+    low = s.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return v
+
+
+def _infer_asset_schema(records: List[dict]) -> Dict[str, str]:
+    schema: Dict[str, str] = {}
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        for key, val in rec.items():
+            if key in schema or val is None:
+                continue
+            if isinstance(val, bool):
+                schema[key] = "boolean"
+            elif isinstance(val, int):
+                schema[key] = "integer"
+            elif isinstance(val, float):
+                schema[key] = "double"
+            else:
+                schema[key] = "string"
+    return schema
+
+
+def _detect_format(filename: Optional[str], override: Optional[str]) -> str:
+    if override:
+        return override.lower()
+    name = (filename or "").lower()
+    if name.endswith(".csv"):
+        return "csv"
+    if name.endswith((".jsonl", ".ndjson")):
+        return "jsonl"
+    if name.endswith((".parquet", ".pq")):
+        return "parquet"
+    return "json"
+
+
+def _parse_upload(raw: bytes, fmt: str) -> List[dict]:
+    if fmt == "csv":
+        reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig")))
+        return [{k: _coerce_cell(v) for k, v in row.items()} for row in reader]
+    if fmt == "jsonl":
+        out: List[dict] = []
+        for line in raw.decode("utf-8").splitlines():
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+        return out
+    if fmt == "json":
+        data = json.loads(raw.decode("utf-8"))
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("records"), list):
+            return data["records"]
+        if isinstance(data, dict):
+            return [data]
+        raise HTTPException(status_code=422, detail="JSON must be a list, {records:[...]}, or an object")
+    if fmt == "parquet":
+        try:
+            import pyarrow.parquet as pq  # optional dependency
+        except ImportError:
+            raise HTTPException(status_code=422, detail="Parquet upload requires the optional 'pyarrow' package")
+        return pq.read_table(io.BytesIO(raw)).to_pylist()
+    raise HTTPException(status_code=422, detail=f"unsupported format '{fmt}'")
+
+
+@router.post("/data-assets/{dataset_id}/upload")
+async def upload_dataset_file(
+    dataset_id: str,
+    file: UploadFile = File(...),
+    format: Optional[str] = Form(default=None),
+    mode: str = Form(default="replace"),   # replace | append
+    db: Session = Depends(get_db),
+):
+    """Ingest a real file (CSV/JSON/JSONL/Parquet) into a dataset: parse rows, infer
+    the schema, and keep the raw file in object storage. Backward compatible with the
+    inline-records model — the parsed rows land in `records` just like an API insert."""
+    asset = db.get(models.DataAsset, dataset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"DataAsset '{dataset_id}' not found")
+    if mode not in ("replace", "append"):
+        raise HTTPException(status_code=422, detail="mode must be 'replace' or 'append'")
+    raw = await file.read()
+    fmt = _detect_format(file.filename, format)
+    parsed = _parse_upload(raw, fmt)
+    uri = storage.put(f"datasets/{dataset_id}/{file.filename or 'upload'}", raw)
+
+    asset.records = (list(asset.records or []) + parsed) if mode == "append" else parsed
+    asset.asset_schema = _infer_asset_schema(asset.records or [])
+    asset.file_ref = uri
+    asset.source_format = fmt
+    asset.updated_at = _now()
+    db.add(models_action.AuditLog(
+        id=uuid.uuid4().hex, actor="system", event_type="data.asset.uploaded",
+        subject_type="data_asset", subject_id=dataset_id,
+        payload={"format": fmt, "records": len(parsed), "mode": mode, "bytes": len(raw)}))
+    db.commit()
+    return {
+        "dataset_id": dataset_id, "source_format": fmt, "added": len(parsed),
+        "record_count": len(asset.records or []), "columns": list((asset.asset_schema or {}).keys()),
+        "file_ref": uri, "bytes": len(raw),
+    }
+
+
+@router.get("/data-assets/{dataset_id}/download")
+def download_dataset_file(dataset_id: str, db: Session = Depends(get_db)):
+    asset = db.get(models.DataAsset, dataset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"DataAsset '{dataset_id}' not found")
+    data = storage.open_bytes(asset.file_ref)
+    if data is None:
+        raise HTTPException(status_code=404, detail="no uploaded file stored for this dataset")
+    filename = (asset.file_ref or "download").split("/")[-1]
+    return Response(content=data, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})

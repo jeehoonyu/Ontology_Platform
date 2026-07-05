@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, postJson } from "../api";
 import {
+  addOntologyProperty,
+  archiveOntologyProperty,
   getOntologyObjectType,
   getOntologySection,
   getOntologyState,
   getOntologyWalkthrough,
   indexObjectType,
+  reorderOntologyProperties,
+  updateOntologyProperty,
   updateOntologyMetadata
 } from "../api/workspaceState";
 import { DataTable, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "../components/data/DataDisplay";
@@ -25,6 +29,9 @@ interface DataAssetsResponseItem extends TableRow {
   id: string;
   display_name?: string;
 }
+
+const BASE_TYPE_OPTIONS = ["string", "integer", "number", "boolean", "date", "timestamp", "json", "geometry", "geoshape", "array"];
+const STATUS_OPTIONS = ["active", "experimental", "deprecated"];
 
 export function OntologyManager() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -118,6 +125,30 @@ export function OntologyManager() {
     setRefreshKey((key) => key + 1);
   }
 
+  async function addProperty(payload: JsonObject) {
+    if (!selectedId) return;
+    setManager(await addOntologyProperty(selectedId, payload));
+    setRefreshKey((key) => key + 1);
+  }
+
+  async function updateProperty(propertyName: string, payload: JsonObject) {
+    if (!selectedId) return;
+    setManager(await updateOntologyProperty(selectedId, propertyName, payload));
+    setRefreshKey((key) => key + 1);
+  }
+
+  async function archiveProperty(propertyName: string) {
+    if (!selectedId) return;
+    setManager(await archiveOntologyProperty(selectedId, propertyName));
+    setRefreshKey((key) => key + 1);
+  }
+
+  async function reorderProperties(order: string[]) {
+    if (!selectedId) return;
+    setManager(await reorderOntologyProperties(selectedId, order));
+    setRefreshKey((key) => key + 1);
+  }
+
   return (
     <section className="workbench-page ontology-workbench-page">
       <header className="manager-topbar">
@@ -169,7 +200,18 @@ export function OntologyManager() {
           </Panel>
         </aside>
         <section className="manager-surface">
-          {manager ? <ManagerSurface manager={manager} sectionState={sectionState} onIndex={markIndexed} onSaveMetadata={saveMetadata} /> : (
+          {manager ? (
+            <ManagerSurface
+              manager={manager}
+              sectionState={sectionState}
+              onIndex={markIndexed}
+              onSaveMetadata={saveMetadata}
+              onAddProperty={addProperty}
+              onUpdateProperty={updateProperty}
+              onArchiveProperty={archiveProperty}
+              onReorderProperties={reorderProperties}
+            />
+          ) : (
             <div className="empty">Generate or select an object type to inspect manager details.</div>
           )}
         </section>
@@ -219,12 +261,20 @@ function ManagerSurface({
   manager,
   sectionState,
   onIndex,
-  onSaveMetadata
+  onSaveMetadata,
+  onAddProperty,
+  onUpdateProperty,
+  onArchiveProperty,
+  onReorderProperties
 }: {
   manager: OntologyManagerState;
   sectionState: OntologySectionState | null;
   onIndex: () => void;
   onSaveMetadata: (patch: JsonObject) => Promise<void>;
+  onAddProperty: (payload: JsonObject) => Promise<void>;
+  onUpdateProperty: (propertyName: string, payload: JsonObject) => Promise<void>;
+  onArchiveProperty: (propertyName: string) => Promise<void>;
+  onReorderProperties: (order: string[]) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [pluralName, setPluralName] = useState(manager.object_type.plural_name);
@@ -302,9 +352,13 @@ function ManagerSurface({
         </Panel>
       </div>
       <div className="manager-grid">
-        <Panel title={`Properties ${manager.cards.properties.count}`}>
-          <DataTable rows={manager.cards.properties.rows} />
-        </Panel>
+        <PropertyEditor
+          manager={manager}
+          onAddProperty={onAddProperty}
+          onUpdateProperty={onUpdateProperty}
+          onArchiveProperty={onArchiveProperty}
+          onReorderProperties={onReorderProperties}
+        />
         <Panel title={`Action Types ${manager.cards.action_types.count}`}>
           <DataTable rows={manager.cards.action_types.rows} />
         </Panel>
@@ -324,5 +378,150 @@ function ManagerSurface({
         </Panel>
       </div>
     </>
+  );
+}
+
+function rowName(row: TableRow) {
+  return asString(row.name || row.api_name);
+}
+
+function rowEditState(row: TableRow): JsonObject {
+  return {
+    name: rowName(row),
+    base_type: asString(row.base_type, "string"),
+    status: asString(row.status, "active"),
+    required: Boolean(row.required),
+    description: asString(row.description, "")
+  };
+}
+
+function PropertyEditor({
+  manager,
+  onAddProperty,
+  onUpdateProperty,
+  onArchiveProperty,
+  onReorderProperties
+}: {
+  manager: OntologyManagerState;
+  onAddProperty: (payload: JsonObject) => Promise<void>;
+  onUpdateProperty: (propertyName: string, payload: JsonObject) => Promise<void>;
+  onArchiveProperty: (propertyName: string) => Promise<void>;
+  onReorderProperties: (order: string[]) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, JsonObject>>({});
+  const [newField, setNewField] = useState<JsonObject>({ name: "", base_type: "string", status: "active", required: false, description: "" });
+  const [confirmArchive, setConfirmArchive] = useState("");
+  const [dragName, setDragName] = useState("");
+  const rows = manager.cards.properties.rows;
+
+  useEffect(() => {
+    setDrafts(Object.fromEntries(rows.map((row) => [rowName(row), rowEditState(row)])));
+  }, [manager.object_type.id, rows.length]);
+
+  function updateDraft(name: string, patch: JsonObject) {
+    setDrafts((current) => ({ ...current, [name]: { ...(current[name] || {}), ...patch } }));
+  }
+
+  async function addField() {
+    const name = asString(newField.name).trim();
+    if (!name) return;
+    await onAddProperty(newField);
+    setNewField({ name: "", base_type: "string", status: "active", required: false, description: "" });
+  }
+
+  async function saveRow(originalName: string) {
+    await onUpdateProperty(originalName, drafts[originalName] || {});
+  }
+
+  async function archiveRow(name: string) {
+    if (confirmArchive !== name) {
+      setConfirmArchive(name);
+      return;
+    }
+    await onArchiveProperty(name);
+    setConfirmArchive("");
+  }
+
+  function orderedNames() {
+    return rows.map(rowName).filter(Boolean);
+  }
+
+  async function moveByButton(name: string, delta: number) {
+    const order = orderedNames();
+    const index = order.indexOf(name);
+    const nextIndex = index + delta;
+    if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
+    const [item] = order.splice(index, 1);
+    order.splice(nextIndex, 0, item);
+    await onReorderProperties(order);
+  }
+
+  async function dropOn(targetName: string) {
+    if (!dragName || dragName === targetName) return;
+    const order = orderedNames().filter((name) => name !== dragName);
+    const targetIndex = order.indexOf(targetName);
+    order.splice(targetIndex < 0 ? order.length : targetIndex, 0, dragName);
+    setDragName("");
+    await onReorderProperties(order);
+  }
+
+  return (
+    <Panel title={`Properties ${manager.cards.properties.count}`} className="property-panel" action={<button onClick={() => setEditing((value) => !value)}>{editing ? "Done" : "Edit fields"}</button>}>
+      {editing ? (
+        <div className="property-editor">
+          <div className="property-add-row">
+            <input value={asString(newField.name)} onChange={(event) => setNewField({ ...newField, name: event.target.value })} placeholder="newFieldName" />
+            <select value={asString(newField.base_type, "string")} onChange={(event) => setNewField({ ...newField, base_type: event.target.value })}>
+              {BASE_TYPE_OPTIONS.map((type) => <option key={type} value={type}>{type}</option>)}
+            </select>
+            <label>
+              <input type="checkbox" checked={Boolean(newField.required)} onChange={(event) => setNewField({ ...newField, required: event.target.checked })} />
+              Required
+            </label>
+            <input value={asString(newField.description)} onChange={(event) => setNewField({ ...newField, description: event.target.value })} placeholder="Description" />
+            <button onClick={addField}>Add field</button>
+          </div>
+          <div className="property-field-list">
+            {rows.map((row) => {
+              const name = rowName(row);
+              const draft = drafts[name] || rowEditState(row);
+              return (
+                <article
+                  key={name}
+                  className="property-field-row"
+                  draggable
+                  onDragStart={() => setDragName(name)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => dropOn(name)}
+                >
+                  <span className="drag-handle" title="Drag to reorder">::</span>
+                  <input value={asString(draft.name)} onChange={(event) => updateDraft(name, { name: event.target.value })} />
+                  <select value={asString(draft.base_type, "string")} onChange={(event) => updateDraft(name, { base_type: event.target.value })}>
+                    {BASE_TYPE_OPTIONS.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                  <select value={asString(draft.status, "active")} onChange={(event) => updateDraft(name, { status: event.target.value })}>
+                    {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                  <label>
+                    <input type="checkbox" checked={Boolean(draft.required)} onChange={(event) => updateDraft(name, { required: event.target.checked })} />
+                    Required
+                  </label>
+                  <input value={asString(draft.description)} onChange={(event) => updateDraft(name, { description: event.target.value })} placeholder="Description" />
+                  <button onClick={() => saveRow(name)}>Save</button>
+                  <button onClick={() => moveByButton(name, -1)}>Up</button>
+                  <button onClick={() => moveByButton(name, 1)}>Down</button>
+                  <button disabled={row.can_delete === false} onClick={() => archiveRow(name)}>
+                    {confirmArchive === name ? "Confirm archive" : "Archive"}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <DataTable rows={rows} />
+      )}
+    </Panel>
   );
 }
