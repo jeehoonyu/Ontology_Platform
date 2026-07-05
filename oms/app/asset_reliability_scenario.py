@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -65,6 +66,12 @@ POLICY_RULE_ID = "asset_reliability_high_risk_approval_policy"
 
 
 class ScenarioBootstrapRequest(BaseModel):
+    actor: str = "workspace"
+    run_pipelines: bool = True
+    run_checks: bool = True
+
+
+class ProjectDemoRequest(BaseModel):
     actor: str = "workspace"
     run_pipelines: bool = True
     run_checks: bool = True
@@ -700,6 +707,67 @@ def _latest_report(db: Session) -> Optional[Dict[str, Any]]:
     return investigations._report_dict(report) if report else None
 
 
+def _scenario_report_payload(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    summary = _summarize(db, asset_id=asset_id)
+    report = summary.get("latest_report")
+    pipeline_runs = [
+        _pipeline_run_dict(row)
+        for row in db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).limit(12).all()
+    ]
+    evidence = {
+        "asset_id": asset_id,
+        "selected_asset_id": (summary.get("selected_asset") or {}).get("id"),
+        "selected_work_order_id": (summary.get("selected_work_order") or {}).get("id"),
+        "pipeline_run_ids": [row["id"] for row in pipeline_runs],
+        "data_contract_status": (summary.get("data_contract") or {}).get("status"),
+        "model_monitor_status": (summary.get("model_monitor") or {}).get("status"),
+        "approval_ids": [row.get("id") for row in summary.get("approvals", [])],
+        "incident_ids": [row.get("id") for row in summary.get("incidents", [])],
+        "report_id": (report or {}).get("id"),
+        "timeline_ids": [row.get("id") for row in summary.get("timeline", []) if row.get("id")],
+    }
+    return {
+        "scenario_id": SCENARIO_ID,
+        "generated_at": _now(),
+        "summary": summary,
+        "report": report,
+        "pipeline_runs": pipeline_runs,
+        "evidence": evidence,
+    }
+
+
+def _scenario_report_markdown(payload: Dict[str, Any]) -> str:
+    summary = payload.get("summary") or {}
+    kpis = summary.get("kpis") or {}
+    report = payload.get("report") or {}
+    evidence = payload.get("evidence") or {}
+    lines = [
+        "# Asset Reliability Command Center Report",
+        "",
+        f"- Scenario: {payload.get('scenario_id')}",
+        f"- Generated at: {payload.get('generated_at')}",
+        f"- High-risk assets: {kpis.get('high_risk_assets', 0)}",
+        f"- Open approvals: {kpis.get('open_approvals', 0)}",
+        f"- Open incidents: {kpis.get('open_incidents', 0)}",
+        f"- Data contract: {kpis.get('data_contract_status', 'NOT_RUN')}",
+        f"- Model monitor: {kpis.get('model_monitor_status', 'NOT_RUN')}",
+        "",
+        "## Evidence IDs",
+        "",
+        f"- Asset: {evidence.get('selected_asset_id') or '-'}",
+        f"- Work order: {evidence.get('selected_work_order_id') or '-'}",
+        f"- Pipeline runs: {', '.join(evidence.get('pipeline_run_ids') or []) or '-'}",
+        f"- Approvals: {', '.join(evidence.get('approval_ids') or []) or '-'}",
+        f"- Incidents: {', '.join(evidence.get('incident_ids') or []) or '-'}",
+        f"- Report: {evidence.get('report_id') or '-'}",
+        "",
+        "## Narrative",
+        "",
+        report.get("body") or "No generated report body is available yet.",
+    ]
+    return "\n".join(lines)
+
+
 def _risk_findings(db: Session) -> List[Dict[str, Any]]:
     rows = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == "asset").all()
     findings = []
@@ -781,6 +849,212 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
         "latest_report": _latest_report(db),
         "timeline": timeline.get("timeline", []),
         "graph": graph,
+    }
+
+
+def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    summary = _summarize(db, asset_id=asset_id)
+    try:
+        from . import imports_ops, ontology_generator, pipeline_builder_ops
+        latest_import = db.query(imports_ops.ImportJob).order_by(imports_ops.ImportJob.updated_at.desc()).first()
+        latest_draft = db.query(ontology_generator.OntologyGeneratorDraft).order_by(ontology_generator.OntologyGeneratorDraft.updated_at.desc()).first()
+        latest_graph = db.query(pipeline_builder_ops.PipelineBuilderGraph).order_by(pipeline_builder_ops.PipelineBuilderGraph.updated_at.desc()).first()
+    except Exception:
+        latest_import = latest_draft = latest_graph = None
+    latest_run = db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).first()
+    latest_approval = db.query(models_action.ApprovalRequest).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    report = summary.get("latest_report")
+    selected_asset = summary.get("selected_asset") or {}
+    steps = [
+        {
+            "id": "bootstrap",
+            "label": "Start with sample data",
+            "status": "complete" if selected_asset else "active",
+            "evidence_id": selected_asset.get("id"),
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "import",
+            "label": "Import or connect data",
+            "status": "complete" if latest_import else "available",
+            "evidence_id": getattr(latest_import, "id", None),
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "ontology",
+            "label": "Generate ontology",
+            "status": "complete" if latest_draft or selected_asset else "available",
+            "evidence_id": getattr(latest_draft, "object_type_id", None) or selected_asset.get("object_type_id"),
+            "href": "/workspace/ontology",
+        },
+        {
+            "id": "pipeline",
+            "label": "Deliver pipeline",
+            "status": "complete" if latest_run else "available",
+            "evidence_id": getattr(latest_run, "id", None),
+            "href": "/workspace/pipeline",
+            "graph_id": getattr(latest_graph, "id", None),
+        },
+        {
+            "id": "triage",
+            "label": "Run reliability triage",
+            "status": "complete" if summary.get("approvals") else ("available" if selected_asset else "blocked"),
+            "evidence_id": (summary.get("approvals") or [{}])[0].get("id") if summary.get("approvals") else None,
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "approval",
+            "label": "Approve governed action",
+            "status": "complete" if latest_approval and latest_approval.status != models_action.ApprovalStatus.PENDING.value else ("active" if latest_approval else "available"),
+            "evidence_id": getattr(latest_approval, "id", None),
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "report",
+            "label": "Export proof report",
+            "status": "complete" if report else "available",
+            "evidence_id": (report or {}).get("id"),
+            "href": "/scenarios/asset-reliability/report?format=markdown",
+        },
+    ]
+    blocked = next((step for step in steps if step["status"] == "blocked"), None)
+    active = next((step for step in steps if step["status"] == "active"), None)
+    next_step = active or next((step for step in steps if step["status"] == "available"), None)
+    return {
+        "scenario_id": SCENARIO_ID,
+        "asset_id": asset_id,
+        "current_step": (next_step or steps[-1])["id"],
+        "completed_steps": [step["id"] for step in steps if step["status"] == "complete"],
+        "blocked_step": blocked,
+        "next_action": next_step,
+        "steps": steps,
+        "evidence_links": [
+            {"kind": "asset", "id": selected_asset.get("id"), "href": "/workspace/object-explorer?legacy=1"},
+            {"kind": "import_job", "id": getattr(latest_import, "id", None), "href": "/workspace/imports"},
+            {"kind": "ontology_object_type", "id": selected_asset.get("object_type_id"), "href": "/workspace/ontology"},
+            {"kind": "pipeline_graph", "id": getattr(latest_graph, "id", None), "href": "/workspace/pipeline"},
+            {"kind": "pipeline_run", "id": getattr(latest_run, "id", None), "href": "/workspace/pipeline"},
+            {"kind": "approval", "id": getattr(latest_approval, "id", None), "href": "/workspace/command-center"},
+            {"kind": "report", "id": (report or {}).get("id"), "href": "/scenarios/asset-reliability/report?format=markdown"},
+        ],
+        "summary": summary,
+    }
+
+
+def _step_status(workflow: Dict[str, Any], step_id: str) -> str:
+    for step in workflow.get("steps", []):
+        if step.get("id") == step_id:
+            return str(step.get("status") or "available")
+    return "available"
+
+
+def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    workflow = _workflow_state(db, asset_id=asset_id)
+    summary = workflow.get("summary") or {}
+    kpis = summary.get("kpis") or {}
+    high_risk_assets = summary.get("high_risk_assets") or []
+    top_risk = high_risk_assets[0] if high_risk_assets else ((summary.get("risk_findings") or [{}])[0] if summary.get("risk_findings") else {})
+    top_risk_score = top_risk.get("risk") or {}
+    selected_asset = summary.get("selected_asset") or {}
+    selected_work_order = summary.get("selected_work_order") or {}
+    approvals = summary.get("approvals") or []
+    incidents = summary.get("incidents") or []
+    report = summary.get("latest_report") or {}
+    data_contract = summary.get("data_contract") or {}
+    model_monitor = summary.get("model_monitor") or {}
+    warnings: List[Dict[str, Any]] = []
+    if not selected_asset:
+        warnings.append({"id": "sample_data_missing", "message": "Start with sample data to populate the evaluator workflow.", "severity": "info"})
+    if data_contract.get("status") in {"WARN", "FAIL"}:
+        warnings.append({"id": "data_quality", "message": f"Data contract status is {data_contract.get('status')}.", "severity": "warn"})
+    if model_monitor.get("status") in {"WARN", "FAIL"}:
+        warnings.append({"id": "model_monitor", "message": f"Model monitor status is {model_monitor.get('status')}.", "severity": "warn"})
+    if approvals and approvals[0].get("status") == "PENDING":
+        warnings.append({"id": "approval_pending", "message": "A governed action is staged and waiting for approval.", "severity": "high"})
+    risk_drivers = top_risk_score.get("drivers") or []
+    recommended_actions = top_risk_score.get("recommended_actions") or []
+    recommendation = (
+        recommended_actions[0]
+        if recommended_actions
+        else "Escalate the work order and keep the incident open until reliability signals return to baseline."
+    )
+    evaluator_summary = {
+        "title": "Reliability decision summary",
+        "decision": "Approval required" if approvals else ("Run triage" if selected_asset else "Bootstrap sample data"),
+        "recommendation": recommendation,
+        "why": top_risk_score.get("explanation") or "The workflow combines pipeline evidence, ontology objects, risk scoring, checks, approvals, and report output.",
+        "selected_asset": selected_asset.get("id"),
+        "risk_band": top_risk_score.get("band", "not_scored"),
+        "risk_score": top_risk_score.get("score"),
+        "drivers": risk_drivers,
+        "next_action": workflow.get("next_action"),
+    }
+    sections = [
+        {
+            "id": "start",
+            "title": "Start or import data",
+            "status": _step_status(workflow, "bootstrap"),
+            "description": "Load the deterministic asset reliability scenario or bring in your own records.",
+            "metrics": {"asset_count": kpis.get("asset_count", 0), "open_work_orders": kpis.get("open_work_orders", 0)},
+            "rows": [{"asset": selected_asset.get("id"), "work_order": selected_work_order.get("id"), "status": selected_asset.get("properties", {}).get("status")}],
+            "href": "/workspace/imports",
+        },
+        {
+            "id": "risk",
+            "title": "Risk and checks",
+            "status": "complete" if top_risk_score else "available",
+            "description": "Risk, data quality, and model monitor evidence used by the triage recommendation.",
+            "metrics": {
+                "risk_band": top_risk_score.get("band", "not_scored"),
+                "risk_score": top_risk_score.get("score", 0),
+                "data_contract": kpis.get("data_contract_status", "NOT_RUN"),
+                "model_monitor": kpis.get("model_monitor_status", "NOT_RUN"),
+            },
+            "rows": [
+                {"check": "Risk explanation", "status": top_risk_score.get("band", "not_scored"), "detail": top_risk_score.get("explanation")},
+                {"check": "Data contract", "status": data_contract.get("status", "NOT_RUN"), "detail": data_contract.get("summary", {})},
+                {"check": "Model monitor", "status": model_monitor.get("status", "NOT_RUN"), "detail": model_monitor.get("alerts", [])},
+            ],
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "approval",
+            "title": "Approval and action",
+            "status": _step_status(workflow, "approval"),
+            "description": "High-risk operational changes are staged for human approval instead of mutating directly.",
+            "metrics": {"open_approvals": kpis.get("open_approvals", 0), "open_incidents": kpis.get("open_incidents", 0)},
+            "rows": approvals[:6],
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "report",
+            "title": "Incident and report",
+            "status": _step_status(workflow, "report"),
+            "description": "Export the decision narrative with linked evidence IDs.",
+            "metrics": {"incident_count": len(incidents), "latest_report": report.get("id")},
+            "rows": incidents[:6],
+            "href": "/scenarios/asset-reliability/report?format=markdown",
+        },
+    ]
+    return {
+        "summary": {
+            "scenario_id": SCENARIO_ID,
+            "asset_id": asset_id,
+            "current_step": workflow.get("current_step"),
+            "completed_step_count": len(workflow.get("completed_steps") or []),
+            "kpis": kpis,
+        },
+        "primary_actions": [
+            {"id": "bootstrap", "label": "Start with sample data", "method": "POST", "path": "/project/demo/bootstrap"},
+            {"id": "triage", "label": "Run reliability triage", "method": "POST", "path": "/scenarios/asset-reliability/run-triage"},
+            {"id": "report", "label": "Export proof report", "method": "GET", "path": "/scenarios/asset-reliability/report?format=markdown"},
+        ],
+        "sections": sections,
+        "evidence_links": workflow.get("evidence_links", []),
+        "warnings": warnings,
+        "last_updated": _now(),
+        "workflow": workflow,
+        "evaluator_summary": evaluator_summary,
     }
 
 
@@ -1092,6 +1366,47 @@ def asset_reliability_summary(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Ses
     return _summarize(db, asset_id=asset_id)
 
 
+@router.get("/scenarios/asset-reliability/workflow-state")
+def asset_reliability_workflow_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+    return _workflow_state(db, asset_id=asset_id)
+
+
+@router.get("/ui-state/command-center")
+def command_center_ui_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+    return _command_center_ui_state(db, asset_id=asset_id)
+
+
+@router.post("/project/demo/bootstrap")
+def bootstrap_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db)):
+    result = bootstrap_asset_reliability(
+        ScenarioBootstrapRequest(actor=body.actor, run_pipelines=body.run_pipelines, run_checks=body.run_checks),
+        db,
+    )
+    return {
+        "status": "READY",
+        "mode": "idempotent_bootstrap",
+        "scenario": result,
+        "workflow_state": _workflow_state(db),
+        "ui_state": _command_center_ui_state(db),
+    }
+
+
+@router.post("/project/demo/reset")
+def reset_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db)):
+    result = bootstrap_asset_reliability(
+        ScenarioBootstrapRequest(actor=body.actor, run_pipelines=body.run_pipelines, run_checks=body.run_checks),
+        db,
+    )
+    return {
+        "status": "READY",
+        "mode": "idempotent_reset",
+        "note": "Local demo reset is non-destructive: it re-upserts the sample workflow and leaves unrelated user data intact.",
+        "scenario": result,
+        "workflow_state": _workflow_state(db),
+        "ui_state": _command_center_ui_state(db),
+    }
+
+
 @router.post("/scenarios/asset-reliability/run-triage")
 def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageRequest(), db: Session = Depends(get_db)):
     asset = db.get(models.ObjectInstance, body.asset_id)
@@ -1166,3 +1481,37 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
 @router.get("/scenarios/asset-reliability/validation-dashboard")
 def asset_reliability_validation_dashboard(db: Session = Depends(get_db)):
     return _validation_dashboard(db)
+
+
+@router.get("/scenarios/asset-reliability/report")
+def asset_reliability_report(
+    asset_id: str = Query(HIGH_RISK_ASSET_ID),
+    format: str = Query("json", pattern="^(json|markdown)$"),
+    actor: str = Query("workspace"),
+    db: Session = Depends(get_db),
+):
+    payload = _scenario_report_payload(db, asset_id=asset_id)
+    create_audit_log(
+        db,
+        actor=actor,
+        event_type="scenario.report.exported",
+        subject_type="scenario",
+        subject_id=SCENARIO_ID,
+        payload={"asset_id": asset_id, "format": format, "evidence": payload["evidence"]},
+    )
+    ops_control.record_ops_event(
+        db,
+        source="scenario",
+        event_type="scenario.report.exported",
+        severity="info",
+        title="Asset reliability report exported",
+        subject_type="scenario",
+        subject_id=SCENARIO_ID,
+        object_type_id="asset",
+        object_id=asset_id,
+        payload={"format": format, "evidence": payload["evidence"]},
+    )
+    db.commit()
+    if format == "markdown":
+        return PlainTextResponse(_scenario_report_markdown(payload), media_type="text/markdown")
+    return payload

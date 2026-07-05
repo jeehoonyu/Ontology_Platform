@@ -1,0 +1,71 @@
+import type { ReactNode } from "react";
+import type { PipelineCanvasState } from "../../types";
+import { classNames } from "../../utils/format";
+
+export function Page({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+        </div>
+        <a className="legacy-button" href={`${window.location.pathname}?legacy=1`}>Legacy view</a>
+      </header>
+      {children}
+    </>
+  );
+}
+
+export function WorkspaceHeader({ title, tabs, actions }: { title: string; tabs: string[]; actions: ReactNode }) {
+  return (
+    <div className="workspace-header">
+      <div>
+        <strong>{title}</strong>
+        <span>Batch</span>
+      </div>
+      <nav>{tabs.map((tab) => <button key={tab} className={tab === "Graph" ? "active" : ""}>{tab}</button>)}</nav>
+      <div className="button-row">{actions}</div>
+    </div>
+  );
+}
+
+export function Toolbar({ groups }: { groups: PipelineCanvasState["toolbar_groups"] }) {
+  return (
+    <div className="toolbar-strip">
+      {groups.map((group) => (
+        <div key={group.id} className="toolbar-group">
+          <span>{group.label}</span>
+          <div>{group.actions.slice(0, 8).map((action) => <button key={action} title={action}>{action.slice(0, 2).toUpperCase()}</button>)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const FLOW_STAGES = [
+  { id: "imports", label: "Import" },
+  { id: "ontology", label: "Ontology" },
+  { id: "pipeline", label: "Pipeline" },
+  { id: "command-center", label: "Risk" },
+  { id: "approval", label: "Approval" },
+  { id: "report", label: "Report" }
+];
+
+export function PlatformFlow({ currentView }: { currentView: string }) {
+  const activeId = currentView === "imports" || currentView === "ontology" || currentView === "pipeline" ? currentView : "command-center";
+  return (
+    <nav className="platform-flow" aria-label="Evaluator workflow">
+      {FLOW_STAGES.map((stage, index) => (
+        <a
+          key={stage.id}
+          className={classNames("flow-stage", stage.id === activeId && "active", index < FLOW_STAGES.findIndex((item) => item.id === activeId) && "complete")}
+          href={stage.id === "approval" || stage.id === "report" ? "/workspace/command-center" : `/workspace/${stage.id}`}
+        >
+          <span>{index + 1}</span>
+          {stage.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
