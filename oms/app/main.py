@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -79,6 +79,8 @@ from . import (
     platform_core,
     asset_reliability_scenario,
     ontology_generator,
+    imports_ops,
+    system_hardening,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -141,7 +143,11 @@ models_action.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Ontology Artificial Intelligence Platform")
 UI_DIR = Path(__file__).resolve().parent / "ui"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIST_DIR = REPO_ROOT / "frontend" / "dist"
 app.mount("/ui/assets", StaticFiles(directory=str(UI_DIR)), name="ui-assets")
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/react", StaticFiles(directory=str(FRONTEND_DIST_DIR)), name="react-assets")
 
 # Mount the new Foundry tool-equivalent routers. Each module exposes `router`.
 for _ext_module in (
@@ -214,6 +220,8 @@ for _ext_module in (
     platform_core,
     asset_reliability_scenario,
     ontology_generator,
+    imports_ops,
+    system_hardening,
 ):
     app.include_router(_ext_module.router)
 
@@ -222,16 +230,23 @@ def _not_found(resource: str, resource_id: str):
     raise HTTPException(status_code=404, detail=f"{resource} '{resource_id}' not found")
 
 
-@app.get("/workspace", include_in_schema=False)
-def serve_workspace():
+def _workspace_shell(legacy: bool = False):
+    react_index = FRONTEND_DIST_DIR / "index.html"
+    if react_index.exists() and not legacy:
+        return FileResponse(react_index)
     return FileResponse(UI_DIR / "index.html")
+
+
+@app.get("/workspace", include_in_schema=False)
+def serve_workspace(request: Request):
+    return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
 
 @app.get("/workspace/{view}", include_in_schema=False)
-def serve_workspace_view(view: str):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center"}:
+def serve_workspace_view(view: str, request: Request):
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "imports", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"}:
         _not_found("Workspace", view)
-    return FileResponse(UI_DIR / "index.html")
+    return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
 @app.get("/")
 def read_root():
@@ -274,6 +289,25 @@ def read_root():
             "shared_activity_timeline",
             "platform_graph_overview",
             "asset_reliability_command_center",
+            "data_imports",
+            "file_imports",
+            "semantic_import_mapping",
+            "import_transforms",
+            "mapping_suggestions",
+            "hybrid_connector_preview",
+            "stream_replay",
+            "react_vite_frontend",
+            "ui_state_contracts",
+            "pipeline_canvas_node_preview",
+            "ontology_manager_workspace",
+            "asset_reliability_workflow_state",
+            "validation_dashboard",
+            "project_snapshot",
+            "project_validation",
+            "schema_health",
+            "event_consistency",
+            "migration_metadata",
+            "scenario_report_export",
             "action_execution_with_hitl",
             "agent_studio",
             "aip_evals",
@@ -525,6 +559,9 @@ def search_object_sets(request: schemas.ObjectSetQuery, db: Session = Depends(ge
             object_type_id=request.object_type_id,
             filters=request.filters,
             limit=request.limit,
+            offset=request.offset,
+            cursor=request.cursor,
+            with_total=request.with_total,
             include_lineage=request.include_lineage,
         )
     except ValueError as exc:

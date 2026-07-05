@@ -291,4 +291,19 @@ Closed the Tier-4/5 backend breadth the validation catalogued (UI-only chrome st
 **Central:** object **primary-key uniqueness** enforced on `POST /objects` when a profile declares a PK (backward compatible — no profile/PK ⇒ no enforcement); `audit_ops` wired into `main.py`. One real bug caught by adversarial review and fixed: Vertex link-merge `group_by` read from the edge dict instead of the `LinkInstance` (now resolved + tested). `pipeline_builder_ops.py` left untouched per scope.
 
 ---
-**Test suite status:** **56 test files, all green.** Wave-3 additions: `test_quiver_runtime`, `test_contour_analytics_unified`, `test_fusion_lookup`, `test_gis_ops_ext`, `test_vertex_link_merge` (41), `test_notepad_templates`, `test_security_governance`, `test_security_admin`, `test_ontology_core_ext`, `test_audit_ops`, `test_apps_versioning`, `test_datasets_connectivity_ext`, `test_streaming_schedules_ext`. App: **645 routes / 175 tables**.
+**Test suite status (Wave 3):** **56 test files, all green.** Wave-3 additions: `test_quiver_runtime`, `test_contour_analytics_unified`, `test_fusion_lookup`, `test_gis_ops_ext`, `test_vertex_link_merge` (41), `test_notepad_templates`, `test_security_governance`, `test_security_admin`, `test_ontology_core_ext`, `test_audit_ops`, `test_apps_versioning`, `test_datasets_connectivity_ext`, `test_streaming_schedules_ext`. App: **645 routes / 175 tables**.
+
+### Pass 16 — Performance & data realness + operator UI
+Post-completion enhancements chosen after a platform-wide status survey (production-hardening and real-Claude wiring deferred by the user).
+
+**Backend — performance & data realness**
+- **Query pushdown** (`runtime._query_object_rows`) — simple top-level **equality** predicates are narrowed in SQL via SQLite `json_extract` as a candidate pre-filter; the existing Python `_compare_filter` pass re-confirms every row, so results are **byte-identical** to a pure-Python filter (verified: `test_query_pushdown.py`, 40 assertions). Non-SQLite dialects skip the pre-filter (correct, unoptimized).
+- **Pagination** — `query_object_set` + `POST /object-sets/search` gain `offset`, opaque `cursor`, and opt-in `with_total` (skip the full-scan count), returning `next_cursor`. Backward compatible (default call unchanged).
+- **Indexes** — composite `(object_type_id, created_at)` on `ObjectInstance`.
+- **Real file upload + object storage** (`storage.py`) — `POST /data-assets/{id}/upload` parses **CSV / JSON / JSONL / Parquet** into records + inferred schema and stores the raw file (`GET .../download`); `POST /media-sets/{id}/items/upload` + `GET /media-items/{id}/content` for binary media. `STORAGE_DIR`-configurable; adds `python-multipart` (Parquet via optional `pyarrow`). Verified: `test_uploads.py` (34 assertions).
+
+**Frontend — eight new React operator workspaces** (served at `/workspace`, `tsc --noEmit && vite build` green, 55 modules):
+Control Panel, Security & Governance, Automate, Data & Media (real file upload), Vertex (graph explorer via `MiniGraph`), Fusion (spreadsheet grid), Analytics (hand-rolled SVG Object-Explorer charts + Contour boards), Delivery (Marketplace/DevOps/code). Backend `/workspace/{view}` whitelist extended so the deep-links serve the SPA shell (smoke-verified); `pipeline_builder_ops.py` and the vanilla `ui/` untouched. Production hardening (auth/CI/migrations) and real-Claude wiring remain the two deferred tracks.
+
+---
+**Test suite status (current):** **70 test files, all green.** App: **~796 routes / ~209 tables**. Frontend build clean (55 modules).
