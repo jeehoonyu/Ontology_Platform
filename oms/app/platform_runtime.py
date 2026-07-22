@@ -390,7 +390,7 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
         "execution": None if not last_job else _job_dict(last_job),
         "evidence_links": [
             {"type": "revision", "label": f"Revision {row.current_revision}", "href": f"/artifacts/{row.id}/versions"},
-            {"type": "audit", "label": "Audit evidence", "href": f"/audit/search?subject_type=artifact&subject_id={row.id}"},
+            {"type": "audit", "label": "Audit evidence", "href": "/audit-logs/search?subject_type=artifact"},
             {"type": "events", "label": "Operational events", "href": f"/ops/events?subject_type=artifact&subject_id={row.id}"},
         ],
         "created_at": row.created_at,

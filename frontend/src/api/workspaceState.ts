@@ -6,6 +6,8 @@ import type {
   NodePreview,
   NodeSuggestions,
   OntologyManagerState,
+  OntologyFieldMapping,
+  OntologyMappingPreview,
   OntologySectionState,
   OntologyUiState,
   OntologyWalkthrough,
@@ -143,6 +145,27 @@ export function getOntologySection(objectTypeId: string, sectionId: string): Pro
   return api<OntologySectionState>(
     `/ui-state/ontology/object-types/${encodeURIComponent(objectTypeId)}/sections/${encodeURIComponent(sectionId)}`
   );
+}
+
+export function previewOntologyMapping(assetId: string, objectTypeId: string, mappings: OntologyFieldMapping[] = []): Promise<OntologyMappingPreview> {
+  return postJson<OntologyMappingPreview>("/ontology/mappings/preview", {
+    asset_id: assetId,
+    object_type_id: objectTypeId,
+    mappings,
+    limit: 20
+  });
+}
+
+export function saveOntologyDatasourceMapping(objectTypeId: string, assetId: string, mappings: OntologyFieldMapping[]): Promise<{ mapping: JsonObject; preview: OntologyMappingPreview; manager: OntologyManagerState }> {
+  return postJson(`/ontology/object-types/${encodeURIComponent(objectTypeId)}/datasource-mappings`, {
+    asset_id: assetId,
+    mappings,
+    actor: "react"
+  });
+}
+
+export function analyzeOntologyImpact(objectTypeId: string, changes: JsonObject[]): Promise<JsonObject> {
+  return postJson<JsonObject>("/ontology/changes/impact", { object_type_id: objectTypeId, changes });
 }
 
 export function updateOntologyMetadata(objectTypeId: string, patch: JsonObject): Promise<OntologyManagerState> {

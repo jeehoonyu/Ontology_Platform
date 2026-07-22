@@ -659,6 +659,144 @@ button:disabled {
   font-weight: 700;
 }
 
+.ontology-mapping-panel {
+  grid-column: 1 / -1;
+}
+
+.mapping-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mapping-toolbar label {
+  min-width: min(320px, 100%);
+  display: grid;
+  gap: 4px;
+  color: #536570;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mapping-toolbar select,
+.mapping-target select {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #c7d1d7;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.ontology-mapping-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, .7fr) minmax(360px, 1.3fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.ontology-mapping-grid > section {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d4dde2;
+  background: #f8fafb;
+}
+
+.ontology-mapping-grid h3,
+.ontology-mapping-grid p {
+  margin: 0 0 7px;
+}
+
+.ontology-mapping-grid h3 {
+  font-size: 13px;
+}
+
+.ontology-mapping-grid p {
+  color: #667985;
+  font-size: 11px;
+}
+
+.mapping-source-list,
+.mapping-target-list {
+  display: grid;
+  gap: 6px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.mapping-source-list button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  text-align: left;
+  cursor: grab;
+}
+
+.mapping-source-list button.mapped {
+  border-color: #72a794;
+  background: #eef8f4;
+}
+
+.mapping-target {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(130px, .9fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px dashed #aebcc4;
+  background: #fff;
+}
+
+.mapping-target > span {
+  min-width: 0;
+  display: grid;
+}
+
+.mapping-target small {
+  color: #687a85;
+}
+
+.mapping-target.mapped {
+  border-style: solid;
+  border-color: #72a794;
+}
+
+.mapping-target.incompatible {
+  border-color: #c9766d;
+  background: #fff3f1;
+}
+
+.mapping-preview-drawer {
+  margin-top: 10px;
+  border: 1px solid #d4dde2;
+}
+
+.mapping-preview-drawer summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  background: #f6f9fa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ontology-impact-warning {
+  padding: 8px 10px;
+  border: 1px solid #d4a85f;
+  background: #fff8e8;
+  color: #694b16;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .ontology-mapping-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .visual-builder-empty {
   min-height: 65vh;
   display: grid;
