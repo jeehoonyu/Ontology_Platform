@@ -24,6 +24,11 @@ def ok(response, label, expect=200):
 catalog = ok(client.get("/builder/catalogs/pipeline"), "pipeline catalog")
 assert len(catalog["nodes"]) >= 30 and "replace_state" in catalog["commands"], catalog
 assert all("inputs" in node and "outputs" in node and "configuration_schema" in node for node in catalog["nodes"])
+workshop_catalog = ok(client.get("/builder/catalogs/workshop"), "workshop catalog")
+assert workshop_catalog["nodes"][0]["configuration_schema"]["properties"], workshop_catalog
+aip_catalog = ok(client.get("/builder/catalogs/aip_logic"), "AIP Logic catalog")
+approval_schema = next(node for node in aip_catalog["nodes"] if node["type"] == "approval")["configuration_schema"]
+assert approval_schema["properties"]["proposal_variable"]["required"] is True, approval_schema
 
 artifact = ok(client.post("/artifacts", json={
     "id": "kernel_pipeline",
@@ -84,6 +89,19 @@ preview = ok(client.post("/artifacts/kernel_pipeline/preview", json={"sample_lim
 assert preview["status"] == "SUCCEEDED" and preview["metrics"]["node_count"] == 3, preview
 job = ok(client.get(f"/jobs/{preview['job_id']}"), "preview job evidence")
 assert [event["event_type"] for event in job["events"]] == ["job.queued", "job.started", "job.succeeded"], job
+
+aip_artifact = ok(client.post("/artifacts", json={
+    "id": "kernel_aip", "artifact_type": "aip_logic", "display_name": "Governed AIP plan",
+    "state": {"nodes": [{
+        "id": "approval", "position": {"x": 100, "y": 100},
+        "data": {"label": "Approve", "nodeType": "approval", "configurationSchemaVersion": 1, "fields": [
+            {"id": "proposal", "name": "proposal_variable", "value": "proposed_action"},
+        ]},
+    }], "edges": []},
+}), "create typed AIP artifact", 201)
+assert aip_artifact["validation"]["status"] == "PASS", aip_artifact
+aip_preview = ok(client.post("/artifacts/kernel_aip/preview", json={"sample_limit": 10}), "preview governed AIP trace", 202)
+assert aip_preview["trace"][0]["policy_decision"] == "APPROVAL_REQUIRED" and aip_preview["trace"][0]["approval_gate"], aip_preview
 
 ok(client.post("/object-types", json={
     "id": "impact_asset", "display_name": "Impact Asset", "description": "Impact test",

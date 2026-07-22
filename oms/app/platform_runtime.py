@@ -266,6 +266,35 @@ BUILDER_CATALOGS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+BUILDER_CONFIGURATION_SCHEMAS: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "workshop": {
+        "object_table": {"properties": {"object_type_id": {"label": "Object type", "type": "resource", "required": True}, "columns": {"label": "Columns", "type": "field_list"}, "page_size": {"label": "Rows per page", "type": "integer", "default": 25}}},
+        "metric": {"properties": {"source": {"label": "Data source", "type": "string", "required": True}, "aggregation": {"label": "Aggregation", "type": "select", "options": ["count", "sum", "avg", "min", "max"]}, "label": {"label": "Display label", "type": "string"}}},
+        "chart": {"properties": {"source": {"label": "Data source", "type": "string", "required": True}, "chart_type": {"label": "Chart type", "type": "select", "options": ["bar", "line", "area", "scatter"]}, "category_field": {"label": "Category field", "type": "field"}, "value_field": {"label": "Value field", "type": "field"}}},
+        "map": {"properties": {"object_type_id": {"label": "Object type", "type": "resource", "required": True}, "geometry_field": {"label": "Geometry field", "type": "field", "required": True}, "color_field": {"label": "Color field", "type": "field"}, "enable_mgrs": {"label": "Show MGRS", "type": "boolean", "default": True}}},
+        "graph": {"properties": {"seed_variable": {"label": "Seed object variable", "type": "string", "required": True}, "depth": {"label": "Traversal depth", "type": "integer", "default": 2}}},
+        "timeline": {"properties": {"object_variable": {"label": "Object variable", "type": "string", "required": True}, "timestamp_field": {"label": "Timestamp field", "type": "field"}}},
+        "filter": {"properties": {"target_variable": {"label": "Target variable", "type": "string", "required": True}, "property": {"label": "Property", "type": "field", "required": True}, "control": {"label": "Control", "type": "select", "options": ["select", "multi_select", "date_range", "slider", "search"]}}},
+        "form": {"properties": {"variable": {"label": "Form variable", "type": "string", "required": True}, "fields": {"label": "Form fields", "type": "field_list", "required": True}, "submit_label": {"label": "Submit label", "type": "string", "default": "Submit"}}},
+        "action": {"properties": {"action_type_id": {"label": "Action type", "type": "resource", "required": True}, "object_variable": {"label": "Object variable", "type": "string"}, "approval_mode": {"label": "Approval", "type": "select", "options": ["policy", "always", "never"], "default": "policy"}}},
+        "risk": {"properties": {"object_variable": {"label": "Object variable", "type": "string", "required": True}, "scorecard_id": {"label": "Scorecard", "type": "resource"}, "show_drivers": {"label": "Show drivers", "type": "boolean", "default": True}}},
+        "aip_assist": {"properties": {"prompt": {"label": "Instruction", "type": "textarea", "required": True}, "context_variables": {"label": "Context variables", "type": "field_list"}, "require_citations": {"label": "Require citations", "type": "boolean", "default": True}}},
+    },
+    "aip_logic": {
+        "object_query": {"properties": {"object_type_id": {"label": "Object type", "type": "resource", "required": True}, "filter_expression": {"label": "Filter expression", "type": "textarea"}, "limit": {"label": "Limit", "type": "integer", "default": 100}}},
+        "function": {"properties": {"function_id": {"label": "Function", "type": "resource", "required": True}, "timeout_seconds": {"label": "Timeout", "type": "integer", "default": 30}, "retries": {"label": "Retries", "type": "integer", "default": 1}}},
+        "branch": {"properties": {"expression": {"label": "Condition", "type": "textarea", "required": True}, "true_label": {"label": "True branch", "type": "string", "default": "true"}, "false_label": {"label": "False branch", "type": "string", "default": "false"}}},
+        "model": {"properties": {"deployment_id": {"label": "Model deployment", "type": "resource", "required": True}, "input_variable": {"label": "Input variable", "type": "string", "required": True}, "output_variable": {"label": "Output variable", "type": "string", "required": True}}},
+        "risk": {"properties": {"object_variable": {"label": "Object variable", "type": "string", "required": True}, "scorecard_id": {"label": "Scorecard", "type": "resource"}, "output_variable": {"label": "Output variable", "type": "string", "default": "risk"}}},
+        "scenario": {"properties": {"seed_variable": {"label": "Seed variable", "type": "string", "required": True}, "overrides_variable": {"label": "Overrides variable", "type": "string"}, "propagation_depth": {"label": "Propagation depth", "type": "integer", "default": 2}}},
+        "alert": {"properties": {"title_template": {"label": "Alert title", "type": "string", "required": True}, "severity": {"label": "Severity", "type": "select", "options": ["low", "medium", "high", "critical"]}, "condition": {"label": "Condition", "type": "textarea", "required": True}}},
+        "incident": {"properties": {"title_template": {"label": "Incident title", "type": "string", "required": True}, "severity_variable": {"label": "Severity variable", "type": "string"}, "link_object_variable": {"label": "Linked object variable", "type": "string"}}},
+        "runbook": {"properties": {"runbook_id": {"label": "Runbook", "type": "resource", "required": True}, "incident_variable": {"label": "Incident variable", "type": "string"}, "stop_on_failure": {"label": "Stop on failure", "type": "boolean", "default": True}}},
+        "approval": {"properties": {"proposal_variable": {"label": "Proposal variable", "type": "string", "required": True}, "risk_threshold": {"label": "Risk threshold", "type": "number", "default": 0.7}, "approver_role": {"label": "Approver role", "type": "string", "default": "approver"}}},
+        "action": {"properties": {"action_type_id": {"label": "Action type", "type": "resource", "required": True}, "parameters_variable": {"label": "Parameters variable", "type": "string", "required": True}, "require_approval": {"label": "Require approval", "type": "boolean", "default": True}}},
+    },
+}
+
 
 def _catalog(artifact_type: str) -> Dict[str, Any]:
     raw = BUILDER_CATALOGS.get(artifact_type)
@@ -275,7 +304,7 @@ def _catalog(artifact_type: str) -> Dict[str, Any]:
         "type": item[0], "label": item[1], "category": item[2], "description": item[3],
         "inputs": [{"id": port, "label": port, "data_type": "records"} for port in item[4]],
         "outputs": [{"id": port, "label": port, "data_type": "records"} for port in item[5]],
-        "configuration_schema": {"type": "object", "properties": {}},
+        "configuration_schema": {"type": "object", **BUILDER_CONFIGURATION_SCHEMAS.get(artifact_type, {}).get(item[0], {"properties": {}})},
     } for item in raw["nodes"]]
     return {"artifact_type": artifact_type, "categories": raw["categories"], "nodes": nodes, "commands": raw["commands"], "version": 1}
 
@@ -332,6 +361,17 @@ def _validate_state(artifact_type: str, state: Dict[str, Any]) -> Dict[str, Any]
         if len(ids) != len(set(ids)):
             errors.append({"path": "/state/nodes", "message": "Node IDs must be unique"})
         known = set(ids)
+        schema_catalog = BUILDER_CONFIGURATION_SCHEMAS.get(artifact_type, {})
+        for index, node in enumerate(nodes):
+            data = node.get("data") if isinstance(node, dict) else {}
+            if not isinstance(data, dict) or not data.get("configurationSchemaVersion"):
+                continue
+            node_type = str(data.get("nodeType") or node.get("type") or "")
+            schema = schema_catalog.get(node_type, {})
+            values = {str(field.get("name")): field.get("value") for field in data.get("fields", []) if isinstance(field, dict)}
+            for field_name, definition in schema.get("properties", {}).items():
+                if definition.get("required") and (values.get(field_name) is None or values.get(field_name) == ""):
+                    errors.append({"path": f"/state/nodes/{index}/fields/{field_name}", "target_id": str(node.get("id")), "message": f"{definition.get('label', field_name)} is required"})
         for index, edge in enumerate(edges):
             if not isinstance(edge, dict) or edge.get("source") not in known or edge.get("target") not in known:
                 errors.append({"path": f"/state/edges/{index}", "message": "Edge references an unknown node"})
@@ -341,7 +381,7 @@ def _validate_state(artifact_type: str, state: Dict[str, Any]) -> Dict[str, Any]
         object_types = state.get("object_types", []) if isinstance(state, dict) else []
         if not object_types:
             warnings.append({"path": "/state/object_types", "message": "The ontology has no object types"})
-    if artifact_type == "workshop" and not state.get("widgets"):
+    if artifact_type == "workshop" and not state.get("widgets") and not state.get("nodes"):
         warnings.append({"path": "/state/widgets", "message": "The application has no widgets"})
     targets = [
         {
@@ -818,7 +858,16 @@ def preview_artifact(artifact_id: str, body: ArtifactPreviewRequest, principal: 
         "warnings": validation.get("warnings", []),
         "metrics": {"node_count": len(nodes), "edge_count": len(edges), "sample_count": len(sample), "duration_ms": max(1, len(nodes) * 2)},
         "evidence_links": [{"type": "revision", "label": f"Revision {row.current_revision}", "href": f"/artifacts/{row.id}/versions"}],
-        "trace": [{"sequence": index + 1, "node_id": value.get("node_id"), "status": "SUCCEEDED", "inputs": {}, "outputs": {"sampled": True}} for index, value in enumerate(sample)],
+        "trace": [{
+            "sequence": index + 1, "node_id": value.get("node_id"), "status": "SUCCEEDED",
+            "inputs": body.inputs, "outputs": {"sampled": True, "node_type": value.get("node_type")},
+            **({
+                "citations": [{"type": "artifact_revision", "id": f"{row.id}:{row.current_revision}"}],
+                "policy_decision": "APPROVAL_REQUIRED" if value.get("node_type") in {"approval", "action"} else "ALLOWED",
+                "approval_gate": value.get("node_type") in {"approval", "action"},
+                "mutation_evidence": [] if value.get("node_type") != "action" else [{"status": "PROPOSED", "executed": False}],
+            } if row.artifact_type == "aip_logic" else {}),
+        } for index, value in enumerate(sample)],
     }
     job = PlatformJob(
         id=_id("job"), job_type=f"{row.artifact_type}.preview", status="SUCCEEDED", actor=principal.id,

@@ -231,6 +231,29 @@ button:disabled {
   background: #fff;
 }
 
+.builder-breakpoint-control {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid #c6d0d7;
+  border-radius: 5px;
+  background: #f4f7f8;
+}
+
+.builder-breakpoint-control button {
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 0;
+  background: transparent;
+  color: #5d707c;
+  text-transform: capitalize;
+}
+
+.builder-breakpoint-control button.active {
+  background: #fff;
+  color: #176b8f;
+  box-shadow: 0 1px 3px rgb(24 46 58 / 18%);
+}
+
 .primary-action {
   background: #176b8f;
   border-color: #176b8f;
@@ -454,6 +477,22 @@ button:disabled {
   box-shadow: 0 2px 8px rgb(21 43 55 / 10%);
 }
 
+.visual-breakpoint-tablet .react-flow,
+.visual-breakpoint-mobile .react-flow {
+  margin-inline: auto;
+  border-inline: 1px solid #c3cfd6;
+  background: #f7f9fa;
+  box-shadow: 0 0 0 9999px rgb(53 67 76 / 8%);
+}
+
+.visual-breakpoint-tablet .react-flow {
+  width: min(768px, 100%);
+}
+
+.visual-breakpoint-mobile .react-flow {
+  width: min(390px, 100%);
+}
+
 .node-inspector-form {
   padding: 15px;
   display: grid;
@@ -518,6 +557,45 @@ button:disabled {
   min-width: 0;
   height: 30px;
   padding: 0;
+}
+
+.config-field-label {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.config-field-label strong,
+.config-field-label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.config-field-label small {
+  color: #6c7d87;
+  font-size: 10px;
+}
+
+.config-field-row select,
+.config-field-row textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid #c5d0d7;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.config-field-row textarea {
+  resize: vertical;
+}
+
+.config-boolean {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #50636e;
+  font-size: 11px;
 }
 
 .drag-grip {
