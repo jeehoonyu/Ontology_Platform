@@ -32,10 +32,67 @@ export interface PlatformArtifact {
   state: ArtifactState;
   layout: Record<string, unknown>;
   validation: { status?: string; errors?: Array<Record<string, unknown>>; warnings?: Array<Record<string, unknown>> };
+  validation_targets: Array<{ target_type: string; target_id: string; severity: string; message: string; path: string }>;
   lease?: { holder: string; expires_at: number } | null;
   permissions: string[];
+  dirty_revision?: number | null;
+  execution?: ArtifactJob | null;
+  evidence_links: Array<{ type: string; label: string; href: string }>;
   created_at: number;
   updated_at: number;
+}
+
+export interface BuilderPort {
+  id: string;
+  label: string;
+  data_type: string;
+}
+
+export interface BuilderCatalogNode {
+  type: string;
+  label: string;
+  category: string;
+  description: string;
+  inputs: BuilderPort[];
+  outputs: BuilderPort[];
+  configuration_schema: { type: "object"; properties: Record<string, unknown> };
+}
+
+export interface BuilderCatalog {
+  artifact_type: ArtifactType;
+  categories: string[];
+  nodes: BuilderCatalogNode[];
+  commands: string[];
+  permissions: string[];
+  version: number;
+}
+
+export interface BuilderCommand {
+  command_id?: string;
+  command: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ArtifactJob {
+  id: string;
+  job_type: string;
+  status: string;
+  progress: number;
+  result: Record<string, unknown>;
+  error?: string | null;
+}
+
+export interface ArtifactPreview {
+  job_id: string;
+  status: string;
+  artifact_id: string;
+  revision: number;
+  schema: Array<{ name: string; type: string }>;
+  sample_output: Array<{ node_id: string; node_type: string; label: string; status: string }>;
+  warnings: Array<{ path?: string; message: string }>;
+  metrics: { node_count: number; edge_count: number; sample_count: number; duration_ms: number };
+  evidence_links: Array<{ type: string; label: string; href: string }>;
+  trace: Array<{ sequence: number; node_id: string; status: string; inputs: Record<string, unknown>; outputs: Record<string, unknown> }>;
 }
 
 export interface ArtifactLease {
@@ -88,6 +145,33 @@ export function saveArtifact(
       layout: Object.fromEntries(state.nodes.map((node) => [node.id, node.position])),
       message
     })
+  });
+}
+
+export function getBuilderCatalog(artifactType: ArtifactType): Promise<BuilderCatalog> {
+  return api<BuilderCatalog>(`/builder/catalogs/${encodeURIComponent(artifactType)}`);
+}
+
+export function applyArtifactCommands(
+  artifact: PlatformArtifact,
+  commands: BuilderCommand[],
+  leaseToken: string,
+  message = "Applied visual builder commands",
+  idempotencyKey = crypto.randomUUID()
+): Promise<PlatformArtifact> {
+  return postJson<PlatformArtifact>(`/artifacts/${encodeURIComponent(artifact.id)}/commands`, {
+    expected_lock_version: artifact.lock_version,
+    lease_token: leaseToken,
+    idempotency_key: idempotencyKey,
+    commands,
+    message
+  });
+}
+
+export function previewArtifact(artifactId: string, sampleLimit = 20): Promise<ArtifactPreview> {
+  return postJson<ArtifactPreview>(`/artifacts/${encodeURIComponent(artifactId)}/preview`, {
+    sample_limit: sampleLimit,
+    inputs: {}
   });
 }
 
