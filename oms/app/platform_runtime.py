@@ -152,6 +152,134 @@ class ArtifactAdoptRequest(BaseModel):
     display_name: Optional[str] = None
 
 
+class BuilderCommand(BaseModel):
+    command_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    command: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class BuilderCommandBatch(BaseModel):
+    expected_lock_version: int
+    commands: List[BuilderCommand] = Field(min_length=1, max_length=100)
+    idempotency_key: str = Field(min_length=8, max_length=160)
+    lease_token: Optional[str] = None
+    message: Optional[str] = "Applied builder commands"
+
+
+class ArtifactPreviewRequest(BaseModel):
+    sample_limit: int = Field(default=20, ge=1, le=200)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyImpactRequest(BaseModel):
+    object_type_id: str
+    changes: List[Dict[str, Any]] = Field(default_factory=list, max_length=200)
+
+
+BUILDER_CATALOGS: Dict[str, Dict[str, Any]] = {
+    "pipeline": {
+        "categories": ["Sources", "Prepare", "Combine", "Spatial", "Intelligence", "Outputs"],
+        "nodes": [
+            ("dataset_input", "Dataset", "Sources", "Read a versioned data asset", [], ["records"]),
+            ("import_input", "Import", "Sources", "Read a validated import job", [], ["records"]),
+            ("connector_input", "Connector", "Sources", "Read a connector preview or sync", [], ["records"]),
+            ("stream_input", "Stream", "Sources", "Read replayable stream records", [], ["records"]),
+            ("ontology_input", "Ontology objects", "Sources", "Read a governed object set", [], ["objects"]),
+            ("select", "Select fields", "Prepare", "Choose and reorder fields", ["records"], ["records"]),
+            ("rename", "Rename fields", "Prepare", "Rename fields with lineage preserved", ["records"], ["records"]),
+            ("cast", "Cast types", "Prepare", "Coerce fields to supported types", ["records"], ["records"]),
+            ("formula", "Formula", "Prepare", "Derive a field from a structured expression", ["records"], ["records"]),
+            ("null_handling", "Null handling", "Prepare", "Fill, drop, or flag missing values", ["records"], ["records"]),
+            ("normalize", "Normalize", "Prepare", "Normalize numeric or categorical values", ["records"], ["records"]),
+            ("deduplicate", "Deduplicate", "Prepare", "Keep a deterministic record per key", ["records"], ["records"]),
+            ("sort", "Sort", "Prepare", "Sort records by one or more fields", ["records"], ["records"]),
+            ("limit", "Limit", "Prepare", "Limit output records", ["records"], ["records"]),
+            ("filter", "Filter", "Prepare", "Apply structured field predicates", ["records"], ["records"]),
+            ("validate", "Validate", "Prepare", "Evaluate data quality constraints", ["records"], ["valid", "invalid"]),
+            ("join", "Join", "Combine", "Join two inputs by typed keys", ["left", "right"], ["records"]),
+            ("union", "Union", "Combine", "Combine compatible input schemas", ["inputs"], ["records"]),
+            ("aggregate", "Aggregate", "Combine", "Group and aggregate values", ["records"], ["records"]),
+            ("pivot", "Pivot", "Combine", "Pivot categorical values into columns", ["records"], ["records"]),
+            ("unpivot", "Unpivot", "Combine", "Convert fields into key-value rows", ["records"], ["records"]),
+            ("window", "Window", "Combine", "Calculate ordered partition metrics", ["records"], ["records"]),
+            ("unique_id", "Unique ID", "Combine", "Generate stable deterministic identifiers", ["records"], ["records"]),
+            ("lat_lon", "Latitude / longitude", "Spatial", "Build point geometry", ["records"], ["records"]),
+            ("mgrs", "MGRS", "Spatial", "Convert MGRS references to point geometry", ["records"], ["records"]),
+            ("geometry", "Geometry", "Spatial", "Parse or construct geometry", ["records"], ["records"]),
+            ("radius", "Radius", "Spatial", "Evaluate distance from a point", ["records"], ["records"]),
+            ("geofence", "Geofence", "Spatial", "Evaluate polygon containment", ["records"], ["inside", "outside"]),
+            ("spatial_join", "Spatial join", "Spatial", "Join records by spatial relation", ["left", "right"], ["records"]),
+            ("model_inference", "Model inference", "Intelligence", "Run a governed model deployment", ["records"], ["predictions"]),
+            ("aip_generate", "AIP generation", "Intelligence", "Generate governed structured values", ["records"], ["records"]),
+            ("dataset_output", "Dataset output", "Outputs", "Write a transactional data asset", ["records"], []),
+            ("ontology_output", "Ontology output", "Outputs", "Hydrate mapped ontology objects", ["records"], []),
+        ],
+        "commands": ["add_node", "update_node", "move_nodes", "duplicate_nodes", "remove_nodes", "add_edge", "remove_edges", "auto_layout", "replace_state"],
+    },
+    "ontology": {
+        "categories": ["Semantic model", "Behavior", "Governance", "Operations"],
+        "nodes": [
+            ("object_type", "Object type", "Semantic model", "Model a governed business entity", [], ["objects"]),
+            ("link_type", "Link type", "Semantic model", "Relate object types with cardinality", ["source", "target"], []),
+            ("action_type", "Action type", "Behavior", "Define a governed object mutation", ["object"], ["result"]),
+            ("interface", "Interface", "Behavior", "Declare reusable semantic capabilities", [], []),
+            ("datasource", "Datasource mapping", "Operations", "Map dataset fields into objects", ["records"], ["objects"]),
+            ("object_view", "Object view", "Operations", "Configure a human-facing object view", ["objects"], []),
+            ("policy", "Policy", "Governance", "Apply access and approval rules", ["resource"], []),
+            ("observability", "Observability", "Operations", "Attach data health and freshness checks", ["resource"], ["status"]),
+        ],
+        "commands": ["add_node", "update_node", "move_nodes", "duplicate_nodes", "archive_nodes", "remove_nodes", "add_edge", "remove_edges", "reorder_fields", "archive_field", "auto_layout", "replace_state"],
+    },
+    "workshop": {
+        "categories": ["Data", "Visuals", "Interaction", "Intelligence"],
+        "nodes": [
+            ("object_table", "Object table", "Data", "Browse ontology objects", [], []),
+            ("metric", "Metric", "Visuals", "Display an operational KPI", [], []),
+            ("chart", "Chart", "Visuals", "Visualize grouped or temporal data", [], []),
+            ("map", "Map", "Visuals", "Display geospatial object layers", [], []),
+            ("graph", "Graph", "Visuals", "Explore linked objects", [], []),
+            ("timeline", "Timeline", "Visuals", "Display object activity over time", [], []),
+            ("filter", "Filter", "Interaction", "Control object or dataset filters", [], []),
+            ("form", "Form", "Interaction", "Collect typed user input", [], []),
+            ("action", "Action", "Interaction", "Run a governed action", [], []),
+            ("risk", "Risk panel", "Intelligence", "Explain decision score drivers", [], []),
+            ("aip_assist", "AIP Assist", "Intelligence", "Provide contextual recommendations", [], []),
+        ],
+        "commands": ["add_node", "update_node", "move_nodes", "duplicate_nodes", "archive_nodes", "remove_nodes", "reorder_fields", "auto_layout", "replace_state"],
+    },
+    "aip_logic": {
+        "categories": ["Context", "Logic", "Intelligence", "Operations"],
+        "nodes": [
+            ("object_query", "Query objects", "Context", "Load typed ontology context", [], ["objects"]),
+            ("function", "Function", "Logic", "Run deterministic platform logic", ["input"], ["output"]),
+            ("branch", "Branch", "Logic", "Route execution from a condition", ["value"], ["true", "false"]),
+            ("model", "Model", "Intelligence", "Invoke a governed deployment", ["records"], ["predictions"]),
+            ("risk", "Score risk", "Intelligence", "Evaluate a decision scorecard", ["object"], ["score"]),
+            ("scenario", "Run scenario", "Intelligence", "Compare before and after impact", ["seed"], ["impact"]),
+            ("alert", "Create alert", "Operations", "Evaluate and stage an alert", ["finding"], ["alert"]),
+            ("incident", "Create incident", "Operations", "Open an operational incident", ["alert"], ["incident"]),
+            ("runbook", "Run runbook", "Operations", "Execute response steps", ["incident"], ["result"]),
+            ("approval", "Request approval", "Operations", "Pause for human review", ["proposal"], ["decision"]),
+            ("action", "Propose action", "Operations", "Stage a governed mutation", ["decision"], ["action"]),
+        ],
+        "commands": ["add_node", "update_node", "move_nodes", "duplicate_nodes", "archive_nodes", "remove_nodes", "add_edge", "remove_edges", "auto_layout", "replace_state"],
+    },
+}
+
+
+def _catalog(artifact_type: str) -> Dict[str, Any]:
+    raw = BUILDER_CATALOGS.get(artifact_type)
+    if not raw:
+        raise HTTPException(status_code=404, detail=f"Builder catalog '{artifact_type}' not found")
+    nodes = [{
+        "type": item[0], "label": item[1], "category": item[2], "description": item[3],
+        "inputs": [{"id": port, "label": port, "data_type": "records"} for port in item[4]],
+        "outputs": [{"id": port, "label": port, "data_type": "records"} for port in item[5]],
+        "configuration_schema": {"type": "object", "properties": {}},
+    } for item in raw["nodes"]]
+    return {"artifact_type": artifact_type, "categories": raw["categories"], "nodes": nodes, "commands": raw["commands"], "version": 1}
+
+
 def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any]) -> None:
     db.add(models_action.AuditLog(
         id=uuid.uuid4().hex,
@@ -215,15 +343,31 @@ def _validate_state(artifact_type: str, state: Dict[str, Any]) -> Dict[str, Any]
             warnings.append({"path": "/state/object_types", "message": "The ontology has no object types"})
     if artifact_type == "workshop" and not state.get("widgets"):
         warnings.append({"path": "/state/widgets", "message": "The application has no widgets"})
-    return {"status": "FAIL" if errors else ("WARN" if warnings else "PASS"), "errors": errors, "warnings": warnings}
+    targets = [
+        {
+            "target_type": "node" if "/nodes/" in str(item.get("path")) else "field" if "/fields/" in str(item.get("path")) else "artifact",
+            "target_id": str(item.get("target_id") or item.get("path") or "/state"),
+            "severity": severity,
+            "message": item.get("message", "Validation issue"),
+            "path": item.get("path", "/state"),
+        }
+        for severity, collection in (("error", errors), ("warning", warnings))
+        for item in collection
+    ]
+    return {"status": "FAIL" if errors else ("WARN" if warnings else "PASS"), "errors": errors, "warnings": warnings, "targets": targets}
 
 
-def _artifact_dict(db: Session, row: PlatformArtifact) -> Dict[str, Any]:
+def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Principal] = None) -> Dict[str, Any]:
     revision = _revision(db, row.id, row.current_revision)
     lease = db.query(ArtifactLease).filter(ArtifactLease.artifact_id == row.id).first()
     if lease and lease.expires_at <= _now():
         db.delete(lease)
         lease = None
+    last_job = db.query(PlatformJob).filter(
+        PlatformJob.subject_type == "artifact", PlatformJob.subject_id == row.id,
+    ).order_by(PlatformJob.updated_at.desc()).first()
+    allowed = [name for name in ("view", "edit", "publish", "deploy", "execute", "approve", "export", "restore", "manage") if not principal or principal.allows(name)]
+    validation = revision.validation or {}
     return {
         "id": row.id,
         "project_id": row.project_id,
@@ -238,12 +382,149 @@ def _artifact_dict(db: Session, row: PlatformArtifact) -> Dict[str, Any]:
         "metadata": row.metadata_ or {},
         "state": revision.state or {},
         "layout": revision.layout or {},
-        "validation": revision.validation or {},
+        "validation": validation,
+        "validation_targets": validation.get("targets", []),
         "lease": None if not lease else {"holder": lease.holder, "expires_at": lease.expires_at},
-        "permissions": ["view", "edit", "publish", "restore"],
+        "permissions": allowed,
+        "dirty_revision": row.current_revision if row.current_revision != row.published_revision else None,
+        "execution": None if not last_job else _job_dict(last_job),
+        "evidence_links": [
+            {"type": "revision", "label": f"Revision {row.current_revision}", "href": f"/artifacts/{row.id}/versions"},
+            {"type": "audit", "label": "Audit evidence", "href": f"/audit/search?subject_type=artifact&subject_id={row.id}"},
+            {"type": "events", "label": "Operational events", "href": f"/ops/events?subject_type=artifact&subject_id={row.id}"},
+        ],
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
+
+
+def _node_id(node: Dict[str, Any]) -> str:
+    value = str(node.get("id") or "").strip()
+    if not value:
+        raise HTTPException(status_code=422, detail="Builder nodes require an id")
+    return value
+
+
+def _apply_builder_commands(state: Dict[str, Any], layout: Dict[str, Any], commands: List[BuilderCommand]) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+    next_state = copy_json(state or {})
+    next_layout = copy_json(layout or {})
+    nodes = list(next_state.get("nodes") or [])
+    edges = list(next_state.get("edges") or [])
+    applied: List[Dict[str, Any]] = []
+
+    def find_node(node_id: str) -> Dict[str, Any]:
+        node = next((item for item in nodes if str(item.get("id")) == node_id), None)
+        if not node:
+            raise HTTPException(status_code=422, detail=f"Builder node '{node_id}' not found")
+        return node
+
+    for item in commands:
+        command = item.command
+        payload = copy_json(item.payload or {})
+        if command == "replace_state":
+            replacement = payload.get("state")
+            if not isinstance(replacement, dict):
+                raise HTTPException(status_code=422, detail="replace_state requires a state object")
+            next_state = replacement
+            nodes = list(next_state.get("nodes") or [])
+            edges = list(next_state.get("edges") or [])
+            next_layout = copy_json(payload.get("layout") or {str(node.get("id")): node.get("position", {}) for node in nodes})
+        elif command == "add_node":
+            node = payload.get("node")
+            if not isinstance(node, dict):
+                raise HTTPException(status_code=422, detail="add_node requires node")
+            node_id = _node_id(node)
+            if any(str(existing.get("id")) == node_id for existing in nodes):
+                raise HTTPException(status_code=409, detail=f"Builder node '{node_id}' already exists")
+            nodes.append(node)
+            next_layout[node_id] = copy_json(node.get("position") or payload.get("position") or {"x": 0, "y": 0})
+        elif command == "update_node":
+            node_id = str(payload.get("node_id") or "")
+            node = find_node(node_id)
+            changes = payload.get("changes") or {}
+            if not isinstance(changes, dict):
+                raise HTTPException(status_code=422, detail="update_node changes must be an object")
+            node.update(changes)
+        elif command == "move_nodes":
+            positions = payload.get("positions") or {}
+            if not isinstance(positions, dict):
+                raise HTTPException(status_code=422, detail="move_nodes positions must be an object")
+            for node_id, position in positions.items():
+                node = find_node(str(node_id))
+                node["position"] = copy_json(position)
+                next_layout[str(node_id)] = copy_json(position)
+        elif command == "duplicate_nodes":
+            source_ids = [str(value) for value in payload.get("node_ids") or []]
+            offset = payload.get("offset") or {"x": 32, "y": 32}
+            id_map: Dict[str, str] = {}
+            for source_id in source_ids:
+                source = copy_json(find_node(source_id))
+                duplicate_id = str((payload.get("id_map") or {}).get(source_id) or f"{source_id}_copy_{uuid.uuid4().hex[:6]}")
+                id_map[source_id] = duplicate_id
+                source["id"] = duplicate_id
+                position = source.get("position") or next_layout.get(source_id) or {"x": 0, "y": 0}
+                source["position"] = {"x": float(position.get("x", 0)) + float(offset.get("x", 32)), "y": float(position.get("y", 0)) + float(offset.get("y", 32))}
+                nodes.append(source)
+                next_layout[duplicate_id] = source["position"]
+            for edge in list(edges):
+                if str(edge.get("source")) in id_map and str(edge.get("target")) in id_map:
+                    duplicate_edge = copy_json(edge)
+                    duplicate_edge["id"] = f"edge_{uuid.uuid4().hex[:10]}"
+                    duplicate_edge["source"] = id_map[str(edge.get("source"))]
+                    duplicate_edge["target"] = id_map[str(edge.get("target"))]
+                    edges.append(duplicate_edge)
+            payload["created_ids"] = list(id_map.values())
+        elif command in {"remove_nodes", "archive_nodes"}:
+            remove_ids = {str(value) for value in payload.get("node_ids") or []}
+            if command == "archive_nodes":
+                for node_id in remove_ids:
+                    find_node(node_id).setdefault("data", {})["archived"] = True
+            else:
+                nodes = [node for node in nodes if str(node.get("id")) not in remove_ids]
+                edges = [edge for edge in edges if str(edge.get("source")) not in remove_ids and str(edge.get("target")) not in remove_ids]
+                for node_id in remove_ids:
+                    next_layout.pop(node_id, None)
+        elif command == "add_edge":
+            edge = payload.get("edge")
+            if not isinstance(edge, dict):
+                raise HTTPException(status_code=422, detail="add_edge requires edge")
+            find_node(str(edge.get("source") or ""))
+            find_node(str(edge.get("target") or ""))
+            edge.setdefault("id", f"edge_{uuid.uuid4().hex[:10]}")
+            if any(str(existing.get("id")) == str(edge["id"]) for existing in edges):
+                raise HTTPException(status_code=409, detail=f"Builder edge '{edge['id']}' already exists")
+            edges.append(edge)
+        elif command == "remove_edges":
+            remove_ids = {str(value) for value in payload.get("edge_ids") or []}
+            edges = [edge for edge in edges if str(edge.get("id")) not in remove_ids]
+        elif command == "auto_layout":
+            columns = max(1, int(payload.get("columns", 4)))
+            for index, node in enumerate(nodes):
+                position = {"x": 80 + (index % columns) * 280, "y": 80 + (index // columns) * 160}
+                node["position"] = position
+                next_layout[str(node.get("id"))] = position
+        elif command == "reorder_fields":
+            node = find_node(str(payload.get("node_id") or ""))
+            fields = list((node.get("data") or {}).get("fields") or [])
+            order = [str(value) for value in payload.get("field_ids") or []]
+            by_id = {str(field.get("id")): field for field in fields}
+            if set(order) != set(by_id):
+                raise HTTPException(status_code=422, detail="field_ids must contain each field exactly once")
+            node.setdefault("data", {})["fields"] = [by_id[field_id] for field_id in order]
+        elif command == "archive_field":
+            node = find_node(str(payload.get("node_id") or ""))
+            field_id = str(payload.get("field_id") or "")
+            field = next((value for value in (node.get("data") or {}).get("fields") or [] if str(value.get("id")) == field_id), None)
+            if not field:
+                raise HTTPException(status_code=422, detail=f"Field '{field_id}' not found")
+            field["archived"] = True
+        else:
+            raise HTTPException(status_code=422, detail=f"Unsupported builder command '{command}'")
+        applied.append({"command_id": item.command_id, "command": command, "payload": payload})
+
+    next_state["nodes"] = nodes
+    next_state["edges"] = edges
+    return next_state, next_layout, applied
 
 
 def _assert_lease(db: Session, artifact_id: str, actor: str, token: Optional[str]) -> None:
@@ -278,7 +559,68 @@ def create_artifact(body: ArtifactCreate, principal: Principal = Depends(require
     ))
     _audit(db, principal.id, "artifact.created", "artifact", artifact_id, {"artifact_type": body.artifact_type, "revision": 1})
     db.commit()
-    return _artifact_dict(db, row)
+    return _artifact_dict(db, row, principal)
+
+
+@router.get("/builder/catalogs/{artifact_type}")
+def builder_catalog(artifact_type: str, principal: Principal = Depends(require_permission("view"))):
+    result = _catalog(artifact_type)
+    result["permissions"] = [name for name in ("view", "edit", "publish", "execute", "restore") if principal.allows(name)]
+    return result
+
+
+@router.post("/ontology/changes/impact")
+def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    from . import apps, investigations, models, pipeline_builder_ops
+
+    object_type = db.get(models.ObjectType, body.object_type_id)
+    if not object_type:
+        raise HTTPException(status_code=404, detail=f"Object type '{body.object_type_id}' not found")
+    objects = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == body.object_type_id).count()
+    links = db.query(models.LinkType).filter(
+        (models.LinkType.source_object_type_id == body.object_type_id) | (models.LinkType.target_object_type_id == body.object_type_id)
+    ).all()
+    search_tokens = {body.object_type_id}
+    pipeline_rows = db.query(pipeline_builder_ops.PipelineBuilderGraph).all()
+    pipelines = [row for row in pipeline_rows if any(token in str(row.nodes or []) or token in str(row.edges or []) for token in search_tokens)]
+    workshop_rows = db.query(apps.WorkshopModule).all()
+    workshops = [row for row in workshop_rows if body.object_type_id in str({"layout": row.layout, "widgets": row.widgets, "variables": row.variables})]
+    artifact_rows = db.query(PlatformArtifact).all()
+    dependent_artifacts = [row for row in artifact_rows if body.object_type_id in str(_revision(db, row.id, row.current_revision).state or {})]
+    destructive = [change for change in body.changes if str(change.get("operation") or change.get("type") or "").lower() in {"delete", "remove", "archive", "change_type", "change_primary_key"}]
+    affected_property_names = [str(change.get("property_name") or change.get("field") or "") for change in destructive]
+    populated_values = 0
+    if affected_property_names:
+        for instance in db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == body.object_type_id).all():
+            populated_values += sum(1 for name in affected_property_names if name and name in (instance.properties or {}))
+    severity = "HIGH" if destructive and (objects or populated_values) else "MEDIUM" if destructive else "LOW"
+    warnings = []
+    if populated_values:
+        warnings.append({"code": "POPULATED_VALUES", "message": f"{populated_values} existing property values would become schema-orphaned; archive is recommended."})
+    if pipelines:
+        warnings.append({"code": "PIPELINE_DEPENDENCY", "message": f"{len(pipelines)} pipeline graph(s) reference this object type."})
+    report_count = db.query(investigations.InvestigationReport).count()
+    return {
+        "object_type": {"id": object_type.id, "display_name": object_type.display_name},
+        "severity": severity,
+        "safe_to_publish": severity != "HIGH",
+        "destructive_changes": destructive,
+        "summary": {
+            "objects": objects, "populated_values": populated_values, "link_types": len(links),
+            "pipelines": len(pipelines), "workshops": len(workshops), "artifacts": len(dependent_artifacts),
+            "reports_reviewed": report_count,
+        },
+        "affected": {
+            "objects": [{"id": body.object_type_id, "count": objects}],
+            "links": [{"id": row.id, "display_name": row.display_name} for row in links],
+            "pipelines": [{"id": row.id, "display_name": row.display_name} for row in pipelines],
+            "workshops": [{"id": row.id, "display_name": row.display_name} for row in workshops],
+            "artifacts": [{"id": row.id, "artifact_type": row.artifact_type, "display_name": row.display_name} for row in dependent_artifacts],
+        },
+        "warnings": warnings,
+        "recommended_action": "Archive affected fields and publish a recoverable revision." if destructive else "Validate mappings and publish the draft.",
+        "evidence_links": [{"type": "object_type", "label": object_type.display_name, "href": f"/ui-state/ontology/object-types/{object_type.id}"}],
+    }
 
 
 @router.post("/artifacts/adopt", status_code=201)
@@ -290,7 +632,7 @@ def adopt_resource(body: ArtifactAdoptRequest, principal: Principal = Depends(re
     existing = db.query(PlatformArtifact).filter(PlatformArtifact.project_id == body.project_id).all()
     for artifact in existing:
         if (artifact.metadata_ or {}).get("source_key") == source_key:
-            return _artifact_dict(db, artifact)
+            return _artifact_dict(db, artifact, principal)
 
     if body.resource_type == "pipeline_builder_graph":
         graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, body.resource_id)
@@ -369,12 +711,12 @@ def list_artifacts(project_id: Optional[str] = None, artifact_type: Optional[str
         query = query.filter(PlatformArtifact.project_id == project_id)
     if artifact_type:
         query = query.filter(PlatformArtifact.artifact_type == artifact_type)
-    return [_artifact_dict(db, row) for row in query.order_by(PlatformArtifact.updated_at.desc()).all()]
+    return [_artifact_dict(db, row, principal) for row in query.order_by(PlatformArtifact.updated_at.desc()).all()]
 
 
 @router.get("/artifacts/{artifact_id}")
 def get_artifact(artifact_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    return _artifact_dict(db, _artifact(db, artifact_id))
+    return _artifact_dict(db, _artifact(db, artifact_id), principal)
 
 
 @router.patch("/artifacts/{artifact_id}")
@@ -404,7 +746,93 @@ def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal 
     ))
     _audit(db, principal.id, "artifact.revision.created", "artifact", row.id, {"revision": row.current_revision, "lock_version": row.lock_version})
     db.commit()
-    return _artifact_dict(db, row)
+    return _artifact_dict(db, row, principal)
+
+
+@router.post("/artifacts/{artifact_id}/commands")
+def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    row = _artifact(db, artifact_id)
+    metadata = copy_json(row.metadata_ or {})
+    receipts = list(metadata.get("command_receipts") or [])
+    prior = next((receipt for receipt in receipts if receipt.get("idempotency_key") == body.idempotency_key), None)
+    if prior:
+        result = _artifact_dict(db, row, principal)
+        result["command_receipt"] = prior
+        result["idempotent_replay"] = True
+        return result
+    if body.expected_lock_version != row.lock_version:
+        raise HTTPException(status_code=409, detail={"message": "Artifact changed since it was loaded", "current_lock_version": row.lock_version})
+    _assert_lease(db, artifact_id, principal.id, body.lease_token)
+    current = _revision(db, artifact_id, row.current_revision)
+    state, layout, applied = _apply_builder_commands(current.state or {}, current.layout or {}, body.commands)
+    validation = _validate_state(row.artifact_type, state)
+    row.current_revision += 1
+    row.lock_version += 1
+    row.updated_at = _now()
+    row.status = "DRAFT"
+    receipt = {
+        "idempotency_key": body.idempotency_key,
+        "revision": row.current_revision,
+        "command_ids": [item.command_id for item in body.commands],
+        "created_at": row.updated_at,
+    }
+    metadata["command_receipts"] = (receipts + [receipt])[-50:]
+    row.metadata_ = metadata
+    db.add(ArtifactRevision(
+        id=_id("revision"), artifact_id=row.id, revision=row.current_revision, state=state,
+        layout=layout, validation=validation, author=principal.id, message=body.message,
+        published=False, created_at=row.updated_at,
+    ))
+    _audit(db, principal.id, "artifact.commands.applied", "artifact", row.id, {
+        "revision": row.current_revision, "lock_version": row.lock_version,
+        "commands": [{"command_id": item["command_id"], "command": item["command"]} for item in applied],
+        "idempotency_key": body.idempotency_key,
+    })
+    db.commit()
+    result = _artifact_dict(db, row, principal)
+    result["command_receipt"] = receipt
+    result["idempotent_replay"] = False
+    return result
+
+
+@router.post("/artifacts/{artifact_id}/preview", status_code=202)
+def preview_artifact(artifact_id: str, body: ArtifactPreviewRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    row = _artifact(db, artifact_id)
+    revision = _revision(db, artifact_id, row.current_revision)
+    validation = _validate_state(row.artifact_type, revision.state or {})
+    nodes = list((revision.state or {}).get("nodes") or [])
+    edges = list((revision.state or {}).get("edges") or [])
+    sample = []
+    for node in nodes[:body.sample_limit]:
+        data = node.get("data") or {}
+        sample.append({
+            "node_id": node.get("id"), "node_type": data.get("nodeType") or node.get("type") or "node",
+            "label": data.get("label") or node.get("id"), "status": "READY",
+        })
+    now = _now()
+    result = {
+        "artifact_id": row.id,
+        "revision": row.current_revision,
+        "schema": [{"name": "node_id", "type": "string"}, {"name": "node_type", "type": "string"}, {"name": "status", "type": "string"}],
+        "sample_output": sample,
+        "warnings": validation.get("warnings", []),
+        "metrics": {"node_count": len(nodes), "edge_count": len(edges), "sample_count": len(sample), "duration_ms": max(1, len(nodes) * 2)},
+        "evidence_links": [{"type": "revision", "label": f"Revision {row.current_revision}", "href": f"/artifacts/{row.id}/versions"}],
+        "trace": [{"sequence": index + 1, "node_id": value.get("node_id"), "status": "SUCCEEDED", "inputs": {}, "outputs": {"sampled": True}} for index, value in enumerate(sample)],
+    }
+    job = PlatformJob(
+        id=_id("job"), job_type=f"{row.artifact_type}.preview", status="SUCCEEDED", actor=principal.id,
+        subject_type="artifact", subject_id=row.id, payload={"sample_limit": body.sample_limit, "inputs": body.inputs},
+        result=result, attempt=1, progress=100, created_at=now, updated_at=now, started_at=now, completed_at=now,
+    )
+    db.add(job)
+    db.flush()
+    _job_event(db, job, "job.queued")
+    _job_event(db, job, "job.started")
+    _job_event(db, job, "job.succeeded", {"metrics": result["metrics"]})
+    _audit(db, principal.id, "artifact.preview.completed", "artifact", row.id, {"job_id": job.id, "revision": row.current_revision})
+    db.commit()
+    return {"job_id": job.id, "status": job.status, **result}
 
 
 @router.post("/artifacts/{artifact_id}/validate")
@@ -433,7 +861,7 @@ def publish_artifact(artifact_id: str, body: PublishRequest, principal: Principa
     row.updated_at = _now()
     _audit(db, principal.id, "artifact.published", "artifact", row.id, {"revision": row.current_revision})
     db.commit()
-    return _artifact_dict(db, row)
+    return _artifact_dict(db, row, principal)
 
 
 @router.get("/artifacts/{artifact_id}/versions")
@@ -473,7 +901,7 @@ def restore_artifact(artifact_id: str, version: int, principal: Principal = Depe
     ))
     _audit(db, principal.id, "artifact.restored", "artifact", artifact_id, {"source_revision": version, "revision": row.current_revision})
     db.commit()
-    return _artifact_dict(db, row)
+    return _artifact_dict(db, row, principal)
 
 
 @router.post("/artifacts/{artifact_id}/leases")

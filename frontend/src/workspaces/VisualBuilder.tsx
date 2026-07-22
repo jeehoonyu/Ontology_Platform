@@ -17,8 +17,10 @@ import {
 } from "@xyflow/react";
 import {
   Archive,
+  AlignHorizontalSpaceAround,
   Check,
   Copy,
+  Eye,
   History,
   Plus,
   Redo2,
@@ -33,19 +35,23 @@ import { SortableContext, arrayMove, verticalListSortingStrategy, useSortable } 
 import { CSS } from "@dnd-kit/utilities";
 import {
   acquireArtifactLease,
+  applyArtifactCommands,
   createArtifact,
+  getBuilderCatalog,
   listArtifacts,
   listArtifactVersions,
   publishArtifact,
+  previewArtifact,
   restoreArtifactVersion,
-  saveArtifact,
   type ArtifactLease,
   type ArtifactNodeData,
+  type ArtifactPreview,
   type ArtifactState,
   type ArtifactType,
   type PlatformArtifact
 } from "../api/artifactApi";
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
+import { autoLayout, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
 
 interface VisualBuilderProps {
   artifactType: ArtifactType;
@@ -131,10 +137,19 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
   const [instance, setInstance] = useState<ReactFlowInstance<Node<ArtifactNodeData>, Edge> | null>(null);
+  const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const undoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   const redoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   const hydratedArtifact = useRef("");
-  const library = (LIBRARIES[artifactType] || []).filter((item) => item.label.toLowerCase().includes(search.toLowerCase()));
+  const clipboard = useRef<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] } | null>(null);
+  const catalog = useQuery({
+    queryKey: ["builder-catalog", artifactType],
+    queryFn: () => getBuilderCatalog(artifactType),
+    enabled: ["pipeline", "ontology", "workshop", "aip_logic"].includes(artifactType),
+    retry: false
+  });
+  const catalogLibrary = catalog.data?.nodes || LIBRARIES[artifactType] || [];
+  const library = catalogLibrary.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()));
 
   const versions = useQuery({
     queryKey: ["artifact-versions", artifact?.id],
@@ -169,7 +184,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const saveMutation = useMutation({
     mutationFn: ({ reason }: { reason: string }) => {
       if (!artifact || !lease) throw new Error("Select an artifact and acquire its editing lease first.");
-      return saveArtifact(artifact, { ...(artifact.state || {}), nodes: nodes as ArtifactState["nodes"], edges: edges as ArtifactState["edges"] }, lease.token, reason);
+      return applyArtifactCommands(artifact, [replaceStateCommand(nodes, edges, artifact.state)], lease.token, reason);
     },
     onSuccess: async (saved) => {
       setDirty(false);
@@ -177,6 +192,18 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
       hydratedArtifact.current = `${saved.id}:${saved.current_revision}`;
       queryClient.setQueryData<PlatformArtifact[]>(["artifacts", artifactType], (current = []) => current.map((item) => item.id === saved.id ? saved : item));
       await queryClient.invalidateQueries({ queryKey: ["artifact-versions", saved.id] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error))
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: () => {
+      if (!artifact) throw new Error("Select an artifact before previewing.");
+      return previewArtifact(artifact.id);
+    },
+    onSuccess: (result) => {
+      setPreview(result);
+      setMessage(`Preview completed in ${result.metrics.duration_ms} ms`);
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error))
   });
@@ -212,7 +239,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }
 
   function addNode(nodeType: string, position?: { x: number; y: number }) {
-    const item = LIBRARIES[artifactType].find((entry) => entry.type === nodeType);
+    const item = catalogLibrary.find((entry) => entry.type === nodeType);
     if (!item) return;
     snapshot();
     const id = `${nodeType}_${crypto.randomUUID().slice(0, 8)}`;
@@ -257,6 +284,94 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     setDirty(true);
   }
 
+  function duplicateNodes(ids = selectedNodeIds(nodes).length ? selectedNodeIds(nodes) : selectedNodeId ? [selectedNodeId] : []) {
+    if (!ids.length) return;
+    snapshot();
+    const next = duplicateSelection({ nodes, edges }, ids);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setSelectedNodeId(next.nodes.find((node) => node.selected)?.id || "");
+    setDirty(true);
+  }
+
+  function deleteSelection() {
+    const nodeIds = selectedNodeIds(nodes).length ? selectedNodeIds(nodes) : selectedNodeId ? [selectedNodeId] : [];
+    const edgeIds = edges.filter((edge) => edge.selected).map((edge) => edge.id);
+    if (!nodeIds.length && !edgeIds.length) return;
+    snapshot();
+    const next = removeSelection({ nodes, edges }, nodeIds, edgeIds);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setSelectedNodeId("");
+    setDirty(true);
+  }
+
+  function copySelection() {
+    const ids = new Set(selectedNodeIds(nodes).length ? selectedNodeIds(nodes) : selectedNodeId ? [selectedNodeId] : []);
+    if (!ids.size) return;
+    clipboard.current = {
+      nodes: structuredClone(nodes.filter((node) => ids.has(node.id))),
+      edges: structuredClone(edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)))
+    };
+    setMessage(`${ids.size} node${ids.size === 1 ? "" : "s"} copied`);
+  }
+
+  function pasteSelection() {
+    if (!clipboard.current) return;
+    const source = clipboard.current;
+    const idMap = new Map<string, string>();
+    const pastedNodes = source.nodes.map((node) => {
+      const id = `${node.data.nodeType}_${crypto.randomUUID().slice(0, 8)}`;
+      idMap.set(node.id, id);
+      return { ...structuredClone(node), id, selected: true, position: { x: node.position.x + 48, y: node.position.y + 48 } };
+    });
+    const pastedEdges = source.edges.map((edge) => ({
+      ...structuredClone(edge), id: `edge_${crypto.randomUUID().slice(0, 10)}`,
+      source: idMap.get(edge.source)!, target: idMap.get(edge.target)!, selected: false
+    }));
+    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes]);
+    setEdges((current) => [...current, ...pastedEdges]);
+    setSelectedNodeId(pastedNodes[0]?.id || "");
+    setDirty(true);
+  }
+
+  function layoutNodes() {
+    snapshot();
+    setNodes((current) => autoLayout(current));
+    setDirty(true);
+    window.setTimeout(() => instance?.fitView({ padding: 0.2, duration: 300 }), 0);
+  }
+
+  useEffect(() => {
+    function handleKeyboard(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      if (modifier && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        event.shiftKey ? redo() : undo();
+      } else if (modifier && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redo();
+      } else if (modifier && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        copySelection();
+      } else if (modifier && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        snapshot();
+        pasteSelection();
+      } else if (modifier && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        duplicateNodes();
+      } else if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        deleteSelection();
+      }
+    }
+    window.addEventListener("keydown", handleKeyboard);
+    return () => window.removeEventListener("keydown", handleKeyboard);
+  }, [nodes, edges, selectedNodeId]);
+
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
 
   if (artifacts.isLoading) return <LoadingState label={`Loading ${title} artifacts...`} />;
@@ -283,6 +398,8 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           <StatusBadge value={dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status} />
           <button title="Undo" aria-label="Undo" onClick={undo} disabled={!undoStack.current.length}><Undo2 size={16} /></button>
           <button title="Redo" aria-label="Redo" onClick={redo} disabled={!redoStack.current.length}><Redo2 size={16} /></button>
+          <button title="Auto-layout nodes" onClick={layoutNodes}><AlignHorizontalSpaceAround size={16} /> Layout</button>
+          <button onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending}><Eye size={16} /> {previewMutation.isPending ? "Running" : "Preview"}</button>
           <button onClick={() => saveMutation.mutate({ reason: "Manual save" })} disabled={!dirty || saveMutation.isPending}><Save size={16} /> Save</button>
           <button className="primary-action" onClick={async () => {
             const saved = dirty ? await saveMutation.mutateAsync({ reason: "Save before publish" }) : null;
@@ -305,44 +422,61 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
                 onDragStart={(event) => event.dataTransfer.setData("application/ontology-builder-node", item.type)}
                 onClick={() => addNode(item.type)}
               >
-                <Plus size={14} /><span><strong>{item.label}</strong><small>{item.description}</small></span>
+                <Plus size={14} /><span><strong>{item.label}</strong><small>{"category" in item ? `${item.category} · ` : ""}{item.description}</small></span>
               </button>
             ))}
           </div>
         </aside>
-        <div className="visual-flow-canvas" onDrop={drop} onDragOver={(event) => event.preventDefault()}>
-          <ReactFlow<Node<ArtifactNodeData>, Edge>
-            nodes={nodes}
-            edges={edges}
-            onInit={setInstance}
-            onNodesChange={changeNodes}
-            onEdgesChange={changeEdges}
-            onConnect={connect}
-            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-            onPaneClick={() => setSelectedNodeId("")}
-            fitView
-            snapToGrid
-            snapGrid={[16, 16]}
-            deleteKeyCode={["Backspace", "Delete"]}
-            multiSelectionKeyCode={["Control", "Meta"]}
-          >
-            <Background gap={16} size={1} />
-            <MiniMap pannable zoomable />
-            <Controls showInteractive />
-          </ReactFlow>
+        <div className="visual-builder-center">
+          <div className="visual-flow-canvas" onDrop={drop} onDragOver={(event) => event.preventDefault()}>
+            <ReactFlow<Node<ArtifactNodeData>, Edge>
+              nodes={nodes}
+              edges={edges}
+              onInit={setInstance}
+              onNodesChange={changeNodes}
+              onEdgesChange={changeEdges}
+              onConnect={connect}
+              onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+              onPaneClick={() => setSelectedNodeId("")}
+              fitView
+              snapToGrid
+              snapGrid={[16, 16]}
+              deleteKeyCode={null}
+              multiSelectionKeyCode={["Control", "Meta"]}
+              selectionOnDrag
+              panOnDrag={[1, 2]}
+            >
+              <Background gap={16} size={1} />
+              <MiniMap pannable zoomable />
+              <Controls showInteractive />
+            </ReactFlow>
+          </div>
+          <section className="builder-execution-drawer" aria-label="Builder preview and validation">
+            <div className="builder-drawer-tabs"><strong>Preview</strong><span>Validation</span><span>Evidence</span></div>
+            <div className="builder-drawer-content">
+              {preview ? (
+                <>
+                  <div className="preview-metrics">
+                    <span><strong>{preview.metrics.node_count}</strong> nodes</span>
+                    <span><strong>{preview.metrics.edge_count}</strong> edges</span>
+                    <span><strong>{preview.metrics.duration_ms} ms</strong> duration</span>
+                    <StatusBadge value={preview.status} />
+                  </div>
+                  <div className="preview-row-list">{preview.sample_output.slice(0, 6).map((row) => <span key={row.node_id}><strong>{row.label}</strong><small>{row.node_type}</small><StatusBadge value={row.status} /></span>)}</div>
+                </>
+              ) : (
+                <p>Select Preview to validate the current revision and inspect deterministic execution evidence.</p>
+              )}
+            </div>
+          </section>
         </div>
         <aside className="visual-inspector-panel">
           {selectedNode ? (
             <NodeInspector
               node={selectedNode}
               onChange={updateSelected}
-              onDuplicate={() => {
-                snapshot();
-                const copy = { ...selectedNode, id: `${selectedNode.data.nodeType}_${crypto.randomUUID().slice(0, 8)}`, position: { x: selectedNode.position.x + 32, y: selectedNode.position.y + 32 }, selected: false };
-                setNodes((current) => [...current, copy]);
-                setDirty(true);
-              }}
-              onDelete={() => changeNodes([{ id: selectedNode.id, type: "remove" }])}
+              onDuplicate={() => duplicateNodes([selectedNode.id])}
+              onDelete={deleteSelection}
             />
           ) : (
             <div className="inspector-empty"><Archive size={22} /><strong>Select a node</strong><p>Configure fields, bindings, behavior, and validation from this panel.</p></div>
@@ -359,6 +493,16 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
                 }}>Restore</button>}
               </div>
             ))}
+          </details>
+          <details className="version-history" open={Boolean(artifact.validation_targets?.length)}>
+            <summary>Validation targets <StatusBadge value={artifact.validation?.status || "UNKNOWN"} /></summary>
+            {(artifact.validation_targets || []).length ? artifact.validation_targets.map((target, index) => (
+              <div className="version-row" key={`${target.path}-${index}`}><span><strong>{target.severity}</strong><small>{target.message}</small></span></div>
+            )) : <div className="version-row"><span><strong>Ready</strong><small>No targeted validation issues.</small></span></div>}
+          </details>
+          <details className="version-history">
+            <summary>Evidence</summary>
+            {(artifact.evidence_links || []).map((link) => <a className="builder-evidence-link" href={link.href} key={link.href}>{link.label}</a>)}
           </details>
         </aside>
       </div>
