@@ -595,6 +595,70 @@ button:disabled {
   text-decoration: underline;
 }
 
+.pipeline-node-config {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #d9e1e5;
+}
+
+.pipeline-config-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pipeline-node-config label {
+  display: grid;
+  gap: 4px;
+  color: #536570;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pipeline-node-config input,
+.pipeline-node-config select,
+.pipeline-node-config textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #c7d1d7;
+  border-radius: 4px;
+  background: #fff;
+  color: #1e303a;
+  font: inherit;
+  font-weight: 400;
+}
+
+.pipeline-node-config textarea {
+  resize: vertical;
+}
+
+.inline-form-error {
+  padding: 7px 8px;
+  border: 1px solid #d7a6a1;
+  border-radius: 4px;
+  background: #fff1ef;
+  color: #8a2f28;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pipeline-lineage-details {
+  margin-top: 12px;
+  border-top: 1px solid #d9e1e5;
+  padding-top: 10px;
+}
+
+.pipeline-lineage-details summary {
+  cursor: pointer;
+  color: #405560;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .visual-builder-empty {
   min-height: 65vh;
   display: grid;
