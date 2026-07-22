@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { LogIn, LogOut, Search, User } from "lucide-react";
 import { api, postJson } from "./api";
 import {
   bootstrapProjectDemo,
@@ -8,7 +10,6 @@ import {
   getValidationState,
   resetProjectDemo
 } from "./api/workspaceState";
-import { MiniGraph } from "./components/canvas/PipelineCanvas";
 import {
   DataTable,
   DeveloperEvidence,
@@ -37,6 +38,8 @@ import { Vertex } from "./workspaces/Vertex";
 import { Fusion } from "./workspaces/Fusion";
 import { Analytics } from "./workspaces/Analytics";
 import { Delivery } from "./workspaces/Delivery";
+import { PlatformGraphWorkspace } from "./workspaces/PlatformGraph";
+import { getAuthSession, logout, type AuthSession } from "./api/authApi";
 import type {
   CommandCenterSummary,
   CommandCenterUiState,
@@ -48,13 +51,18 @@ import type {
   WorkflowState
 } from "./types";
 
-const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "graph", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"]);
+const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "workshop", "aip", "investigations", "entity-resolution", "graph", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"]);
+const VisualBuilder = lazy(() => import("./workspaces/VisualBuilder").then((module) => ({ default: module.VisualBuilder })));
 
 const NAV_ITEMS = [
   { id: "command-center", label: "Command Center", hint: "Guided asset reliability workflow" },
   { id: "imports", label: "Data Onboarding", hint: "Upload, map, transform, connect, replay" },
   { id: "ontology", label: "Ontology Manager", hint: "Generate and manage object types" },
   { id: "pipeline", label: "Pipeline Builder", hint: "Canvas, previews, outputs" },
+  { id: "workshop", label: "Workshop", hint: "Compose operational applications" },
+  { id: "aip", label: "AIP Logic", hint: "Build governed decision logic" },
+  { id: "investigations", label: "Investigations", hint: "Evidence, entities, hypotheses" },
+  { id: "entity-resolution", label: "Entity Resolution", hint: "Review and merge duplicates" },
   { id: "graph", label: "Platform Graph", hint: "Inspect relationships and evidence" },
   { id: "validation", label: "Validation", hint: "Trust, conformance, schema health" },
   { id: "data-media", label: "Data & Media", hint: "Upload files, datasets, media" },
@@ -67,7 +75,7 @@ const NAV_ITEMS = [
   { id: "delivery", label: "Delivery", hint: "Marketplace, DevOps, code & compute" }
 ];
 
-const LEGACY_ITEMS = ["aip", "map", "workshop", "object-explorer", "models", "decision", "ops", "investigations"];
+const LEGACY_ITEMS = ["map", "object-explorer", "models", "decision", "ops"];
 
 const ENDPOINT_INVENTORY: TableRow[] = [
   {
@@ -125,19 +133,30 @@ interface DataAssetsResponseItem extends TableRow {
   display_name?: string;
 }
 
-interface GraphOverview {
-  nodes?: TableRow[];
-  edges?: TableRow[];
-}
-
 export function App() {
-  const [view, setView] = useState(currentWorkspaceView(CORE_VIEWS));
+  useLocation();
+  const view = currentWorkspaceView(CORE_VIEWS);
   const backendReadiness = useAsyncState<ProjectReadiness>(getProjectReadiness, []);
+  const authSession = useAsyncState<AuthSession>(getAuthSession, []);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [recentViews, setRecentViews] = useState<string[]>(() => JSON.parse(localStorage.getItem("ontology.recentViews") || "[]"));
   useEffect(() => {
-    const handler = () => setView(currentWorkspaceView(CORE_VIEWS));
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
+    const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  function openView(nextView: string) {
+    navigate(nextView);
+    const nextRecent = [nextView, ...recentViews.filter((item) => item !== nextView)].slice(0, 5);
+    setRecentViews(nextRecent);
+    localStorage.setItem("ontology.recentViews", JSON.stringify(nextRecent));
+  }
 
   return (
     <div className="app-shell">
@@ -149,37 +168,81 @@ export function App() {
             <small>React evaluator shell</small>
           </div>
         </div>
+        <button className="command-palette-trigger" onClick={() => setPaletteOpen(true)}><Search size={16} /><span>Search and commands</span><kbd>Ctrl K</kbd></button>
         <nav>
           {NAV_ITEMS.map((item) => (
-            <button key={item.id} className={classNames("nav-item", view === item.id && "active")} onClick={() => navigate(item.id)}>
+            <button key={item.id} className={classNames("nav-item", view === item.id && "active")} onClick={() => openView(item.id)}>
               <strong>{item.label}</strong>
               <span>{item.hint}</span>
             </button>
           ))}
         </nav>
+        {recentViews.length ? <div className="recent-links"><strong>Recent</strong>{recentViews.map((item) => {
+          const found = NAV_ITEMS.find((entry) => entry.id === item);
+          return found ? <button key={item} onClick={() => openView(item)}>{found.label}</button> : null;
+        })}</div> : null}
         <div className="legacy-links">
           <strong>Legacy during migration</strong>
           {LEGACY_ITEMS.map((item) => <a key={item} href={`/workspace/${item}?legacy=1`}>{item}</a>)}
         </div>
+        <AuthIdentity session={authSession.value} loading={authSession.loading} error={authSession.error} />
       </aside>
       <main className="workspace">
         <PlatformFlow currentView={view} />
         <BackendConnection readiness={backendReadiness.value} loading={backendReadiness.loading} error={backendReadiness.error} />
-        {view === "command-center" && <CommandCenter />}
-        {view === "imports" && <DataOnboarding />}
-        {view === "ontology" && <OntologyManager />}
-        {view === "pipeline" && <PipelineBuilder />}
-        {view === "graph" && <GraphWorkspace />}
-        {view === "validation" && <ValidationWorkspace />}
-        {view === "data-media" && <DataMedia />}
-        {view === "automate" && <Automate />}
-        {view === "security" && <Security />}
-        {view === "control-panel" && <ControlPanel />}
-        {view === "vertex" && <Vertex />}
-        {view === "fusion" && <Fusion />}
-        {view === "analytics" && <Analytics />}
-        {view === "delivery" && <Delivery />}
+        <Suspense fallback={<LoadingState label="Loading visual workspace..." />}>
+          {view === "command-center" && <CommandCenter />}
+          {view === "imports" && <DataOnboarding />}
+          {view === "ontology" && <OntologyManager />}
+          {view === "pipeline" && <PipelineBuilder />}
+          {view === "workshop" && <VisualBuilder artifactType="workshop" title="Workshop" subtitle="Compose responsive operational applications from governed data and actions." />}
+          {view === "aip" && <VisualBuilder artifactType="aip_logic" title="AIP Logic" subtitle="Build typed, governed decision flows with visible tools and approval gates." />}
+          {view === "investigations" && <VisualBuilder artifactType="investigation_graph" title="Investigations" subtitle="Organize entities, evidence, hypotheses, findings, and reports." />}
+          {view === "entity-resolution" && <VisualBuilder artifactType="entity_resolution" title="Entity Resolution" subtitle="Review candidate matches and stage merge or split decisions." />}
+          {view === "graph" && <PlatformGraphWorkspace />}
+          {view === "validation" && <ValidationWorkspace />}
+          {view === "data-media" && <DataMedia />}
+          {view === "automate" && <Automate />}
+          {view === "security" && <Security />}
+          {view === "control-panel" && <ControlPanel />}
+          {view === "vertex" && <Vertex />}
+          {view === "fusion" && <Fusion />}
+          {view === "analytics" && <Analytics />}
+          {view === "delivery" && <Delivery />}
+        </Suspense>
       </main>
+      {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} onOpen={(item) => { openView(item); setPaletteOpen(false); }} /> : null}
+    </div>
+  );
+}
+
+function AuthIdentity({ session, loading, error }: { session: AuthSession | null; loading: boolean; error: string }) {
+  if (loading) return <div className="auth-identity"><User size={16} /><span>Checking session...</span></div>;
+  if (error || !session?.authenticated) return <a className="auth-identity" href={`/auth/login?next=${encodeURIComponent(window.location.pathname)}`}><LogIn size={16} /><span>Sign in</span></a>;
+  return (
+    <div className="auth-identity">
+      <User size={16} />
+      <span><strong>{session.display_name}</strong><small>{session.roles.join(", ")}</small></span>
+      {session.auth_mode === "oidc" ? <button title="Sign out" aria-label="Sign out" onClick={async () => { await logout(); window.location.assign("/auth/login"); }}><LogOut size={15} /></button> : null}
+    </div>
+  );
+}
+
+function CommandPalette({ onClose, onOpen }: { onClose: () => void; onOpen: (view: string) => void }) {
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => NAV_ITEMS.filter((item) => `${item.label} ${item.hint}`.toLowerCase().includes(query.toLowerCase())), [query]);
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+  return (
+    <div className="command-palette-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Search workspaces" onMouseDown={(event) => event.stopPropagation()}>
+        <label><Search size={18} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a workspace or capability" /></label>
+        <div>{filtered.map((item) => <button key={item.id} onClick={() => onOpen(item.id)}><strong>{item.label}</strong><small>{item.hint}</small></button>)}</div>
+        {!filtered.length ? <p>No matching workspaces.</p> : null}
+      </section>
     </div>
   );
 }
@@ -429,7 +492,7 @@ function DataOnboarding() {
       }} />
       <div className="two-col">
         <Panel title="CSV Import and Transform" action={<button onClick={createCsvJob}>Create Job</button>}>
-          <textarea value={csvContent} onChange={(event) => setCsvContent(event.target.value)} />
+          <textarea aria-label="CSV records" value={csvContent} onChange={(event) => setCsvContent(event.target.value)} />
           <div className="button-row">
             <button onClick={suggestMapping} disabled={!job?.id}>Suggest Mapping</button>
             <button onClick={transformJob} disabled={!job?.id}>Apply Transforms</button>
@@ -464,51 +527,6 @@ function DataOnboarding() {
   );
 }
 
-function GraphWorkspace() {
-  const [query, setQuery] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState("");
-  const graph = useAsyncState<GraphOverview>(() => api<GraphOverview>("/graph/overview"), []);
-  const nodes = graph.value?.nodes || [];
-  const filteredNodes = nodes.filter((node) => {
-    const haystack = `${asString(node.id)} ${asString(node.label)} ${asString(node.kind || node.type)}`.toLowerCase();
-    return haystack.includes(query.toLowerCase());
-  });
-  const selectedNode = nodes.find((node) => asString(node.id) === selectedNodeId) || filteredNodes[0];
-  const nodeEdges = (graph.value?.edges || []).filter((edge) => {
-    const selectedId = asString(selectedNode?.id);
-    return selectedId && (asString(edge.source || edge.source_id) === selectedId || asString(edge.target || edge.target_id) === selectedId);
-  });
-  return (
-    <Page title="Platform Graph" subtitle="Searchable overview of datasets, pipelines, objects, incidents, and reports.">
-      <ErrorBanner message={graph.error} />
-      {graph.loading && <LoadingState label="Loading platform graph..." />}
-      <div className="button-row top-actions">
-        <input className="compact-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search graph nodes..." />
-        <button onClick={() => setQuery("")}>Clear</button>
-      </div>
-      <div className="graph-workspace-grid">
-        <Panel title="Graph Canvas">
-          <MiniGraph nodes={filteredNodes} edges={graph.value?.edges || []} />
-        </Panel>
-        <Panel title="Selected Node">
-          {selectedNode ? <KeyValueGrid data={selectedNode} /> : <EmptyState title="No node selected" description="Search for a dataset, pipeline, object, incident, model, or report." />}
-        </Panel>
-      </div>
-      <div className="two-col">
-        <Panel title="Nodes">
-          <DataTable rows={filteredNodes.map((node) => ({ ...node, select: asString(node.id) === selectedNodeId ? "selected" : "click row id" }))} />
-          <div className="button-row graph-node-buttons">
-            {filteredNodes.slice(0, 8).map((node) => (
-              <button key={asString(node.id)} onClick={() => setSelectedNodeId(asString(node.id))}>{asString(node.label || node.id).slice(0, 28)}</button>
-            ))}
-          </div>
-        </Panel>
-        <Panel title="Related Edges"><DataTable rows={nodeEdges} /></Panel>
-      </div>
-    </Page>
-  );
-}
-
 function ValidationWorkspace() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -536,7 +554,7 @@ function ValidationWorkspace() {
         <Panel title="Project Readiness">
           <DataTable rows={readiness.value?.checks || []} />
         </Panel>
-        <Panel title="Docs Matrix" action={<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+        <Panel title="Docs Matrix" action={<select aria-label="Filter documentation status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="ALL">All statuses</option>
           <option value="MATCH">Match</option>
           <option value="LOCAL_ANALOG">Local analog</option>

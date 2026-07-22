@@ -178,6 +178,22 @@ export function PipelineBuilder() {
   const outputRows = asRows((outputs?.outputs || canvas?.outputs)?.nodes);
   const buildRows = asRows((outputs?.outputs || canvas?.outputs)?.builds);
 
+  async function createGraph() {
+    setActionStatus("Creating pipeline draft...");
+    const graph = await postJson<{ id: string }>("/pipeline-builder/graphs", {
+      display_name: "Untitled pipeline",
+      description: "Visual pipeline draft",
+      nodes: [],
+      edges: [],
+      parameters: {},
+      status: "DRAFT"
+    });
+    setSelectedGraphId(graph.id);
+    setSelectedNodeId("");
+    setActionStatus("Pipeline draft created. Drag an input or transform onto the canvas.");
+    setRefreshKey((key) => key + 1);
+  }
+
   return (
     <section className="workbench-page pipeline-workbench-page">
       <div className="builder-shell">
@@ -186,13 +202,14 @@ export function PipelineBuilder() {
             title={canvas?.graph.display_name || "Pipeline graph"}
             tabs={["Graph", "Proposals", "History"]}
             actions={<>
+              <button onClick={createGraph}>New pipeline</button>
               <button onClick={() => setZoom((value) => Math.max(0.55, value - 0.08))}>-</button>
               <button onClick={() => setZoom(0.86)}>Fit</button>
               <button onClick={() => setZoom((value) => Math.min(1.35, value + 0.08))}>+</button>
               <button onClick={saveLayout}>Save layout</button>
               <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
-              <button onClick={() => run("validate")}>Propose</button>
-              <button onClick={() => run("deliver")}>Deploy</button>
+              <button onClick={() => run("validate")} disabled={!selectedGraphId}>Propose</button>
+              <button onClick={() => run("deliver")} disabled={!selectedGraphId}>Deploy</button>
               <a className="legacy-button compact" href="/workspace/pipeline?legacy=1">Legacy</a>
             </>}
           />

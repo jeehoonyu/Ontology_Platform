@@ -1,0 +1,50 @@
+{
+  "realm": "ontology",
+  "enabled": true,
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {"name": "viewer"},
+      {"name": "editor"},
+      {"name": "operator"},
+      {"name": "approver"},
+      {"name": "publisher"},
+      {"name": "administrator"}
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ontology-platform",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ],
+      "redirectUris": [
+        "http://localhost:8000/auth/callback",
+        "http://localhost:18000/auth/callback",
+        "https://*/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8000",
+        "http://localhost:18000",
+        "https://*"
+      ]
+    }
+  ]
+}
