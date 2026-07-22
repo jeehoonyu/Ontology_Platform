@@ -113,6 +113,16 @@ export function getPipelineNodeDetails(graphId: string, nodeId: string): Promise
   );
 }
 
+export function updatePipelineNode(graphId: string, nodeId: string, label: string, config: JsonObject): Promise<PipelineNodeDetails> {
+  return api<PipelineNodeDetails>(
+    `/pipeline-builder/graphs/${encodeURIComponent(graphId)}/nodes/${encodeURIComponent(nodeId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ label, config, actor: "react" })
+    }
+  );
+}
+
 export function getPipelineOutputs(graphId: string): Promise<PipelineOutputsState> {
   return api<PipelineOutputsState>(`/ui-state/pipeline/${encodeURIComponent(graphId)}/outputs`);
 }

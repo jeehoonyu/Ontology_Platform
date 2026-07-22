@@ -86,6 +86,119 @@ NODE_TYPE_CATALOG = [
     {"type": "dataset_output", "label": "Dataset Output", "category": "output", "description": "Write delivered rows to a local output DataAsset."},
 ]
 
+NODE_CONFIGURATION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "input_dataset": {"fields": [
+        {"name": "asset_id", "label": "Dataset", "type": "resource", "resource_type": "data_asset", "required": True},
+    ]},
+    "filter": {"fields": [
+        {"name": "field", "label": "Field", "type": "field", "required": True},
+        {"name": "operator", "label": "Operator", "type": "select", "options": ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "in"], "required": True},
+        {"name": "value", "label": "Value", "type": "scalar", "required": True},
+    ]},
+    "project": {"fields": [{"name": "fields", "label": "Fields", "type": "field_list", "required": True}]},
+    "select": {"fields": [{"name": "fields", "label": "Fields", "type": "field_list", "required": True}]},
+    "rename": {"fields": [{"name": "mapping", "label": "Rename mapping", "type": "key_value", "required": True}]},
+    "cast": {"fields": [
+        {"name": "field", "label": "Field", "type": "field", "required": True},
+        {"name": "target_type", "label": "Target type", "type": "select", "options": ["string", "integer", "number", "boolean", "timestamp"], "required": True},
+    ]},
+    "derive": {"fields": [
+        {"name": "target_field", "label": "Output field", "type": "string", "required": True},
+        {"name": "operation", "label": "Operation", "type": "select", "options": ["copy", "concat", "add", "subtract", "multiply", "divide", "lower", "upper"], "required": True},
+        {"name": "source_fields", "label": "Source fields", "type": "field_list", "required": True},
+    ]},
+    "fill_nulls": {"fields": [
+        {"name": "field", "label": "Field", "type": "field", "required": True},
+        {"name": "value", "label": "Default value", "type": "string", "required": True},
+    ]},
+    "normalize": {"fields": [
+        {"name": "fields", "label": "Fields", "type": "field_list", "required": True},
+        {"name": "mode", "label": "Mode", "type": "select", "options": ["trim", "lower", "upper", "title"], "required": True},
+    ]},
+    "deduplicate": {"fields": [
+        {"name": "keys", "label": "Key fields", "type": "field_list", "required": True},
+        {"name": "keep", "label": "Keep", "type": "select", "options": ["first", "last"], "required": True},
+    ]},
+    "join": {"fields": [
+        {"name": "left_key", "label": "Left key", "type": "field", "required": True},
+        {"name": "right_key", "label": "Right key", "type": "field", "required": True},
+        {"name": "how", "label": "Join type", "type": "select", "options": ["inner", "left"], "required": True},
+        {"name": "right_asset_id", "label": "Right dataset", "type": "resource", "resource_type": "data_asset"},
+    ]},
+    "union": {"fields": [{"name": "asset_id", "label": "Additional dataset", "type": "resource", "resource_type": "data_asset"}]},
+    "aggregate": {"fields": [
+        {"name": "group_by", "label": "Group fields", "type": "field_list"},
+        {"name": "field", "label": "Value field", "type": "field"},
+        {"name": "operation", "label": "Aggregation", "type": "select", "options": ["count", "sum", "avg", "min", "max"], "required": True},
+        {"name": "target_field", "label": "Output field", "type": "string", "required": True},
+    ]},
+    "sort": {"fields": [
+        {"name": "field", "label": "Sort field", "type": "field", "required": True},
+        {"name": "direction", "label": "Direction", "type": "select", "options": ["asc", "desc"], "required": True},
+    ]},
+    "limit": {"fields": [{"name": "limit", "label": "Row limit", "type": "integer", "required": True, "minimum": 1}]},
+    "unique_id": {"fields": [
+        {"name": "fields", "label": "Identity fields", "type": "field_list", "required": True},
+        {"name": "target_field", "label": "Output field", "type": "string", "required": True},
+    ]},
+    "pivot": {"fields": [
+        {"name": "index", "label": "Index fields", "type": "field_list", "required": True},
+        {"name": "column", "label": "Category field", "type": "field", "required": True},
+        {"name": "value", "label": "Value field", "type": "field", "required": True},
+        {"name": "aggregation", "label": "Aggregation", "type": "select", "options": ["first", "sum", "count"], "required": True},
+    ]},
+    "unpivot": {"fields": [
+        {"name": "id_fields", "label": "Identity fields", "type": "field_list"},
+        {"name": "value_fields", "label": "Value fields", "type": "field_list", "required": True},
+        {"name": "name_field", "label": "Name output", "type": "string", "required": True},
+        {"name": "value_field", "label": "Value output", "type": "string", "required": True},
+    ]},
+    "window": {"fields": [
+        {"name": "partition_by", "label": "Partition fields", "type": "field_list"},
+        {"name": "order_by", "label": "Order field", "type": "field", "required": True},
+        {"name": "operation", "label": "Operation", "type": "select", "options": ["row_number", "rank", "running_sum"], "required": True},
+        {"name": "value_field", "label": "Value field", "type": "field"},
+        {"name": "target_field", "label": "Output field", "type": "string", "required": True},
+    ]},
+    "validate": {"fields": [
+        {"name": "field", "label": "Field", "type": "field", "required": True},
+        {"name": "check", "label": "Check", "type": "select", "options": ["required", "type", "range", "allowed"], "required": True},
+        {"name": "severity", "label": "Severity", "type": "select", "options": ["warning", "error"], "required": True},
+    ]},
+    "derive_geo_point": {"fields": [
+        {"name": "latitude_field", "label": "Latitude field", "type": "field", "required": True},
+        {"name": "longitude_field", "label": "Longitude field", "type": "field", "required": True},
+        {"name": "target_field", "label": "Geometry field", "type": "string", "required": True},
+    ]},
+    "derive_mgrs": {"fields": [
+        {"name": "latitude_field", "label": "Latitude field", "type": "field", "required": True},
+        {"name": "longitude_field", "label": "Longitude field", "type": "field", "required": True},
+        {"name": "target_field", "label": "MGRS field", "type": "string", "required": True},
+        {"name": "precision", "label": "Precision", "type": "integer", "minimum": 1, "maximum": 5},
+    ]},
+    "spatial_filter": {"fields": [
+        {"name": "geometry_field", "label": "Geometry field", "type": "field", "required": True},
+        {"name": "mode", "label": "Mode", "type": "select", "options": ["radius", "geofence"], "required": True},
+        {"name": "radius_meters", "label": "Radius (meters)", "type": "number"},
+    ]},
+    "spatial_join": {"fields": [
+        {"name": "left_geometry_field", "label": "Left geometry", "type": "field", "required": True},
+        {"name": "right_geometry_field", "label": "Right geometry", "type": "field", "required": True},
+        {"name": "distance_meters", "label": "Maximum distance", "type": "number", "required": True},
+    ]},
+    "llm_assist": {"fields": [
+        {"name": "source_fields", "label": "Context fields", "type": "field_list", "required": True},
+        {"name": "prompt", "label": "Prompt", "type": "textarea", "required": True},
+        {"name": "target_field", "label": "Output field", "type": "string", "required": True},
+    ]},
+    "dataset_output": {"fields": [{"name": "asset_id", "label": "Output dataset", "type": "string", "required": True}]},
+    "ontology_output": {"fields": [
+        {"name": "object_type_id", "label": "Object type", "type": "resource", "resource_type": "object_type", "required": True},
+        {"name": "primary_key", "label": "Primary key field", "type": "field", "required": True},
+        {"name": "property_mapping", "label": "Property mapping", "type": "key_value", "required": True},
+    ]},
+}
+
 
 class PipelineBuilderGraph(Base):
     __tablename__ = "pipeline_builder_graphs"
@@ -183,6 +296,12 @@ class PipelineNodePreviewRequest(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PipelineNodeUpdateRequest(BaseModel):
+    label: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    actor: str = "pipeline_builder"
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -193,7 +312,11 @@ def _new_id() -> str:
 
 @router.get("/pipeline-builder/node-types")
 def list_node_types():
-    return {"node_types": NODE_TYPE_CATALOG}
+    return {"node_types": _node_catalog_payload()}
+
+
+def _node_catalog_payload() -> List[Dict[str, Any]]:
+    return [{**item, "configuration_schema": NODE_CONFIGURATION_SCHEMAS.get(item["type"], {"fields": []})} for item in NODE_TYPE_CATALOG]
 
 
 @router.get("/ui-state/pipeline")
@@ -214,7 +337,7 @@ def pipeline_ui_state(db: Session = Depends(get_db)):
             {"id": "version_draft", "label": "Create versioned draft", "method": "POST", "path": "/artifacts/adopt"},
         ],
         "graphs": [PipelineGraphRead.model_validate(graph).model_dump() for graph in graphs],
-        "node_library": NODE_TYPE_CATALOG,
+        "node_library": _node_catalog_payload(),
         "selected_canvas": _canvas_payload(db, selected) if selected else None,
         "empty_state": None if selected else {
             "title": "No pipeline graph yet",
@@ -308,6 +431,35 @@ def _node_from_request(graph: PipelineBuilderGraph, body: PipelineInsertNodeRequ
     }
 
 
+def _validate_node_config(node_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    schema = NODE_CONFIGURATION_SCHEMAS.get(node_type, {"fields": []})
+    errors: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+    for field in schema.get("fields", []):
+        name = field["name"]
+        value = config.get(name)
+        if field.get("required") and (value is None or value == "" or value == [] or value == {}):
+            errors.append({"field": name, "code": "REQUIRED", "message": f"{field.get('label', name)} is required"})
+            continue
+        if value is None:
+            continue
+        if field.get("type") == "integer":
+            try:
+                integer = int(value)
+                if field.get("minimum") is not None and integer < int(field["minimum"]):
+                    errors.append({"field": name, "code": "MINIMUM", "message": f"Value must be at least {field['minimum']}"})
+                if field.get("maximum") is not None and integer > int(field["maximum"]):
+                    errors.append({"field": name, "code": "MAXIMUM", "message": f"Value must be no more than {field['maximum']}"})
+            except (TypeError, ValueError):
+                errors.append({"field": name, "code": "TYPE", "message": "Value must be an integer"})
+        if field.get("type") == "select" and value not in field.get("options", []):
+            errors.append({"field": name, "code": "OPTION", "message": f"Choose one of: {', '.join(field.get('options', []))}"})
+    unknown = sorted(set(config) - {field["name"] for field in schema.get("fields", [])})
+    if unknown:
+        warnings.append({"code": "UNKNOWN_CONFIG", "message": f"Unrecognized configuration fields: {', '.join(unknown)}"})
+    return {"status": "INVALID" if errors else "VALID", "errors": errors, "warnings": warnings}
+
+
 def _edge_exists(edges: List[Dict[str, Any]], source: str, target: str) -> bool:
     return any(_edge_source(edge) == source and _edge_target(edge) == target for edge in edges)
 
@@ -387,7 +539,7 @@ def _canvas_payload(db: Session, graph: PipelineBuilderGraph, *, selected_node_i
             {"id": "aip", "label": "AIP", "actions": ["llm_assist"]},
             {"id": "deploy", "label": "Deploy", "actions": ["validate", "preview", "deliver"]},
         ],
-        "node_library": NODE_TYPE_CATALOG,
+        "node_library": _node_catalog_payload(),
         "legend": [
             {"category": "input", "label": "Raw Input", "color": "#7d8b99"},
             {"category": "transform", "label": "Transform", "color": "#d49b00"},
@@ -427,6 +579,7 @@ def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str
         "columns": [],
         "schema": {"fields": []},
     }
+    execution: Dict[str, Any] = {}
     try:
         execution = _execute_graph(db, graph, write_ontology=False)
         output = execution.get("node_outputs", {}).get(node_id, {})
@@ -448,6 +601,20 @@ def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str
             "error": exc.detail,
         }
     node_type = _node_type(node)
+    config = _config(node)
+    available_fields = [field.get("name") for field in preview.get("columns", []) if field.get("name")]
+    upstream_ids = _predecessors(graph).get(node_id, [])
+    field_lineage = []
+    for field_name in available_fields:
+        sources = []
+        for upstream_id in upstream_ids:
+            upstream_output = (execution or {}).get("node_outputs", {}).get(upstream_id, {})
+            if field_name in [field.get("name") for field in (upstream_output.get("schema") or {}).get("fields", [])]:
+                sources.append({"node_id": upstream_id, "field": field_name})
+        if not sources and node_type in {"derive", "unique_id", "derive_geo_point", "derive_mgrs", "window"}:
+            source_names = config.get("source_fields") or config.get("fields") or [config.get("latitude_field"), config.get("longitude_field")]
+            sources = [{"node_id": upstream_ids[0] if upstream_ids else None, "field": value} for value in source_names if value]
+        field_lineage.append({"field": field_name, "sources": sources, "operation": node_type})
     context_actions = [
         {"id": "transform", "label": "Transform", "node_type": "filter"},
         {"id": "split", "label": "Split", "node_type": "project"},
@@ -470,8 +637,12 @@ def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str
         },
         "metadata": {
             "type": node_type,
-            "config": _config(node),
-            "upstream": _predecessors(graph).get(node_id, []),
+            "config": config,
+            "configuration_schema": NODE_CONFIGURATION_SCHEMAS.get(node_type, {"fields": []}),
+            "configuration_validation": _validate_node_config(node_type, config),
+            "available_fields": available_fields,
+            "field_lineage": field_lineage,
+            "upstream": upstream_ids,
             "downstream": [_edge_target(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id],
         },
         "preview": preview,
@@ -507,7 +678,7 @@ def _node_suggestions_payload(db: Session, graph: PipelineBuilderGraph, node_id:
         "graph_id": graph.id,
         "node_id": node_id,
         "suggestions": suggestions,
-        "insertable_node_types": NODE_TYPE_CATALOG,
+        "insertable_node_types": _node_catalog_payload(),
         "warnings": validation.get("warnings", []),
         "errors": [error for error in validation.get("errors", []) if error.get("node_id") in {None, node_id}],
     }
@@ -647,7 +818,7 @@ def _filter_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dic
     elif isinstance(filters, list):
         specs = filters
     else:
-        specs = [{"field": config.get("field"), "op": config.get("op", "equals"), "value": config.get("value")}]
+        specs = [{"field": config.get("field"), "op": config.get("op") or config.get("operator", "equals"), "value": config.get("value")}]
     return [
         row for row in rows
         if all(_compare(_value(row, spec.get("field")), spec.get("op", "equals"), spec.get("value")) for spec in specs if spec.get("field"))
@@ -687,7 +858,7 @@ def _cast_value(value: Any, target_type: str) -> Any:
 
 
 def _cast_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    mapping = config.get("mapping") or config.get("types") or {}
+    mapping = config.get("mapping") or config.get("types") or ({config["field"]: config.get("target_type")} if config.get("field") and config.get("target_type") else {})
     on_error = str(config.get("on_error", "null")).lower()
     output = []
     for row in rows:
@@ -749,13 +920,13 @@ def _derive_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dic
 
 
 def _fill_nulls(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    defaults = config.get("defaults") or config.get("mapping") or {}
+    defaults = config.get("defaults") or config.get("mapping") or ({config["field"]: config.get("value")} if config.get("field") else {})
     return [{**row, **{field: value for field, value in defaults.items() if _value(row, field) is None}} for row in rows]
 
 
 def _normalize_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
     fields = config.get("fields") or []
-    case = str(config.get("case", "preserve")).lower()
+    case = str(config.get("case") or config.get("mode", "preserve")).lower()
     output = []
     for row in rows:
         result = copy.deepcopy(row)
@@ -792,7 +963,7 @@ def _pivot_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict
         index_fields = [index_fields]
     column_field = config.get("column") or config.get("column_field")
     value_field = config.get("value") or config.get("value_field")
-    operation = str(config.get("operation", "first")).lower()
+    operation = str(config.get("operation") or config.get("aggregation", "first")).lower()
     grouped: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
     for row in rows:
         key = tuple(_value(row, field) for field in index_fields)
@@ -828,7 +999,7 @@ def _window_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dic
     order_by = config.get("order_by")
     operation = str(config.get("operation", "row_number")).lower()
     target = config.get("target_field") or operation
-    field = config.get("field")
+    field = config.get("field") or config.get("value_field")
     partitions: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
     for row in rows:
         partitions.setdefault(tuple(_value(row, item) for item in partition_by), []).append(copy.deepcopy(row))
@@ -880,7 +1051,11 @@ def _row_validation_errors(row: Dict[str, Any], checks: List[Dict[str, Any]]) ->
 
 
 def _validate_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    checks = config.get("checks") or []
+    checks = config.get("checks") or ([{
+        "field": config.get("field"), "type": config.get("check", "required"),
+        "expected": config.get("expected"), "min": config.get("min"), "max": config.get("max"),
+        "values": config.get("values") or config.get("allowed_values"),
+    }] if config.get("field") else [])
     on_error = str(config.get("on_error", "annotate")).lower()
     output = []
     for row in rows:
@@ -939,7 +1114,7 @@ def _spatial_filter_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> 
 
 
 def _spatial_join_rows(left_rows: List[Dict[str, Any]], right_rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    max_distance = float(config.get("max_distance_meters", 1000))
+    max_distance = float(config.get("max_distance_meters") or config.get("distance_meters", 1000))
     left_field = config.get("left_geometry_field") or "geometry"
     right_field = config.get("right_geometry_field") or "geometry"
     output = []
@@ -986,7 +1161,10 @@ def _aggregate_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[
     group_by = config.get("group_by") or []
     if isinstance(group_by, str):
         group_by = [group_by]
-    metrics = config.get("metrics") or [{"operation": "count", "alias": "count"}]
+    metrics = config.get("metrics") or [{
+        "operation": config.get("operation", "count"), "field": config.get("field"),
+        "alias": config.get("target_field") or config.get("alias") or "count",
+    }]
     grouped: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
     for row in rows:
         key = tuple(_value(row, field) for field in group_by) if group_by else ("all",)
@@ -1344,6 +1522,33 @@ def update_graph_layout(graph_id: str, body: PipelineLayoutRequest, db: Session 
     db.commit()
     db.refresh(graph)
     return _canvas_payload(db, graph)
+
+
+@router.patch("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}")
+def update_pipeline_node(graph_id: str, node_id: str, body: PipelineNodeUpdateRequest, db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    index, node = _find_node(graph, node_id)
+    next_node = copy.deepcopy(node)
+    if body.label is not None:
+        label = body.label.strip()
+        if not label:
+            raise HTTPException(status_code=422, detail="Node label cannot be empty")
+        next_node["label"] = label
+    if body.config is not None:
+        validation = _validate_node_config(_node_type(node), body.config)
+        if validation["status"] == "INVALID":
+            raise HTTPException(status_code=422, detail={"message": "Node configuration is invalid", "validation": validation})
+        next_node["config"] = body.config
+    nodes = list(graph.nodes or [])
+    nodes[index] = next_node
+    graph.nodes = nodes
+    graph.updated_at = _now()
+    _audit_graph(db, body.actor, "pipeline_builder.node.updated", graph, {
+        "node_id": node_id, "node_type": _node_type(node), "config_fields": sorted((body.config or {}).keys()),
+    })
+    db.commit()
+    db.refresh(graph)
+    return _node_details_payload(db, graph, node_id)
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes")
