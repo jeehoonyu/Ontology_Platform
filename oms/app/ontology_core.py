@@ -240,6 +240,24 @@ class ObjectTypePropertyOrderRequest(BaseModel):
     actor: str = "ontology_manager"
 
 
+class OntologyFieldMapping(BaseModel):
+    source_field: str
+    target_property: str
+
+
+class OntologyMappingPreviewRequest(BaseModel):
+    asset_id: str
+    object_type_id: str
+    mappings: List[OntologyFieldMapping] = Field(default_factory=list)
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class OntologyDatasourceMappingRequest(BaseModel):
+    asset_id: str
+    mappings: List[OntologyFieldMapping] = Field(default_factory=list)
+    actor: str = "ontology_manager"
+
+
 class ActionLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -538,6 +556,100 @@ def _references_object_type(payload: Any, object_type_id: str) -> bool:
     return str(payload) == object_type_id
 
 
+def _mapping_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "double"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "geopoint" if value.get("type") == "Point" else "struct"
+    text = str(value)
+    if re.match(r"^\d{4}-\d{2}-\d{2}T", text):
+        return "timestamp"
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        return "date"
+    return "string"
+
+
+def _mapping_compatible(source_type: str, target_type: str) -> bool:
+    if source_type == "null":
+        return True
+    numeric = {"byte", "short", "integer", "long", "float", "double", "decimal", "number"}
+    if source_type in numeric and target_type in numeric:
+        return True
+    return source_type == target_type or target_type == "string" or {source_type, target_type} <= {"struct", "json", "object"}
+
+
+def _mapping_preview(db: Session, body: OntologyMappingPreviewRequest) -> Dict[str, Any]:
+    asset = db.get(models.DataAsset, body.asset_id)
+    obj_type = db.get(models.ObjectType, body.object_type_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"DataAsset '{body.asset_id}' not found")
+    if not obj_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+    profile = db.get(ObjectTypeProfile, body.object_type_id)
+    properties, _profile_backed = _property_store(obj_type, profile)
+    rows = list(asset.records or [])
+    source_fields = sorted({str(key) for row in rows for key in (row or {}).keys()})
+    normalized_sources = {re.sub(r"[^a-z0-9]", "", field.lower()): field for field in source_fields}
+    mappings = list(body.mappings)
+    if not mappings:
+        for target in properties:
+            normalized = re.sub(r"[^a-z0-9]", "", target.lower())
+            source = normalized_sources.get(normalized)
+            if source:
+                mappings.append(OntologyFieldMapping(source_field=source, target_property=target))
+    mapping_by_target = {item.target_property: item.source_field for item in mappings}
+    compatibility = []
+    errors = []
+    warnings = []
+    for item in mappings:
+        if item.source_field not in source_fields:
+            errors.append({"code": "SOURCE_NOT_FOUND", "source_field": item.source_field, "target_property": item.target_property, "message": "Source field does not exist"})
+            continue
+        if item.target_property not in properties:
+            errors.append({"code": "PROPERTY_NOT_FOUND", "source_field": item.source_field, "target_property": item.target_property, "message": "Target property does not exist"})
+            continue
+        source_value = next(((row or {}).get(item.source_field) for row in rows if (row or {}).get(item.source_field) is not None), None)
+        source_type = _mapping_type(source_value)
+        spec = properties[item.target_property] if isinstance(properties[item.target_property], dict) else {}
+        target_type = str(spec.get("base_type") or spec.get("type") or "string")
+        compatible = _mapping_compatible(source_type, target_type)
+        compatibility.append({"source_field": item.source_field, "target_property": item.target_property, "source_type": source_type, "target_type": target_type, "compatible": compatible})
+        if not compatible:
+            errors.append({"code": "TYPE_MISMATCH", "source_field": item.source_field, "target_property": item.target_property, "message": f"{source_type} is not compatible with {target_type}"})
+    for name, spec in properties.items():
+        if isinstance(spec, dict) and spec.get("required") and name not in mapping_by_target:
+            errors.append({"code": "REQUIRED_UNMAPPED", "target_property": name, "message": f"Required property '{name}' is not mapped"})
+    mapped_sources = {item.source_field for item in mappings}
+    for field in source_fields:
+        if field not in mapped_sources:
+            warnings.append({"code": "UNMAPPED_SOURCE", "source_field": field, "message": f"Source field '{field}' will not be hydrated"})
+    hydrated = []
+    primary_key = _property_primary_key(obj_type, profile)
+    for index, row in enumerate(rows[:body.limit]):
+        props = {item.target_property: (row or {}).get(item.source_field) for item in mappings if item.source_field in (row or {}) and item.target_property in properties}
+        hydrated.append({"object_id": str(props.get(primary_key) if primary_key else f"preview_{index + 1}"), "object_type_id": obj_type.id, **props})
+    return {
+        "asset": {"id": asset.id, "display_name": asset.display_name, "row_count": len(rows)},
+        "object_type": {"id": obj_type.id, "display_name": obj_type.display_name, "primary_key": primary_key},
+        "source_fields": [{"name": field, "inferred_type": _mapping_type(next(((row or {}).get(field) for row in rows if (row or {}).get(field) is not None), None)), "mapped": field in mapped_sources} for field in source_fields],
+        "target_properties": [{"name": name, **(spec if isinstance(spec, dict) else {"base_type": str(spec)}), "mapped_from": mapping_by_target.get(name)} for name, spec in properties.items()],
+        "mappings": [item.model_dump() for item in mappings],
+        "compatibility": compatibility,
+        "hydrated_preview": hydrated,
+        "status": "FAIL" if errors else ("WARN" if warnings else "PASS"),
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
 def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, Any]:
     obj_type = db.get(models.ObjectType, object_type_id)
     if not obj_type:
@@ -573,6 +685,8 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
         for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id).all()
         if row.source_asset_id
     })
+    manager_config = (obj_type.properties or {}).get("__manager", {}) if isinstance(obj_type.properties, dict) else {}
+    saved_mappings = list(manager_config.get("datasource_mappings") or []) if isinstance(manager_config, dict) else []
     pipeline_dependents: List[Dict[str, Any]] = []
     try:
         from . import pipeline_builder_ops
@@ -603,7 +717,7 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
             "properties": {"count": len(properties), "rows": properties},
             "action_types": {"count": len(action_types), "rows": action_types},
             "link_types": {"count": len(link_types), "rows": link_types},
-            "datasources": {"count": len(source_asset_ids), "rows": [{"asset_id": asset_id} for asset_id in source_asset_ids]},
+            "datasources": {"count": len(set(source_asset_ids) | {str(item.get('asset_id')) for item in saved_mappings}), "rows": [{"asset_id": asset_id, "status": "materialized"} for asset_id in source_asset_ids] + [{**item, "status": "mapped"} for item in saved_mappings if item.get("asset_id") not in source_asset_ids]},
             "observability": {"object_count": object_count, "index_status": metadata["index_status"], "data_health": "configured" if object_count else "not_configured"},
             "dependents": {"count": len(pipeline_dependents), "rows": pipeline_dependents},
         },
@@ -768,6 +882,39 @@ def ontology_object_type_walkthrough(object_type_id: str, db: Session = Depends(
 @router.get("/ui-state/ontology/object-types/{object_type_id}/sections/{section_id}")
 def ontology_object_type_section(object_type_id: str, section_id: str, db: Session = Depends(get_db)):
     return _object_type_section_state(db, object_type_id, section_id)
+
+
+@router.post("/ontology/mappings/preview")
+def preview_ontology_mapping(body: OntologyMappingPreviewRequest, db: Session = Depends(get_db)):
+    return _mapping_preview(db, body)
+
+
+@router.post("/ontology/object-types/{object_type_id}/datasource-mappings")
+def save_ontology_datasource_mapping(object_type_id: str, body: OntologyDatasourceMappingRequest, db: Session = Depends(get_db)):
+    preview_body = OntologyMappingPreviewRequest(
+        asset_id=body.asset_id, object_type_id=object_type_id, mappings=body.mappings, limit=20,
+    )
+    preview = _mapping_preview(db, preview_body)
+    if preview["errors"]:
+        raise HTTPException(status_code=422, detail={"message": "Datasource mapping is invalid", "preview": preview})
+    obj_type = db.get(models.ObjectType, object_type_id)
+    properties = dict(obj_type.properties or {})
+    manager = dict(properties.get("__manager") or {})
+    existing = [item for item in list(manager.get("datasource_mappings") or []) if item.get("asset_id") != body.asset_id]
+    record = {
+        "asset_id": body.asset_id,
+        "mappings": [item.model_dump() for item in body.mappings],
+        "mapped_property_count": len(body.mappings),
+        "updated_at": _now(),
+    }
+    manager["datasource_mappings"] = existing + [record]
+    properties["__manager"] = manager
+    obj_type.properties = properties
+    flag_modified(obj_type, "properties")
+    obj_type.updated_at = _now()
+    _audit(db, body.actor, "ontology.datasource_mapping.saved", "object_type", object_type_id, record)
+    db.commit()
+    return {"mapping": record, "preview": preview, "manager": _object_type_manager_state(db, object_type_id)}
 
 
 @router.patch("/ontology/object-types/{object_type_id}/metadata")
