@@ -1,4 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  applyNodeChanges,
+  type Connection,
+  type Edge,
+  type Node,
+  type NodeChange
+} from "@xyflow/react";
 import { api, postJson } from "../api";
 import {
   addOntologyProperty,
@@ -19,6 +30,7 @@ import { navigate } from "../utils/navigation";
 import type {
   JsonObject,
   OntologyManagerState,
+  OntologyObjectSummary,
   OntologySectionState,
   OntologyUiState,
   OntologyWalkthrough,
@@ -185,7 +197,7 @@ export function OntologyManager() {
             ))}
           </Panel>
           <Panel title="Generate From Dataset" action={<button onClick={createDraft} disabled={!assetId}>Generate</button>}>
-            <select value={assetId} onChange={(event) => setAssetId(event.target.value)}>
+            <select aria-label="Dataset for ontology generation" value={assetId} onChange={(event) => setAssetId(event.target.value)}>
               <option value="">Choose dataset</option>
               {(assets.value || []).map((asset) => <option key={asset.id} value={asset.id}>{asset.display_name || asset.id}</option>)}
             </select>
@@ -203,6 +215,7 @@ export function OntologyManager() {
           {manager ? (
             <ManagerSurface
               manager={manager}
+              objectTypes={state.value?.object_types || []}
               sectionState={sectionState}
               onIndex={markIndexed}
               onSaveMetadata={saveMetadata}
@@ -210,6 +223,7 @@ export function OntologyManager() {
               onUpdateProperty={updateProperty}
               onArchiveProperty={archiveProperty}
               onReorderProperties={reorderProperties}
+              onResourceMutation={() => setRefreshKey((key) => key + 1)}
             />
           ) : (
             <div className="empty">Generate or select an object type to inspect manager details.</div>
@@ -259,15 +273,18 @@ function WalkthroughRail({ walkthrough }: { walkthrough: OntologyWalkthrough | n
 
 function ManagerSurface({
   manager,
+  objectTypes,
   sectionState,
   onIndex,
   onSaveMetadata,
   onAddProperty,
   onUpdateProperty,
   onArchiveProperty,
-  onReorderProperties
+  onReorderProperties,
+  onResourceMutation
 }: {
   manager: OntologyManagerState;
+  objectTypes: OntologyObjectSummary[];
   sectionState: OntologySectionState | null;
   onIndex: () => void;
   onSaveMetadata: (patch: JsonObject) => Promise<void>;
@@ -275,6 +292,7 @@ function ManagerSurface({
   onUpdateProperty: (propertyName: string, payload: JsonObject) => Promise<void>;
   onArchiveProperty: (propertyName: string) => Promise<void>;
   onReorderProperties: (order: string[]) => Promise<void>;
+  onResourceMutation: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [pluralName, setPluralName] = useState(manager.object_type.plural_name);
@@ -351,6 +369,7 @@ function ManagerSurface({
           }} />
         </Panel>
       </div>
+      <OntologyRelationshipDesigner objectTypes={objectTypes} selectedObjectTypeId={manager.object_type.id} />
       <div className="manager-grid">
         <PropertyEditor
           manager={manager}
@@ -359,12 +378,8 @@ function ManagerSurface({
           onArchiveProperty={onArchiveProperty}
           onReorderProperties={onReorderProperties}
         />
-        <Panel title={`Action Types ${manager.cards.action_types.count}`}>
-          <DataTable rows={manager.cards.action_types.rows} />
-        </Panel>
-        <Panel title={`Link Types ${manager.cards.link_types.count}`}>
-          <RelationshipStrip rows={manager.cards.link_types.rows} fallback={manager.object_type.display_name} />
-        </Panel>
+        <ActionTypeEditor objectTypeId={manager.object_type.id} rows={manager.cards.action_types.rows} onMutation={onResourceMutation} />
+        <LinkTypeEditor rows={manager.cards.link_types.rows} fallback={manager.object_type.display_name} onMutation={onResourceMutation} />
         <Panel title={`Dependents ${manager.cards.dependents.count}`}>
           <DataTable rows={manager.cards.dependents.rows} />
         </Panel>
@@ -378,6 +393,193 @@ function ManagerSurface({
         </Panel>
       </div>
     </>
+  );
+}
+
+function ActionTypeEditor({ objectTypeId, rows, onMutation }: { objectTypeId: string; rows: TableRow[]; onMutation: () => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function createAction() {
+    const displayName = name.trim();
+    if (!displayName) return;
+    const id = `${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 96);
+    try {
+      await postJson("/action-types", {
+        id,
+        display_name: displayName,
+        description: description.trim() || `Governed action for ${objectTypeId}.`,
+        parameters: {},
+        rules: { object_type_id: objectTypeId, operations: [] }
+      });
+      setName("");
+      setDescription("");
+      setMessage("Action type created and audited.");
+      onMutation();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create action type.");
+    }
+  }
+
+  return (
+    <Panel title={`Action Types ${rows.length}`} className="ontology-resource-editor">
+      <div className="resource-create-row">
+        <input aria-label="New action name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Action name" />
+        <input aria-label="New action description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
+        <button onClick={createAction} disabled={!name.trim()}>Add action</button>
+      </div>
+      {message ? <div className="operation-message" role="status">{message}</div> : null}
+      {rows.length ? rows.map((row) => <EditableOntologyResource key={asString(row.id)} kind="action" row={row} onMutation={onMutation} />) : <div className="empty">No action types use this object type.</div>}
+    </Panel>
+  );
+}
+
+function LinkTypeEditor({ rows, fallback, onMutation }: { rows: TableRow[]; fallback: string; onMutation: () => void }) {
+  if (!rows.length) return <Panel title="Link Types 0"><RelationshipStrip rows={rows} fallback={fallback} /></Panel>;
+  return (
+    <Panel title={`Link Types ${rows.length}`} className="ontology-resource-editor">
+      {rows.map((row) => <EditableOntologyResource key={asString(row.id)} kind="link" row={row} onMutation={onMutation} />)}
+    </Panel>
+  );
+}
+
+function EditableOntologyResource({ kind, row, onMutation }: { kind: "action" | "link"; row: TableRow; onMutation: () => void }) {
+  const [displayName, setDisplayName] = useState(asString(row.display_name || row.id));
+  const [description, setDescription] = useState(asString(row.description));
+  const [cardinality, setCardinality] = useState(asString(row.cardinality, "MANY_TO_MANY"));
+  const [message, setMessage] = useState("");
+
+  async function save() {
+    const body: JsonObject = { display_name: displayName, description };
+    if (kind === "link") body.cardinality = cardinality;
+    try {
+      await api(`/${kind}-types/${encodeURIComponent(asString(row.id))}`, { method: "PATCH", body: JSON.stringify(body) });
+      setMessage("Saved and audited.");
+      onMutation();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save resource.");
+    }
+  }
+
+  return (
+    <article className="ontology-resource-row">
+      <div>
+        <strong>{asString(row.id)}</strong>
+        {kind === "link" ? <small>{asString(row.source_object_type_id)} to {asString(row.target_object_type_id)}</small> : null}
+      </div>
+      <input aria-label={`${kind} display name`} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+      <input aria-label={`${kind} description`} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
+      {kind === "link" ? (
+        <select aria-label="Link cardinality" value={cardinality} onChange={(event) => setCardinality(event.target.value)}>
+          <option value="ONE_TO_ONE">One to one</option>
+          <option value="ONE_TO_MANY">One to many</option>
+          <option value="MANY_TO_MANY">Many to many</option>
+        </select>
+      ) : null}
+      <button onClick={save}>Save</button>
+      {message ? <span className="resource-save-state" role="status">{message}</span> : null}
+    </article>
+  );
+}
+
+interface OntologyLinkType extends TableRow {
+  id: string;
+  display_name: string;
+  source_object_type_id: string;
+  target_object_type_id: string;
+  cardinality: string;
+}
+
+function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { objectTypes: OntologyObjectSummary[]; selectedObjectTypeId: string }) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [cardinality, setCardinality] = useState("MANY_TO_MANY");
+  const [message, setMessage] = useState("");
+  const links = useAsyncState<OntologyLinkType[]>(() => api<OntologyLinkType[]>("/link-types"), [refreshKey]);
+  const [nodes, setNodes] = useState<Node<JsonObject>[]>([]);
+
+  useEffect(() => {
+    setNodes(objectTypes.map((objectType, index) => ({
+      id: objectType.id,
+      position: { x: (index % 4) * 220, y: Math.floor(index / 4) * 130 },
+      data: {
+        label: objectType.display_name,
+        property_count: objectType.property_count,
+        selected: objectType.id === selectedObjectTypeId
+      },
+      className: objectType.id === selectedObjectTypeId ? "ontology-graph-node selected" : "ontology-graph-node",
+      style: { borderColor: objectType.id === selectedObjectTypeId ? "#2386a8" : "#7c5aa6" }
+    })));
+  }, [objectTypes, selectedObjectTypeId]);
+
+  const edges = useMemo<Edge[]>(() => (links.value || []).map((link) => ({
+    id: link.id,
+    source: link.source_object_type_id,
+    target: link.target_object_type_id,
+    label: `${link.display_name} · ${link.cardinality.replace(/_/g, " ").toLowerCase()}`,
+    type: "smoothstep",
+    markerEnd: { type: "arrowclosed" as const }
+  })).filter((edge) => objectTypes.some((item) => item.id === edge.source) && objectTypes.some((item) => item.id === edge.target)), [links.value, objectTypes]);
+
+  const onNodesChange = useCallback((changes: NodeChange<Node<JsonObject>>[]) => {
+    setNodes((current) => applyNodeChanges(changes, current));
+  }, []);
+
+  async function createRelationship(connection: Connection) {
+    if (!connection.source || !connection.target) return;
+    const normalized = `${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 96);
+    try {
+      await postJson<OntologyLinkType>("/link-types", {
+        id: normalized,
+        display_name: `${connection.source.replace(/_/g, " ")} to ${connection.target.replace(/_/g, " ")}`,
+        description: "Created in the visual ontology relationship designer.",
+        source_object_type_id: connection.source,
+        target_object_type_id: connection.target,
+        cardinality
+      });
+      setMessage("Relationship created and audited.");
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create relationship.");
+    }
+  }
+
+  return (
+    <Panel
+      title="Object and Link Designer"
+      className="ontology-relationship-designer"
+      action={(
+        <label className="inline-field">
+          <span>New link cardinality</span>
+          <select value={cardinality} onChange={(event) => setCardinality(event.target.value)}>
+            <option value="ONE_TO_ONE">One to one</option>
+            <option value="ONE_TO_MANY">One to many</option>
+            <option value="MANY_TO_MANY">Many to many</option>
+          </select>
+        </label>
+      )}
+    >
+      <p className="panel-description">Drag object types to arrange the ontology. Connect node ports to create a governed link type.</p>
+      {message ? <div className="workbench-status-strip" role="status">{message}</div> : null}
+      <div className="ontology-relationship-canvas" aria-label="Visual ontology relationship designer">
+        {nodes.length ? (
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onConnect={createRelationship}
+            nodesDraggable
+            nodesConnectable
+            fitView
+            minZoom={0.25}
+          >
+            <Background gap={22} color="#d6dde1" />
+            <MiniMap pannable zoomable nodeColor={(node) => node.id === selectedObjectTypeId ? "#2386a8" : "#7c5aa6"} />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        ) : <div className="empty">Apply an ontology draft to begin designing relationships.</div>}
+      </div>
+    </Panel>
   );
 }
 

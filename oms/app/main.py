@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
 import time
+import os
 
 from . import models, schemas, models_action
 # New Foundry tool-equivalent modules (self-contained routers + ORM models).
@@ -81,6 +82,8 @@ from . import (
     ontology_generator,
     imports_ops,
     system_hardening,
+    production_auth,
+    platform_runtime,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -138,10 +141,13 @@ from .runtime import (
 )
 import uuid
 
-models.Base.metadata.create_all(bind=engine)
-models_action.Base.metadata.create_all(bind=engine)
+if os.getenv("SKIP_CREATE_ALL", "0") != "1":
+    models.Base.metadata.create_all(bind=engine)
+    models_action.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Ontology Artificial Intelligence Platform")
+production_auth.validate_auth_configuration()
+app.add_middleware(production_auth.ProductionAuthorizationMiddleware)
 UI_DIR = Path(__file__).resolve().parent / "ui"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST_DIR = REPO_ROOT / "frontend" / "dist"
@@ -222,6 +228,8 @@ for _ext_module in (
     ontology_generator,
     imports_ops,
     system_hardening,
+    production_auth,
+    platform_runtime,
 ):
     app.include_router(_ext_module.router)
 
@@ -244,7 +252,7 @@ def serve_workspace(request: Request):
 
 @app.get("/workspace/{view}", include_in_schema=False)
 def serve_workspace_view(view: str, request: Request):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "search", "graph", "command-center", "imports", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"}:
+    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "entity-resolution", "search", "graph", "command-center", "imports", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"}:
         _not_found("Workspace", view)
     return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
@@ -489,6 +497,26 @@ def create_link_type(link: schemas.LinkTypeCreate, db: Session = Depends(get_db)
 @app.get("/link-types", response_model=List[schemas.LinkType])
 def list_link_types(db: Session = Depends(get_db)):
     return db.query(models.LinkType).all()
+
+
+@app.patch("/link-types/{link_type_id}", response_model=schemas.LinkType)
+def update_link_type(link_type_id: str, patch: schemas.LinkTypePatch, db: Session = Depends(get_db)):
+    row = db.get(models.LinkType, link_type_id)
+    if not row:
+        _not_found("LinkType", link_type_id)
+    changes = patch.model_dump(exclude_unset=True)
+    cardinality = changes.get("cardinality")
+    if cardinality is not None and cardinality not in {"ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY"}:
+        raise HTTPException(status_code=422, detail="Unsupported link cardinality")
+    for field in ("source_object_type_id", "target_object_type_id"):
+        if field in changes and not db.get(models.ObjectType, changes[field]):
+            raise HTTPException(status_code=422, detail=f"ObjectType '{changes[field]}' not found")
+    for field, value in changes.items():
+        setattr(row, field, value)
+    create_audit_log(db, actor="system", event_type="ontology.link_type.updated", subject_type="link_type", subject_id=link_type_id, payload=changes)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @app.post("/links", response_model=schemas.LinkInstance)
@@ -820,6 +848,20 @@ def create_action_type(action: schemas.ActionTypeCreate, db: Session = Depends(g
 @app.get("/action-types", response_model=List[schemas.ActionType])
 def list_action_types(db: Session = Depends(get_db)):
     return db.query(models.ActionType).all()
+
+
+@app.patch("/action-types/{action_type_id}", response_model=schemas.ActionType)
+def update_action_type(action_type_id: str, patch: schemas.ActionTypePatch, db: Session = Depends(get_db)):
+    row = db.get(models.ActionType, action_type_id)
+    if not row:
+        _not_found("ActionType", action_type_id)
+    changes = patch.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(row, field, value)
+    create_audit_log(db, actor="system", event_type="ontology.action_type.updated", subject_type="action_type", subject_id=action_type_id, payload=changes)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 # --- Data Assets and Pipeline Builder ---

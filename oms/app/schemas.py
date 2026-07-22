@@ -45,6 +45,13 @@ class LinkTypeCreate(ResourceBase):
 class LinkType(LinkTypeCreate):
     model_config = ConfigDict(from_attributes=True)
 
+class LinkTypePatch(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    source_object_type_id: Optional[str] = None
+    target_object_type_id: Optional[str] = None
+    cardinality: Optional[str] = None
+
 class LinkInstanceCreate(BaseModel):
     id: Optional[str] = None
     link_type_id: str
@@ -232,6 +239,12 @@ class ActionTypeCreate(ResourceBase):
 
 class ActionType(ActionTypeCreate):
     model_config = ConfigDict(from_attributes=True)
+
+class ActionTypePatch(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+    rules: Optional[Dict[str, Any]] = None
 
 # --- ACTION EXECUTION ---
 class ActionExecutionRequest(BaseModel):

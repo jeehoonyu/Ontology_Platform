@@ -72,7 +72,7 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   }, [safeRows]);
   if (!safeRows.length) return <div className="empty">{empty}</div>;
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" tabIndex={0} role="region" aria-label="Scrollable data table">
       <table>
         <thead>
           <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>

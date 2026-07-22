@@ -152,6 +152,44 @@ archived = full["base_properties"]["__manager"]["archived_properties"]["inspecti
 assert archived["spec"]["description"] == "Confirmed inspection deadline", archived
 passed += 1
 
+ok(client.post("/object-types", json={
+    "id": "editable_facility",
+    "display_name": "Editable Facility",
+    "properties": {"facilityId": {"type": "string", "required": True}},
+}), "create linked object type")
+ok(client.post("/link-types", json={
+    "id": "editable_asset_facility",
+    "display_name": "Asset at facility",
+    "source_object_type_id": "editable_asset",
+    "target_object_type_id": "editable_facility",
+    "cardinality": "MANY_TO_MANY",
+}), "create editable link type")
+updated_link = ok(client.patch("/link-types/editable_asset_facility", json={
+    "display_name": "Facility contains asset",
+    "cardinality": "ONE_TO_MANY",
+}), "edit link type")
+assert updated_link["display_name"] == "Facility contains asset" and updated_link["cardinality"] == "ONE_TO_MANY", updated_link
+passed += 1
+
+ok(client.post("/action-types", json={
+    "id": "editable_asset_inspect",
+    "display_name": "Inspect asset",
+    "description": "Create an inspection recommendation.",
+    "parameters": {},
+    "rules": {"object_type_id": "editable_asset", "operations": []},
+}), "create editable action type")
+updated_action = ok(client.patch("/action-types/editable_asset_inspect", json={
+    "display_name": "Schedule asset inspection",
+    "description": "Schedule a governed inspection.",
+}), "edit action type")
+assert updated_action["display_name"] == "Schedule asset inspection", updated_action
+passed += 1
+
+manager_resources = ok(client.get("/ui-state/ontology/object-types/editable_asset"), "manager includes editable resources")
+assert any(row["id"] == "editable_asset_facility" for row in manager_resources["cards"]["link_types"]["rows"]), manager_resources
+assert any(row["id"] == "editable_asset_inspect" for row in manager_resources["cards"]["action_types"]["rows"]), manager_resources
+passed += 2
+
 for event in [
     "pipeline_builder.node.created",
     "pipeline_builder.graph.layout_updated",
@@ -160,6 +198,8 @@ for event in [
     "ontology.object_type.property_updated",
     "ontology.object_type.properties_reordered",
     "ontology.object_type.property_archived",
+    "ontology.link_type.updated",
+    "ontology.action_type.updated",
 ]:
     assert_event(event)
 

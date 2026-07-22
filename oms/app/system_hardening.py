@@ -29,6 +29,7 @@ from . import (
     object_explorer_ops,
     ops_control,
     platform_core,
+    platform_runtime,
     schedules,
     streaming,
     webhooks_ops,
@@ -36,6 +37,22 @@ from . import (
 from .database import Base, get_db
 
 router = APIRouter(tags=["system_hardening"])
+
+
+@router.get("/health/live", include_in_schema=False)
+def health_live():
+    return {"status": "LIVE", "timestamp": int(time.time())}
+
+
+@router.get("/health/ready", include_in_schema=False)
+def health_ready(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        health = schema_health(db)
+        ready = health.get("status") == "PASS"
+        return {"status": "READY" if ready else "NOT_READY", "schema": health, "timestamp": int(time.time())}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database readiness check failed: {exc}") from exc
 
 
 class MigrationRecord(Base):
@@ -61,6 +78,13 @@ CORE_TABLES = [
     "ops_events",
     "import_jobs",
     "system_migration_records",
+    "platform_artifacts",
+    "platform_artifact_revisions",
+    "platform_artifact_leases",
+    "platform_jobs",
+    "platform_job_events",
+    "auth_sessions",
+    "auth_oidc_flows",
     "connection_sources",
     "connection_syncs",
     "sync_runs",
@@ -81,11 +105,12 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
     {"version": 3, "name": "hybrid_onboarding_connectors_streams_react_foundation", "status": "applied"},
+    {"version": 4, "name": "versioned_artifacts_jobs_oidc_sessions", "status": "applied"},
 ]
 
 
@@ -316,6 +341,22 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             investigations._report_dict(row)
             for row in db.query(investigations.InvestigationReport).all()
         ],
+        "platform_artifacts": [
+            _row_dict(row, ["id", "project_id", "artifact_type", "display_name", "description", "status", "current_revision", "published_revision", "lock_version", "owner", "metadata_", "created_at", "updated_at"])
+            for row in db.query(platform_runtime.PlatformArtifact).all()
+        ],
+        "platform_artifact_revisions": [
+            _row_dict(row, ["id", "artifact_id", "revision", "state", "layout", "validation", "author", "message", "published", "restored_from_revision", "created_at"])
+            for row in db.query(platform_runtime.ArtifactRevision).all()
+        ],
+        "platform_jobs": [
+            _row_dict(row, ["id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"])
+            for row in db.query(platform_runtime.PlatformJob).all()
+        ],
+        "platform_job_events": [
+            _row_dict(row, ["id", "job_id", "event_type", "status", "payload", "created_at"])
+            for row in db.query(platform_runtime.PlatformJobEvent).all()
+        ],
     }
 
 
@@ -416,6 +457,10 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "investigation_hypotheses",
         "investigation_findings",
         "investigation_reports",
+        "platform_artifacts",
+        "platform_artifact_revisions",
+        "platform_jobs",
+        "platform_job_events",
     ]
     missing = [key for key in expected if key not in snapshot]
     counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
@@ -433,11 +478,22 @@ def schema_health(db: Session = Depends(get_db)):
     inspector = inspect(db.get_bind())
     existing = set(inspector.get_table_names())
     missing = [table for table in CORE_TABLES if table not in existing]
+    missing_columns = {}
+    for table_name, table in models.Base.metadata.tables.items():
+        if table_name not in existing:
+            continue
+        actual = {column["name"] for column in inspector.get_columns(table_name)}
+        absent = sorted(set(table.columns.keys()) - actual)
+        if absent:
+            missing_columns[table_name] = absent
+    healthy = not missing and not missing_columns
     return {
-        "status": "PASS" if not missing else "WARN",
+        "status": "PASS" if healthy else "WARN",
         "table_count": len(existing),
         "required_table_count": len(CORE_TABLES),
         "missing_tables": missing,
+        "missing_columns": missing_columns,
+        "migration_required": not healthy,
         "checked_tables": CORE_TABLES,
         "schema_version": SCHEMA_VERSION,
     }
@@ -564,6 +620,31 @@ def event_consistency(db: Session = Depends(get_db)):
 def validate_project(db: Session = Depends(get_db)):
     schema = schema_health(db)
     migration_info = migrations(db)
+    if schema.get("migration_required"):
+        blocked = {
+            "status": "WARN",
+            "blocked_reason": "Database schema is older than the runtime. Run Alembic upgrade before validation.",
+        }
+        sections = {
+            "schema_health": schema,
+            "migrations": migration_info,
+            "event_consistency": blocked,
+            "snapshot_coverage": blocked,
+            "route_health": {"status": "PASS", "routes": []},
+            "docs_conformance": _docs_matrix_summary(),
+        }
+        return {
+            "status": "WARN",
+            "checked_at": _now(),
+            "sections": sections,
+            "summary": {
+                "schema": "WARN",
+                "migrations": migration_info["status"],
+                "events": "WARN",
+                "snapshot": "WARN",
+                "docs": sections["docs_conformance"]["status"],
+            },
+        }
     event_info = event_consistency(db)
     snapshot = _snapshot(db)
     snapshot_info = _snapshot_coverage(snapshot)
@@ -838,6 +919,20 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
     for row in snapshot.get("investigation_reports") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, investigations.InvestigationReport, row, ["id", "investigation_id", "title", "body", "sections", "created_at"]))
+    for row in snapshot.get("platform_artifacts") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, platform_runtime.PlatformArtifact, row, ["id", "project_id", "artifact_type", "display_name", "description", "status", "current_revision", "published_revision", "lock_version", "owner", "metadata_", "created_at", "updated_at"]))
+    for row in snapshot.get("platform_artifact_revisions") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, platform_runtime.ArtifactRevision, row, ["id", "artifact_id", "revision", "state", "layout", "validation", "author", "message", "published", "restored_from_revision", "created_at"]))
+    for row in snapshot.get("platform_jobs") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, platform_runtime.PlatformJob, row, ["id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"]))
+    for row in snapshot.get("platform_job_events") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, platform_runtime.PlatformJobEvent, row, ["id", "job_id", "event_type", "status", "payload", "created_at"]))
 
     _audit(db, body.actor, "project.snapshot.imported", "project", "local", counts)
     ops_control.record_ops_event(
