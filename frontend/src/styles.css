@@ -342,6 +342,87 @@ button:disabled {
   background: #edf1f4;
 }
 
+.visual-builder-center {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(380px, 1fr) auto;
+  overflow: hidden;
+}
+
+.builder-execution-drawer {
+  min-height: 132px;
+  max-height: 230px;
+  overflow: auto;
+  border-top: 1px solid #cbd5db;
+  background: #fff;
+}
+
+.builder-drawer-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 22px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #d8e0e5;
+  background: #f8fafb;
+  color: #61727d;
+  font-size: 12px;
+}
+
+.builder-drawer-tabs strong {
+  color: #176b8f;
+}
+
+.builder-drawer-content {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.builder-drawer-content p {
+  margin: 0;
+  color: #637580;
+}
+
+.preview-metrics,
+.preview-row-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.preview-metrics > span {
+  padding: 5px 8px;
+  border: 1px solid #d4dde2;
+  border-radius: 4px;
+  color: #5c6e79;
+  font-size: 12px;
+}
+
+.preview-row-list > span {
+  min-width: 150px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  border: 1px solid #d6dfe4;
+  border-radius: 4px;
+  background: #fbfcfd;
+}
+
+.preview-row-list small {
+  color: #667985;
+}
+
+.preview-row-list .status-badge {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
 .visual-flow-canvas .react-flow__node {
   width: 190px;
   min-height: 64px;
@@ -496,6 +577,22 @@ button:disabled {
   color: #687a85;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.builder-evidence-link {
+  display: block;
+  padding: 8px 10px;
+  border-top: 1px solid #e0e6ea;
+  color: #176b8f;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.builder-evidence-link:hover,
+.builder-evidence-link:focus-visible {
+  background: #eef5f8;
+  text-decoration: underline;
 }
 
 .visual-builder-empty {
