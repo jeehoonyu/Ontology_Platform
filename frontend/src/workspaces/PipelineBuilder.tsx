@@ -10,16 +10,18 @@ import {
   insertPipelineNode,
   previewPipelineNode,
   savePipelineLayout,
-  suggestPipelineNode
+  suggestPipelineNode,
+  updatePipelineNode
 } from "../api/workspaceState";
 import { BottomDrawer, PipelineCanvas } from "../components/canvas/PipelineCanvas";
-import { KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { DataTable, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { Toolbar, WorkspaceHeader } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asRows, asString, classNames, formatValue } from "../utils/format";
 import type {
   NodePreview,
   NodeSuggestions,
+  JsonObject,
   PipelineCanvasState,
   PipelineNodeDetails,
   PipelineOutputsState,
@@ -262,13 +264,30 @@ export function PipelineBuilder() {
         </section>
         <aside className="output-rail">
           <Panel title="Selected Node">
-            {details ? <KeyValueGrid data={{
-              id: details.node_id,
-              type: details.metadata.type,
-              upstream: formatValue(details.metadata.upstream),
-              downstream: formatValue(details.metadata.downstream),
-              preview_rows: details.preview.row_count,
-            }} /> : <div className="empty">Select a node to inspect lineage, config, and preview details.</div>}
+            {details ? <>
+              <KeyValueGrid data={{
+                id: details.node_id,
+                type: details.metadata.type,
+                upstream: formatValue(details.metadata.upstream),
+                downstream: formatValue(details.metadata.downstream),
+                preview_rows: details.preview.row_count,
+              }} />
+              <PipelineNodeConfig
+                details={details}
+                onSave={async (label, config) => {
+                  if (!selectedGraphId) return;
+                  setActionStatus(`Saving ${details.node_id} configuration...`);
+                  const next = await updatePipelineNode(selectedGraphId, details.node_id, label, config);
+                  setDetails(next);
+                  setActionStatus(`${details.node_id} configuration saved and preview refreshed.`);
+                  setRefreshKey((key) => key + 1);
+                }}
+              />
+              <details className="pipeline-lineage-details">
+                <summary>Field lineage</summary>
+                <DataTable rows={asRows(details.metadata.field_lineage)} empty="No propagated fields are available yet." />
+              </details>
+            </> : <div className="empty">Select a node to inspect lineage, config, and preview details.</div>}
           </Panel>
           <Panel title="Pipeline Outputs" action={<button onClick={() => insertAfter("dataset_output")}>Add</button>}>
             <input className="compact-input" placeholder="Search outputs..." />
@@ -307,4 +326,103 @@ export function PipelineBuilder() {
       </div>
     </section>
   );
+}
+
+interface ConfigFieldDefinition {
+  name: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  options?: string[];
+  minimum?: number;
+  maximum?: number;
+}
+
+function PipelineNodeConfig({ details, onSave }: { details: PipelineNodeDetails; onSave: (label: string, config: JsonObject) => Promise<void> }) {
+  const schema = details.metadata.configuration_schema as { fields?: ConfigFieldDefinition[] } | undefined;
+  const fields = schema?.fields || [];
+  const sourceConfig = (details.metadata.config || {}) as JsonObject;
+  const [label, setLabel] = useState(details.node.label);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setLabel(details.node.label);
+    setValues(Object.fromEntries(fields.map((field) => [field.name, displayConfigValue(sourceConfig[field.name], field.type)])));
+    setError("");
+  }, [details.node_id, details.node.label, JSON.stringify(sourceConfig)]);
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      const config: JsonObject = {};
+      for (const field of fields) {
+        const raw = values[field.name] || "";
+        if (!raw && !field.required) continue;
+        config[field.name] = parseConfigValue(raw, field.type);
+      }
+      await onSave(label, config);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="pipeline-node-config" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <div className="pipeline-config-heading"><strong>Transform configuration</strong><StatusBadge value={asString((details.metadata.configuration_validation as JsonObject | undefined)?.status || "READY")} /></div>
+      <label>Node label<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label>
+      {fields.map((field) => (
+        <label key={field.name}>
+          {field.label}{field.required ? " *" : ""}
+          {field.type === "select" ? (
+            <select value={values[field.name] || ""} required={field.required} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}>
+              <option value="">Choose...</option>
+              {(field.options || []).map((option) => <option value={option} key={option}>{option.replace(/_/g, " ")}</option>)}
+            </select>
+          ) : field.type === "textarea" || field.type === "key_value" ? (
+            <textarea rows={field.type === "key_value" ? 4 : 3} value={values[field.name] || ""} required={field.required} placeholder={field.type === "key_value" ? "source: target, one per line" : undefined} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))} />
+          ) : (
+            <input
+              type={["integer", "number"].includes(field.type) ? "number" : "text"}
+              min={field.minimum}
+              max={field.maximum}
+              value={values[field.name] || ""}
+              required={field.required}
+              placeholder={field.type === "field_list" ? "field_a, field_b" : field.type === "field" ? "Choose or enter a field" : undefined}
+              onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}
+            />
+          )}
+        </label>
+      ))}
+      {error ? <div className="inline-form-error" role="alert">{error}</div> : null}
+      <button className="primary-action" type="submit" disabled={saving}>{saving ? "Saving..." : "Save configuration"}</button>
+    </form>
+  );
+}
+
+function displayConfigValue(value: unknown, type: string): string {
+  if (value == null) return "";
+  if (type === "field_list" && Array.isArray(value)) return value.join(", ");
+  if (type === "key_value" && typeof value === "object" && !Array.isArray(value)) return Object.entries(value as JsonObject).map(([key, item]) => `${key}: ${String(item)}`).join("\n");
+  return String(value);
+}
+
+function parseConfigValue(value: string, type: string): string | number | boolean | string[] | JsonObject {
+  if (type === "integer") return Number.parseInt(value, 10);
+  if (type === "number") return Number.parseFloat(value);
+  if (type === "field_list") return value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (type === "key_value") return Object.fromEntries(value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).map((item) => {
+    const [key, ...rest] = item.split(":");
+    return [key.trim(), rest.join(":").trim()];
+  }));
+  if (type === "scalar") {
+    if (value === "true" || value === "false") return value === "true";
+    const number = Number(value);
+    return value.trim() !== "" && Number.isFinite(number) ? number : value;
+  }
+  return value;
 }
