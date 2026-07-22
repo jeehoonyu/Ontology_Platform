@@ -45,7 +45,7 @@ test("command palette supports keyboard navigation", async ({ page }) => {
   await expect(page).toHaveURL(/\/workspace\/entity-resolution$/);
 });
 
-test("visual builder supports keyboard add, editable fields, save, and publish", async ({ page }, testInfo) => {
+test("visual builder supports typed configuration, preview, save, and publish", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful builder workflow once on desktop.");
   await page.goto("/workspace/workshop");
   const create = page.getByRole("button", { name: "Create draft" });
@@ -53,15 +53,28 @@ test("visual builder supports keyboard add, editable fields, save, and publish",
   await expect(create.or(canvas)).toBeVisible();
   if (await create.isVisible()) await create.click();
   await expect(canvas).toBeVisible();
-  await page.getByRole("button", { name: /Metric Show an operational KPI/ }).click();
+  await page.locator(".node-library-list > button").filter({ hasText: "Metric" }).first().click();
   await expect(page.getByRole("heading", { name: "Node settings" })).toBeVisible();
-  await page.getByRole("button", { name: "Add" }).click();
-  await page.getByLabel("Field name").fill("metricBinding");
-  await page.getByLabel("Field value").fill("asset.risk.score");
+  await page.getByLabel("Data source").fill("asset.risk.score");
+  await page.getByLabel("Display label").fill("Asset risk");
   await page.getByRole("button", { name: /Save/ }).click();
   await expect(page.locator(".operation-message")).toContainText(/Saved revision/);
+  await page.getByRole("button", { name: /Preview/ }).click();
+  await expect(page.locator(".builder-execution-drawer")).toContainText(/\d+ nodes/);
   await page.getByRole("button", { name: /Publish/ }).click();
   await expect(page.locator(".operation-message")).toContainText(/Published revision/);
+});
+
+test("ontology maps dataset fields with hydrated preview", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ontology mapping workflow once on desktop.");
+  await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} });
+  await page.goto("/workspace/ontology");
+  const mappingPanel = page.locator(".ontology-mapping-panel");
+  await expect(mappingPanel.getByRole("heading", { name: "Dataset to Ontology Mapping" })).toBeVisible();
+  await mappingPanel.getByLabel("Source dataset").selectOption({ index: 1 });
+  await mappingPanel.getByRole("button", { name: "Suggest mappings" }).click();
+  await expect(mappingPanel.getByText(/Suggested \d+ compatible field mappings/)).toBeVisible();
+  await expect(mappingPanel.getByText(/Hydrated object preview/)).toBeVisible();
 });
 
 test("pipeline creates a graph and accepts a dragged node", async ({ page }, testInfo) => {
@@ -96,7 +109,10 @@ test("platform graph supports selection, dragging, and neighborhood exploration"
   await expect(firstNode).toBeVisible();
   const before = await firstNode.boundingBox();
   expect(before).not.toBeNull();
-  await firstNode.dragTo(canvas, { targetPosition: { x: 440, y: 260 } });
+  await page.mouse.move((before?.x || 0) + (before?.width || 0) / 2, (before?.y || 0) + (before?.height || 0) / 2);
+  await page.mouse.down();
+  await page.mouse.move((before?.x || 0) + (before?.width || 0) / 2 + 120, (before?.y || 0) + (before?.height || 0) / 2 + 80, { steps: 12 });
+  await page.mouse.up();
   const after = await firstNode.boundingBox();
   expect(after).not.toBeNull();
   expect(Math.abs((after?.x || 0) - (before?.x || 0)) + Math.abs((after?.y || 0) - (before?.y || 0))).toBeGreaterThan(5);
