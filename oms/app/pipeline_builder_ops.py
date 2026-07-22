@@ -7,6 +7,7 @@ model and deterministic DAG execution used by the local UI.
 """
 import copy
 import hashlib
+import math
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,12 +31,25 @@ NODE_TYPES = {
     "project",
     "select",
     "rename",
+    "cast",
+    "derive",
+    "fill_nulls",
+    "normalize",
+    "deduplicate",
     "join",
     "union",
     "aggregate",
     "sort",
     "limit",
     "unique_id",
+    "pivot",
+    "unpivot",
+    "window",
+    "validate",
+    "derive_geo_point",
+    "derive_mgrs",
+    "spatial_filter",
+    "spatial_join",
     "llm_assist",
     "llm",
     "ontology_output",
@@ -48,12 +62,25 @@ NODE_TYPE_CATALOG = [
     {"type": "filter", "label": "Filter", "category": "transform", "description": "Keep rows matching deterministic filter criteria."},
     {"type": "project", "label": "Project / Select", "category": "transform", "description": "Select a subset of columns."},
     {"type": "rename", "label": "Rename", "category": "transform", "description": "Rename one or more fields."},
+    {"type": "cast", "label": "Cast Types", "category": "transform", "description": "Coerce selected fields to typed values."},
+    {"type": "derive", "label": "Derive / Formula", "category": "transform", "description": "Create fields with safe deterministic formula operations."},
+    {"type": "fill_nulls", "label": "Fill Missing", "category": "transform", "description": "Replace missing values with configured defaults."},
+    {"type": "normalize", "label": "Normalize", "category": "transform", "description": "Trim and normalize string values."},
+    {"type": "deduplicate", "label": "Deduplicate", "category": "transform", "description": "Keep one row for each selected key."},
     {"type": "join", "label": "Join", "category": "transform", "description": "Join two upstream branches or a configured right-hand dataset."},
     {"type": "union", "label": "Union", "category": "transform", "description": "Append rows from another branch or dataset."},
     {"type": "aggregate", "label": "Aggregate", "category": "transform", "description": "Group rows and compute count, sum, avg, min, or max."},
     {"type": "sort", "label": "Sort", "category": "transform", "description": "Sort rows by a field."},
     {"type": "limit", "label": "Limit", "category": "transform", "description": "Keep the first N rows."},
     {"type": "unique_id", "label": "Unique ID", "category": "transform", "description": "Create a stable local identifier from selected fields."},
+    {"type": "pivot", "label": "Pivot", "category": "transform", "description": "Turn category values into columns."},
+    {"type": "unpivot", "label": "Unpivot", "category": "transform", "description": "Turn selected columns into name/value rows."},
+    {"type": "window", "label": "Window", "category": "transform", "description": "Compute row numbers, ranks, and running totals."},
+    {"type": "validate", "label": "Validate Rows", "category": "quality", "description": "Apply typed row-level quality rules."},
+    {"type": "derive_geo_point", "label": "Latitude / Longitude", "category": "spatial", "description": "Create GeoJSON points from coordinates."},
+    {"type": "derive_mgrs", "label": "MGRS", "category": "spatial", "description": "Encode coordinates as MGRS references."},
+    {"type": "spatial_filter", "label": "Radius / Geofence", "category": "spatial", "description": "Keep records inside a radius or polygon."},
+    {"type": "spatial_join", "label": "Spatial Join", "category": "spatial", "description": "Join branches by geographic distance."},
     {"type": "llm_assist", "label": "LLM Assist", "category": "ai", "description": "Deterministically summarize selected fields as a local LLM analogue."},
     {"type": "ontology_output", "label": "Ontology Output", "category": "output", "description": "Materialize rows into ontology object instances on delivery."},
     {"type": "dataset_output", "label": "Dataset Output", "category": "output", "description": "Write delivered rows to a local output DataAsset."},
@@ -184,6 +211,7 @@ def pipeline_ui_state(db: Session = Depends(get_db)):
             {"id": "add_data", "label": "Add data", "method": "POST", "path": "/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/insert-after"},
             {"id": "validate", "label": "Validate", "method": "POST", "path": "/pipeline-builder/graphs/{graph_id}/validate"},
             {"id": "deliver", "label": "Deliver", "method": "POST", "path": "/pipeline-builder/graphs/{graph_id}/deliver"},
+            {"id": "version_draft", "label": "Create versioned draft", "method": "POST", "path": "/artifacts/adopt"},
         ],
         "graphs": [PipelineGraphRead.model_validate(graph).model_dump() for graph in graphs],
         "node_library": NODE_TYPE_CATALOG,
@@ -636,6 +664,303 @@ def _rename_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dic
     return [{mapping.get(key, key): value for key, value in row.items()} for row in rows]
 
 
+def _cast_value(value: Any, target_type: str) -> Any:
+    if value is None:
+        return None
+    target = str(target_type).lower()
+    if target in {"string", "str"}:
+        return str(value)
+    if target in {"integer", "int"}:
+        return int(float(value))
+    if target in {"number", "float", "double"}:
+        return float(value)
+    if target in {"boolean", "bool"}:
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes", "y"}:
+                return True
+            if lowered in {"false", "0", "no", "n"}:
+                return False
+            raise ValueError(f"Cannot cast '{value}' to boolean")
+        return bool(value)
+    raise ValueError(f"Unsupported cast type '{target_type}'")
+
+
+def _cast_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    mapping = config.get("mapping") or config.get("types") or {}
+    on_error = str(config.get("on_error", "null")).lower()
+    output = []
+    for row in rows:
+        result = copy.deepcopy(row)
+        for field, target_type in mapping.items():
+            try:
+                result[field] = _cast_value(_value(row, field), str(target_type))
+            except (TypeError, ValueError):
+                if on_error == "fail":
+                    raise HTTPException(status_code=422, detail=f"Cannot cast field '{field}' to {target_type}")
+                if on_error == "keep":
+                    continue
+                result[field] = None
+        output.append(result)
+    return output
+
+
+def _derive_value(row: Dict[str, Any], spec: Dict[str, Any]) -> Any:
+    operation = str(spec.get("operation") or spec.get("op") or "copy").lower()
+    fields = spec.get("fields") or ([spec.get("field")] if spec.get("field") else [])
+    values = [_value(row, field) for field in fields]
+    if operation == "copy":
+        return values[0] if values else spec.get("value")
+    if operation == "literal":
+        return spec.get("value")
+    if operation == "coalesce":
+        return next((value for value in values if value is not None), spec.get("default"))
+    if operation == "concat":
+        return str(spec.get("separator", "")).join(str(value) for value in values if value is not None)
+    if operation in {"lower", "upper", "trim"}:
+        text = "" if not values or values[0] is None else str(values[0])
+        return text.lower() if operation == "lower" else text.upper() if operation == "upper" else text.strip()
+    numbers = [float(value) for value in values if value is not None]
+    if operation == "add":
+        return sum(numbers)
+    if operation == "subtract":
+        return numbers[0] - sum(numbers[1:]) if numbers else None
+    if operation == "multiply":
+        result = 1.0
+        for value in numbers:
+            result *= value
+        return result
+    if operation == "divide":
+        return numbers[0] / numbers[1] if len(numbers) >= 2 and numbers[1] != 0 else None
+    raise HTTPException(status_code=422, detail=f"Unsupported derive operation '{operation}'")
+
+
+def _derive_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    derivations = config.get("derivations") or [config]
+    output = []
+    for row in rows:
+        result = copy.deepcopy(row)
+        for spec in derivations:
+            target = spec.get("target") or spec.get("target_field") or spec.get("as")
+            if target:
+                result[target] = _derive_value(result, spec)
+        output.append(result)
+    return output
+
+
+def _fill_nulls(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    defaults = config.get("defaults") or config.get("mapping") or {}
+    return [{**row, **{field: value for field, value in defaults.items() if _value(row, field) is None}} for row in rows]
+
+
+def _normalize_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    fields = config.get("fields") or []
+    case = str(config.get("case", "preserve")).lower()
+    output = []
+    for row in rows:
+        result = copy.deepcopy(row)
+        for field in fields:
+            value = _value(row, field)
+            if isinstance(value, str):
+                value = value.strip()
+                value = value.lower() if case == "lower" else value.upper() if case == "upper" else value
+                result[field] = value
+        output.append(result)
+    return output
+
+
+def _deduplicate_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    keys = config.get("keys") or config.get("fields") or []
+    if not keys:
+        keys = sorted({key for row in rows for key in row})
+    keep = str(config.get("keep", "first")).lower()
+    ordered = list(reversed(rows)) if keep == "last" else rows
+    seen = set()
+    output = []
+    for row in ordered:
+        signature = tuple(repr(_value(row, field)) for field in keys)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        output.append(copy.deepcopy(row))
+    return list(reversed(output)) if keep == "last" else output
+
+
+def _pivot_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    index_fields = config.get("index") or config.get("group_by") or []
+    if isinstance(index_fields, str):
+        index_fields = [index_fields]
+    column_field = config.get("column") or config.get("column_field")
+    value_field = config.get("value") or config.get("value_field")
+    operation = str(config.get("operation", "first")).lower()
+    grouped: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    for row in rows:
+        key = tuple(_value(row, field) for field in index_fields)
+        target = grouped.setdefault(key, {field: key[index] for index, field in enumerate(index_fields)})
+        column = str(_value(row, column_field))
+        value = _value(row, value_field)
+        if operation == "sum":
+            target[column] = float(target.get(column, 0) or 0) + float(value or 0)
+        elif operation == "count":
+            target[column] = int(target.get(column, 0) or 0) + 1
+        elif column not in target:
+            target[column] = value
+    return list(grouped.values())
+
+
+def _unpivot_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    id_fields = config.get("id_fields") or []
+    value_fields = config.get("value_fields") or []
+    name_field = config.get("name_field") or "field"
+    value_field = config.get("value_field") or "value"
+    output = []
+    for row in rows:
+        base = {field: _value(row, field) for field in id_fields}
+        for field in value_fields:
+            output.append({**base, name_field: field, value_field: _value(row, field)})
+    return output
+
+
+def _window_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    partition_by = config.get("partition_by") or []
+    if isinstance(partition_by, str):
+        partition_by = [partition_by]
+    order_by = config.get("order_by")
+    operation = str(config.get("operation", "row_number")).lower()
+    target = config.get("target_field") or operation
+    field = config.get("field")
+    partitions: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+    for row in rows:
+        partitions.setdefault(tuple(_value(row, item) for item in partition_by), []).append(copy.deepcopy(row))
+    output = []
+    for partition in partitions.values():
+        if order_by:
+            partition.sort(key=lambda item: (_value(item, order_by) is None, _value(item, order_by)))
+        running = 0.0
+        previous = object()
+        rank = 0
+        for index, row in enumerate(partition, start=1):
+            if operation == "row_number":
+                row[target] = index
+            elif operation == "rank":
+                current = _value(row, order_by)
+                if current != previous:
+                    rank = index
+                    previous = current
+                row[target] = rank
+            elif operation == "running_sum":
+                value = _value(row, field)
+                running += float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+                row[target] = running
+            output.append(row)
+    return output
+
+
+def _row_validation_errors(row: Dict[str, Any], checks: List[Dict[str, Any]]) -> List[str]:
+    errors = []
+    for check in checks:
+        check_type = str(check.get("type", "required")).lower()
+        field = check.get("field")
+        value = _value(row, field) if field else None
+        if check_type in {"required", "non_null"} and value is None:
+            errors.append(f"{field} is required")
+        elif check_type == "type" and value is not None:
+            expected = str(check.get("expected", "string"))
+            expected_types = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "object": dict, "array": list}
+            if expected in expected_types and (not isinstance(value, expected_types[expected]) or expected == "integer" and isinstance(value, bool)):
+                errors.append(f"{field} must be {expected}")
+        elif check_type == "range" and value is not None:
+            if check.get("min") is not None and value < check["min"]:
+                errors.append(f"{field} is below {check['min']}")
+            if check.get("max") is not None and value > check["max"]:
+                errors.append(f"{field} is above {check['max']}")
+        elif check_type == "allowed_values" and value not in (check.get("values") or []):
+            errors.append(f"{field} is not an allowed value")
+    return errors
+
+
+def _validate_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    checks = config.get("checks") or []
+    on_error = str(config.get("on_error", "annotate")).lower()
+    output = []
+    for row in rows:
+        errors = _row_validation_errors(row, checks)
+        if errors and on_error == "fail":
+            raise HTTPException(status_code=422, detail={"message": "Row validation failed", "errors": errors})
+        if errors and on_error == "drop":
+            continue
+        output.append({**row, **({"_validation_errors": errors} if errors else {})})
+    return output
+
+
+def _point(row: Dict[str, Any], field: Optional[str] = None) -> Optional[Tuple[float, float]]:
+    value = _value(row, field) if field else row.get("geometry")
+    if isinstance(value, dict) and value.get("type") == "Point" and isinstance(value.get("coordinates"), list) and len(value["coordinates"]) >= 2:
+        return float(value["coordinates"][1]), float(value["coordinates"][0])
+    lat = row.get("latitude")
+    lon = row.get("longitude")
+    return (float(lat), float(lon)) if lat is not None and lon is not None else None
+
+
+def _distance_meters(left: Tuple[float, float], right: Tuple[float, float]) -> float:
+    lat1, lon1, lat2, lon2 = map(math.radians, [left[0], left[1], right[0], right[1]])
+    a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _derive_geo_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    latitude = config.get("latitude_field") or "latitude"
+    longitude = config.get("longitude_field") or "longitude"
+    target = config.get("target_field") or "geometry"
+    return [{**row, target: {"type": "Point", "coordinates": [float(_value(row, longitude)), float(_value(row, latitude))]}} if _value(row, latitude) is not None and _value(row, longitude) is not None else copy.deepcopy(row) for row in rows]
+
+
+def _derive_mgrs_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    from .runtime import encode_mgrs
+    latitude = config.get("latitude_field") or "latitude"
+    longitude = config.get("longitude_field") or "longitude"
+    target = config.get("target_field") or "mgrs"
+    precision = int(config.get("precision", 5))
+    output = []
+    for row in rows:
+        lat, lon = _value(row, latitude), _value(row, longitude)
+        output.append({**row, **({target: encode_mgrs(float(lat), float(lon), precision)} if lat is not None and lon is not None else {})})
+    return output
+
+
+def _spatial_filter_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    center = config.get("center") or {}
+    center_point = (float(center.get("latitude")), float(center.get("longitude"))) if center.get("latitude") is not None and center.get("longitude") is not None else None
+    radius = float(config.get("radius_meters", 0))
+    geometry_field = config.get("geometry_field") or "geometry"
+    if not center_point or radius <= 0:
+        return rows
+    return [row for row in rows if _point(row, geometry_field) and _distance_meters(_point(row, geometry_field), center_point) <= radius]
+
+
+def _spatial_join_rows(left_rows: List[Dict[str, Any]], right_rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    max_distance = float(config.get("max_distance_meters", 1000))
+    left_field = config.get("left_geometry_field") or "geometry"
+    right_field = config.get("right_geometry_field") or "geometry"
+    output = []
+    for left in left_rows:
+        left_point = _point(left, left_field)
+        if not left_point:
+            continue
+        for right in right_rows:
+            right_point = _point(right, right_field)
+            if not right_point:
+                continue
+            distance = _distance_meters(left_point, right_point)
+            if distance <= max_distance:
+                merged = copy.deepcopy(left)
+                for key, value in right.items():
+                    merged[key if key not in merged else f"right_{key}"] = value
+                merged[config.get("distance_field") or "distance_meters"] = round(distance, 3)
+                output.append(merged)
+    return output
+
+
 def _join_rows(left_rows: List[Dict[str, Any]], right_rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
     left_key = config.get("left_key") or config.get("on")
     right_key = config.get("right_key") or config.get("on")
@@ -743,6 +1068,16 @@ def _execute_graph(
             rows = _project_rows(rows, config)
         elif node_type == "rename":
             rows = _rename_rows(rows, config)
+        elif node_type == "cast":
+            rows = _cast_rows(rows, config)
+        elif node_type == "derive":
+            rows = _derive_rows(rows, config)
+        elif node_type == "fill_nulls":
+            rows = _fill_nulls(rows, config)
+        elif node_type == "normalize":
+            rows = _normalize_rows(rows, config)
+        elif node_type == "deduplicate":
+            rows = _deduplicate_rows(rows, config)
         elif node_type == "join":
             right_rows = parents[1] if len(parents) > 1 else None
             if right_rows is None and config.get("right_asset_id"):
@@ -770,6 +1105,28 @@ def _execute_graph(
             target = config.get("target_field") or "id"
             fields = config.get("source_fields") or config.get("fields") or []
             rows = [{**row, target: row.get(target) or _stable_row_id(row, fields)} for row in rows]
+        elif node_type == "pivot":
+            rows = _pivot_rows(rows, config)
+        elif node_type == "unpivot":
+            rows = _unpivot_rows(rows, config)
+        elif node_type == "window":
+            rows = _window_rows(rows, config)
+        elif node_type == "validate":
+            rows = _validate_rows(rows, config)
+        elif node_type == "derive_geo_point":
+            rows = _derive_geo_rows(rows, config)
+        elif node_type == "derive_mgrs":
+            rows = _derive_mgrs_rows(rows, config)
+        elif node_type == "spatial_filter":
+            rows = _spatial_filter_rows(rows, config)
+        elif node_type == "spatial_join":
+            right_rows = parents[1] if len(parents) > 1 else []
+            if config.get("right_asset_id"):
+                right_asset = db.get(models.DataAsset, config["right_asset_id"])
+                if not right_asset:
+                    raise HTTPException(status_code=404, detail=f"DataAsset '{config['right_asset_id']}' not found")
+                right_rows = copy.deepcopy(right_asset.records or [])
+            rows = _spatial_join_rows(rows, right_rows, config)
         elif node_type in {"llm_assist", "llm"}:
             output_field = config.get("output_field") or "llm_summary"
             prompt = config.get("prompt") or "summarize"

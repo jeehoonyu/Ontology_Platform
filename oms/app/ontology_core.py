@@ -737,6 +737,7 @@ def ontology_ui_state(db: Session = Depends(get_db)):
         "primary_actions": [
             {"id": "create_draft", "label": "Generate ontology draft", "method": "POST", "path": "/ontology-generator/drafts"},
             {"id": "index", "label": "Index object type", "method": "POST", "path": "/ontology/object-types/{object_type_id}/index"},
+            {"id": "version_draft", "label": "Open visual designer", "method": "POST", "path": "/artifacts/adopt"},
         ],
         "object_types": [
             {

@@ -53,6 +53,8 @@ Based on modern ontology-driven principles, this backend separates the data plan
 
 ## Setup & Running Locally
 
+For a self-hosted team pilot with OIDC, TLS, migrations, backup, restore, and upgrade procedures, see [Production Pilot Operations](docs/PRODUCTION_PILOT.md).
+
 1. **Install Dependencies**
    ```bash
    cd oms
