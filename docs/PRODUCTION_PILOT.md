@@ -2,6 +2,8 @@
 
 This deployment profile is intended for one organization and a small pilot team. It uses Postgres, OIDC, server-side sessions, TLS, versioned visual artifacts, and persistent Docker volumes.
 
+Builder authoring and recovery behavior is documented in [Visual Builder Operations](VISUAL_BUILDERS.md).
+
 ## Prepare
 
 1. Copy `deploy/.env.production.example` to `.env.production` and replace every placeholder.

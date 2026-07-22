@@ -55,6 +55,8 @@ Based on modern ontology-driven principles, this backend separates the data plan
 
 For a self-hosted team pilot with OIDC, TLS, migrations, backup, restore, and upgrade procedures, see [Production Pilot Operations](docs/PRODUCTION_PILOT.md).
 
+For drag/drop editing, typed Pipeline transforms, ontology mappings, Workshop breakpoints, AIP traces, versioning, and recovery, see [Visual Builder Operations](docs/VISUAL_BUILDERS.md).
+
 1. **Install Dependencies**
    ```bash
    cd oms

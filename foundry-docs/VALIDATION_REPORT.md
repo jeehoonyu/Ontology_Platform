@@ -8,7 +8,7 @@ Current result:
 
 - Breadth: strong coverage across ontology, actions, AIP Logic, Workshop, Object Explorer, Pipeline Builder, GIS, data health, modeling, ModelOps, decision intelligence, ops, investigations, reliability, security, governance, global search, eventing, policies, timelines, and graph overview.
 - Outcome proof: the Asset Reliability Command Center provides one complete local workflow from raw maintenance data to governed operational decision, incident, and report.
-- Authoring fidelity: Pipeline Builder now has UI-state contracts, a React workbench canvas with grouped toolbar, edge insert actions, selected-node context menu, output rail, preview drawer, node-level details/preview/suggestions, and deterministic deliver; Ontology Manager now has a three-pane manager/walkthrough layout, object-type manager cards, section state, metadata/index actions, and dataset-to-object-type generation.
+- Authoring fidelity: Pipeline Builder now has structured transform schemas, audited node configuration, field lineage, schema/sample preview, spatial/MGRS execution, and deterministic delivery. Ontology Manager adds drag/drop datasource mapping, compatibility checks, hydrated object preview, saved mappings, and change-impact confirmation. Workshop and AIP Logic share atomic command editing, typed forms, validation targets, previews, publication, and recovery.
 - User data path: CSV/JSON import jobs infer schemas, preview records, validate template mappings, upload local files without extra dependencies, and promote reviewed data into local datasets for the Ontology Generator and Command Center workflow.
 - Onboarding depth: import jobs now support mapping suggestions, type coercion, enum cleanup, timestamp normalization, unit normalization, derived geo points, MGRS-to-point conversion, duplicate detection, connector preview, connector-to-import generation, sync validation, and deterministic stream replay.
 - Frontend direction: a React/Vite/TypeScript shell now serves typed core evaluator workspaces when built, with reusable contracts for pipeline, ontology, imports, command center, graph, and validation while the legacy static UI remains as a migration fallback.
@@ -26,8 +26,8 @@ Current result:
 | AIP Logic and agents | Medium-high | Blocks, variables, object tools, proposed actions, deterministic LLM substitute |
 | Workshop | High | Variables, widgets, events, live render, publish, restore |
 | Object Explorer | High | Query, facets, histograms, profiles, saved explorations, actions |
-| Pipeline and DataOps | High | React DAG workbench, UI-state canvas contracts, selected-node details, output rail summaries, node insert/layout/preview/suggestions, validate/preview/deliver, ontology outputs, transactions, data expectations, lineage impact |
-| Ontology Generator and Manager | High local analog | Dataset schema inference, primary/title key selection, profile/action scaffolding, generated pipeline graph, object-type overview/status/properties/cards, walkthrough, section state, metadata/index actions |
+| Pipeline and DataOps | High | React DAG workbench, structured configuration forms, selected-node schema/preview, field lineage, typed validation, spatial/MGRS transforms, output rail, deliver, transactions, and recovery |
+| Ontology Generator and Manager | High local analog | Dataset schema inference, drag/drop property mapping, type compatibility, hydrated object preview, primary/title keys, visual links, property/action editors, archived recovery, and change impact |
 | GIS and Map | High | GeoJSON overlays, MGRS, radius/geofence, map layers |
 | ModelOps | Medium-high | Objectives, training, eval gates, releases, deployments, inference logs, drift monitors |
 | Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, visual graph overview |
