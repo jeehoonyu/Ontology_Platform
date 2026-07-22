@@ -7,7 +7,8 @@ export interface ArtifactNodeData {
   label: string;
   description?: string;
   nodeType: string;
-  fields?: Array<{ id: string; name: string; value: string }>;
+  fields?: Array<{ id: string; name: string; value: string; label?: string; type?: string; required?: boolean; options?: string[] }>;
+  configurationSchemaVersion?: number;
 }
 
 export interface ArtifactState {

@@ -138,6 +138,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [search, setSearch] = useState("");
   const [instance, setInstance] = useState<ReactFlowInstance<Node<ArtifactNodeData>, Edge> | null>(null);
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
+  const [breakpoint, setBreakpoint] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const undoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   const redoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   const hydratedArtifact = useRef("");
@@ -243,10 +244,23 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     if (!item) return;
     snapshot();
     const id = `${nodeType}_${crypto.randomUUID().slice(0, 8)}`;
+    type FieldDefinition = { label?: string; type?: string; required?: boolean; options?: string[]; default?: unknown };
+    const schema = ("configuration_schema" in item ? item.configuration_schema : undefined) as { properties?: Record<string, FieldDefinition> } | undefined;
+    const properties = schema?.properties || {};
     setNodes((current) => [...current, {
       id,
       position: position || { x: 120 + current.length * 28, y: 100 + current.length * 28 },
-      data: { label: item.label, description: item.description, nodeType, fields: [] },
+      data: {
+        label: item.label,
+        description: item.description,
+        nodeType,
+        configurationSchemaVersion: 1,
+        fields: Object.entries(properties).map(([name, definition]) => ({
+          id: crypto.randomUUID(), name, label: definition.label || name.replace(/_/g, " "),
+          value: definition.default == null ? "" : String(definition.default), type: definition.type || "string",
+          required: Boolean(definition.required), options: definition.options
+        }))
+      },
       className: `visual-node visual-node-${nodeType}`
     }]);
     setSelectedNodeId(id);
@@ -399,6 +413,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           <button title="Undo" aria-label="Undo" onClick={undo} disabled={!undoStack.current.length}><Undo2 size={16} /></button>
           <button title="Redo" aria-label="Redo" onClick={redo} disabled={!redoStack.current.length}><Redo2 size={16} /></button>
           <button title="Auto-layout nodes" onClick={layoutNodes}><AlignHorizontalSpaceAround size={16} /> Layout</button>
+          {artifactType === "workshop" ? <div className="builder-breakpoint-control" aria-label="Workshop breakpoint">{(["desktop", "tablet", "mobile"] as const).map((item) => <button type="button" className={breakpoint === item ? "active" : ""} onClick={() => setBreakpoint(item)} key={item}>{item}</button>)}</div> : null}
           <button onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending}><Eye size={16} /> {previewMutation.isPending ? "Running" : "Preview"}</button>
           <button onClick={() => saveMutation.mutate({ reason: "Manual save" })} disabled={!dirty || saveMutation.isPending}><Save size={16} /> Save</button>
           <button className="primary-action" onClick={async () => {
@@ -428,7 +443,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           </div>
         </aside>
         <div className="visual-builder-center">
-          <div className="visual-flow-canvas" onDrop={drop} onDragOver={(event) => event.preventDefault()}>
+          <div className={`visual-flow-canvas visual-breakpoint-${breakpoint}`} onDrop={drop} onDragOver={(event) => event.preventDefault()}>
             <ReactFlow<Node<ArtifactNodeData>, Edge>
               nodes={nodes}
               edges={edges}
@@ -523,7 +538,7 @@ function NodeInspector({ node, onChange, onDuplicate, onDelete }: { node: Node<A
       <div className="inspector-heading"><div><span className="eyebrow">{node.data.nodeType}</span><h2>Node settings</h2></div><div><button title="Duplicate node" onClick={onDuplicate}><Copy size={15} /></button><button title="Delete node" onClick={onDelete}><Trash2 size={15} /></button></div></div>
       <label>Name<input value={node.data.label} onChange={(event) => onChange({ ...node.data, label: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={node.data.description || ""} onChange={(event) => onChange({ ...node.data, description: event.target.value })} /></label>
-      <div className="field-list-heading"><strong>Configuration fields</strong><button onClick={() => onChange({ ...node.data, fields: [...fields, { id: crypto.randomUUID(), name: "field", value: "" }] })}><Plus size={14} /> Add</button></div>
+      <div className="field-list-heading"><strong>Configuration fields</strong><button onClick={() => onChange({ ...node.data, fields: [...fields, { id: crypto.randomUUID(), name: "field", label: "Custom field", value: "", type: "string" }] })}><Plus size={14} /> Add</button></div>
       <DndContext collisionDetection={closestCenter} onDragEnd={reorder}>
         <SortableContext items={fields.map((field) => field.id)} strategy={verticalListSortingStrategy}>
           <div className="config-field-list">
@@ -535,13 +550,23 @@ function NodeInspector({ node, onChange, onDuplicate, onDelete }: { node: Node<A
   );
 }
 
-function SortableField({ field, onChange, onDelete }: { field: { id: string; name: string; value: string }; onChange: (field: { id: string; name: string; value: string }) => void; onDelete: () => void }) {
+type InspectorField = NonNullable<ArtifactNodeData["fields"]>[number];
+
+function SortableField({ field, onChange, onDelete }: { field: InspectorField; onChange: (field: InspectorField) => void; onDelete: () => void }) {
   const sortable = useSortable({ id: field.id });
   return (
     <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition }} className="config-field-row">
       <button className="drag-grip" aria-label={`Reorder ${field.name}`} {...sortable.attributes} {...sortable.listeners}>⋮⋮</button>
-      <input aria-label="Field name" value={field.name} onChange={(event) => onChange({ ...field, name: event.target.value })} />
-      <input aria-label="Field value" value={field.value} onChange={(event) => onChange({ ...field, value: event.target.value })} />
+      <span className="config-field-label"><strong>{field.label || field.name}</strong><small>{field.required ? "Required" : field.type || "string"}</small></span>
+      {field.type === "select" ? (
+        <select aria-label={field.label || field.name} value={field.value} onChange={(event) => onChange({ ...field, value: event.target.value })}><option value="">Choose...</option>{(field.options || []).map((option) => <option value={option} key={option}>{option.replace(/_/g, " ")}</option>)}</select>
+      ) : field.type === "boolean" ? (
+        <label className="config-boolean"><input type="checkbox" checked={field.value === "true"} onChange={(event) => onChange({ ...field, value: String(event.target.checked) })} /> Enabled</label>
+      ) : field.type === "textarea" ? (
+        <textarea aria-label={field.label || field.name} rows={3} value={field.value} onChange={(event) => onChange({ ...field, value: event.target.value })} />
+      ) : (
+        <input aria-label={field.label || field.name} type={["integer", "number"].includes(field.type || "") ? "number" : "text"} placeholder={field.type === "field_list" ? "value_a, value_b" : undefined} value={field.value} onChange={(event) => onChange({ ...field, value: event.target.value })} />
+      )}
       <button aria-label={`Delete ${field.name}`} onClick={onDelete}><Trash2 size={14} /></button>
     </div>
   );
