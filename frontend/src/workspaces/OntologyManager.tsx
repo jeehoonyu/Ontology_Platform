@@ -13,13 +13,16 @@ import {
 import { api, postJson } from "../api";
 import {
   addOntologyProperty,
+  analyzeOntologyImpact,
   archiveOntologyProperty,
   getOntologyObjectType,
   getOntologySection,
   getOntologyState,
   getOntologyWalkthrough,
   indexObjectType,
+  previewOntologyMapping,
   reorderOntologyProperties,
+  saveOntologyDatasourceMapping,
   updateOntologyProperty,
   updateOntologyMetadata
 } from "../api/workspaceState";
@@ -29,7 +32,9 @@ import { asString, classNames, formatValue } from "../utils/format";
 import { navigate } from "../utils/navigation";
 import type {
   JsonObject,
+  OntologyFieldMapping,
   OntologyManagerState,
+  OntologyMappingPreview,
   OntologyObjectSummary,
   OntologySectionState,
   OntologyUiState,
@@ -216,6 +221,7 @@ export function OntologyManager() {
             <ManagerSurface
               manager={manager}
               objectTypes={state.value?.object_types || []}
+              assets={assets.value || []}
               sectionState={sectionState}
               onIndex={markIndexed}
               onSaveMetadata={saveMetadata}
@@ -274,6 +280,7 @@ function WalkthroughRail({ walkthrough }: { walkthrough: OntologyWalkthrough | n
 function ManagerSurface({
   manager,
   objectTypes,
+  assets,
   sectionState,
   onIndex,
   onSaveMetadata,
@@ -285,6 +292,7 @@ function ManagerSurface({
 }: {
   manager: OntologyManagerState;
   objectTypes: OntologyObjectSummary[];
+  assets: DataAssetsResponseItem[];
   sectionState: OntologySectionState | null;
   onIndex: () => void;
   onSaveMetadata: (patch: JsonObject) => Promise<void>;
@@ -370,6 +378,7 @@ function ManagerSurface({
         </Panel>
       </div>
       <OntologyRelationshipDesigner objectTypes={objectTypes} selectedObjectTypeId={manager.object_type.id} />
+      <DatasetMappingPanel objectTypeId={manager.object_type.id} assets={assets} onSaved={onResourceMutation} />
       <div className="manager-grid">
         <PropertyEditor
           manager={manager}
@@ -377,6 +386,7 @@ function ManagerSurface({
           onUpdateProperty={onUpdateProperty}
           onArchiveProperty={onArchiveProperty}
           onReorderProperties={onReorderProperties}
+          onAnalyzeImpact={(propertyName) => analyzeOntologyImpact(manager.object_type.id, [{ operation: "archive", property_name: propertyName }])}
         />
         <ActionTypeEditor objectTypeId={manager.object_type.id} rows={manager.cards.action_types.rows} onMutation={onResourceMutation} />
         <LinkTypeEditor rows={manager.cards.link_types.rows} fallback={manager.object_type.display_name} onMutation={onResourceMutation} />
@@ -480,6 +490,94 @@ function EditableOntologyResource({ kind, row, onMutation }: { kind: "action" | 
       <button onClick={save}>Save</button>
       {message ? <span className="resource-save-state" role="status">{message}</span> : null}
     </article>
+  );
+}
+
+function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: string; assets: DataAssetsResponseItem[]; onSaved: () => void }) {
+  const [assetId, setAssetId] = useState("");
+  const [preview, setPreview] = useState<OntologyMappingPreview | null>(null);
+  const [mappings, setMappings] = useState<OntologyFieldMapping[]>([]);
+  const [draggedField, setDraggedField] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function loadSuggestions(nextAssetId = assetId) {
+    if (!nextAssetId) return;
+    setBusy(true);
+    setMessage("Generating field mapping suggestions...");
+    try {
+      const result = await previewOntologyMapping(nextAssetId, objectTypeId);
+      setPreview(result);
+      setMappings(result.mappings);
+      setMessage(`Suggested ${result.mappings.length} compatible field mappings.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not preview mapping.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshPreview(nextMappings = mappings) {
+    if (!assetId) return;
+    setBusy(true);
+    try {
+      const result = await previewOntologyMapping(assetId, objectTypeId, nextMappings);
+      setPreview(result);
+      setMappings(result.mappings);
+      setMessage(`Mapping validation: ${result.status}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not validate mapping.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function mapField(targetProperty: string, sourceField = draggedField) {
+    if (!sourceField) return;
+    const next = [...mappings.filter((item) => item.target_property !== targetProperty && item.source_field !== sourceField), { source_field: sourceField, target_property: targetProperty }];
+    setMappings(next);
+    setDraggedField("");
+    void refreshPreview(next);
+  }
+
+  async function save() {
+    if (!assetId || !preview || preview.errors.length) return;
+    setBusy(true);
+    try {
+      await saveOntologyDatasourceMapping(objectTypeId, assetId, mappings);
+      setMessage("Datasource mapping saved and audited. It is ready for an ontology output node.");
+      onSaved();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save mapping.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="Dataset to Ontology Mapping" className="ontology-mapping-panel" action={<StatusBadge value={preview?.status || "NOT_CONFIGURED"} />}>
+      <div className="mapping-toolbar">
+        <label>Source dataset<select value={assetId} onChange={(event) => { setAssetId(event.target.value); setPreview(null); setMappings([]); }}><option value="">Choose dataset</option>{assets.map((asset) => <option value={asset.id} key={asset.id}>{asset.display_name || asset.id}</option>)}</select></label>
+        <button onClick={() => loadSuggestions()} disabled={!assetId || busy}>Suggest mappings</button>
+        <button onClick={() => refreshPreview()} disabled={!assetId || busy}>Preview objects</button>
+        <button className="primary-action" onClick={save} disabled={!preview || Boolean(preview.errors.length) || busy}>Save mapping</button>
+      </div>
+      {message ? <div className="workbench-status-strip" role="status">{message}</div> : null}
+      {preview ? (
+        <>
+          <div className="ontology-mapping-grid">
+            <section><h3>Dataset fields</h3><p>Drag a source field onto a target property.</p><div className="mapping-source-list">{preview.source_fields.map((field) => <button key={field.name} draggable onDragStart={() => setDraggedField(field.name)} className={classNames(field.mapped && "mapped")}><strong>{field.name}</strong><small>{field.inferred_type}</small></button>)}</div></section>
+            <section><h3>Object properties</h3><p>Required properties must be mapped before saving.</p><div className="mapping-target-list">{preview.target_properties.map((property) => {
+              const source = mappings.find((item) => item.target_property === property.name)?.source_field;
+              const compatibility = preview.compatibility.find((item) => item.target_property === property.name);
+              return <div key={property.name} onDragOver={(event) => event.preventDefault()} onDrop={() => mapField(property.name)} className={classNames("mapping-target", source && "mapped", compatibility && !compatibility.compatible && "incompatible")}><span><strong>{property.name}</strong><small>{property.base_type || property.type}{property.required ? " · required" : ""}</small></span><select aria-label={`Map ${property.name}`} value={source || ""} onChange={(event) => mapField(property.name, event.target.value)}><option value="">Not mapped</option>{preview.source_fields.map((field) => <option value={field.name} key={field.name}>{field.name}</option>)}</select></div>;
+            })}</div></section>
+          </div>
+          {preview.errors.length || preview.warnings.length ? <DataTable rows={[...preview.errors, ...preview.warnings]} empty="Mapping is valid." /> : null}
+          <details className="mapping-preview-drawer" open><summary>Hydrated object preview · {preview.hydrated_preview.length} rows</summary><DataTable rows={preview.hydrated_preview} empty="No objects can be previewed." /></details>
+        </>
+      ) : <div className="empty">Choose a dataset to map fields and preview object hydration.</div>}
+    </Panel>
   );
 }
 
@@ -602,19 +700,22 @@ function PropertyEditor({
   onAddProperty,
   onUpdateProperty,
   onArchiveProperty,
-  onReorderProperties
+  onReorderProperties,
+  onAnalyzeImpact
 }: {
   manager: OntologyManagerState;
   onAddProperty: (payload: JsonObject) => Promise<void>;
   onUpdateProperty: (propertyName: string, payload: JsonObject) => Promise<void>;
   onArchiveProperty: (propertyName: string) => Promise<void>;
   onReorderProperties: (order: string[]) => Promise<void>;
+  onAnalyzeImpact: (propertyName: string) => Promise<JsonObject>;
 }) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, JsonObject>>({});
   const [newField, setNewField] = useState<JsonObject>({ name: "", base_type: "string", status: "active", required: false, description: "" });
   const [confirmArchive, setConfirmArchive] = useState("");
   const [dragName, setDragName] = useState("");
+  const [impactMessage, setImpactMessage] = useState("");
   const rows = manager.cards.properties.rows;
 
   useEffect(() => {
@@ -638,11 +739,15 @@ function PropertyEditor({
 
   async function archiveRow(name: string) {
     if (confirmArchive !== name) {
+      const impact = await onAnalyzeImpact(name);
+      const summary = impact.summary as JsonObject | undefined;
+      setImpactMessage(`${asString(impact.severity, "LOW")} impact: ${formatValue(summary?.objects || 0)} objects and ${formatValue(summary?.pipelines || 0)} pipelines may be affected. Confirm to archive; values remain recoverable.`);
       setConfirmArchive(name);
       return;
     }
     await onArchiveProperty(name);
     setConfirmArchive("");
+    setImpactMessage("");
   }
 
   function orderedNames() {
@@ -672,6 +777,7 @@ function PropertyEditor({
     <Panel title={`Properties ${manager.cards.properties.count}`} className="property-panel" action={<button onClick={() => setEditing((value) => !value)}>{editing ? "Done" : "Edit fields"}</button>}>
       {editing ? (
         <div className="property-editor">
+          {impactMessage ? <div className="ontology-impact-warning" role="alert">{impactMessage}</div> : null}
           <div className="property-add-row">
             <input value={asString(newField.name)} onChange={(event) => setNewField({ ...newField, name: event.target.value })} placeholder="newFieldName" />
             <select value={asString(newField.base_type, "string")} onChange={(event) => setNewField({ ...newField, base_type: event.target.value })}>

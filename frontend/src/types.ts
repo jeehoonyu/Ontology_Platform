@@ -280,6 +280,24 @@ export interface OntologySectionState {
   rows: TableRow[];
 }
 
+export interface OntologyFieldMapping {
+  source_field: string;
+  target_property: string;
+}
+
+export interface OntologyMappingPreview {
+  asset: { id: string; display_name: string; row_count: number };
+  object_type: { id: string; display_name: string; primary_key?: string | null };
+  source_fields: Array<{ name: string; inferred_type: string; mapped: boolean }>;
+  target_properties: Array<{ name: string; base_type?: string; type?: string; required?: boolean; mapped_from?: string | null }>;
+  mappings: OntologyFieldMapping[];
+  compatibility: Array<{ source_field: string; target_property: string; source_type: string; target_type: string; compatible: boolean }>;
+  hydrated_preview: TableRow[];
+  status: string;
+  errors: TableRow[];
+  warnings: TableRow[];
+}
+
 export interface OntologyUiState {
   summary: StatusSummary;
   primary_actions: ActionLink[];
