@@ -20,7 +20,7 @@ export default defineConfig({
     { name: "wide-1600", use: { viewport: { width: 1600, height: 1000 } } }
   ],
   webServer: {
-    command: "..\\oms\\venv312\\Scripts\\python.exe -m uvicorn app.main:app --app-dir ..\\oms --host 127.0.0.1 --port 8010",
+    command: "..\\oms\\venv312\\Scripts\\python.exe -m alembic -c ..\\oms\\alembic.ini upgrade head && ..\\oms\\venv312\\Scripts\\python.exe -m uvicorn app.main:app --app-dir ..\\oms --host 127.0.0.1 --port 8010",
     url: "http://127.0.0.1:8010/health/live",
     env: {
       DATABASE_URL: "sqlite:///playwright.db",

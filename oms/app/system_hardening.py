@@ -106,13 +106,14 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
     {"version": 3, "name": "hybrid_onboarding_connectors_streams_react_foundation", "status": "applied"},
     {"version": 4, "name": "versioned_artifacts_jobs_oidc_sessions", "status": "applied"},
     {"version": 5, "name": "durable_worker_leases_and_job_recovery", "status": "applied"},
+    {"version": 6, "name": "durable_agent_execution_and_policy_evidence", "status": "applied"},
 ]
 
 

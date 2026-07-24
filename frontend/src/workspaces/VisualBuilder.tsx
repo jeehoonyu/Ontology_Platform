@@ -52,6 +52,7 @@ import {
 } from "../api/artifactApi";
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
 import { autoLayout, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
+import { AgentRuntimePanel } from "./AgentRuntimePanel";
 
 interface VisualBuilderProps {
   artifactType: ArtifactType;
@@ -483,6 +484,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
                 <p>Select Preview to validate the current revision and inspect deterministic execution evidence.</p>
               )}
             </div>
+            {artifactType === "aip_logic" ? <AgentRuntimePanel /> : null}
           </section>
         </div>
         <aside className="visual-inspector-panel">
