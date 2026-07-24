@@ -10,7 +10,8 @@ Worker deployment and queue recovery behavior is documented in [Asynchronous Exe
 1. Copy `deploy/.env.production.example` to `.env.production` and replace every placeholder.
 2. Configure an OIDC client with Authorization Code flow, PKCE, and the callback `${PUBLIC_BASE_URL}/auth/callback`.
 3. Map provider roles to `viewer`, `editor`, `operator`, `approver`, `publisher`, or `administrator`. Override `OIDC_ROLES_CLAIM` when roles are stored under a different claim.
-4. Point `PUBLIC_HOST` at the server. Caddy obtains and renews TLS certificates automatically for public DNS names.
+4. Emit `organization_id` and a string-array `project_ids` claim. Effective access requires both a global role permission and project membership/claim. See [Project Tenancy And Ontology Packages](TENANCY_AND_PACKAGES.md).
+5. Point `PUBLIC_HOST` at the server. Caddy obtains and renews TLS certificates automatically for public DNS names.
 
 Production startup fails when `AUTH_MODE` is not `oidc` or required OIDC settings are missing. The local administrator bypass is therefore unavailable in the production profile.
 
@@ -44,7 +45,7 @@ npm run test:production-oidc
 cd ..
 ```
 
-The browser check signs in both users and proves that `pilot-admin` can mutate an artifact while `pilot-viewer` can read it but receives `403` for the same mutation. Remove all isolated containers and data after the rehearsal:
+The rehearsal assigns both users to organization `pilot` and project `default`. The browser check proves that `pilot-admin` can mutate an artifact while `pilot-viewer` can read it but receives `403` for the same mutation. Remove all isolated containers and data after the rehearsal:
 
 ```powershell
 ./scripts/stop-production-rehearsal.ps1 -DeleteData
@@ -90,7 +91,7 @@ After restoration, verify `/health/ready`, sign in, inspect `/workspace/validati
 ## Demo Reset and Project Transfer
 
 - `POST /project/demo/reset` returns the deterministic evaluator scenario to a known state.
-- `GET /project/export` exports portable project resources, including visual artifact revisions and job evidence.
+- `GET /project/export` exports portable project resources, including visual artifact revisions, job evidence, tenancy memberships, ontology packages/installations, and collaboration events.
 - `POST /project/import` restores a project JSON snapshot in merge mode.
 
 Database backup remains the authoritative disaster-recovery mechanism because it also preserves all audit, security, and runtime tables.
@@ -98,7 +99,7 @@ Database backup remains the authoritative disaster-recovery mechanism because it
 ## Troubleshooting
 
 - `401`: begin at `/auth/login`; verify issuer reachability and callback URL.
-- `403`: inspect the OIDC role claim and the permission shown in the response.
+- `403`: inspect the OIDC role, `organization_id`, `project_ids`, and persisted project membership shown in the response.
 - `409`: reload the artifact because another revision was saved.
 - `423`: another user holds the short editing lease; wait for expiry or coordinate ownership.
 - `503` readiness: inspect Postgres connectivity and migration logs before restarting repeatedly.

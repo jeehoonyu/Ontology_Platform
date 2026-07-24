@@ -114,6 +114,41 @@ test("ontology maps dataset fields with hydrated preview", async ({ page }, test
   await expect(mappingPanel.getByText(/Hydrated object preview/)).toBeVisible();
 });
 
+test("ontology manager publishes and installs a governed package", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the governed package workflow once on desktop.");
+  const suffix = Date.now();
+  const objectTypeId = `packaged_asset_${suffix}`;
+  const displayName = `Packaged Asset ${suffix}`;
+  const created = await page.request.post("/object-types", { data: {
+    id: objectTypeId,
+    display_name: displayName,
+    description: "Browser package acceptance type",
+    properties: { asset_id: { type: "string", required: true }, status: { type: "string" } }
+  } });
+  expect(created.ok()).toBeTruthy();
+
+  await page.goto("/workspace/ontology");
+  await page.locator(".manager-resource-nav .resource-row").filter({ hasText: displayName }).click();
+  const packagePanel = page.locator(".ontology-package-panel");
+  await expect(packagePanel).toBeVisible();
+  const initialize = packagePanel.getByRole("button", { name: "Initialize workspace" });
+  if (await initialize.isVisible()) {
+    await initialize.click();
+    await expect(packagePanel).toContainText("Package workspace initialized");
+  }
+  await packagePanel.getByLabel("Package").selectOption("");
+  await packagePanel.getByRole("button", { name: "Create from selected type" }).click();
+  await expect(packagePanel).toContainText("Package created");
+  await packagePanel.getByLabel("New version").fill("1.0.0");
+  await packagePanel.getByRole("button", { name: "Capture selected type" }).click();
+  await expect(packagePanel).toContainText("Captured 1.0.0");
+  await packagePanel.getByRole("button", { name: "Publish" }).click();
+  await expect(packagePanel).toContainText("Published 1.0.0");
+  await packagePanel.getByLabel("Namespace").fill(`browser_${suffix}`);
+  await packagePanel.getByRole("button", { name: "Install package" }).click();
+  await expect(packagePanel).toContainText("Installed 1.0.0");
+});
+
 test("pipeline creates a graph and accepts a dragged node", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful pipeline workflow once on desktop.");
   await page.goto("/workspace/pipeline");

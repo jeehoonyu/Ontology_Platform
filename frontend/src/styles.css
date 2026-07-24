@@ -549,7 +549,7 @@ button:disabled {
 }
 
 .agent-runtime-panel small {
-  color: #667985;
+  color: #526671;
 }
 
 .agent-runtime-controls {
@@ -1129,6 +1129,80 @@ button:disabled {
   place-items: center;
   align-content: center;
   gap: 12px;
+}
+
+.ontology-package-panel,
+.package-install-form {
+  display: grid;
+  gap: 8px;
+}
+
+.ontology-package-panel label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  color: #526671;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ontology-package-panel select,
+.ontology-package-panel input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+}
+
+.package-empty-state {
+  display: grid;
+  gap: 8px;
+  color: #657782;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.package-summary-row,
+.package-version-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+}
+
+.package-summary-row > span:not(.status-badge):not(.badge) {
+  color: #526671;
+}
+
+.package-version-row {
+  justify-content: space-between;
+  padding: 7px;
+  border: 1px solid #d4dde2;
+  border-radius: 5px;
+  background: #f7f9fa;
+}
+
+.package-version-row > div {
+  min-width: 0;
+  display: grid;
+}
+
+.package-version-row span {
+  max-width: 100px;
+  overflow: hidden;
+  color: #667681;
+  font-family: monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.package-operation-status {
+  padding: 7px 8px;
+  border-left: 3px solid #176b8f;
+  background: #eef6f8;
+  color: #36515f;
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1100px) {
