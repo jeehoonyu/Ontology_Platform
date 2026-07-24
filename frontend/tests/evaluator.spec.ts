@@ -65,6 +65,43 @@ test("visual builder supports typed configuration, preview, save, and publish", 
   await expect(page.locator(".operation-message")).toContainText(/Published revision/);
 });
 
+test("visual builders show collaborators and receive clean remote revisions", async ({ browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the multi-user collaboration workflow once on desktop.");
+  const contextA = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const contextB = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  try {
+    const suffix = Date.now();
+    const created = await pageA.request.post("/artifacts", { data: {
+      artifact_type: "workshop",
+      display_name: `Collaborative workshop ${suffix}`,
+      state: {
+        nodes: [{ id: "initial", position: { x: 80, y: 80 }, data: { label: "Initial metric", nodeType: "metric" } }],
+        edges: [],
+        widgets: []
+      }
+    } });
+    expect(created.ok()).toBeTruthy();
+    const artifact = await created.json() as { id: string };
+
+    await Promise.all([pageA.goto("/workspace/workshop"), pageB.goto("/workspace/workshop")]);
+    await pageA.getByLabel("Workshop artifact").selectOption(artifact.id);
+    await pageB.getByLabel("Workshop artifact").selectOption(artifact.id);
+    await expect(pageA.locator(".collaboration-presence")).toContainText("2 editing");
+    await expect(pageB.locator(".collaboration-presence")).toContainText("2 editing");
+    await expect(pageB.locator(".react-flow__node")).toHaveCount(1);
+
+    await pageA.locator(".node-library-list > button").filter({ hasText: "Metric" }).first().click();
+    await pageA.getByRole("button", { name: /Save/ }).click();
+    await expect(pageA.locator(".operation-message")).toContainText(/Saved revision/);
+    await expect(pageB.locator(".react-flow__node")).toHaveCount(2);
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
 test("ontology maps dataset fields with hydrated preview", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ontology mapping workflow once on desktop.");
   await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} });
