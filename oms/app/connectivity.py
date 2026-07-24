@@ -11,7 +11,8 @@ from sqlalchemy import String, Integer, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from .database import Base, get_db
-from . import imports_ops, models, models_action, ops_control
+from . import imports_ops, models, models_action, ops_control, tenancy
+from .production_auth import Principal, require_permission
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy models
@@ -22,6 +23,7 @@ class ConnectionSource(Base):
     __tablename__ = "connection_sources"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     source_type: Mapped[str] = mapped_column(String)  # jdbc/s3/sftp/rest/kafka
     config: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -37,6 +39,7 @@ class ConnectionSync(Base):
     __tablename__ = "connection_syncs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source_id: Mapped[str] = mapped_column(String, ForeignKey("connection_sources.id"), index=True)
     target_asset_id: Mapped[str] = mapped_column(String, index=True)
     mode: Mapped[str] = mapped_column(String, default="snapshot")  # snapshot/incremental
@@ -68,6 +71,7 @@ class ConnectionExport(Base):
     __tablename__ = "connection_exports"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source_asset_id: Mapped[str] = mapped_column(String, index=True)
     destination: Mapped[str] = mapped_column(String)
     format: Mapped[str] = mapped_column(String, default="csv")  # csv/json/parquet
@@ -94,6 +98,7 @@ class ConnectionExportCheckpoint(Base):
 
 class ConnectionSourceCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     source_type: str = Field(..., pattern="^(jdbc|s3|sftp|rest|kafka)$")
     config: Dict[str, Any] = Field(default_factory=dict)
@@ -104,6 +109,7 @@ class ConnectionSourceCreate(BaseModel):
 class ConnectionSourceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     display_name: str
     source_type: str
     config: Dict[str, Any]
@@ -123,6 +129,7 @@ class ConnectionSyncCreate(BaseModel):
 class ConnectionSyncRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     source_id: str
     target_asset_id: str
     mode: str
@@ -144,6 +151,7 @@ class SyncRunRead(BaseModel):
 
 class ConnectionExportCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     source_asset_id: str
     destination: str
     format: str = Field(default="csv", pattern="^(csv|json|parquet)$")
@@ -152,6 +160,7 @@ class ConnectionExportCreate(BaseModel):
 class ConnectionExportRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     source_asset_id: str
     destination: str
     format: str
@@ -255,17 +264,21 @@ def _infer_schema(records: List[Any]) -> List[Dict[str, str]]:
     return [{"name": c, "type": types[c]} for c in columns]
 
 
-def _source_or_404(db: Session, source_id: str) -> ConnectionSource:
+def _source_or_404(db: Session, source_id: str, principal: Optional[Principal] = None, permission: str = "view") -> ConnectionSource:
     source = db.query(ConnectionSource).filter(ConnectionSource.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+    if principal:
+        tenancy.assert_project_permission(db, principal, source.project_id, permission)
     return source
 
 
-def _sync_or_404(db: Session, sync_id: str) -> ConnectionSync:
+def _sync_or_404(db: Session, sync_id: str, principal: Optional[Principal] = None, permission: str = "view") -> ConnectionSync:
     sync = db.query(ConnectionSync).filter(ConnectionSync.id == sync_id).first()
     if not sync:
         raise HTTPException(status_code=404, detail="Sync not found")
+    if principal:
+        tenancy.assert_project_permission(db, principal, sync.project_id, permission)
     return sync
 
 
@@ -296,9 +309,11 @@ router = APIRouter(tags=["connectivity"])
 # --- Sources ---
 
 @router.post("/connections/sources", response_model=ConnectionSourceRead)
-def create_source(body: ConnectionSourceCreate, db: Session = Depends(get_db)):
+def create_source(body: ConnectionSourceCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     row = ConnectionSource(
         id=body.id or uuid.uuid4().hex,
+        project_id=body.project_id,
         display_name=body.display_name,
         source_type=body.source_type,
         config=body.config,
@@ -313,26 +328,32 @@ def create_source(body: ConnectionSourceCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/connections/sources", response_model=List[ConnectionSourceRead])
-def list_sources(db: Session = Depends(get_db)):
-    return db.query(ConnectionSource).all()
+def list_sources(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(ConnectionSource)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ConnectionSource.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal)
+        if accessible is not None:
+            query = query.filter(ConnectionSource.project_id.in_(accessible))
+    return query.all()
 
 
 @router.get("/connections/sources/{source_id}", response_model=ConnectionSourceRead)
-def get_source(source_id: str, db: Session = Depends(get_db)):
-    return _source_or_404(db, source_id)
+def get_source(source_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    return _source_or_404(db, source_id, principal)
 
 
 @router.post("/connections/sources/{source_id}/test")
-def test_source(source_id: str, actor: str = Query(default="system"), db: Session = Depends(get_db)):
+def test_source(source_id: str, actor: str = Query(default="system"), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     """
     Deterministic connection validation. Verifies that the required config keys for
     the source's source_type are present; the connection is reported ok only when
     every required-key check passes. Faithful to Foundry's "test connection" step
     that surfaces connection/credential issues before a source can be explored.
     """
-    source = db.query(ConnectionSource).filter(ConnectionSource.id == source_id).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+    source = _source_or_404(db, source_id, principal, "execute")
 
     checks = _validate_source_config(source.source_type, source.config or {})
     ok = all(c["present"] for c in checks)
@@ -358,15 +379,13 @@ def test_source(source_id: str, actor: str = Query(default="system"), db: Sessio
 
 
 @router.get("/connections/sources/{source_id}/schema")
-def get_source_schema(source_id: str, db: Session = Depends(get_db)):
+def get_source_schema(source_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     """
     Infer a tabular schema (column names + inferred base types) for a source. Sample
     rows are taken from the source's syncs' sample_records when available, otherwise
     from a 'sample_records' / 'sample' list embedded in the source config.
     """
-    source = db.query(ConnectionSource).filter(ConnectionSource.id == source_id).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+    source = _source_or_404(db, source_id, principal)
 
     samples: List[Any] = []
     syncs = db.query(ConnectionSync).filter(ConnectionSync.source_id == source_id).all()
@@ -389,8 +408,8 @@ def get_source_schema(source_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/connections/sources/{source_id}/preview")
-def preview_source(source_id: str, body: SourcePreviewRequest = SourcePreviewRequest(), db: Session = Depends(get_db)):
-    source = _source_or_404(db, source_id)
+def preview_source(source_id: str, body: SourcePreviewRequest = SourcePreviewRequest(), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    source = _source_or_404(db, source_id, principal)
     checks = _validate_source_config(source.source_type, source.config or {})
     rows = _source_sample_records(db, source, body.limit, body.sample_records)
     schema = _infer_schema(rows)
@@ -407,8 +426,8 @@ def preview_source(source_id: str, body: SourcePreviewRequest = SourcePreviewReq
 
 
 @router.post("/connections/sources/{source_id}/generate-import-job")
-def generate_import_job_from_source(source_id: str, body: SourceGenerateImportJobRequest = SourceGenerateImportJobRequest(), db: Session = Depends(get_db)):
-    source = _source_or_404(db, source_id)
+def generate_import_job_from_source(source_id: str, body: SourceGenerateImportJobRequest = SourceGenerateImportJobRequest(), principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    source = _source_or_404(db, source_id, principal, "edit")
     rows = _source_sample_records(db, source, body.limit)
     if not rows:
         raise HTTPException(status_code=400, detail="Source has no sample records to import")
@@ -458,12 +477,11 @@ def generate_import_job_from_source(source_id: str, body: SourceGenerateImportJo
 # --- Syncs ---
 
 @router.post("/connections/sources/{source_id}/syncs", response_model=ConnectionSyncRead)
-def create_sync(source_id: str, body: ConnectionSyncCreate, db: Session = Depends(get_db)):
-    source = db.query(ConnectionSource).filter(ConnectionSource.id == source_id).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+def create_sync(source_id: str, body: ConnectionSyncCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    source = _source_or_404(db, source_id, principal, "edit")
     row = ConnectionSync(
         id=body.id or uuid.uuid4().hex,
+        project_id=source.project_id,
         source_id=source_id,
         target_asset_id=body.target_asset_id,
         mode=body.mode,
@@ -478,16 +496,23 @@ def create_sync(source_id: str, body: ConnectionSyncCreate, db: Session = Depend
 
 
 @router.get("/connections/syncs", response_model=List[ConnectionSyncRead])
-def list_syncs(source_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+def list_syncs(source_id: Optional[str] = Query(None), project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     q = db.query(ConnectionSync)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        q = q.filter(ConnectionSync.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal)
+        if accessible is not None:
+            q = q.filter(ConnectionSync.project_id.in_(accessible))
     if source_id:
         q = q.filter(ConnectionSync.source_id == source_id)
     return q.all()
 
 
 @router.post("/connections/syncs/{sync_id}/run", response_model=SyncRunRead)
-def run_sync(sync_id: str, actor: str = Query(default="system"), db: Session = Depends(get_db)):
-    sync = _sync_or_404(db, sync_id)
+def run_sync(sync_id: str, actor: str = Query(default="system"), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    sync = _sync_or_404(db, sync_id, principal, "execute")
 
     # Append sample_records into the target DataAsset
     asset = db.query(models.DataAsset).filter(models.DataAsset.id == sync.target_asset_id).first()
@@ -535,9 +560,9 @@ def run_sync(sync_id: str, actor: str = Query(default="system"), db: Session = D
 
 
 @router.post("/connections/syncs/{sync_id}/validate")
-def validate_sync(sync_id: str, body: SyncValidateRequest = SyncValidateRequest(), db: Session = Depends(get_db)):
-    sync = _sync_or_404(db, sync_id)
-    source = _source_or_404(db, sync.source_id)
+def validate_sync(sync_id: str, body: SyncValidateRequest = SyncValidateRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    sync = _sync_or_404(db, sync_id, principal, "execute")
+    source = _source_or_404(db, sync.source_id, principal, "execute")
     source_checks = _validate_source_config(source.source_type, source.config or {})
     target = db.query(models.DataAsset).filter(models.DataAsset.id == sync.target_asset_id).first()
     records = body.sample_records if body.sample_records is not None else sync.sample_records
@@ -581,9 +606,11 @@ def validate_sync(sync_id: str, body: SyncValidateRequest = SyncValidateRequest(
 # --- Exports ---
 
 @router.post("/connections/exports", response_model=ConnectionExportRead)
-def create_export(body: ConnectionExportCreate, db: Session = Depends(get_db)):
+def create_export(body: ConnectionExportCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     row = ConnectionExport(
         id=body.id or uuid.uuid4().hex,
+        project_id=body.project_id,
         source_asset_id=body.source_asset_id,
         destination=body.destination,
         format=body.format,
@@ -596,8 +623,16 @@ def create_export(body: ConnectionExportCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/connections/exports", response_model=List[ConnectionExportRead])
-def list_exports(db: Session = Depends(get_db)):
-    return db.query(ConnectionExport).all()
+def list_exports(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(ConnectionExport)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ConnectionExport.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal)
+        if accessible is not None:
+            query = query.filter(ConnectionExport.project_id.in_(accessible))
+    return query.all()
 
 
 @router.post("/connections/exports/{export_id}/run")
@@ -605,6 +640,7 @@ def run_export(
     export_id: str,
     actor: str = Query(default="system"),
     delta: bool = Query(default=False),
+    principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
     """
@@ -620,6 +656,7 @@ def run_export(
     export = db.query(ConnectionExport).filter(ConnectionExport.id == export_id).first()
     if not export:
         raise HTTPException(status_code=404, detail="Export not found")
+    tenancy.assert_project_permission(db, principal, export.project_id, "execute")
 
     asset = db.query(models.DataAsset).filter(models.DataAsset.id == export.source_asset_id).first()
     all_records = list(asset.records) if asset and asset.records else []
@@ -688,11 +725,12 @@ def run_export(
 
 
 @router.get("/connections/exports/{export_id}/checkpoint")
-def get_export_checkpoint(export_id: str, db: Session = Depends(get_db)):
+def get_export_checkpoint(export_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     """Return the current delta checkpoint (high-water-mark) for an export."""
     export = db.query(ConnectionExport).filter(ConnectionExport.id == export_id).first()
     if not export:
         raise HTTPException(status_code=404, detail="Export not found")
+    tenancy.assert_project_permission(db, principal, export.project_id, "view")
     checkpoint = db.query(ConnectionExportCheckpoint).filter(
         ConnectionExportCheckpoint.export_id == export_id
     ).first()

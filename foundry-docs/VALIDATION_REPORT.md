@@ -10,7 +10,7 @@ Current result:
 - Outcome proof: the Asset Reliability Command Center provides one complete local workflow from raw maintenance data to governed operational decision, incident, and report.
 - Authoring fidelity: Pipeline Builder now has structured transform schemas, audited node configuration, field lineage, schema/sample preview, spatial/MGRS execution, and durable queued preview/deployment with guarded idempotent commits. Ontology Manager adds drag/drop datasource mapping, compatibility checks, hydrated object preview, saved mappings, change-impact confirmation, and governed package capture/publish/install. Workshop and AIP Logic share atomic command editing, typed forms, validation targets, previews, publication, recovery, and live multi-user presence with optimistic command rebasing. Agent Studio adds durable invocation, retrieval and citation evidence, visible tool policy decisions, cancellation-safe commits, and approval staging without direct agent mutations.
 - User data path: CSV/JSON import jobs infer schemas, preview records, validate template mappings, upload local files without extra dependencies, and promote reviewed data into local datasets for the Ontology Generator and Command Center workflow.
-- Onboarding depth: import jobs now support mapping suggestions, type coercion, enum cleanup, timestamp normalization, unit normalization, derived geo points, MGRS-to-point conversion, duplicate detection, connector preview, connector-to-import generation, sync validation, and deterministic stream replay.
+- Onboarding depth: import jobs support mapping suggestions, type coercion, enum cleanup, timestamp normalization, unit normalization, derived geo points, MGRS-to-point conversion, duplicate detection, connector preview, and connector-to-import generation. Connector syncs and stream replays now run through project-scoped durable jobs with leases, retries, idempotency, budgets, telemetry, and dead-letter recovery.
 - Frontend direction: a React/Vite/TypeScript shell now serves typed core evaluator workspaces when built, with reusable contracts for pipeline, ontology, imports, command center, graph, and validation while the legacy static UI remains as a migration fallback.
 - Guided evaluator flow: Command Center now has UI-state, workflow-state, a persistent flow indicator, evaluator summary, clean state/warning cards, clickable proof trail, import-to-ontology draft generation, backend-backed report export, and linked evidence IDs.
 - Trust dashboard: `/workspace/validation` and `/project/validate` surface matrix status, priority gaps, runtime schema health, persisted migration records, event consistency, route health, and extended project snapshot evidence.
@@ -33,6 +33,7 @@ Current result:
 | Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, visual graph overview |
 | Operational MVP | High | Asset Reliability Command Center bootstrap/import, UI-state, workflow-state, evaluator summary, proof trail, triage, approval, action execution, incident, report, validation dashboard |
 | Data import and project portability | High local analog | CSV/JSON/file import jobs, semantic mapping, transforms, connector previews, stream replay, import-to-ontology drafts, audit/ops events, extended JSON snapshot export/import |
+| Connectors and streaming | High local analog | Project-scoped source/sync/stream resources, durable worker execution, idempotent recovery, rolling budgets, run telemetry, dead letters, and portable evidence |
 | Frontend product foundation | Medium-high | Typed React/Vite core evaluator shell, persistent flow indicator, split workspaces/components, clean state primitives, close-analog pipeline workbench, ontology manager, and legacy fallback |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
 | Security/governance | Medium-high | OIDC roles, organization/project isolation, persisted memberships, package integrity, markings, restricted views, scanners, retention, and audit |
@@ -43,7 +44,7 @@ Current result:
 - LLM and model behavior is deterministic. There is no hosted model catalog, GPU runtime, model router, or paid external API dependency.
 - Pipeline Builder compiles to local Python logic and local datasets, not Spark-backed Foundry transforms.
 - UI workspaces are Foundry-style local approximations, not copied Foundry frontends. The React shell covers the evaluator path first and uses screenshot-grounded layout ideas without proprietary assets or internals; legacy workspaces remain during migration.
-- Hybrid connector previews use deterministic sample records by default. Optional Docker/local service demos are not required for test pass.
+- Built-in connector adapters use deterministic records by default. External REST/JDBC/S3/SFTP/Kafka adapter processes and their infrastructure-specific credentials remain deployment integrations.
 - Private tenant pages are not automated validation sources unless the user provides screenshots or exported documents.
 - Browser screenshot validation depends on available local browser tooling. If unavailable, route smoke checks are still required and visual checks are marked manual.
 
@@ -88,6 +89,6 @@ python test_docs_conformance.py
 
 1. Add browser screenshot capture for `/workspace/command-center`, `/workspace/pipeline`, `/workspace/ontology`, `/workspace/graph`, and `/workspace/validation` when Playwright or Chrome control is available.
 2. Continue React migration for Object Explorer, Workshop, Map, ModelOps, Ops, and Investigations after the evaluator path is stable.
-3. Add optional Docker fixtures for Postgres and mock REST connector demos without making tests depend on those services.
+3. Add optional live adapter workers for Postgres, object storage, and Kafka without making deterministic tests depend on those services.
 4. Expand visual conformance notes for Workshop, Pipeline Builder, Object Explorer, Ontology Generator, Graph, Validation, and Map using user-provided screenshots.
 5. Keep public source links current because Palantir documentation changes over time.
