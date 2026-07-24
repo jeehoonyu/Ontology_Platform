@@ -16,7 +16,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -100,6 +100,8 @@ class Principal:
     roles: List[str]
     permissions: List[str]
     authenticated: bool = True
+    organization_id: Optional[str] = None
+    project_ids: List[str] = field(default_factory=list)
 
     def allows(self, permission: str) -> bool:
         return "*" in self.permissions or permission in self.permissions
@@ -112,6 +114,8 @@ class Principal:
             "email": self.email,
             "roles": self.roles,
             "permissions": self.permissions,
+            "organization_id": self.organization_id,
+            "project_ids": self.project_ids,
             "auth_mode": auth_mode(),
         }
 
@@ -134,7 +138,15 @@ def _local_principal() -> Principal:
         email=None,
         roles=["administrator"],
         permissions=["*"],
+        project_ids=["*"],
     )
+
+
+def _claim_projects(claims: Dict[str, Any]) -> List[str]:
+    value = claims.get("project_ids", claims.get("projects", []))
+    if isinstance(value, str):
+        value = [item.strip() for item in value.replace(",", " ").split() if item.strip()]
+    return sorted({str(item) for item in value}) if isinstance(value, list) else []
 
 
 def _session_principal(db: Session, session_id: Optional[str]) -> Optional[Principal]:
@@ -145,7 +157,16 @@ def _session_principal(db: Session, session_id: Optional[str]) -> Optional[Princ
         return None
     row.last_seen_at = _now()
     roles = [str(item) for item in (row.roles or [])]
-    return Principal(row.principal_id, row.display_name, row.email, roles, _permissions(roles))
+    claims = row.claims or {}
+    return Principal(
+        row.principal_id,
+        row.display_name,
+        row.email,
+        roles,
+        _permissions(roles),
+        organization_id=str(claims.get("organization_id") or claims.get("org_id")) if (claims.get("organization_id") or claims.get("org_id")) else None,
+        project_ids=_claim_projects(claims),
+    )
 
 
 def _bearer_principal(db: Session, authorization: Optional[str]) -> Optional[Principal]:
@@ -156,7 +177,13 @@ def _bearer_principal(db: Session, authorization: Optional[str]) -> Optional[Pri
     if not token or token.revoked or (token.expires_at is not None and token.expires_at <= _now()):
         return None
     scopes = [str(item) for item in (token.scopes or [])]
-    return Principal(token.principal_id, token.principal_id, None, [token.principal_type], _permissions([], scopes))
+    project_ids = sorted({scope.split(":", 2)[1] for scope in scopes if scope.startswith("project:") and len(scope.split(":", 2)) == 3})
+    permissions = [scope.split(":", 2)[2] if scope.startswith("project:") and len(scope.split(":", 2)) == 3 else scope for scope in scopes]
+    organization_id = None
+    if token.principal_type == "service_account":
+        account = db.get(admin_auth.ServiceAccount, token.principal_id)
+        organization_id = account.organization_id if account else None
+    return Principal(token.principal_id, token.principal_id, None, [token.principal_type], _permissions([], permissions), organization_id=organization_id, project_ids=project_ids)
 
 
 def resolve_principal(request: Request, db: Session) -> Optional[Principal]:
@@ -301,7 +328,7 @@ def oidc_callback(request: Request, code: str, state: str, db: Session = Depends
         email=claims.get("email"),
         display_name=str(claims.get("name") or claims.get("preferred_username") or claims.get("sub")),
         roles=roles,
-        claims={key: claims.get(key) for key in ("sub", "email", "name", "preferred_username") if claims.get(key) is not None},
+        claims={key: claims.get(key) for key in ("sub", "email", "name", "preferred_username", "organization_id", "org_id", "project_ids", "projects") if claims.get(key) is not None},
         created_at=_now(),
         expires_at=min(int(claims.get("exp", _now() + 28800)), _now() + int(os.getenv("SESSION_TTL_SECONDS", "28800"))),
         last_seen_at=_now(),

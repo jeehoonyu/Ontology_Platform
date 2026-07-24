@@ -28,11 +28,13 @@ from . import (
     models,
     models_action,
     object_explorer_ops,
+    ontology_packages,
     ops_control,
     platform_core,
     platform_runtime,
     schedules,
     streaming,
+    tenancy,
     webhooks_ops,
 )
 from .database import Base, get_db
@@ -87,6 +89,13 @@ CORE_TABLES = [
     "platform_job_leases",
     "platform_artifact_collaborators",
     "platform_artifact_collaboration_events",
+    "platform_organizations",
+    "platform_projects",
+    "platform_project_memberships",
+    "ontology_packages",
+    "ontology_package_versions",
+    "ontology_package_installations",
+    "ontology_package_resources",
     "auth_sessions",
     "auth_oidc_flows",
     "connection_sources",
@@ -109,7 +118,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -118,6 +127,7 @@ MIGRATIONS = [
     {"version": 5, "name": "durable_worker_leases_and_job_recovery", "status": "applied"},
     {"version": 6, "name": "durable_agent_execution_and_policy_evidence", "status": "applied"},
     {"version": 7, "name": "artifact_collaboration_presence_and_events", "status": "applied"},
+    {"version": 8, "name": "project_tenancy_and_governed_ontology_packages", "status": "applied"},
 ]
 
 
@@ -156,6 +166,13 @@ def _ensure_runtime_tables(db: Session) -> None:
         schedules.Build.__table__,
         webhooks_ops.WhListener.__table__,
         webhooks_ops.WhListenerEvent.__table__,
+        tenancy.PlatformOrganization.__table__,
+        tenancy.PlatformProject.__table__,
+        tenancy.ProjectMembership.__table__,
+        ontology_packages.OntologyPackage.__table__,
+        ontology_packages.OntologyPackageVersion.__table__,
+        ontology_packages.OntologyPackageInstallation.__table__,
+        ontology_packages.OntologyPackageResource.__table__,
     ):
         table.create(bind=db.get_bind(), checkfirst=True)
     _ensure_column(db, "streams", "archive_policy", "JSON")
@@ -366,6 +383,38 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "job_id", "event_type", "status", "payload", "created_at"])
             for row in db.query(platform_runtime.PlatformJobEvent).all()
         ],
+        "platform_artifact_collaboration_events": [
+            _row_dict(row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"])
+            for row in db.query(platform_runtime.ArtifactCollaborationEvent).all()
+        ],
+        "organizations": [
+            _row_dict(row, ["id", "display_name", "status", "created_at", "updated_at"])
+            for row in db.query(tenancy.PlatformOrganization).all()
+        ],
+        "projects": [
+            _row_dict(row, ["id", "organization_id", "display_name", "description", "status", "created_at", "updated_at"])
+            for row in db.query(tenancy.PlatformProject).all()
+        ],
+        "project_memberships": [
+            _row_dict(row, ["id", "project_id", "principal_id", "role", "permissions", "created_at", "updated_at"])
+            for row in db.query(tenancy.ProjectMembership).all()
+        ],
+        "ontology_packages": [
+            _row_dict(row, ["id", "organization_id", "owning_project_id", "display_name", "description", "status", "current_version", "created_by", "created_at", "updated_at"])
+            for row in db.query(ontology_packages.OntologyPackage).all()
+        ],
+        "ontology_package_versions": [
+            _row_dict(row, ["id", "package_id", "version", "status", "manifest", "checksum", "validation", "author", "created_at", "published_at"])
+            for row in db.query(ontology_packages.OntologyPackageVersion).all()
+        ],
+        "ontology_package_installations": [
+            _row_dict(row, ["id", "package_id", "package_version_id", "version", "target_project_id", "namespace", "status", "installed_resources", "prior_state", "previous_installation_id", "installed_by", "installed_at", "rolled_back_at"])
+            for row in db.query(ontology_packages.OntologyPackageInstallation).all()
+        ],
+        "ontology_package_resources": [
+            _row_dict(row, ["id", "package_id", "installation_id", "target_project_id", "namespace", "resource_type", "resource_id", "source_resource_id", "created_at", "updated_at"])
+            for row in db.query(ontology_packages.OntologyPackageResource).all()
+        ],
     }
 
 
@@ -470,6 +519,14 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "platform_artifact_revisions",
         "platform_jobs",
         "platform_job_events",
+        "platform_artifact_collaboration_events",
+        "organizations",
+        "projects",
+        "project_memberships",
+        "ontology_packages",
+        "ontology_package_versions",
+        "ontology_package_installations",
+        "ontology_package_resources",
     ]
     missing = [key for key in expected if key not in snapshot]
     counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
@@ -907,6 +964,32 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
     for row in snapshot.get("webhook_listener_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, webhooks_ops.WhListenerEvent, row, ["id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"]))
+    for row in snapshot.get("organizations") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, tenancy.PlatformOrganization, row, ["id", "display_name", "status", "created_at", "updated_at"]))
+    for row in snapshot.get("projects") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, tenancy.PlatformProject, row, ["id", "organization_id", "display_name", "description", "status", "created_at", "updated_at"]))
+    for row in snapshot.get("project_memberships") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, tenancy.ProjectMembership, row, ["id", "project_id", "principal_id", "role", "permissions", "created_at", "updated_at"]))
+    for row in snapshot.get("ontology_packages") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, ontology_packages.OntologyPackage, row, ["id", "organization_id", "owning_project_id", "display_name", "description", "status", "current_version", "created_by", "created_at", "updated_at"]))
+    for row in snapshot.get("ontology_package_versions") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, ontology_packages.OntologyPackageVersion, row, ["id", "package_id", "version", "status", "manifest", "checksum", "validation", "author", "created_at", "published_at"]))
+    for row in snapshot.get("ontology_package_installations") or []:
+        row.setdefault("installed_at", now)
+        track(_upsert_model(db, ontology_packages.OntologyPackageInstallation, row, ["id", "package_id", "package_version_id", "version", "target_project_id", "namespace", "status", "installed_resources", "prior_state", "previous_installation_id", "installed_by", "installed_at", "rolled_back_at"]))
+    for row in snapshot.get("ontology_package_resources") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, ontology_packages.OntologyPackageResource, row, ["id", "package_id", "installation_id", "target_project_id", "namespace", "resource_type", "resource_id", "source_resource_id", "created_at", "updated_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
@@ -942,6 +1025,9 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
     for row in snapshot.get("platform_job_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, platform_runtime.PlatformJobEvent, row, ["id", "job_id", "event_type", "status", "payload", "created_at"]))
+    for row in snapshot.get("platform_artifact_collaboration_events") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, platform_runtime.ArtifactCollaborationEvent, row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"]))
 
     _audit(db, body.actor, "project.snapshot.imported", "project", "local", counts)
     ops_control.record_ops_event(

@@ -50,7 +50,7 @@ function Ensure-RealmUser([string]$Username, [string]$Password, [string]$Role) {
         $users = @($parsedUsers) | Where-Object { $_ -and $_.username }
     }
     $userId = $users[0].id
-    & docker @compose exec -T keycloak $kcadm update "users/$userId" -r ontology -s enabled=true -s emailVerified=true -s firstName=Pilot -s "lastName=$Role" -s 'requiredActions=[]' | Out-Null
+    & docker @compose exec -T keycloak $kcadm update "users/$userId" -r ontology -s enabled=true -s emailVerified=true -s firstName=Pilot -s "lastName=$Role" -s 'requiredActions=[]' -s 'attributes={"organization_id":["pilot"],"project_ids":["default"]}' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not complete the profile for $Username." }
     & docker @compose exec -T keycloak $kcadm set-password -r ontology --username $Username --new-password $Password | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not set password for $Username." }

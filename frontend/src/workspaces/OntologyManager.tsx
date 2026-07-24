@@ -30,6 +30,7 @@ import { DataTable, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
 import { navigate } from "../utils/navigation";
+import { OntologyPackagePanel } from "./OntologyPackagePanel";
 import type {
   JsonObject,
   OntologyFieldMapping,
@@ -215,6 +216,7 @@ export function OntologyManager() {
               </button>
             ))}
           </Panel>
+          <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} />
         </aside>
         <section className="manager-surface">
           {manager ? (
