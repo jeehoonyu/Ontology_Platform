@@ -57,6 +57,8 @@ For a self-hosted team pilot with OIDC, TLS, migrations, backup, restore, and up
 
 For drag/drop editing, typed Pipeline transforms, ontology mappings, Workshop breakpoints, AIP traces, versioning, and recovery, see [Visual Builder Operations](docs/VISUAL_BUILDERS.md).
 
+For durable worker claims, heartbeats, retries, cancellation, timeout recovery, and queue monitoring, see [Asynchronous Execution Runtime](docs/ASYNC_EXECUTION.md).
+
 1. **Install Dependencies**
    ```bash
    cd oms

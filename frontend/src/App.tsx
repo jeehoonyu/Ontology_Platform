@@ -40,11 +40,13 @@ import { Analytics } from "./workspaces/Analytics";
 import { Delivery } from "./workspaces/Delivery";
 import { PlatformGraphWorkspace } from "./workspaces/PlatformGraph";
 import { getAuthSession, logout, type AuthSession } from "./api/authApi";
+import { getJobSummary } from "./api/jobApi";
 import type {
   CommandCenterSummary,
   CommandCenterUiState,
   ImportsUiState,
   JsonObject,
+  JobSummary,
   ProjectReadiness,
   TableRow,
   ValidationUiState,
@@ -137,6 +139,8 @@ export function App() {
   useLocation();
   const view = currentWorkspaceView(CORE_VIEWS);
   const backendReadiness = useAsyncState<ProjectReadiness>(getProjectReadiness, []);
+  const [runtimeRefresh, setRuntimeRefresh] = useState(0);
+  const jobSummary = useAsyncState<JobSummary>(getJobSummary, [runtimeRefresh]);
   const authSession = useAsyncState<AuthSession>(getAuthSession, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [recentViews, setRecentViews] = useState<string[]>(() => JSON.parse(localStorage.getItem("ontology.recentViews") || "[]"));
@@ -149,6 +153,10 @@ export function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => setRuntimeRefresh((value) => value + 1), 15_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   function openView(nextView: string) {
@@ -189,7 +197,7 @@ export function App() {
       </aside>
       <main className="workspace">
         <PlatformFlow currentView={view} />
-        <BackendConnection readiness={backendReadiness.value} loading={backendReadiness.loading} error={backendReadiness.error} />
+        <BackendConnection readiness={backendReadiness.value} loading={backendReadiness.loading} error={backendReadiness.error} jobs={jobSummary.value} jobsError={jobSummary.error} />
         <Suspense fallback={<LoadingState label="Loading visual workspace..." />}>
           {view === "command-center" && <CommandCenter />}
           {view === "imports" && <DataOnboarding />}
@@ -247,13 +255,20 @@ function CommandPalette({ onClose, onOpen }: { onClose: () => void; onOpen: (vie
   );
 }
 
-function BackendConnection({ readiness, loading, error }: { readiness: ProjectReadiness | null; loading: boolean; error: string }) {
+function BackendConnection({ readiness, loading, error, jobs, jobsError }: { readiness: ProjectReadiness | null; loading: boolean; error: string; jobs: JobSummary | null; jobsError: string }) {
   const status = error ? "OFFLINE" : loading ? "CHECKING" : readiness?.status || "UNKNOWN";
+  const failedJobs = jobs?.counts.FAILED || 0;
   return (
-    <div className={classNames("backend-connection", error && "offline", status === "READY" && "ready")}>
+    <div className={classNames("backend-connection", error && "offline", status === "READY" && "ready", failedJobs > 0 && "execution-warning")}>
       <div className="backend-connection-main">
         <StatusBadge value={status} />
         <span>{error ? `Backend connection failed: ${error}` : `Backend connection: ${status}`}</span>
+        {jobs ? <span className="execution-health" aria-label="Asynchronous execution health">
+          <strong>{jobs.counts.RUNNING || 0}</strong> running
+          <strong>{jobs.counts.QUEUED || 0}</strong> queued
+          <strong>{failedJobs}</strong> failed
+          <strong>{jobs.active_workers}</strong> workers
+        </span> : jobsError ? <small>Execution status unavailable</small> : null}
         {readiness?.summary ? (
           <small>
             {asString(readiness.summary.ready_checks, "0")}/{asString(readiness.summary.check_count, "0")} checks ready
