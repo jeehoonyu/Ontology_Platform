@@ -101,6 +101,16 @@ export interface ProjectReadiness {
   last_updated: number;
 }
 
+export interface JobSummary {
+  counts: Record<string, number>;
+  by_job_type: Record<string, Record<string, number>>;
+  active_workers: number;
+  active_leases: number;
+  oldest_queued_seconds: number;
+  reaped_stale_jobs: number;
+  last_updated: number;
+}
+
 export interface PipelineGraph {
   id: string;
   display_name: string;
