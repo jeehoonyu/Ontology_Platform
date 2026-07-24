@@ -1,5 +1,6 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { postJson } from "../api";
+import { cancelJob, enqueuePipelineJob, getJob, retryJob, runPipelineJob } from "../api/jobApi";
 import {
   createPipelineNode,
   deletePipelineNode,
@@ -25,7 +26,8 @@ import type {
   PipelineCanvasState,
   PipelineNodeDetails,
   PipelineOutputsState,
-  PipelineUiState
+  PipelineUiState,
+  PlatformJob
 } from "../types";
 
 export function PipelineBuilder() {
@@ -39,8 +41,18 @@ export function PipelineBuilder() {
   const [outputs, setOutputs] = useState<PipelineOutputsState | null>(null);
   const [zoom, setZoom] = useState(0.86);
   const [quickAddType, setQuickAddType] = useState("filter");
+  const [executionJob, setExecutionJob] = useState<PlatformJob | null>(null);
+  const [busyAction, setBusyAction] = useState("");
   const [actionStatus, setActionStatus] = useState("Select a node, insert transforms from edges or the node menu, then preview or deploy.");
   const state = useAsyncState<PipelineUiState>(getPipelineState, [refreshKey]);
+
+  useEffect(() => {
+    if (!executionJob || !["QUEUED", "RUNNING"].includes(executionJob.status)) return;
+    const timer = window.setInterval(() => {
+      void getJob(executionJob.id).then(setExecutionJob).catch(() => undefined);
+    }, 1_500);
+    return () => window.clearInterval(timer);
+  }, [executionJob?.id, executionJob?.status]);
 
   useEffect(() => {
     if (!selectedGraphId && state.value?.selected_canvas?.graph.id) {
@@ -96,9 +108,45 @@ export function PipelineBuilder() {
 
   async function run(action: "validate" | "preview" | "deliver") {
     if (!selectedGraphId) return;
-    setActionStatus(`${action === "deliver" ? "Deploying" : action === "validate" ? "Checking proposal" : "Preparing preview"}...`);
-    const result = await postJson(`/pipeline-builder/graphs/${encodeURIComponent(selectedGraphId)}/${action}`, { actor: "react" });
-    setActionStatus(`${action} completed: ${formatValue((result as { status?: unknown }).status || "ok")}`);
+    setBusyAction(action);
+    try {
+      if (action === "validate") {
+        setActionStatus("Checking proposal...");
+        const result = await postJson(`/pipeline-builder/graphs/${encodeURIComponent(selectedGraphId)}/validate`, {});
+        setActionStatus(`Validation completed: ${formatValue((result as { status?: unknown }).status || "ok")}`);
+      } else {
+        setActionStatus(`Queueing Pipeline ${action}...`);
+        const queued = await enqueuePipelineJob(selectedGraphId, action, `${action}-${selectedGraphId}-${Date.now()}`);
+        setExecutionJob(queued);
+        setActionStatus(`${action} queued as ${queued.id}. Waiting for worker claim...`);
+        const executed = await runPipelineJob(queued.id);
+        if (executed.job) {
+          const detail = await getJob(executed.job.id);
+          setExecutionJob(detail);
+          setActionStatus(`${action} ${detail.status.toLowerCase()}: ${detail.error || `${detail.progress}% complete`}`);
+        }
+      }
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setActionStatus(`${action} failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function cancelExecution() {
+    if (!executionJob) return;
+    setExecutionJob(await cancelJob(executionJob.id));
+    setActionStatus(`Cancelled ${executionJob.id}. Its worker lease has been released.`);
+  }
+
+  async function retryExecution() {
+    if (!executionJob) return;
+    const queued = await retryJob(executionJob.id);
+    setExecutionJob(queued);
+    setActionStatus(`Retrying ${queued.id}, attempt ${queued.attempt}...`);
+    const executed = await runPipelineJob(queued.id);
+    if (executed.job) setExecutionJob(await getJob(executed.job.id));
     setRefreshKey((key) => key + 1);
   }
 
@@ -210,8 +258,9 @@ export function PipelineBuilder() {
               <button onClick={() => setZoom((value) => Math.min(1.35, value + 0.08))}>+</button>
               <button onClick={saveLayout}>Save layout</button>
               <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
-              <button onClick={() => run("validate")} disabled={!selectedGraphId}>Propose</button>
-              <button onClick={() => run("deliver")} disabled={!selectedGraphId}>Deploy</button>
+              <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>
+              <button onClick={() => run("preview")} disabled={!selectedGraphId || Boolean(busyAction)}>Preview</button>
+              <button onClick={() => run("deliver")} disabled={!selectedGraphId || Boolean(busyAction)}>{busyAction === "deliver" ? "Queueing..." : "Deploy"}</button>
               <a className="legacy-button compact" href="/workspace/pipeline?legacy=1">Legacy</a>
             </>}
           />
@@ -263,6 +312,23 @@ export function PipelineBuilder() {
           />
         </section>
         <aside className="output-rail">
+          <Panel title="Execution">
+            {executionJob ? <div className="pipeline-execution-state" aria-live="polite">
+              <div className="pipeline-execution-heading"><StatusBadge value={executionJob.status} /><strong>{executionJob.job_type}</strong></div>
+              <progress max={100} value={executionJob.progress} aria-label={`Execution progress ${executionJob.progress}%`} />
+              <KeyValueGrid data={{
+                job_id: executionJob.id,
+                progress: `${executionJob.progress}%`,
+                attempt: executionJob.attempt,
+                error: executionJob.error || "None"
+              }} />
+              <div className="action-row">
+                <button onClick={cancelExecution} disabled={!["QUEUED", "RUNNING"].includes(executionJob.status)}>Cancel</button>
+                <button onClick={retryExecution} disabled={!["FAILED", "CANCELLED"].includes(executionJob.status)}>Retry</button>
+              </div>
+              {executionJob.events?.length ? <details><summary>Execution events</summary><DataTable rows={executionJob.events.map((event) => ({ event: event.event_type, status: event.status, created_at: event.created_at }))} /></details> : null}
+            </div> : <div className="empty">Preview or deploy to create durable execution evidence.</div>}
+          </Panel>
           <Panel title="Selected Node">
             {details ? <>
               <KeyValueGrid data={{

@@ -111,6 +111,32 @@ export interface JobSummary {
   last_updated: number;
 }
 
+export interface PlatformJobEvent {
+  id: number;
+  event_type: string;
+  status: string;
+  payload: JsonObject;
+  created_at: number;
+}
+
+export interface PlatformJob {
+  id: string;
+  job_type: string;
+  status: string;
+  subject_type?: string | null;
+  subject_id?: string | null;
+  progress: number;
+  attempt: number;
+  error?: string | null;
+  result: JsonObject;
+  execution: JsonObject;
+  lease?: JsonObject | null;
+  events?: PlatformJobEvent[];
+  created_at: number;
+  updated_at: number;
+  completed_at?: number | null;
+}
+
 export interface PipelineGraph {
   id: string;
   display_name: string;
