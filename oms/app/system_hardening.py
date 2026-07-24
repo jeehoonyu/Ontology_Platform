@@ -23,6 +23,7 @@ from . import (
     connectivity,
     connectivity_ops,
     imports_ops,
+    ingestion_runtime,
     investigations,
     modelops,
     models,
@@ -96,6 +97,9 @@ CORE_TABLES = [
     "ontology_package_versions",
     "ontology_package_installations",
     "ontology_package_resources",
+    "ingestion_runs",
+    "ingestion_budgets",
+    "ingestion_dead_letters",
     "auth_sessions",
     "auth_oidc_flows",
     "connection_sources",
@@ -118,7 +122,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -128,6 +132,7 @@ MIGRATIONS = [
     {"version": 6, "name": "durable_agent_execution_and_policy_evidence", "status": "applied"},
     {"version": 7, "name": "artifact_collaboration_presence_and_events", "status": "applied"},
     {"version": 8, "name": "project_tenancy_and_governed_ontology_packages", "status": "applied"},
+    {"version": 9, "name": "project_scoped_durable_ingestion_runtime", "status": "applied"},
 ]
 
 
@@ -173,11 +178,16 @@ def _ensure_runtime_tables(db: Session) -> None:
         ontology_packages.OntologyPackageVersion.__table__,
         ontology_packages.OntologyPackageInstallation.__table__,
         ontology_packages.OntologyPackageResource.__table__,
+        ingestion_runtime.IngestionRun.__table__,
+        ingestion_runtime.IngestionBudget.__table__,
+        ingestion_runtime.IngestionDeadLetter.__table__,
     ):
         table.create(bind=db.get_bind(), checkfirst=True)
     _ensure_column(db, "streams", "archive_policy", "JSON")
     _ensure_column(db, "stream_records", "archived", "BOOLEAN DEFAULT 0")
     _ensure_column(db, "stream_records", "archived_at", "INTEGER")
+    for table_name in ("platform_jobs", "connection_sources", "connection_syncs", "connection_exports", "streams"):
+        _ensure_column(db, table_name, "project_id", "VARCHAR DEFAULT 'default' NOT NULL")
     _ensure_migration_records(db)
 
 
@@ -296,11 +306,11 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(modelops.ModelPredictionLog).all()
         ],
         "connection_sources": [
-            _row_dict(row, ["id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"])
             for row in db.query(connectivity.ConnectionSource).all()
         ],
         "connection_syncs": [
-            _row_dict(row, ["id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"])
+            _row_dict(row, ["id", "project_id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"])
             for row in db.query(connectivity.ConnectionSync).all()
         ],
         "connection_sync_runs": [
@@ -308,7 +318,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(connectivity.SyncRun).all()
         ],
         "connection_exports": [
-            _row_dict(row, ["id", "source_asset_id", "destination", "format", "created_at"])
+            _row_dict(row, ["id", "project_id", "source_asset_id", "destination", "format", "created_at"])
             for row in db.query(connectivity.ConnectionExport).all()
         ],
         "connection_export_checkpoints": [
@@ -320,7 +330,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(connectivity_ops.SyncCursorState).all()
         ],
         "streams": [
-            _row_dict(row, ["id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"])
             for row in db.query(streaming.Stream).all()
         ],
         "stream_records": [
@@ -376,7 +386,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(platform_runtime.ArtifactRevision).all()
         ],
         "platform_jobs": [
-            _row_dict(row, ["id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"])
+            _row_dict(row, ["id", "project_id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"])
             for row in db.query(platform_runtime.PlatformJob).all()
         ],
         "platform_job_events": [
@@ -414,6 +424,18 @@ def _snapshot(db: Session) -> Dict[str, Any]:
         "ontology_package_resources": [
             _row_dict(row, ["id", "package_id", "installation_id", "target_project_id", "namespace", "resource_type", "resource_id", "source_resource_id", "created_at", "updated_at"])
             for row in db.query(ontology_packages.OntologyPackageResource).all()
+        ],
+        "ingestion_runs": [
+            _row_dict(row, ["id", "project_id", "job_id", "idempotency_key", "run_type", "resource_type", "resource_id", "status", "records_in", "records_out", "bytes_processed", "estimated_cost_usd", "metrics", "error", "created_at", "started_at", "completed_at"])
+            for row in db.query(ingestion_runtime.IngestionRun).all()
+        ],
+        "ingestion_budgets": [
+            _row_dict(row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "created_at", "updated_at"])
+            for row in db.query(ingestion_runtime.IngestionBudget).all()
+        ],
+        "ingestion_dead_letters": [
+            _row_dict(row, ["id", "project_id", "run_id", "resource_type", "resource_id", "payload", "error", "status", "replay_job_id", "attempts", "created_at", "updated_at"])
+            for row in db.query(ingestion_runtime.IngestionDeadLetter).all()
         ],
     }
 
@@ -527,6 +549,9 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "ontology_package_versions",
         "ontology_package_installations",
         "ontology_package_resources",
+        "ingestion_runs",
+        "ingestion_budgets",
+        "ingestion_dead_letters",
     ]
     missing = [key for key in expected if key not in snapshot]
     counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
@@ -928,17 +953,20 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         track(_upsert_model(db, modelops.ModelPredictionLog, row, ["id", "deployment_id", "objective_id", "submission_id", "request_shape", "input_count", "output_count", "prediction_summary", "created_at"]))
     for row in snapshot.get("connection_sources") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, connectivity.ConnectionSource, row, ["id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, connectivity.ConnectionSource, row, ["id", "project_id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"]))
     for row in snapshot.get("connection_syncs") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, connectivity.ConnectionSync, row, ["id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, connectivity.ConnectionSync, row, ["id", "project_id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"]))
     for row in snapshot.get("connection_sync_runs") or []:
         row.setdefault("created_at", now)
         row.setdefault("completed_at", now)
         track(_upsert_model(db, connectivity.SyncRun, row, ["id", "sync_id", "status", "records_in", "records_out", "created_at", "completed_at"]))
     for row in snapshot.get("connection_exports") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, connectivity.ConnectionExport, row, ["id", "source_asset_id", "destination", "format", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, connectivity.ConnectionExport, row, ["id", "project_id", "source_asset_id", "destination", "format", "created_at"]))
     for row in snapshot.get("connection_export_checkpoints") or []:
         row.setdefault("updated_at", now)
         track(_upsert_model_by_key(db, connectivity.ConnectionExportCheckpoint, row, "export_id", ["export_id", "last_exported_count", "runs", "updated_at"]))
@@ -947,7 +975,8 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         track(_upsert_model_by_key(db, connectivity_ops.SyncCursorState, row, "sync_id", ["sync_id", "cursor_field", "last_value", "runs", "updated_at"]))
     for row in snapshot.get("streams") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, streaming.Stream, row, ["id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, streaming.Stream, row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"]))
     for row in snapshot.get("stream_records") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, streaming.StreamRecord, row, ["id", "stream_id", "payload", "ts", "archived", "archived_at", "created_at"]))
@@ -990,6 +1019,17 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, ontology_packages.OntologyPackageResource, row, ["id", "package_id", "installation_id", "target_project_id", "namespace", "resource_type", "resource_id", "source_resource_id", "created_at", "updated_at"]))
+    for row in snapshot.get("ingestion_runs") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, ingestion_runtime.IngestionRun, row, ["id", "project_id", "job_id", "idempotency_key", "run_type", "resource_type", "resource_id", "status", "records_in", "records_out", "bytes_processed", "estimated_cost_usd", "metrics", "error", "created_at", "started_at", "completed_at"]))
+    for row in snapshot.get("ingestion_budgets") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, ingestion_runtime.IngestionBudget, row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "created_at", "updated_at"]))
+    for row in snapshot.get("ingestion_dead_letters") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, ingestion_runtime.IngestionDeadLetter, row, ["id", "project_id", "run_id", "resource_type", "resource_id", "payload", "error", "status", "replay_job_id", "attempts", "created_at", "updated_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
@@ -1021,7 +1061,8 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
     for row in snapshot.get("platform_jobs") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, platform_runtime.PlatformJob, row, ["id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, platform_runtime.PlatformJob, row, ["id", "project_id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"]))
     for row in snapshot.get("platform_job_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, platform_runtime.PlatformJobEvent, row, ["id", "job_id", "event_type", "status", "payload", "created_at"]))

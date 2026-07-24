@@ -96,6 +96,8 @@ After restoration, verify `/health/ready`, sign in, inspect `/workspace/validati
 
 Database backup remains the authoritative disaster-recovery mechanism because it also preserves all audit, security, and runtime tables.
 
+Connector syncs and stream replays should be submitted through the durable `/ingestion/*` APIs in production. Configure project budgets before enabling schedules, monitor `/ingestion/summary`, and drain pending `/ingestion/dead-letters` during incident recovery. See `docs/DURABLE_INGESTION_RUNTIME.md` for the worker and recovery contract.
+
 ## Troubleshooting
 
 - `401`: begin at `/auth/login`; verify issuer reachability and callback URL.
