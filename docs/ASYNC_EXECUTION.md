@@ -60,3 +60,17 @@ Pipeline Builder uses the runtime through:
 The React workbench queues preview and deployment requests, executes the exact submitted job through the local worker adapter, polls durable status, and exposes progress, attempts, cancellation, retry, and event evidence. A separately deployed worker can use the same claim protocol instead of the local adapter.
 
 Delivery uses the platform job ID as its transaction idempotency key. Before committing dataset transactions or ontology mutations, it locks and verifies the active job and lease. A retry after a worker failure returns the prior successful build rather than materializing the output twice. Cancellation is cooperative until this guarded commit boundary.
+
+## AIP Agent Integration
+
+Agent Studio uses the runtime through:
+
+- `POST /aip/agents/{agent_id}/invoke/async`
+- `POST /aip/agents/workers/run-next`
+- `GET /aip/agents/{agent_id}/runs`
+
+Each durable run persists its retrieved ontology context, selected tool inputs and outputs, citations, execution timing, policy decisions, proposed actions, and approval references. Governed action tools never mutate objects during agent invocation. Required action parameters are validated before proposal; invalid tools receive a `DENIED` decision and create no approval. Valid governed actions create a pending approval request when policy requires one and record `direct_mutations: 0` in the policy summary.
+
+The execution job ID uniquely identifies the persisted agent run. Replaying the same job returns the prior run, while producer idempotency prevents duplicate jobs. Immediately before committing a run or approval request, the worker locks and verifies the active job and lease; cancellation or lease loss rolls back the entire invocation.
+
+The React AIP workspace exposes this lifecycle as an Agent Runtime panel with progress, attempts, cancellation, retry, grounded answer, citation counts, tool policy decisions, and approval IDs. Raw tool payloads remain outside the normal user path.

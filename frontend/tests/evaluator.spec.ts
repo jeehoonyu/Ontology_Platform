@@ -135,6 +135,70 @@ test("pipeline preview runs through durable worker evidence", async ({ page }, t
   await expect(page.locator(".workbench-status-strip")).toContainText(/preview succeeded/i);
 });
 
+test("AIP agent runtime exposes durable policy and citation evidence", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful agent execution workflow once on desktop.");
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const suffix = Date.now();
+  const objectTypeId = `browser_incident_${suffix}`;
+  const objectId = `browser_incident_object_${suffix}`;
+  const actionId = `browser_escalate_${suffix}`;
+  const agentId = `browser_agent_${suffix}`;
+  await page.request.post("/object-types", { data: {
+    id: objectTypeId,
+    display_name: "Browser incident",
+    properties: { severity: { type: "string" } }
+  } });
+  await page.request.post("/objects", { data: {
+    id: objectId,
+    object_type_id: objectTypeId,
+    properties: { severity: "critical" }
+  } });
+  await page.request.post("/action-types", { data: {
+    id: actionId,
+    display_name: "Browser escalation",
+    parameters: { incident_id: { type: "string", required: true } },
+    rules: { requires_approval: true }
+  } });
+  await page.request.post("/agents", { data: {
+    id: agentId,
+    display_name: `Browser Agent ${suffix}`,
+    description: "A governed browser-test agent",
+    allowed_object_types: [objectTypeId],
+    allowed_actions: [actionId]
+  } });
+  await page.request.put(`/aip/agents/${agentId}/tools`, { data: {
+    tools: [
+      { name: "find incident", type: "object_query", object_type_id: objectTypeId, trigger: "incident" },
+      { name: "escalate", type: "action", action_type_id: actionId, trigger: "escalate" }
+    ],
+    retrieval: { ontology: [objectTypeId] }
+  } });
+  await page.request.post("/artifacts", { data: {
+    artifact_type: "aip_logic",
+    display_name: `Browser AIP Logic ${suffix}`,
+    state: { nodes: [{ id: "query", type: "object_query", position: { x: 120, y: 120 }, data: { nodeType: "object_query", label: "Query incidents" } }], edges: [] }
+  } });
+
+  await page.goto("/workspace/aip");
+  await expect(page.locator(".app-shell"), pageErrors.join("\n")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(pageErrors).toEqual([]);
+  const runtime = page.locator(".agent-runtime-panel");
+  await expect(runtime).toBeVisible();
+  await runtime.getByLabel("Agent").selectOption(agentId);
+  await runtime.getByLabel("Instruction").fill("escalate the critical incident");
+  await runtime.getByRole("button", { name: "Add parameter" }).click();
+  await runtime.getByLabel("Parameter 1 name").fill("incident_id");
+  await runtime.getByLabel("Parameter 1 value").fill(objectId);
+  await runtime.getByRole("button", { name: "Run agent" }).click();
+  await expect(runtime.locator(".agent-job-state")).toContainText("SUCCEEDED");
+  await expect(runtime).toContainText("APPROVAL_REQUIRED");
+  await expect(runtime).toContainText("1 objects retrieved");
+  await expect(runtime).toContainText("Approval ");
+  await expect(runtime.locator(".agent-event-strip")).toContainText("succeeded");
+});
+
 test("platform graph supports selection, dragging, and neighborhood exploration", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful graph workflow once on desktop.");
   await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} });
