@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import models_action, ops_control
@@ -105,6 +106,18 @@ class PlatformJobEvent(Base):
     created_at: Mapped[int] = mapped_column(Integer, index=True)
 
 
+class PlatformJobLease(Base):
+    __tablename__ = "platform_job_leases"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    job_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    worker_id: Mapped[str] = mapped_column(String, index=True)
+    token: Mapped[str] = mapped_column(String, unique=True, index=True)
+    claimed_at: Mapped[int] = mapped_column(Integer)
+    heartbeat_at: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
 class ArtifactCreate(BaseModel):
     id: Optional[str] = None
     project_id: str = "default"
@@ -143,6 +156,38 @@ class JobCreate(BaseModel):
     subject_type: Optional[str] = None
     subject_id: Optional[str] = None
     payload: Dict[str, Any] = Field(default_factory=dict)
+    priority: int = Field(default=50, ge=0, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    timeout_seconds: int = Field(default=900, ge=1, le=86400)
+    available_at: Optional[int] = None
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class JobClaimRequest(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=200)
+    supported_job_types: List[str] = Field(default_factory=list)
+    lease_seconds: int = Field(default=60, ge=10, le=900)
+
+
+class JobHeartbeatRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    progress: int = Field(ge=0, le=100)
+    message: Optional[str] = Field(default=None, max_length=500)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    lease_seconds: int = Field(default=60, ge=10, le=900)
+
+
+class JobCompleteRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+
+class JobFailRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    error: str = Field(min_length=1, max_length=4000)
+    retriable: bool = True
+    retry_delay_seconds: int = Field(default=0, ge=0, le=86400)
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ArtifactAdoptRequest(BaseModel):
@@ -980,20 +1025,234 @@ def _job_event(db: Session, row: PlatformJob, event_type: str, payload: Optional
     db.add(PlatformJobEvent(job_id=row.id, event_type=event_type, status=row.status, payload=payload or {}, created_at=_now()))
 
 
+def _execution(row: PlatformJob) -> Dict[str, Any]:
+    return dict((row.payload or {}).get("__execution") or {})
+
+
+def _set_execution(row: PlatformJob, **changes: Any) -> None:
+    payload = dict(row.payload or {})
+    execution = dict(payload.get("__execution") or {})
+    execution.update(changes)
+    payload["__execution"] = execution
+    row.payload = payload
+
+
+def _lease_for_job(db: Session, job_id: str) -> Optional[PlatformJobLease]:
+    return db.query(PlatformJobLease).filter(PlatformJobLease.job_id == job_id).first()
+
+
+def _require_job_lease(db: Session, row: PlatformJob, token: str) -> PlatformJobLease:
+    lease = _lease_for_job(db, row.id)
+    if not lease or lease.token != token:
+        raise HTTPException(status_code=409, detail="Job lease is missing or no longer owned by this worker")
+    if lease.expires_at <= _now():
+        raise HTTPException(status_code=409, detail="Job lease has expired")
+    return lease
+
+
+def _release_job_lease(db: Session, job_id: str) -> None:
+    lease = _lease_for_job(db, job_id)
+    if lease:
+        db.delete(lease)
+
+
+def _reap_stale_jobs(db: Session) -> int:
+    now = _now()
+    reaped = 0
+    running = db.query(PlatformJob).filter(PlatformJob.status == "RUNNING").all()
+    for row in running:
+        lease = _lease_for_job(db, row.id)
+        execution = _execution(row)
+        timed_out = bool(row.started_at and row.started_at + int(execution.get("timeout_seconds", 900)) <= now)
+        lease_expired = not lease or lease.expires_at <= now
+        if not timed_out and not lease_expired:
+            continue
+        max_attempts = int(execution.get("max_attempts", 3))
+        reason = "timeout" if timed_out else "lease_expired"
+        _release_job_lease(db, row.id)
+        row.updated_at = now
+        row.error = f"Worker execution {reason.replace('_', ' ')}"
+        if row.attempt < max_attempts:
+            row.status = "QUEUED"
+            row.attempt += 1
+            row.progress = 0
+            row.started_at = None
+            _set_execution(row, available_at=now)
+            _job_event(db, row, "job.requeued", {"reason": reason, "attempt": row.attempt})
+        else:
+            row.status = "FAILED"
+            row.completed_at = now
+            _job_event(db, row, "job.failed", {"reason": reason, "attempt": row.attempt})
+        reaped += 1
+    return reaped
+
+
 @router.post("/jobs", status_code=201)
 def create_job(body: JobCreate, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     now = _now()
-    row = PlatformJob(id=_id("job"), job_type=body.job_type, status="QUEUED", actor=principal.id, subject_type=body.subject_type, subject_id=body.subject_id, payload=body.payload, result={}, attempt=1, progress=0, created_at=now, updated_at=now)
+    if body.idempotency_key:
+        existing = db.query(PlatformJob).filter(PlatformJob.actor == principal.id, PlatformJob.job_type == body.job_type).order_by(PlatformJob.created_at.desc()).limit(250).all()
+        for candidate in existing:
+            if _execution(candidate).get("idempotency_key") == body.idempotency_key:
+                return _job_dict(candidate, db)
+    payload = dict(body.payload)
+    payload["__execution"] = {
+        "priority": body.priority,
+        "max_attempts": body.max_attempts,
+        "timeout_seconds": body.timeout_seconds,
+        "available_at": body.available_at or now,
+        "idempotency_key": body.idempotency_key,
+    }
+    row = PlatformJob(id=_id("job"), job_type=body.job_type, status="QUEUED", actor=principal.id, subject_type=body.subject_type, subject_id=body.subject_id, payload=payload, result={}, attempt=1, progress=0, created_at=now, updated_at=now)
     db.add(row)
     db.flush()
-    _job_event(db, row, "job.queued")
-    _audit(db, principal.id, "job.queued", "platform_job", row.id, {"job_type": row.job_type})
+    _job_event(db, row, "job.queued", {"priority": body.priority, "available_at": body.available_at or now})
+    _audit(db, principal.id, "job.queued", "platform_job", row.id, {"job_type": row.job_type, "priority": body.priority})
     db.commit()
-    return _job_dict(row)
+    return _job_dict(row, db)
 
 
-def _job_dict(row: PlatformJob) -> Dict[str, Any]:
-    return {column: getattr(row, column) for column in ("id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at")}
+def _job_dict(row: PlatformJob, db: Optional[Session] = None) -> Dict[str, Any]:
+    result = {column: getattr(row, column) for column in ("id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at")}
+    result["payload"] = {key: value for key, value in (row.payload or {}).items() if key != "__execution"}
+    result["execution"] = _execution(row)
+    if db:
+        lease = _lease_for_job(db, row.id)
+        result["lease"] = None if not lease else {"worker_id": lease.worker_id, "claimed_at": lease.claimed_at, "heartbeat_at": lease.heartbeat_at, "expires_at": lease.expires_at}
+    return result
+
+
+@router.get("/jobs")
+def list_jobs(status: Optional[str] = None, job_type: Optional[str] = None, limit: int = Query(100, ge=1, le=500), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    _reap_stale_jobs(db)
+    db.commit()
+    query = db.query(PlatformJob)
+    if status:
+        query = query.filter(PlatformJob.status == status.upper())
+    if job_type:
+        query = query.filter(PlatformJob.job_type == job_type)
+    return [_job_dict(row, db) for row in query.order_by(PlatformJob.created_at.desc()).limit(limit).all()]
+
+
+@router.post("/jobs/claim")
+def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    now = _now()
+    _reap_stale_jobs(db)
+    query = db.query(PlatformJob).filter(PlatformJob.status == "QUEUED")
+    if body.supported_job_types:
+        query = query.filter(PlatformJob.job_type.in_(body.supported_job_types))
+    candidates = query.order_by(PlatformJob.created_at).limit(250).all()
+    candidates = [row for row in candidates if int(_execution(row).get("available_at", row.created_at)) <= now]
+    candidates.sort(key=lambda row: (-int(_execution(row).get("priority", 50)), row.created_at, row.id))
+    for row in candidates:
+        if _lease_for_job(db, row.id):
+            continue
+        lease = PlatformJobLease(
+            id=_id("joblease"), job_id=row.id, worker_id=body.worker_id, token=uuid.uuid4().hex,
+            claimed_at=now, heartbeat_at=now, expires_at=now + body.lease_seconds,
+        )
+        db.add(lease)
+        row.status = "RUNNING"
+        row.started_at = row.started_at or now
+        row.updated_at = now
+        row.error = None
+        _job_event(db, row, "job.claimed", {"worker_id": body.worker_id, "attempt": row.attempt, "lease_expires_at": lease.expires_at})
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        result = _job_dict(row, db)
+        result["lease_token"] = lease.token
+        return {"job": result}
+    db.commit()
+    return {"job": None}
+
+
+@router.get("/jobs/summary")
+def job_summary(principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    reaped = _reap_stale_jobs(db)
+    db.commit()
+    rows = db.query(PlatformJob).all()
+    counts: Dict[str, int] = {}
+    by_type: Dict[str, Dict[str, int]] = {}
+    for row in rows:
+        counts[row.status] = counts.get(row.status, 0) + 1
+        type_counts = by_type.setdefault(row.job_type, {})
+        type_counts[row.status] = type_counts.get(row.status, 0) + 1
+    queued = [row for row in rows if row.status == "QUEUED"]
+    now = _now()
+    return {
+        "counts": counts,
+        "by_job_type": by_type,
+        "active_workers": db.query(PlatformJobLease.worker_id).distinct().count(),
+        "active_leases": db.query(PlatformJobLease).count(),
+        "oldest_queued_seconds": max([now - row.created_at for row in queued], default=0),
+        "reaped_stale_jobs": reaped,
+        "last_updated": now,
+    }
+
+
+@router.post("/jobs/{job_id}/heartbeat")
+def heartbeat_job(job_id: str, body: JobHeartbeatRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    row = db.get(PlatformJob, job_id)
+    if not row or row.status != "RUNNING":
+        raise HTTPException(status_code=409 if row else 404, detail="Job is not running" if row else "Job not found")
+    lease = _require_job_lease(db, row, body.lease_token)
+    now = _now()
+    lease.heartbeat_at = now
+    lease.expires_at = now + body.lease_seconds
+    row.progress = body.progress
+    row.updated_at = now
+    _job_event(db, row, "job.progress", {"progress": body.progress, "message": body.message, "metrics": body.metrics})
+    db.commit()
+    return _job_dict(row, db)
+
+
+@router.post("/jobs/{job_id}/complete")
+def complete_job(job_id: str, body: JobCompleteRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    row = db.get(PlatformJob, job_id)
+    if not row or row.status != "RUNNING":
+        raise HTTPException(status_code=409 if row else 404, detail="Job is not running" if row else "Job not found")
+    lease = _require_job_lease(db, row, body.lease_token)
+    now = _now()
+    row.status = "SUCCEEDED"
+    row.progress = 100
+    row.result = body.result
+    row.error = None
+    row.updated_at = row.completed_at = now
+    _job_event(db, row, "job.succeeded", {"worker_id": lease.worker_id, "duration_seconds": max(0, now - (row.started_at or now))})
+    _release_job_lease(db, row.id)
+    _audit(db, principal.id, "job.succeeded", "platform_job", row.id, {"job_type": row.job_type, "attempt": row.attempt})
+    db.commit()
+    return _job_dict(row, db)
+
+
+@router.post("/jobs/{job_id}/fail")
+def fail_job(job_id: str, body: JobFailRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    row = db.get(PlatformJob, job_id)
+    if not row or row.status != "RUNNING":
+        raise HTTPException(status_code=409 if row else 404, detail="Job is not running" if row else "Job not found")
+    lease = _require_job_lease(db, row, body.lease_token)
+    now = _now()
+    max_attempts = int(_execution(row).get("max_attempts", 3))
+    row.error = body.error
+    row.updated_at = now
+    _release_job_lease(db, row.id)
+    if body.retriable and row.attempt < max_attempts:
+        row.status = "QUEUED"
+        row.attempt += 1
+        row.progress = 0
+        row.started_at = None
+        _set_execution(row, available_at=now + body.retry_delay_seconds)
+        _job_event(db, row, "job.retry_scheduled", {"worker_id": lease.worker_id, "attempt": row.attempt, "available_at": now + body.retry_delay_seconds, "error": body.error, "details": body.details})
+    else:
+        row.status = "FAILED"
+        row.completed_at = now
+        _job_event(db, row, "job.failed", {"worker_id": lease.worker_id, "attempt": row.attempt, "error": body.error, "details": body.details})
+    _audit(db, principal.id, "job.failed" if row.status == "FAILED" else "job.retry_scheduled", "platform_job", row.id, {"job_type": row.job_type, "attempt": row.attempt})
+    db.commit()
+    return _job_dict(row, db)
 
 
 @router.get("/jobs/{job_id}")
@@ -1001,7 +1260,10 @@ def get_job(job_id: str, principal: Principal = Depends(require_permission("view
     row = db.get(PlatformJob, job_id)
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
-    result = _job_dict(row)
+    _reap_stale_jobs(db)
+    db.commit()
+    db.refresh(row)
+    result = _job_dict(row, db)
     result["events"] = [{"id": event.id, "event_type": event.event_type, "status": event.status, "payload": event.payload, "created_at": event.created_at} for event in db.query(PlatformJobEvent).filter(PlatformJobEvent.job_id == job_id).order_by(PlatformJobEvent.id).all()]
     return result
 
@@ -1015,10 +1277,11 @@ def cancel_job(job_id: str, principal: Principal = Depends(require_permission("e
         raise HTTPException(status_code=409, detail=f"Job is already {row.status}")
     row.status = "CANCELLED"
     row.updated_at = row.completed_at = _now()
+    _release_job_lease(db, row.id)
     _job_event(db, row, "job.cancelled", {"actor": principal.id})
     _audit(db, principal.id, "job.cancelled", "platform_job", row.id, {})
     db.commit()
-    return _job_dict(row)
+    return _job_dict(row, db)
 
 
 @router.post("/jobs/{job_id}/retry")
@@ -1035,10 +1298,12 @@ def retry_job(job_id: str, principal: Principal = Depends(require_permission("ex
     row.result = {}
     row.started_at = row.completed_at = None
     row.updated_at = _now()
+    _set_execution(row, available_at=_now())
+    _release_job_lease(db, row.id)
     _job_event(db, row, "job.retried", {"attempt": row.attempt, "actor": principal.id})
     _audit(db, principal.id, "job.retried", "platform_job", row.id, {"attempt": row.attempt})
     db.commit()
-    return _job_dict(row)
+    return _job_dict(row, db)
 
 
 @router.get("/events/stream")

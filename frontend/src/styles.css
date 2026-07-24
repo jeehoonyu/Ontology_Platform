@@ -971,6 +971,28 @@ button:disabled {
   background: #fff6f3;
 }
 
+.backend-connection.execution-warning {
+  border-color: #dfc27a;
+}
+
+.execution-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: #53616b;
+  white-space: nowrap;
+}
+
+.execution-health strong {
+  color: #1f3039;
+  font-variant-numeric: tabular-nums;
+}
+
+.execution-health strong:not(:first-child) {
+  margin-left: 6px;
+}
+
 .backend-connection small {
   margin-left: auto;
   color: #64717a;
@@ -2890,6 +2912,12 @@ pre {
   .manager-header-card {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .execution-health {
+    margin-left: 0;
+    flex-wrap: wrap;
+    white-space: normal;
   }
 
   button,
