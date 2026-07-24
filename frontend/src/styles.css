@@ -993,6 +993,30 @@ button:disabled {
   margin-left: 6px;
 }
 
+.pipeline-execution-state {
+  display: grid;
+  gap: 10px;
+}
+
+.pipeline-execution-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pipeline-execution-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-execution-state progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #147d78;
+}
+
 .backend-connection small {
   margin-left: auto;
   color: #64717a;
