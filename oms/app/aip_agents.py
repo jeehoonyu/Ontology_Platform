@@ -19,7 +19,8 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action, runtime
+from . import models, models_action, ops_control, platform_runtime, runtime
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["aip_agents"])
 
@@ -49,6 +50,9 @@ class AgentToolRun(Base):
     prompt: Mapped[str] = mapped_column(String)
     tool_calls: Mapped[list] = mapped_column(JSON, default=list)
     proposed_actions: Mapped[list] = mapped_column(JSON, default=list)
+    retrieval: Mapped[dict] = mapped_column(JSON, default=dict)
+    policy_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    execution_job_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
     answer: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[int] = mapped_column(Integer)
 
@@ -87,6 +91,19 @@ class InvokeRequest(BaseModel):
     prompt: str
     parameters: Dict[str, Any] = Field(default_factory=dict)
     select: Optional[List[str]] = None  # force-select tools by name
+
+
+class AsyncInvokeRequest(InvokeRequest):
+    priority: int = Field(default=60, ge=0, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    timeout_seconds: int = Field(default=300, ge=1, le=86400)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class AgentWorkerRunRequest(BaseModel):
+    worker_id: str = Field(default="aip-agent-worker", min_length=1, max_length=200)
+    lease_seconds: int = Field(default=60, ge=10, le=900)
+    job_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +179,10 @@ def _run_tool(db: Session, tool: Dict[str, Any], prompt: str, parameters: Dict[s
             return {"error": f"action '{tool.get('action_type_id')}' not found"}
         # resolve params from request parameters by matching names
         resolved = {k: parameters.get(k) for k in (action.parameters or {}).keys()}
+        validation_errors = runtime.validate_action_parameters(action, resolved)
         return {"action_type_id": action.id, "display_name": action.display_name, "parameters": resolved,
-                "staged": True, "requires_approval": bool((action.rules or {}).get("requires_approval"))}
+                "staged": not validation_errors, "validation_errors": validation_errors,
+                "requires_approval": bool((action.rules or {}).get("requires_approval"))}
     if ttype == "command":
         return {"command": tool.get("command"), "response": tool.get("response", "ok")}
     return {"error": f"unknown tool type '{ttype}'"}
@@ -179,8 +198,49 @@ def _select(tool: Dict[str, Any], prompt_lc: str, select: Optional[List[str]]) -
     return any(k and k in prompt_lc for k in keys)
 
 
-@router.post("/aip/agents/{agent_id}/invoke")
-def invoke_agent(agent_id: str, body: InvokeRequest, db: Session = Depends(get_db)):
+def _tool_citations(tool: Dict[str, Any], output: Dict[str, Any]) -> List[Dict[str, str]]:
+    tool_type = tool.get("type")
+    if tool_type == "object_query":
+        return [
+            {"type": "ontology_object", "id": str(row.get("id"))}
+            for row in (output.get("rows") or [])[:10]
+            if row.get("id")
+        ]
+    if tool_type == "function" and output.get("function_id"):
+        return [{"type": "ontology_function", "id": str(output["function_id"])}]
+    if tool_type == "action" and output.get("action_type_id"):
+        return [{"type": "action_type", "id": str(output["action_type_id"])}]
+    return [{"type": "agent_tool", "id": str(tool.get("name") or tool_type or "tool")}]
+
+
+def _run_dict(run: AgentToolRun) -> Dict[str, Any]:
+    return {
+        "agent_id": run.agent_id,
+        "prompt": run.prompt,
+        "retrieval": run.retrieval or {},
+        "tool_calls": run.tool_calls or [],
+        "proposed_actions": run.proposed_actions or [],
+        "policy_summary": run.policy_summary or {},
+        "answer": run.answer,
+        "run_id": run.id,
+        "execution_job_id": run.execution_job_id,
+        "created_at": run.created_at,
+    }
+
+
+def _invoke_agent(
+    agent_id: str,
+    body: InvokeRequest,
+    db: Session,
+    *,
+    actor: str = "system",
+    execution_job_id: Optional[str] = None,
+    execution_lease_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    if execution_job_id:
+        prior = db.query(AgentToolRun).filter(AgentToolRun.execution_job_id == execution_job_id).first()
+        if prior:
+            return {**_run_dict(prior), "idempotent_replay": True}
     agent = db.get(models.AgentDefinition, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -202,14 +262,68 @@ def invoke_agent(agent_id: str, body: InvokeRequest, db: Session = Depends(get_d
     # 2) tool selection + execution
     tool_calls: List[Dict[str, Any]] = []
     proposed_actions: List[Dict[str, Any]] = []
+    approval_count = 0
+    denied_tools = 0
     for tool in tools:
         if not _select(tool, prompt_lc, body.select):
             continue
+        started = time.perf_counter()
         output = _run_tool(db, tool, body.prompt, body.parameters)
-        tool_calls.append({"tool": tool.get("name"), "type": tool.get("type"), "output": output})
+        policy_decision = "ALLOWED"
+        approval_request_id = None
+        if tool.get("type") == "action" and output.get("validation_errors"):
+            policy_decision = "DENIED"
+            denied_tools += 1
         if tool.get("type") == "action" and output.get("staged"):
-            proposed_actions.append({"action_type_id": output["action_type_id"], "parameters": output["parameters"],
-                                     "requires_approval": output["requires_approval"]})
+            policy_decision = "APPROVAL_REQUIRED" if output["requires_approval"] else "REVIEW_REQUIRED"
+            if output["requires_approval"]:
+                approval_request_id = uuid.uuid4().hex
+                approval_count += 1
+                db.add(models_action.ApprovalRequest(
+                    id=approval_request_id,
+                    action_type_id=output["action_type_id"],
+                    requester=actor,
+                    parameters=output["parameters"],
+                    status=models_action.ApprovalStatus.PENDING.value,
+                    reason=f"Proposed by agent {agent_id}",
+                    created_at=_now(),
+                ))
+                db.add(models_action.AuditLog(
+                    id=uuid.uuid4().hex,
+                    actor=actor,
+                    event_type="aip.agent.approval_requested",
+                    subject_type="approval_request",
+                    subject_id=approval_request_id,
+                    payload={"agent_id": agent_id, "action_type_id": output["action_type_id"], "execution_job_id": execution_job_id},
+                ))
+                ops_control.record_ops_event(
+                    db,
+                    source="aip_agent",
+                    event_type="aip.agent.approval_requested",
+                    severity="high",
+                    title=f"Agent {agent.display_name} requested action approval",
+                    subject_type="approval_request",
+                    subject_id=approval_request_id,
+                    payload={"agent_id": agent_id, "action_type_id": output["action_type_id"], "execution_job_id": execution_job_id},
+                )
+            proposed_actions.append({
+                "action_type_id": output["action_type_id"],
+                "parameters": output["parameters"],
+                "requires_approval": output["requires_approval"],
+                "policy_decision": policy_decision,
+                "approval_request_id": approval_request_id,
+                "executed": False,
+            })
+        tool_calls.append({
+            "tool": tool.get("name"),
+            "type": tool.get("type"),
+            "input": {"prompt": body.prompt, "parameters": body.parameters},
+            "output": output,
+            "citations": _tool_citations(tool, output),
+            "policy_decision": policy_decision,
+            "approval_gate": policy_decision == "APPROVAL_REQUIRED",
+            "duration_ms": max(1, round((time.perf_counter() - started) * 1000)),
+        })
 
     # 3) grounded deterministic answer
     answer = (
@@ -219,11 +333,150 @@ def invoke_agent(agent_id: str, body: InvokeRequest, db: Session = Depends(get_d
         + (f" Proposed {len(proposed_actions)} action(s) for review." if proposed_actions else "")
     )
 
-    run = AgentToolRun(id=uuid.uuid4().hex, agent_id=agent_id, prompt=body.prompt,
-                       tool_calls=tool_calls, proposed_actions=proposed_actions, answer=answer, created_at=_now())
+    policy_summary = {
+        "decision": "DENIED" if denied_tools else ("APPROVAL_REQUIRED" if approval_count else ("REVIEW_REQUIRED" if proposed_actions else "ALLOWED")),
+        "approval_requests": approval_count,
+        "proposed_actions": len(proposed_actions),
+        "denied_tools": denied_tools,
+        "direct_mutations": 0,
+    }
+    run = AgentToolRun(
+        id=uuid.uuid4().hex,
+        agent_id=agent_id,
+        prompt=body.prompt,
+        tool_calls=tool_calls,
+        proposed_actions=proposed_actions,
+        retrieval=retrieval,
+        policy_summary=policy_summary,
+        execution_job_id=execution_job_id,
+        answer=answer,
+        created_at=_now(),
+    )
     db.add(run)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="aip.agent.invoked",
-                                  subject_type="agent", subject_id=agent_id, payload={"tools_used": len(tool_calls)}))
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=actor, event_type="aip.agent.invoked",
+                                  subject_type="agent", subject_id=agent_id, payload={"tools_used": len(tool_calls), "run_id": run.id, "execution_job_id": execution_job_id, "policy_summary": policy_summary}))
+    if execution_job_id:
+        db.flush()
+        active_job = db.query(platform_runtime.PlatformJob).filter(platform_runtime.PlatformJob.id == execution_job_id).with_for_update().first()
+        active_lease = db.query(platform_runtime.PlatformJobLease).filter(platform_runtime.PlatformJobLease.job_id == execution_job_id).with_for_update().first()
+        if not active_job or active_job.status != "RUNNING" or not active_lease or active_lease.token != execution_lease_token:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Agent invocation was cancelled or lost its execution lease before commit")
     db.commit()
-    return {"agent_id": agent_id, "prompt": body.prompt, "retrieval": retrieval,
-            "tool_calls": tool_calls, "proposed_actions": proposed_actions, "answer": answer, "run_id": run.id}
+    return {**_run_dict(run), "idempotent_replay": False}
+
+
+@router.post("/aip/agents/{agent_id}/invoke")
+def invoke_agent(agent_id: str, body: InvokeRequest, db: Session = Depends(get_db)):
+    return _invoke_agent(agent_id, body, db)
+
+
+@router.post("/aip/agents/{agent_id}/invoke/async", status_code=202)
+def enqueue_agent_invocation(
+    agent_id: str,
+    body: AsyncInvokeRequest,
+    principal: Principal = Depends(require_permission("execute")),
+    db: Session = Depends(get_db),
+):
+    if not db.get(models.AgentDefinition, agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return platform_runtime.create_job(platform_runtime.JobCreate(
+        job_type="aip.agent.invoke",
+        subject_type="agent",
+        subject_id=agent_id,
+        payload={
+            "agent_id": agent_id,
+            "prompt": body.prompt,
+            "parameters": body.parameters,
+            "select": body.select,
+        },
+        priority=body.priority,
+        max_attempts=body.max_attempts,
+        timeout_seconds=body.timeout_seconds,
+        idempotency_key=body.idempotency_key,
+    ), principal, db)
+
+
+@router.post("/aip/agents/workers/run-next")
+def run_next_agent_job(
+    body: AgentWorkerRunRequest = AgentWorkerRunRequest(),
+    principal: Principal = Depends(require_permission("execute")),
+    db: Session = Depends(get_db),
+):
+    claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
+        worker_id=body.worker_id,
+        supported_job_types=["aip.agent.invoke"],
+        lease_seconds=body.lease_seconds,
+        job_id=body.job_id,
+    ), principal, db).get("job")
+    if not claimed:
+        return {"job": None, "result": None}
+    job_id = str(claimed["id"])
+    lease_token = str(claimed["lease_token"])
+    payload = dict(claimed.get("payload") or {})
+    try:
+        platform_runtime.heartbeat_job(job_id, platform_runtime.JobHeartbeatRequest(
+            lease_token=lease_token,
+            progress=15,
+            message="Agent context loaded; selecting governed tools",
+            metrics={"agent_id": payload.get("agent_id")},
+            lease_seconds=body.lease_seconds,
+        ), principal, db)
+        result = _invoke_agent(
+            str(payload.get("agent_id") or claimed.get("subject_id") or ""),
+            InvokeRequest(
+                prompt=str(payload.get("prompt") or ""),
+                parameters=dict(payload.get("parameters") or {}),
+                select=payload.get("select"),
+            ),
+            db,
+            actor=principal.id,
+            execution_job_id=job_id,
+            execution_lease_token=lease_token,
+        )
+        db.expire_all()
+        current = db.get(platform_runtime.PlatformJob, job_id)
+        if current and current.status == "CANCELLED":
+            return {"job": platform_runtime.get_job(job_id, principal, db), "result": None}
+        completed = platform_runtime.complete_job(job_id, platform_runtime.JobCompleteRequest(
+            lease_token=lease_token,
+            result=result,
+        ), principal, db)
+        return {"job": completed, "result": result}
+    except HTTPException as exc:
+        db.rollback()
+        current = db.get(platform_runtime.PlatformJob, job_id)
+        if not current or current.status != "RUNNING":
+            return {"job": platform_runtime.get_job(job_id, principal, db) if current else None, "result": None}
+        failed = platform_runtime.fail_job(job_id, platform_runtime.JobFailRequest(
+            lease_token=lease_token,
+            error=str(exc.detail),
+            retriable=exc.status_code >= 500,
+            details={"status_code": exc.status_code},
+        ), principal, db)
+        return {"job": failed, "result": None}
+    except Exception as exc:
+        db.rollback()
+        current = db.get(platform_runtime.PlatformJob, job_id)
+        if not current or current.status != "RUNNING":
+            return {"job": platform_runtime.get_job(job_id, principal, db) if current else None, "result": None}
+        failed = platform_runtime.fail_job(job_id, platform_runtime.JobFailRequest(
+            lease_token=lease_token,
+            error=str(exc),
+            retriable=True,
+            details={"exception_type": type(exc).__name__},
+        ), principal, db)
+        return {"job": failed, "result": None}
+
+
+@router.get("/aip/agents/{agent_id}/runs")
+def list_agent_runs(
+    agent_id: str,
+    limit: int = 50,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    if not db.get(models.AgentDefinition, agent_id):
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    rows = db.query(AgentToolRun).filter(AgentToolRun.agent_id == agent_id).order_by(AgentToolRun.created_at.desc()).limit(max(1, min(limit, 200))).all()
+    return [_run_dict(row) for row in rows]

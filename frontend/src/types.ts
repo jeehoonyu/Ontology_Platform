@@ -137,6 +137,63 @@ export interface PlatformJob {
   completed_at?: number | null;
 }
 
+export interface AgentDefinition {
+  id: string;
+  display_name: string;
+  description?: string | null;
+  approval_required?: boolean;
+  allowed_object_types?: string[];
+  allowed_actions?: string[];
+}
+
+export interface AgentCitation {
+  type: string;
+  id: string;
+}
+
+export interface AgentToolCall {
+  tool: string;
+  type: string;
+  input: JsonObject;
+  output: JsonObject;
+  citations: AgentCitation[];
+  policy_decision: string;
+  approval_gate: boolean;
+  duration_ms: number;
+}
+
+export interface AgentProposedAction {
+  action_type_id: string;
+  parameters: JsonObject;
+  requires_approval: boolean;
+  policy_decision: string;
+  approval_request_id?: string | null;
+  executed: boolean;
+}
+
+export interface AgentRunResult {
+  agent_id: string;
+  prompt: string;
+  retrieval: {
+    retrieved_object_count?: number;
+    ontology_packs?: JsonObject[];
+    documents?: string[];
+  };
+  tool_calls: AgentToolCall[];
+  proposed_actions: AgentProposedAction[];
+  policy_summary: {
+    decision?: string;
+    approval_requests?: number;
+    proposed_actions?: number;
+    denied_tools?: number;
+    direct_mutations?: number;
+  };
+  answer: string;
+  run_id: string;
+  execution_job_id?: string | null;
+  created_at: number;
+}
+
 export interface PipelineGraph {
   id: string;
   display_name: string;
