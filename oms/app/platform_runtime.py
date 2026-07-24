@@ -14,7 +14,7 @@ from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models_action, ops_control
+from . import models_action, ops_control, tenancy
 from .database import Base, get_db
 from .production_auth import Principal, require_permission
 
@@ -442,6 +442,12 @@ def _artifact(db: Session, artifact_id: str) -> PlatformArtifact:
     return row
 
 
+def _artifact_for(db: Session, artifact_id: str, principal: Principal, permission: str) -> PlatformArtifact:
+    row = _artifact(db, artifact_id)
+    tenancy.assert_project_permission(db, principal, row.project_id, permission)
+    return row
+
+
 def _collaboration_event(
     db: Session,
     row: PlatformArtifact,
@@ -656,7 +662,11 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
     latest_collaboration_event = db.query(ArtifactCollaborationEvent.id).filter(
         ArtifactCollaborationEvent.artifact_id == row.id,
     ).order_by(ArtifactCollaborationEvent.id.desc()).first()
-    allowed = [name for name in ("view", "edit", "publish", "deploy", "execute", "approve", "export", "restore", "manage") if not principal or principal.allows(name)]
+    project_allowed = tenancy.project_permissions(db, principal, row.project_id) if principal else {"*"}
+    allowed = [
+        name for name in ("view", "edit", "publish", "deploy", "execute", "approve", "export", "restore", "administer")
+        if (not principal or principal.allows(name)) and ("*" in project_allowed or name in project_allowed)
+    ]
     validation = revision.validation or {}
     return {
         "id": row.id,
@@ -834,6 +844,7 @@ def _assert_lease(db: Session, artifact_id: str, actor: str, token: Optional[str
 
 @router.post("/artifacts", status_code=201)
 def create_artifact(body: ArtifactCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     artifact_id = body.id or _id("artifact")
     if db.get(PlatformArtifact, artifact_id):
         raise HTTPException(status_code=409, detail="Artifact already exists")
@@ -925,6 +936,7 @@ def adopt_resource(body: ArtifactAdoptRequest, principal: Principal = Depends(re
     """Create a versioned visual draft from an existing pipeline or ontology type."""
     from . import models, pipeline_builder_ops
 
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     source_key = f"{body.resource_type}:{body.resource_id}"
     existing = db.query(PlatformArtifact).filter(PlatformArtifact.project_id == body.project_id).all()
     for artifact in existing:
@@ -1005,7 +1017,12 @@ def copy_json(value: Any) -> Any:
 def list_artifacts(project_id: Optional[str] = None, artifact_type: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     query = db.query(PlatformArtifact)
     if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
         query = query.filter(PlatformArtifact.project_id == project_id)
+    else:
+        allowed = tenancy.accessible_project_ids(db, principal, "view")
+        if allowed is not None:
+            query = query.filter(PlatformArtifact.project_id.in_(allowed)) if allowed else query.filter(PlatformArtifact.id == "__none__")
     if artifact_type:
         query = query.filter(PlatformArtifact.artifact_type == artifact_type)
     return [_artifact_dict(db, row, principal) for row in query.order_by(PlatformArtifact.updated_at.desc()).all()]
@@ -1013,12 +1030,12 @@ def list_artifacts(project_id: Optional[str] = None, artifact_type: Optional[str
 
 @router.get("/artifacts/{artifact_id}")
 def get_artifact(artifact_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    return _artifact_dict(db, _artifact(db, artifact_id), principal)
+    return _artifact_dict(db, _artifact_for(db, artifact_id, principal, "view"), principal)
 
 
 @router.patch("/artifacts/{artifact_id}")
 def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "edit")
     if body.expected_lock_version != row.lock_version:
         raise HTTPException(status_code=409, detail={"message": "Artifact changed since it was loaded", "current_lock_version": row.lock_version})
     _assert_lease(db, artifact_id, principal.id, body.lease_token)
@@ -1049,7 +1066,7 @@ def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal 
 
 @router.post("/artifacts/{artifact_id}/commands")
 def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "edit")
     metadata = copy_json(row.metadata_ or {})
     receipts = list(metadata.get("command_receipts") or [])
     prior = next((receipt for receipt in receipts if receipt.get("idempotency_key") == body.idempotency_key), None)
@@ -1101,7 +1118,7 @@ def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, princip
 
 @router.post("/artifacts/{artifact_id}/preview", status_code=202)
 def preview_artifact(artifact_id: str, body: ArtifactPreviewRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "execute")
     revision = _revision(db, artifact_id, row.current_revision)
     validation = _validate_state(row.artifact_type, revision.state or {})
     nodes = list((revision.state or {}).get("nodes") or [])
@@ -1150,7 +1167,7 @@ def preview_artifact(artifact_id: str, body: ArtifactPreviewRequest, principal: 
 
 @router.post("/artifacts/{artifact_id}/validate")
 def validate_artifact(artifact_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "view")
     revision = _revision(db, artifact_id, row.current_revision)
     revision.validation = _validate_state(row.artifact_type, revision.state or {})
     db.commit()
@@ -1159,7 +1176,7 @@ def validate_artifact(artifact_id: str, principal: Principal = Depends(require_p
 
 @router.post("/artifacts/{artifact_id}/publish")
 def publish_artifact(artifact_id: str, body: PublishRequest, principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "publish")
     if body.expected_lock_version is not None and body.expected_lock_version != row.lock_version:
         raise HTTPException(status_code=409, detail={"message": "Artifact changed since it was loaded", "current_lock_version": row.lock_version})
     revision = _revision(db, artifact_id, row.current_revision)
@@ -1180,7 +1197,7 @@ def publish_artifact(artifact_id: str, body: PublishRequest, principal: Principa
 
 @router.get("/artifacts/{artifact_id}/versions")
 def artifact_versions(artifact_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    _artifact(db, artifact_id)
+    _artifact_for(db, artifact_id, principal, "view")
     rows = db.query(ArtifactRevision).filter(ArtifactRevision.artifact_id == artifact_id).order_by(ArtifactRevision.revision.desc()).all()
     return [{
         "id": row.id, "revision": row.revision, "author": row.author, "message": row.message,
@@ -1191,7 +1208,7 @@ def artifact_versions(artifact_id: str, principal: Principal = Depends(require_p
 
 @router.get("/artifacts/{artifact_id}/diff")
 def artifact_diff(artifact_id: str, from_revision: int = Query(...), to_revision: Optional[int] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "view")
     before = _revision(db, artifact_id, from_revision)
     after = _revision(db, artifact_id, to_revision or row.current_revision)
     keys = sorted(set((before.state or {}).keys()) | set((after.state or {}).keys()))
@@ -1202,7 +1219,7 @@ def artifact_diff(artifact_id: str, from_revision: int = Query(...), to_revision
 
 @router.post("/artifacts/{artifact_id}/versions/{version}/restore")
 def restore_artifact(artifact_id: str, version: int, principal: Principal = Depends(require_permission("restore")), db: Session = Depends(get_db)):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "restore")
     source = _revision(db, artifact_id, version)
     row.current_revision += 1
     row.lock_version += 1
@@ -1221,7 +1238,7 @@ def restore_artifact(artifact_id: str, version: int, principal: Principal = Depe
 
 @router.post("/artifacts/{artifact_id}/leases")
 def acquire_lease(artifact_id: str, body: LeaseRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
-    _artifact(db, artifact_id)
+    _artifact_for(db, artifact_id, principal, "edit")
     lease = db.query(ArtifactLease).filter(ArtifactLease.artifact_id == artifact_id).first()
     now = _now()
     expired = bool(lease and lease.expires_at <= now)
@@ -1249,7 +1266,7 @@ def join_artifact_collaboration(
     principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "edit")
     _prune_collaborators(db, row)
     now = _now()
     participant = db.query(ArtifactCollaborationParticipant).filter(
@@ -1304,7 +1321,7 @@ def artifact_collaboration_state(
     principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "view")
     expired = _prune_collaborators(db, row)
     if expired:
         db.commit()
@@ -1330,7 +1347,7 @@ def heartbeat_artifact_collaboration(
     principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "edit")
     participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
     participant.cursor = body.cursor
     participant.selection = [str(value) for value in body.selection]
@@ -1355,7 +1372,7 @@ def leave_artifact_collaboration(
     principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
-    row = _artifact(db, artifact_id)
+    row = _artifact_for(db, artifact_id, principal, "edit")
     participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
     participant_id = participant.id
     _collaboration_event(
@@ -1378,6 +1395,7 @@ def apply_collaborative_commands(
     principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
+    _artifact_for(db, artifact_id, principal, "edit")
     participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
     row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
     if not row:
@@ -1492,7 +1510,7 @@ def list_artifact_collaboration_events(
     principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ):
-    _artifact(db, artifact_id)
+    _artifact_for(db, artifact_id, principal, "view")
     rows = db.query(ArtifactCollaborationEvent).filter(
         ArtifactCollaborationEvent.artifact_id == artifact_id,
         ArtifactCollaborationEvent.id > after,
@@ -1510,7 +1528,7 @@ async def stream_artifact_collaboration_events(
 ):
     db = next(get_db())
     try:
-        _artifact(db, artifact_id)
+        _artifact_for(db, artifact_id, principal, "view")
     finally:
         db.close()
 

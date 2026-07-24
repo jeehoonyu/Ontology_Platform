@@ -83,6 +83,8 @@ from . import (
     imports_ops,
     system_hardening,
     production_auth,
+    tenancy,
+    ontology_packages,
     platform_runtime,
 )
 from .database import engine, get_db
@@ -229,6 +231,8 @@ for _ext_module in (
     imports_ops,
     system_hardening,
     production_auth,
+    tenancy,
+    ontology_packages,
     platform_runtime,
 ):
     app.include_router(_ext_module.router)

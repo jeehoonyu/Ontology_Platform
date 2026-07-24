@@ -31,6 +31,8 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   const adminSession = await page.evaluate(async () => (await fetch("/auth/session")).json());
   expect(adminSession.authenticated).toBe(true);
   expect(adminSession.roles).toContain("administrator");
+  expect(adminSession.organization_id).toBe("pilot");
+  expect(adminSession.project_ids).toContain("default");
 
   const adminMutation = await page.evaluate(async () => {
     const response = await fetch("/artifacts", {
@@ -93,6 +95,7 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   const viewerSession = await page.evaluate(async () => (await fetch("/auth/session")).json());
   expect(viewerSession.roles).toContain("viewer");
   expect(viewerSession.permissions).toEqual(["view"]);
+  expect(viewerSession.project_ids).toContain("default");
 
   const viewerAccess = await page.evaluate(async () => {
     const read = await fetch("/artifacts");
