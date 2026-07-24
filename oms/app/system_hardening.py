@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Integer, String, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import (
@@ -84,6 +85,8 @@ CORE_TABLES = [
     "platform_jobs",
     "platform_job_events",
     "platform_job_leases",
+    "platform_artifact_collaborators",
+    "platform_artifact_collaboration_events",
     "auth_sessions",
     "auth_oidc_flows",
     "connection_sources",
@@ -106,7 +109,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -114,6 +117,7 @@ MIGRATIONS = [
     {"version": 4, "name": "versioned_artifacts_jobs_oidc_sessions", "status": "applied"},
     {"version": 5, "name": "durable_worker_leases_and_job_recovery", "status": "applied"},
     {"version": 6, "name": "durable_agent_execution_and_policy_evidence", "status": "applied"},
+    {"version": 7, "name": "artifact_collaboration_presence_and_events", "status": "applied"},
 ]
 
 
@@ -174,26 +178,28 @@ def _ensure_column(db: Session, table_name: str, column_name: str, column_ddl: s
 def _ensure_migration_records(db: Session) -> None:
     MigrationRecord.__table__.create(bind=db.get_bind(), checkfirst=True)
     now = _now()
-    existing_versions = {row.version for row in db.query(MigrationRecord.version).all()}
-    added = False
     for migration in MIGRATIONS:
         version = migration["version"]
-        if version in existing_versions:
+        existing = db.get(MigrationRecord, version)
+        if existing:
+            existing.name = migration["name"]
+            existing.status = migration["status"]
+            continue
+        try:
+            with db.begin_nested():
+                db.add(MigrationRecord(
+                    version=version,
+                    name=migration["name"],
+                    status=migration["status"],
+                    applied_at=now,
+                ))
+                db.flush()
+        except IntegrityError:
+            # Another readiness request recorded the same migration concurrently.
             existing = db.get(MigrationRecord, version)
             if existing:
                 existing.name = migration["name"]
                 existing.status = migration["status"]
-            continue
-        db.add(MigrationRecord(
-            version=version,
-            name=migration["name"],
-            status=migration["status"],
-            applied_at=now,
-        ))
-        added = True
-        existing_versions.add(version)
-    if added:
-        db.flush()
 
 
 def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any]) -> None:

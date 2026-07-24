@@ -36,13 +36,21 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   acquireArtifactLease,
   applyArtifactCommands,
+  applyCollaborativeCommands,
+  artifactCollaborationStreamUrl,
   createArtifact,
+  getArtifactCollaboration,
   getBuilderCatalog,
+  heartbeatArtifactCollaboration,
+  joinArtifactCollaboration,
+  leaveArtifactCollaboration,
   listArtifacts,
   listArtifactVersions,
   publishArtifact,
   previewArtifact,
   restoreArtifactVersion,
+  type ArtifactCollaborationEvent,
+  type ArtifactCollaborationSession,
   type ArtifactLease,
   type ArtifactNodeData,
   type ArtifactPreview,
@@ -51,7 +59,7 @@ import {
   type PlatformArtifact
 } from "../api/artifactApi";
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
-import { autoLayout, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
+import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 
 interface VisualBuilderProps {
@@ -125,6 +133,15 @@ function stateEdges(artifact: PlatformArtifact | undefined): Edge[] {
   return (artifact?.state?.edges || []) as Edge[];
 }
 
+function collaborationClientId(): string {
+  const key = "ontology-platform-collaboration-client";
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  window.localStorage.setItem(key, created);
+  return created;
+}
+
 export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderProps) {
   const queryClient = useQueryClient();
   const artifacts = useQuery({ queryKey: ["artifacts", artifactType], queryFn: () => listArtifacts(artifactType) });
@@ -134,6 +151,8 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [lease, setLease] = useState<ArtifactLease | null>(null);
+  const [collaboration, setCollaboration] = useState<ArtifactCollaborationSession | null>(null);
+  const [collaborationConflict, setCollaborationConflict] = useState("");
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -144,6 +163,8 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const redoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   const hydratedArtifact = useRef("");
   const clipboard = useRef<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] } | null>(null);
+  const dirtyRef = useRef(false);
+  const selectionRef = useRef<string[]>([]);
   const catalog = useQuery({
     queryKey: ["builder-catalog", artifactType],
     queryFn: () => getBuilderCatalog(artifactType),
@@ -159,21 +180,106 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     enabled: Boolean(artifact)
   });
 
+  const collaborators = useQuery({
+    queryKey: ["artifact-collaboration", artifact?.id],
+    queryFn: () => getArtifactCollaboration(artifact!.id),
+    enabled: Boolean(artifact && collaboration),
+    refetchInterval: 4_000
+  });
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  useEffect(() => {
+    selectionRef.current = selectedNodeIds(nodes);
+  }, [nodes]);
+
+  useEffect(() => {
+    if (!artifact || !collaborators.data || collaborators.data.lock_version <= artifact.lock_version) return;
+    if (dirtyRef.current) {
+      setCollaborationConflict("A newer shared revision is available while you have local changes.");
+    } else {
+      queryClient.invalidateQueries({ queryKey: ["artifacts", artifactType] });
+      queryClient.invalidateQueries({ queryKey: ["artifact-versions", artifact.id] });
+    }
+  }, [artifact, artifactType, collaborators.data?.lock_version, queryClient]);
+
   useEffect(() => {
     if (!artifact || hydratedArtifact.current === `${artifact.id}:${artifact.current_revision}`) return;
+    if (dirtyRef.current && hydratedArtifact.current.startsWith(`${artifact.id}:`)) {
+      setCollaborationConflict("A newer shared revision is available. Reload it or finish resolving your local changes before saving.");
+      return;
+    }
     setNodes(stateNodes(artifact));
     setEdges(stateEdges(artifact));
     setDirty(false);
     setSelectedNodeId("");
+    setCollaborationConflict("");
     hydratedArtifact.current = `${artifact.id}:${artifact.current_revision}`;
   }, [artifact]);
 
   useEffect(() => {
     if (!artifact) return;
-    acquireArtifactLease(artifact.id, lease?.artifact_id === artifact.id ? lease.token : undefined)
-      .then(setLease)
-      .catch((error) => setMessage(error instanceof Error ? error.message : String(error)));
+    let active = true;
+    setCollaboration(null);
+    setLease(null);
+    joinArtifactCollaboration(artifact.id, collaborationClientId())
+      .then((session) => {
+        if (active) setCollaboration(session);
+      })
+      .catch(async (collaborationError) => {
+        try {
+          const fallbackLease = await acquireArtifactLease(artifact.id);
+          if (active) {
+            setLease(fallbackLease);
+            setMessage("Live collaboration is unavailable. Editing is using a temporary exclusive lease.");
+          }
+        } catch {
+          if (active) setMessage(collaborationError instanceof Error ? collaborationError.message : String(collaborationError));
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [artifact?.id]);
+
+  useEffect(() => {
+    if (!artifact || !collaboration) return;
+    const heartbeat = () => heartbeatArtifactCollaboration(
+      artifact.id,
+      collaboration.participant_token,
+      selectionRef.current
+    ).then(() => queryClient.invalidateQueries({ queryKey: ["artifact-collaboration", artifact.id] })).catch(() => undefined);
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 20_000);
+    return () => {
+      window.clearInterval(timer);
+      leaveArtifactCollaboration(artifact.id, collaboration.participant_token).catch(() => undefined);
+    };
+  }, [artifact?.id, collaboration?.participant_token, queryClient]);
+
+  useEffect(() => {
+    if (!artifact || !collaboration) return;
+    const stream = new EventSource(artifactCollaborationStreamUrl(artifact.id, collaboration.event_cursor));
+    const receive = (raw: Event) => {
+      const event = JSON.parse((raw as MessageEvent<string>).data) as ArtifactCollaborationEvent;
+      queryClient.invalidateQueries({ queryKey: ["artifact-collaboration", artifact.id] });
+      if (event.participant_id === collaboration.participant.id) return;
+      if (["artifact.commands", "artifact.revision", "artifact.published", "artifact.restored"].includes(event.event_type)) {
+        if (dirtyRef.current) {
+          setCollaborationConflict(`${event.actor} updated this artifact while you have local changes.`);
+        } else {
+          queryClient.invalidateQueries({ queryKey: ["artifacts", artifactType] });
+          queryClient.invalidateQueries({ queryKey: ["artifact-versions", artifact.id] });
+        }
+      }
+    };
+    ["presence.joined", "presence.rejoined", "presence.updated", "presence.left", "artifact.commands", "artifact.revision", "artifact.published", "artifact.restored", "artifact.conflict"]
+      .forEach((name) => stream.addEventListener(name, receive));
+    stream.onerror = () => setMessage("Live updates disconnected. Reconnecting automatically...");
+    return () => stream.close();
+  }, [artifact?.id, artifactType, collaboration?.participant.id, collaboration?.event_cursor, queryClient]);
 
   const createMutation = useMutation({
     mutationFn: () => createArtifact(artifactType, `${title} draft`),
@@ -184,18 +290,29 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   });
 
   const saveMutation = useMutation({
-    mutationFn: ({ reason }: { reason: string }) => {
-      if (!artifact || !lease) throw new Error("Select an artifact and acquire its editing lease first.");
+    mutationFn: async ({ reason }: { reason: string }) => {
+      if (!artifact) throw new Error("Select an artifact before saving.");
+      if (collaboration) {
+        const commands = diffArtifactCommands(artifact.state, nodes, edges);
+        if (!commands.length) return artifact;
+        return applyCollaborativeCommands(artifact, collaboration.participant_token, commands, reason);
+      }
+      if (!lease) throw new Error("The editor is not connected. Wait for collaboration or an editing lease.");
       return applyArtifactCommands(artifact, [replaceStateCommand(nodes, edges, artifact.state)], lease.token, reason);
     },
     onSuccess: async (saved) => {
       setDirty(false);
       setMessage(`Saved revision ${saved.current_revision}`);
+      setCollaborationConflict("");
       hydratedArtifact.current = `${saved.id}:${saved.current_revision}`;
       queryClient.setQueryData<PlatformArtifact[]>(["artifacts", artifactType], (current = []) => current.map((item) => item.id === saved.id ? saved : item));
       await queryClient.invalidateQueries({ queryKey: ["artifact-versions", saved.id] });
     },
-    onError: (error) => setMessage(error instanceof Error ? error.message : String(error))
+    onError: (error) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (collaboration) setCollaborationConflict(`Your changes overlap a newer shared edit. ${detail}`);
+      setMessage(detail);
+    }
   });
 
   const previewMutation = useMutation({
@@ -211,10 +328,10 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   });
 
   useEffect(() => {
-    if (!dirty || !artifact || !lease || saveMutation.isPending) return;
+    if (!dirty || !artifact || (!collaboration && !lease) || collaborationConflict || saveMutation.isPending) return;
     const timer = window.setTimeout(() => saveMutation.mutate({ reason: "Autosaved visual edit" }), 1200);
     return () => window.clearTimeout(timer);
-  }, [dirty, nodes, edges, artifact?.id, artifact?.lock_version, lease?.token]);
+  }, [dirty, nodes, edges, artifact?.id, artifact?.lock_version, collaboration?.participant_token, lease?.token, collaborationConflict]);
 
   function snapshot() {
     undoStack.current.push({ nodes: structuredClone(nodes), edges: structuredClone(edges) });
@@ -223,15 +340,17 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }
 
   function changeNodes(changes: NodeChange<Node<ArtifactNodeData>>[]) {
-    snapshot();
+    const persistent = changes.some((change) => change.type === "add" || change.type === "remove" || change.type === "position");
+    if (persistent) snapshot();
     setNodes((current) => applyNodeChanges(changes, current));
-    setDirty(true);
+    if (persistent) setDirty(true);
   }
 
   function changeEdges(changes: EdgeChange<Edge>[]) {
-    snapshot();
+    const persistent = changes.some((change) => change.type === "add" || change.type === "remove" || change.type === "replace");
+    if (persistent) snapshot();
     setEdges((current) => applyEdgeChanges(changes, current));
-    setDirty(true);
+    if (persistent) setDirty(true);
   }
 
   function connect(connection: Connection) {
@@ -410,6 +529,17 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           <select aria-label={`${title} artifact`} value={artifact.id} onChange={(event) => setSelectedId(event.target.value)}>
             {(artifacts.data || []).map((item) => <option value={item.id} key={item.id}>{item.display_name}</option>)}
           </select>
+          <div className="collaboration-presence" aria-label={`${collaborators.data?.participants.length || 0} active editors`}>
+            {(collaborators.data?.participants || []).slice(0, 4).map((participant) => (
+              <span
+                className="collaboration-avatar"
+                style={{ backgroundColor: participant.color }}
+                title={`${participant.display_name}${participant.id === collaboration?.participant.id ? " (you)" : ""}`}
+                key={participant.id}
+              >{participant.display_name.slice(0, 1).toUpperCase()}</span>
+            ))}
+            <small>{collaboration ? `${collaborators.data?.participants.length || 1} editing` : lease ? "Exclusive edit" : "Connecting"}</small>
+          </div>
           <StatusBadge value={dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status} />
           <button title="Undo" aria-label="Undo" onClick={undo} disabled={!undoStack.current.length}><Undo2 size={16} /></button>
           <button title="Redo" aria-label="Redo" onClick={redo} disabled={!redoStack.current.length}><Redo2 size={16} /></button>
@@ -427,6 +557,18 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
         </div>
       </header>
       {message ? <div className="operation-message" role="status">{message}<button aria-label="Dismiss message" onClick={() => setMessage("")}>×</button></div> : null}
+      {collaborationConflict ? (
+        <div className="collaboration-conflict" role="alert">
+          <div><strong>Shared edit needs review</strong><span>{collaborationConflict}</span></div>
+          <button onClick={async () => {
+            setDirty(false);
+            dirtyRef.current = false;
+            setCollaborationConflict("");
+            hydratedArtifact.current = "";
+            await queryClient.invalidateQueries({ queryKey: ["artifacts", artifactType] });
+          }}>Reload shared revision</button>
+        </div>
+      ) : null}
       <div className="visual-builder-grid">
         <aside className="node-library-panel">
           <div className="search-field"><Search size={15} /><input aria-label="Search node library" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tools" /></div>
