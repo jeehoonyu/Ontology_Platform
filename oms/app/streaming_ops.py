@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .database import get_db
 from . import streaming as _streaming
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["streaming_ops"])
 
@@ -53,10 +54,8 @@ class StatefulRequest(BaseModel):
     op: str = "sum"                      # running sum | count | min | max
 
 
-def _events(db: Session, stream_id: str, timestamp_field, key_field, value_field):
-    stream = db.get(_streaming.Stream, stream_id)
-    if not stream:
-        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
+def _events(db: Session, stream_id: str, timestamp_field, key_field, value_field, principal: Principal):
+    _streaming._get_stream_or_404(stream_id, db, principal, "view")
     out = []
     for r in db.query(_streaming.StreamRecord).filter(_streaming.StreamRecord.stream_id == stream_id).all():
         payload = r.payload or {}
@@ -72,8 +71,8 @@ def _events(db: Session, stream_id: str, timestamp_field, key_field, value_field
 
 
 @router.post("/streams/{stream_id}/window")
-def window(stream_id: str, body: WindowRequest, db: Session = Depends(get_db)):
-    events = _events(db, stream_id, body.timestamp_field, body.key_field, body.value_field)
+def window(stream_id: str, body: WindowRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    events = _events(db, stream_id, body.timestamp_field, body.key_field, body.value_field, principal)
     dropped = 0
     if body.watermark is not None:
         cutoff = body.watermark - body.allowed_lateness
@@ -136,9 +135,9 @@ def window(stream_id: str, body: WindowRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/streams/{stream_id}/stateful")
-def stateful_transform(stream_id: str, body: StatefulRequest, db: Session = Depends(get_db)):
+def stateful_transform(stream_id: str, body: StatefulRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     """Per-key running aggregation over the stream in arrival (ts) order."""
-    events = sorted(_events(db, stream_id, None, body.key_field, body.value_field), key=lambda e: e["ts"])
+    events = sorted(_events(db, stream_id, None, body.key_field, body.value_field, principal), key=lambda e: e["ts"])
     state: Dict[Any, Any] = {}
     timeline: List[Dict[str, Any]] = []
     for e in events:
