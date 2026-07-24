@@ -167,6 +167,7 @@ class JobClaimRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=200)
     supported_job_types: List[str] = Field(default_factory=list)
     lease_seconds: int = Field(default=60, ge=10, le=900)
+    job_id: Optional[str] = None
 
 
 class JobHeartbeatRequest(BaseModel):
@@ -1091,7 +1092,12 @@ def _reap_stale_jobs(db: Session) -> int:
 def create_job(body: JobCreate, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     now = _now()
     if body.idempotency_key:
-        existing = db.query(PlatformJob).filter(PlatformJob.actor == principal.id, PlatformJob.job_type == body.job_type).order_by(PlatformJob.created_at.desc()).limit(250).all()
+        existing = db.query(PlatformJob).filter(
+            PlatformJob.actor == principal.id,
+            PlatformJob.job_type == body.job_type,
+            PlatformJob.subject_type == body.subject_type,
+            PlatformJob.subject_id == body.subject_id,
+        ).order_by(PlatformJob.created_at.desc()).limit(250).all()
         for candidate in existing:
             if _execution(candidate).get("idempotency_key") == body.idempotency_key:
                 return _job_dict(candidate, db)
@@ -1139,6 +1145,8 @@ def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_perm
     now = _now()
     _reap_stale_jobs(db)
     query = db.query(PlatformJob).filter(PlatformJob.status == "QUEUED")
+    if body.job_id:
+        query = query.filter(PlatformJob.id == body.job_id)
     if body.supported_job_types:
         query = query.filter(PlatformJob.job_type.in_(body.supported_job_types))
     candidates = query.order_by(PlatformJob.created_at).limit(250).all()

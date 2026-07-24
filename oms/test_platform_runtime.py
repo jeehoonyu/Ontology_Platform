@@ -141,6 +141,9 @@ ok(client.post("/artifacts", json={
     "display_name": "Forbidden edit",
     "state": {"widgets": []},
 }), "production viewer edit denied", expect=403)
+ok(client.post("/jobs", json={
+    "job_type": "pipeline.preview",
+}), "production viewer execution denied", expect=403)
 os.environ["APP_ENV"] = "test"
 os.environ["AUTH_MODE"] = "local"
 client.cookies.clear()

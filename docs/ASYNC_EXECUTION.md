@@ -48,3 +48,15 @@ Recommended alerts:
 - progress heartbeats that remain unchanged across multiple lease intervals
 
 The worker API requires the backend `execute` permission. Production workers should use a dedicated service principal with only the job types and downstream permissions they require.
+
+## Pipeline Integration
+
+Pipeline Builder uses the runtime through:
+
+- `POST /pipeline-builder/graphs/{graph_id}/preview/async`
+- `POST /pipeline-builder/graphs/{graph_id}/deliver/async`
+- `POST /pipeline-builder/workers/run-next`
+
+The React workbench queues preview and deployment requests, executes the exact submitted job through the local worker adapter, polls durable status, and exposes progress, attempts, cancellation, retry, and event evidence. A separately deployed worker can use the same claim protocol instead of the local adapter.
+
+Delivery uses the platform job ID as its transaction idempotency key. Before committing dataset transactions or ontology mutations, it locks and verifies the active job and lease. A retry after a worker failure returns the prior successful build rather than materializing the output twice. Cancellation is cooperative until this guarded commit boundary.

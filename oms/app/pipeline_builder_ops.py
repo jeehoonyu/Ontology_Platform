@@ -17,9 +17,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, platform_runtime
 from .database import Base, get_db
 from .datasets_ext import DatasetTransaction, _fold, _next_seq, _txns_for
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["pipeline_builder"])
 
@@ -271,6 +272,28 @@ class PipelineDeliverRequest(BaseModel):
     actor: str = "system"
     primary_key: str = "id"
     parameters: Dict[str, Any] = Field(default_factory=dict)
+    execution_job_id: Optional[str] = None
+    execution_lease_token: Optional[str] = None
+
+
+class PipelineAsyncPreviewRequest(PipelinePreviewRequest):
+    priority: int = Field(default=50, ge=0, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    timeout_seconds: int = Field(default=900, ge=1, le=86400)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class PipelineAsyncDeliverRequest(PipelineDeliverRequest):
+    priority: int = Field(default=75, ge=0, le=100)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    timeout_seconds: int = Field(default=3600, ge=1, le=86400)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class PipelineWorkerRunRequest(BaseModel):
+    worker_id: str = Field(default="pipeline-worker-local", min_length=1, max_length=200)
+    lease_seconds: int = Field(default=120, ge=10, le=900)
+    job_id: Optional[str] = None
 
 
 class PipelineInsertNodeRequest(BaseModel):
@@ -1702,6 +1725,127 @@ def validate_graph(graph_id: str, db: Session = Depends(get_db)):
     return validation
 
 
+@router.post("/pipeline-builder/graphs/{graph_id}/preview/async", status_code=202)
+def enqueue_graph_preview(graph_id: str, body: PipelineAsyncPreviewRequest = PipelineAsyncPreviewRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    return platform_runtime.create_job(platform_runtime.JobCreate(
+        job_type="pipeline.preview",
+        subject_type="pipeline_builder_graph",
+        subject_id=graph.id,
+        payload={"graph_id": graph.id, "limit": body.limit, "parameters": body.parameters},
+        priority=body.priority,
+        max_attempts=body.max_attempts,
+        timeout_seconds=body.timeout_seconds,
+        idempotency_key=body.idempotency_key,
+    ), principal, db)
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/deliver/async", status_code=202)
+def enqueue_graph_delivery(graph_id: str, body: PipelineAsyncDeliverRequest = PipelineAsyncDeliverRequest(), principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
+    graph = _get_graph(db, graph_id)
+    return platform_runtime.create_job(platform_runtime.JobCreate(
+        job_type="pipeline.deliver",
+        subject_type="pipeline_builder_graph",
+        subject_id=graph.id,
+        payload={
+            "graph_id": graph.id,
+            "output_asset_id": body.output_asset_id,
+            "actor": principal.id,
+            "primary_key": body.primary_key,
+            "parameters": body.parameters,
+        },
+        priority=body.priority,
+        max_attempts=body.max_attempts,
+        timeout_seconds=body.timeout_seconds,
+        idempotency_key=body.idempotency_key,
+    ), principal, db)
+
+
+@router.post("/pipeline-builder/workers/run-next")
+def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
+        worker_id=body.worker_id,
+        supported_job_types=["pipeline.preview", "pipeline.deliver"],
+        lease_seconds=body.lease_seconds,
+        job_id=body.job_id,
+    ), principal, db).get("job")
+    if not claimed:
+        return {"job": None, "result": None}
+
+    job_id = str(claimed["id"])
+    lease_token = str(claimed["lease_token"])
+    payload = dict(claimed.get("payload") or {})
+    graph_id = str(payload.get("graph_id") or claimed.get("subject_id") or "")
+    try:
+        graph = _get_graph(db, graph_id)
+        validation = _validate_graph(db, graph)
+        if validation.get("errors"):
+            failed = platform_runtime.fail_job(job_id, platform_runtime.JobFailRequest(
+                lease_token=lease_token,
+                error="Pipeline validation failed",
+                retriable=False,
+                details={"validation": validation},
+            ), principal, db)
+            return {"job": failed, "result": None}
+
+        platform_runtime.heartbeat_job(job_id, platform_runtime.JobHeartbeatRequest(
+            lease_token=lease_token,
+            progress=15,
+            message="Pipeline validated; preparing deterministic execution",
+            metrics={"node_count": len(graph.nodes or []), "edge_count": len(graph.edges or [])},
+            lease_seconds=body.lease_seconds,
+        ), principal, db)
+
+        if claimed["job_type"] == "pipeline.preview":
+            result = preview_graph(graph_id, PipelinePreviewRequest(
+                limit=int(payload.get("limit") or 50),
+                parameters=dict(payload.get("parameters") or {}),
+            ), db)
+        else:
+            result = deliver_graph(graph_id, PipelineDeliverRequest(
+                output_asset_id=payload.get("output_asset_id"),
+                actor=str(payload.get("actor") or principal.id),
+                primary_key=str(payload.get("primary_key") or "id"),
+                parameters=dict(payload.get("parameters") or {}),
+                execution_job_id=job_id,
+                execution_lease_token=lease_token,
+            ), db)
+
+        db.expire_all()
+        current = db.get(platform_runtime.PlatformJob, job_id)
+        if current and current.status == "CANCELLED":
+            return {"job": platform_runtime.get_job(job_id, principal, db), "result": None}
+        completed = platform_runtime.complete_job(job_id, platform_runtime.JobCompleteRequest(
+            lease_token=lease_token,
+            result=result,
+        ), principal, db)
+        return {"job": completed, "result": result}
+    except HTTPException as exc:
+        db.rollback()
+        current = db.get(platform_runtime.PlatformJob, job_id)
+        if not current or current.status != "RUNNING":
+            return {"job": platform_runtime.get_job(job_id, principal, db) if current else None, "result": None}
+        failed = platform_runtime.fail_job(job_id, platform_runtime.JobFailRequest(
+            lease_token=lease_token,
+            error=str(exc.detail),
+            retriable=exc.status_code >= 500,
+            details={"status_code": exc.status_code},
+        ), principal, db)
+        return {"job": failed, "result": None}
+    except Exception as exc:
+        db.rollback()
+        current = db.get(platform_runtime.PlatformJob, job_id)
+        if not current or current.status != "RUNNING":
+            return {"job": platform_runtime.get_job(job_id, principal, db) if current else None, "result": None}
+        failed = platform_runtime.fail_job(job_id, platform_runtime.JobFailRequest(
+            lease_token=lease_token,
+            error=str(exc),
+            retriable=True,
+            details={"exception_type": type(exc).__name__},
+        ), principal, db)
+        return {"job": failed, "result": None}
+
+
 @router.post("/pipeline-builder/graphs/{graph_id}/preview")
 def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewRequest(), db: Session = Depends(get_db)):
     graph = _get_graph(db, graph_id)
@@ -1738,6 +1882,22 @@ def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewR
 @router.post("/pipeline-builder/graphs/{graph_id}/deliver")
 def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverRequest(), db: Session = Depends(get_db)):
     graph = _get_graph(db, graph_id)
+    if body.execution_job_id:
+        prior_builds = db.query(PipelineBuilderBuild).filter(PipelineBuilderBuild.graph_id == graph.id).order_by(PipelineBuilderBuild.created_at.desc()).all()
+        prior = next((build for build in prior_builds if (build.metrics or {}).get("execution_job_id") == body.execution_job_id), None)
+        if prior:
+            return {
+                "graph_id": graph.id,
+                "status": "DELIVERED",
+                "run_id": prior.run_id,
+                "build_id": prior.id,
+                "output_asset_id": prior.output_asset_id,
+                "transaction_id": (prior.metrics or {}).get("transaction_id"),
+                "records_out": (prior.preview or {}).get("row_count", 0),
+                "lineage": prior.lineage or {},
+                "metrics": prior.metrics or {},
+                "idempotent_replay": True,
+            }
     execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=True)
     output_asset_id = _output_asset_id(graph, body.output_asset_id)
     now = _now()
@@ -1803,7 +1963,7 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         output_asset_id=asset.id,
         preview={"row_count": len(execution["rows"]), "rows": execution["rows"][:10], "schema": _schema(execution["rows"])},
         lineage=execution["lineage"],
-        metrics={**execution["metrics"], "transaction_id": txn.id},
+        metrics={**execution["metrics"], "transaction_id": txn.id, "execution_job_id": body.execution_job_id},
         created_at=now,
     )
     db.add(build)
@@ -1831,6 +1991,17 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         pass
     graph.status = "DELIVERED"
     graph.updated_at = now
+    if body.execution_job_id:
+        db.flush()
+        active_job = db.query(platform_runtime.PlatformJob).filter(
+            platform_runtime.PlatformJob.id == body.execution_job_id,
+        ).with_for_update().first()
+        active_lease = db.query(platform_runtime.PlatformJobLease).filter(
+            platform_runtime.PlatformJobLease.job_id == body.execution_job_id,
+        ).with_for_update().first()
+        if not active_job or active_job.status != "RUNNING" or not active_lease or active_lease.token != body.execution_lease_token:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Pipeline delivery was cancelled or lost its worker lease before commit")
     db.commit()
     return {
         "graph_id": graph.id,

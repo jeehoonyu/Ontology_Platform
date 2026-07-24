@@ -100,6 +100,41 @@ test("pipeline creates a graph and accepts a dragged node", async ({ page }, tes
   await expect(page.getByText(/Added input_dataset at drop location/)).toBeVisible();
 });
 
+test("pipeline preview runs through durable worker evidence", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful Pipeline execution workflow once on desktop.");
+  const suffix = Date.now();
+  const assetId = `browser_async_asset_${suffix}`;
+  const graphId = `browser_async_pipeline_${suffix}`;
+  const graphName = `Browser async pipeline ${suffix}`;
+  await page.request.post("/data-assets", { data: {
+    id: assetId,
+    display_name: "Browser async assets",
+    kind: "dataset",
+    asset_schema: {},
+    records: [{ id: "asset-1", risk: 91 }, { id: "asset-2", risk: 35 }]
+  } });
+  await page.request.post("/pipeline-builder/graphs", { data: {
+    id: graphId,
+    display_name: graphName,
+    nodes: [
+      { id: "input", type: "input_dataset", config: { asset_id: assetId } },
+      { id: "filter", type: "filter", config: { field: "risk", operator: "gte", value: 80 } },
+      { id: "output", type: "dataset_output", config: { asset_id: `${assetId}_output` } }
+    ],
+    edges: [{ source: "input", target: "filter" }, { source: "filter", target: "output" }]
+  } });
+  await page.goto("/workspace/pipeline");
+  await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+  await expect(page.locator(".workspace-header")).toContainText(graphName);
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const execution = page.locator(".pipeline-execution-state");
+  await expect(execution).toContainText("SUCCEEDED");
+  await expect(execution.locator("progress")).toHaveAttribute("value", "100");
+  await execution.getByText("Execution events").click();
+  await expect(execution).toContainText("job.progress");
+  await expect(page.locator(".workbench-status-strip")).toContainText(/preview succeeded/i);
+});
+
 test("platform graph supports selection, dragging, and neighborhood exploration", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful graph workflow once on desktop.");
   await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} });
