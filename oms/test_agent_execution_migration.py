@@ -48,12 +48,14 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
     with sqlite3.connect(database_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(agent_tool_runs)")}
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         legacy = connection.execute("SELECT id, answer FROM agent_tool_runs WHERE id = 'legacy-run'").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(agent_tool_runs)")}
 
     assert {"retrieval", "policy_summary", "execution_job_id"} <= columns, columns
-    assert version == "0004_agent_execution_evidence", version
+    assert version == "0005_artifact_collaboration", version
     assert legacy == ("legacy-run", "legacy answer"), legacy
     assert "ix_agent_tool_runs_execution_job_id" in indexes, indexes
+    assert {"platform_artifact_collaborators", "platform_artifact_collaboration_events"} <= tables, tables
 
 print("\nAgent execution migration verified: legacy evidence preserved and schema upgraded.")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -75,6 +76,38 @@ class ArtifactLease(Base):
     expires_at: Mapped[int] = mapped_column(Integer, index=True)
 
 
+class ArtifactCollaborationParticipant(Base):
+    __tablename__ = "platform_artifact_collaborators"
+    __table_args__ = (UniqueConstraint("artifact_id", "principal_id", "client_id", name="uq_artifact_collaborator_client"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    artifact_id: Mapped[str] = mapped_column(String, index=True)
+    principal_id: Mapped[str] = mapped_column(String, index=True)
+    display_name: Mapped[str] = mapped_column(String)
+    client_id: Mapped[str] = mapped_column(String, index=True)
+    token: Mapped[str] = mapped_column(String, unique=True, index=True)
+    color: Mapped[str] = mapped_column(String)
+    cursor: Mapped[dict] = mapped_column(JSON, default=dict)
+    selection: Mapped[list] = mapped_column(JSON, default=list)
+    joined_at: Mapped[int] = mapped_column(Integer)
+    heartbeat_at: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
+class ArtifactCollaborationEvent(Base):
+    __tablename__ = "platform_artifact_collaboration_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    artifact_id: Mapped[str] = mapped_column(String, index=True)
+    participant_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    actor: Mapped[str] = mapped_column(String, index=True)
+    event_type: Mapped[str] = mapped_column(String, index=True)
+    lock_version: Mapped[int] = mapped_column(Integer)
+    revision: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
 class PlatformJob(Base):
     __tablename__ = "platform_jobs"
 
@@ -146,6 +179,22 @@ class LeaseRequest(BaseModel):
     token: Optional[str] = None
 
 
+class CollaborationJoinRequest(BaseModel):
+    client_id: str = Field(min_length=4, max_length=160)
+    ttl_seconds: int = Field(default=90, ge=30, le=300)
+
+
+class CollaborationHeartbeatRequest(BaseModel):
+    participant_token: str = Field(min_length=16)
+    ttl_seconds: int = Field(default=90, ge=30, le=300)
+    cursor: Dict[str, Any] = Field(default_factory=dict)
+    selection: List[str] = Field(default_factory=list, max_length=250)
+
+
+class CollaborationLeaveRequest(BaseModel):
+    participant_token: str = Field(min_length=16)
+
+
 class PublishRequest(BaseModel):
     expected_lock_version: Optional[int] = None
     message: Optional[str] = "Published"
@@ -210,6 +259,14 @@ class BuilderCommandBatch(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=160)
     lease_token: Optional[str] = None
     message: Optional[str] = "Applied builder commands"
+
+
+class CollaborationCommandBatch(BaseModel):
+    participant_token: str = Field(min_length=16)
+    expected_lock_version: int = Field(ge=1)
+    commands: List[BuilderCommand] = Field(min_length=1, max_length=100)
+    idempotency_key: str = Field(min_length=8, max_length=160)
+    message: Optional[str] = "Collaborative visual edit"
 
 
 class ArtifactPreviewRequest(BaseModel):
@@ -385,6 +442,146 @@ def _artifact(db: Session, artifact_id: str) -> PlatformArtifact:
     return row
 
 
+def _collaboration_event(
+    db: Session,
+    row: PlatformArtifact,
+    event_type: str,
+    *,
+    actor: str,
+    participant_id: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None,
+) -> ArtifactCollaborationEvent:
+    event = ArtifactCollaborationEvent(
+        artifact_id=row.id,
+        participant_id=participant_id,
+        actor=actor,
+        event_type=event_type,
+        lock_version=row.lock_version,
+        revision=row.current_revision,
+        payload=payload or {},
+        created_at=_now(),
+    )
+    db.add(event)
+    return event
+
+
+def _participant_dict(row: ArtifactCollaborationParticipant) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "artifact_id": row.artifact_id,
+        "principal_id": row.principal_id,
+        "display_name": row.display_name,
+        "client_id": row.client_id,
+        "color": row.color,
+        "cursor": row.cursor or {},
+        "selection": row.selection or [],
+        "joined_at": row.joined_at,
+        "heartbeat_at": row.heartbeat_at,
+        "expires_at": row.expires_at,
+    }
+
+
+def _event_dict(row: ArtifactCollaborationEvent) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "artifact_id": row.artifact_id,
+        "participant_id": row.participant_id,
+        "actor": row.actor,
+        "event_type": row.event_type,
+        "lock_version": row.lock_version,
+        "revision": row.revision,
+        "payload": row.payload or {},
+        "created_at": row.created_at,
+    }
+
+
+def _prune_collaborators(db: Session, row: PlatformArtifact) -> int:
+    expired = db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.artifact_id == row.id,
+        ArtifactCollaborationParticipant.expires_at <= _now(),
+    ).all()
+    for participant in expired:
+        _collaboration_event(
+            db,
+            row,
+            "presence.left",
+            actor=participant.principal_id,
+            participant_id=participant.id,
+            payload={"reason": "expired", "client_id": participant.client_id},
+        )
+        db.delete(participant)
+    return len(expired)
+
+
+def _require_collaborator(
+    db: Session,
+    artifact_id: str,
+    token: str,
+    principal: Principal,
+) -> ArtifactCollaborationParticipant:
+    participant = db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.artifact_id == artifact_id,
+        ArtifactCollaborationParticipant.token == token,
+    ).first()
+    if not participant:
+        raise HTTPException(status_code=401, detail="Collaboration participant token is invalid")
+    if participant.principal_id != principal.id:
+        raise HTTPException(status_code=403, detail="Collaboration participant belongs to another principal")
+    if participant.expires_at <= _now():
+        db.delete(participant)
+        db.commit()
+        raise HTTPException(status_code=410, detail="Collaboration participant session expired")
+    return participant
+
+
+def _command_targets(command: BuilderCommand) -> set[str]:
+    payload = command.payload or {}
+    name = command.command
+    if name == "replace_state":
+        return {"artifact:*"}
+    if name == "add_node":
+        node = payload.get("node") or {}
+        return {f"node:{node.get('id', '*')}"}
+    if name == "update_node":
+        return {f"node:{payload.get('node_id', '*')}"}
+    if name == "move_nodes":
+        return {f"node:{node_id}" for node_id in (payload.get("positions") or {})}
+    if name in {"remove_nodes", "archive_nodes", "duplicate_nodes"}:
+        return {f"node:{node_id}" for node_id in (payload.get("node_ids") or [])}
+    if name == "add_edge":
+        edge = payload.get("edge") or {}
+        edge_key = edge.get("id") or f"{edge.get('source', '*')}:{edge.get('target', '*')}"
+        return {f"edge:{edge_key}"}
+    if name == "remove_edges":
+        return {f"edge:{edge_id}" for edge_id in (payload.get("edge_ids") or [])}
+    if name == "auto_layout":
+        return {"layout:*"}
+    if name in {"reorder_fields", "archive_field"}:
+        node_id = payload.get("node_id", "*")
+        field_id = payload.get("field_id", "*")
+        return {f"field:{node_id}:{field_id}"}
+    return {"artifact:*"}
+
+
+def _targets_conflict(incoming: set[str], concurrent: set[str]) -> bool:
+    if not incoming or not concurrent:
+        return False
+    if "artifact:*" in incoming or "artifact:*" in concurrent:
+        return True
+    if "layout:*" in incoming and any(value.startswith("node:") or value == "layout:*" for value in concurrent):
+        return True
+    if "layout:*" in concurrent and any(value.startswith("node:") or value == "layout:*" for value in incoming):
+        return True
+    if incoming & concurrent:
+        return True
+    incoming_nodes = {value.split(":", 2)[1] for value in incoming if value.startswith("field:")}
+    concurrent_nodes = {value.split(":", 2)[1] for value in concurrent if value.startswith("field:")}
+    return bool(
+        incoming_nodes & {value.split(":", 1)[1] for value in concurrent if value.startswith("node:")}
+        or concurrent_nodes & {value.split(":", 1)[1] for value in incoming if value.startswith("node:")}
+    )
+
+
 def _revision(db: Session, artifact_id: str, revision: int) -> ArtifactRevision:
     row = db.query(ArtifactRevision).filter(
         ArtifactRevision.artifact_id == artifact_id,
@@ -452,6 +649,13 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
     last_job = db.query(PlatformJob).filter(
         PlatformJob.subject_type == "artifact", PlatformJob.subject_id == row.id,
     ).order_by(PlatformJob.updated_at.desc()).first()
+    active_collaborators = db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.artifact_id == row.id,
+        ArtifactCollaborationParticipant.expires_at > _now(),
+    ).count()
+    latest_collaboration_event = db.query(ArtifactCollaborationEvent.id).filter(
+        ArtifactCollaborationEvent.artifact_id == row.id,
+    ).order_by(ArtifactCollaborationEvent.id.desc()).first()
     allowed = [name for name in ("view", "edit", "publish", "deploy", "execute", "approve", "export", "restore", "manage") if not principal or principal.allows(name)]
     validation = revision.validation or {}
     return {
@@ -474,6 +678,11 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
         "permissions": allowed,
         "dirty_revision": row.current_revision if row.current_revision != row.published_revision else None,
         "execution": None if not last_job else _job_dict(last_job),
+        "collaboration": {
+            "active_participants": active_collaborators,
+            "event_cursor": latest_collaboration_event[0] if latest_collaboration_event else 0,
+            "stream_href": f"/artifacts/{row.id}/collaboration/stream",
+        },
         "evidence_links": [
             {"type": "revision", "label": f"Revision {row.current_revision}", "href": f"/artifacts/{row.id}/versions"},
             {"type": "audit", "label": "Audit evidence", "href": "/audit-logs/search?subject_type=artifact"},
@@ -635,7 +844,8 @@ def create_artifact(body: ArtifactCreate, principal: Principal = Depends(require
     row = PlatformArtifact(
         id=artifact_id, project_id=body.project_id, artifact_type=body.artifact_type,
         display_name=body.display_name.strip(), description=body.description, owner=principal.id,
-        metadata_=body.metadata, created_at=now, updated_at=now,
+        metadata_=body.metadata, current_revision=1, lock_version=1,
+        created_at=now, updated_at=now,
     )
     db.add(row)
     db.add(ArtifactRevision(
@@ -644,6 +854,7 @@ def create_artifact(body: ArtifactCreate, principal: Principal = Depends(require
         published=False, created_at=now,
     ))
     _audit(db, principal.id, "artifact.created", "artifact", artifact_id, {"artifact_type": body.artifact_type, "revision": 1})
+    _collaboration_event(db, row, "artifact.created", actor=principal.id, payload={"targets": ["artifact:*"], "artifact_type": body.artifact_type})
     db.commit()
     return _artifact_dict(db, row, principal)
 
@@ -831,6 +1042,7 @@ def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal 
         published=False, created_at=_now(),
     ))
     _audit(db, principal.id, "artifact.revision.created", "artifact", row.id, {"revision": row.current_revision, "lock_version": row.lock_version})
+    _collaboration_event(db, row, "artifact.revision", actor=principal.id, payload={"targets": ["artifact:*"], "message": body.message or "Autosaved change"})
     db.commit()
     return _artifact_dict(db, row, principal)
 
@@ -873,6 +1085,12 @@ def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, princip
         "revision": row.current_revision, "lock_version": row.lock_version,
         "commands": [{"command_id": item["command_id"], "command": item["command"]} for item in applied],
         "idempotency_key": body.idempotency_key,
+    })
+    command_targets = sorted({target for command in body.commands for target in _command_targets(command)})
+    _collaboration_event(db, row, "artifact.commands", actor=principal.id, payload={
+        "targets": command_targets,
+        "commands": [{"command_id": item.command_id, "command": item.command} for item in body.commands],
+        "message": body.message,
     })
     db.commit()
     result = _artifact_dict(db, row, principal)
@@ -955,6 +1173,7 @@ def publish_artifact(artifact_id: str, body: PublishRequest, principal: Principa
     row.lock_version += 1
     row.updated_at = _now()
     _audit(db, principal.id, "artifact.published", "artifact", row.id, {"revision": row.current_revision})
+    _collaboration_event(db, row, "artifact.published", actor=principal.id, payload={"targets": ["artifact:*"], "revision": row.current_revision})
     db.commit()
     return _artifact_dict(db, row, principal)
 
@@ -995,6 +1214,7 @@ def restore_artifact(artifact_id: str, version: int, principal: Principal = Depe
         message=f"Restored revision {version}", published=False, restored_from_revision=version, created_at=_now(),
     ))
     _audit(db, principal.id, "artifact.restored", "artifact", artifact_id, {"source_revision": version, "revision": row.current_revision})
+    _collaboration_event(db, row, "artifact.restored", actor=principal.id, payload={"targets": ["artifact:*"], "source_revision": version})
     db.commit()
     return _artifact_dict(db, row, principal)
 
@@ -1020,6 +1240,304 @@ def acquire_lease(artifact_id: str, body: LeaseRequest, principal: Principal = D
             lease.token = uuid.uuid4().hex
     db.commit()
     return {"artifact_id": artifact_id, "holder": lease.holder, "token": lease.token, "expires_at": lease.expires_at}
+
+
+@router.post("/artifacts/{artifact_id}/collaboration/join")
+def join_artifact_collaboration(
+    artifact_id: str,
+    body: CollaborationJoinRequest,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    row = _artifact(db, artifact_id)
+    _prune_collaborators(db, row)
+    now = _now()
+    participant = db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.artifact_id == artifact_id,
+        ArtifactCollaborationParticipant.principal_id == principal.id,
+        ArtifactCollaborationParticipant.client_id == body.client_id,
+    ).first()
+    event_type = "presence.rejoined" if participant else "presence.joined"
+    if participant:
+        participant.display_name = principal.display_name
+        participant.heartbeat_at = now
+        participant.expires_at = now + body.ttl_seconds
+    else:
+        palette = ["#176b8f", "#16815f", "#9a6500", "#a43d5f", "#6956a8", "#3f6f45"]
+        participant = ArtifactCollaborationParticipant(
+            id=_id("participant"),
+            artifact_id=artifact_id,
+            principal_id=principal.id,
+            display_name=principal.display_name,
+            client_id=body.client_id,
+            token=uuid.uuid4().hex,
+            color=palette[sum(ord(char) for char in f"{principal.id}:{body.client_id}") % len(palette)],
+            cursor={},
+            selection=[],
+            joined_at=now,
+            heartbeat_at=now,
+            expires_at=now + body.ttl_seconds,
+        )
+        db.add(participant)
+    _collaboration_event(
+        db,
+        row,
+        event_type,
+        actor=principal.id,
+        participant_id=participant.id,
+        payload={"client_id": body.client_id, "display_name": principal.display_name, "color": participant.color},
+    )
+    db.commit()
+    db.refresh(participant)
+    latest = db.query(ArtifactCollaborationEvent.id).filter(ArtifactCollaborationEvent.artifact_id == artifact_id).order_by(ArtifactCollaborationEvent.id.desc()).first()
+    return {
+        "participant": {**_participant_dict(participant), "token": participant.token},
+        "participant_token": participant.token,
+        "artifact": _artifact_dict(db, row, principal),
+        "event_cursor": latest[0] if latest else 0,
+    }
+
+
+@router.get("/artifacts/{artifact_id}/collaboration")
+def artifact_collaboration_state(
+    artifact_id: str,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    row = _artifact(db, artifact_id)
+    expired = _prune_collaborators(db, row)
+    if expired:
+        db.commit()
+    participants = db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.artifact_id == artifact_id,
+        ArtifactCollaborationParticipant.expires_at > _now(),
+    ).order_by(ArtifactCollaborationParticipant.joined_at).all()
+    latest = db.query(ArtifactCollaborationEvent.id).filter(ArtifactCollaborationEvent.artifact_id == artifact_id).order_by(ArtifactCollaborationEvent.id.desc()).first()
+    return {
+        "artifact_id": artifact_id,
+        "lock_version": row.lock_version,
+        "revision": row.current_revision,
+        "participants": [_participant_dict(participant) for participant in participants],
+        "event_cursor": latest[0] if latest else 0,
+        "last_updated": _now(),
+    }
+
+
+@router.post("/artifacts/{artifact_id}/collaboration/heartbeat")
+def heartbeat_artifact_collaboration(
+    artifact_id: str,
+    body: CollaborationHeartbeatRequest,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    row = _artifact(db, artifact_id)
+    participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
+    participant.cursor = body.cursor
+    participant.selection = [str(value) for value in body.selection]
+    participant.heartbeat_at = _now()
+    participant.expires_at = participant.heartbeat_at + body.ttl_seconds
+    _collaboration_event(
+        db,
+        row,
+        "presence.updated",
+        actor=principal.id,
+        participant_id=participant.id,
+        payload={"cursor": body.cursor, "selection": participant.selection},
+    )
+    db.commit()
+    return _participant_dict(participant)
+
+
+@router.post("/artifacts/{artifact_id}/collaboration/leave")
+def leave_artifact_collaboration(
+    artifact_id: str,
+    body: CollaborationLeaveRequest,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    row = _artifact(db, artifact_id)
+    participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
+    participant_id = participant.id
+    _collaboration_event(
+        db,
+        row,
+        "presence.left",
+        actor=principal.id,
+        participant_id=participant.id,
+        payload={"reason": "left", "client_id": participant.client_id},
+    )
+    db.delete(participant)
+    db.commit()
+    return {"artifact_id": artifact_id, "participant_id": participant_id, "status": "LEFT"}
+
+
+@router.post("/artifacts/{artifact_id}/collaboration/commands")
+def apply_collaborative_commands(
+    artifact_id: str,
+    body: CollaborationCommandBatch,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
+    row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
+    metadata = copy_json(row.metadata_ or {})
+    receipts = list(metadata.get("collaboration_receipts") or [])
+    prior = next((receipt for receipt in receipts if receipt.get("idempotency_key") == body.idempotency_key), None)
+    if prior:
+        result = _artifact_dict(db, row, principal)
+        result["collaboration_receipt"] = prior
+        result["idempotent_replay"] = True
+        return result
+    if body.expected_lock_version > row.lock_version:
+        raise HTTPException(status_code=409, detail={"message": "Client revision is newer than the artifact", "current_lock_version": row.lock_version})
+
+    incoming_targets = {target for command in body.commands for target in _command_targets(command)}
+    concurrent_events = db.query(ArtifactCollaborationEvent).filter(
+        ArtifactCollaborationEvent.artifact_id == artifact_id,
+        ArtifactCollaborationEvent.lock_version > body.expected_lock_version,
+        ArtifactCollaborationEvent.event_type.in_(["artifact.commands", "artifact.revision", "artifact.published", "artifact.restored"]),
+    ).order_by(ArtifactCollaborationEvent.id).all()
+    concurrent_targets = {
+        str(target)
+        for event in concurrent_events
+        for target in (event.payload or {}).get("targets", ["artifact:*"])
+    }
+    if _targets_conflict(incoming_targets, concurrent_targets):
+        conflict_payload = {
+            "message": "Concurrent edits overlap with this command batch",
+            "current_lock_version": row.lock_version,
+            "expected_lock_version": body.expected_lock_version,
+            "incoming_targets": sorted(incoming_targets),
+            "concurrent_targets": sorted(concurrent_targets),
+            "conflicting_event_ids": [event.id for event in concurrent_events],
+        }
+        _collaboration_event(
+            db,
+            row,
+            "artifact.conflict",
+            actor=principal.id,
+            participant_id=participant.id,
+            payload=conflict_payload,
+        )
+        db.commit()
+        raise HTTPException(status_code=409, detail=conflict_payload)
+
+    current = _revision(db, artifact_id, row.current_revision)
+    state, layout, applied = _apply_builder_commands(current.state or {}, current.layout or {}, body.commands)
+    validation = _validate_state(row.artifact_type, state)
+    rebased_from = body.expected_lock_version if body.expected_lock_version < row.lock_version else None
+    row.current_revision += 1
+    row.lock_version += 1
+    row.updated_at = _now()
+    row.status = "DRAFT"
+    receipt = {
+        "idempotency_key": body.idempotency_key,
+        "revision": row.current_revision,
+        "lock_version": row.lock_version,
+        "participant_id": participant.id,
+        "command_ids": [command.command_id for command in body.commands],
+        "rebased_from_lock_version": rebased_from,
+        "created_at": row.updated_at,
+    }
+    metadata["collaboration_receipts"] = (receipts + [receipt])[-100:]
+    row.metadata_ = metadata
+    participant.heartbeat_at = row.updated_at
+    participant.expires_at = max(participant.expires_at, row.updated_at + 60)
+    db.add(ArtifactRevision(
+        id=_id("revision"),
+        artifact_id=row.id,
+        revision=row.current_revision,
+        state=state,
+        layout=layout,
+        validation=validation,
+        author=principal.id,
+        message=body.message,
+        published=False,
+        created_at=row.updated_at,
+    ))
+    _audit(db, principal.id, "artifact.collaboration.commands_applied", "artifact", row.id, {
+        "revision": row.current_revision,
+        "lock_version": row.lock_version,
+        "participant_id": participant.id,
+        "rebased_from_lock_version": rebased_from,
+        "commands": [{"command_id": item["command_id"], "command": item["command"]} for item in applied],
+    })
+    _collaboration_event(
+        db,
+        row,
+        "artifact.commands",
+        actor=principal.id,
+        participant_id=participant.id,
+        payload={
+            "targets": sorted(incoming_targets),
+            "commands": [{"command_id": item.command_id, "command": item.command} for item in body.commands],
+            "rebased_from_lock_version": rebased_from,
+            "message": body.message,
+        },
+    )
+    db.commit()
+    result = _artifact_dict(db, row, principal)
+    result["collaboration_receipt"] = receipt
+    result["idempotent_replay"] = False
+    return result
+
+
+@router.get("/artifacts/{artifact_id}/collaboration/events")
+def list_artifact_collaboration_events(
+    artifact_id: str,
+    after: int = 0,
+    limit: int = Query(200, ge=1, le=500),
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    _artifact(db, artifact_id)
+    rows = db.query(ArtifactCollaborationEvent).filter(
+        ArtifactCollaborationEvent.artifact_id == artifact_id,
+        ArtifactCollaborationEvent.id > after,
+    ).order_by(ArtifactCollaborationEvent.id).limit(limit).all()
+    return {"events": [_event_dict(event) for event in rows], "next_cursor": rows[-1].id if rows else after}
+
+
+@router.get("/artifacts/{artifact_id}/collaboration/stream")
+async def stream_artifact_collaboration_events(
+    artifact_id: str,
+    request: Request,
+    after: int = 0,
+    once: bool = False,
+    principal: Principal = Depends(require_permission("view")),
+):
+    db = next(get_db())
+    try:
+        _artifact(db, artifact_id)
+    finally:
+        db.close()
+
+    async def generate():
+        cursor = after
+        idle_cycles = 0
+        while True:
+            event_db = next(get_db())
+            try:
+                events = event_db.query(ArtifactCollaborationEvent).filter(
+                    ArtifactCollaborationEvent.artifact_id == artifact_id,
+                    ArtifactCollaborationEvent.id > cursor,
+                ).order_by(ArtifactCollaborationEvent.id).limit(100).all()
+                for event in events:
+                    cursor = event.id
+                    yield f"id: {event.id}\nevent: {event.event_type}\ndata: {json.dumps(_event_dict(event), separators=(',', ':'))}\n\n"
+                idle_cycles = 0 if events else idle_cycles + 1
+            finally:
+                event_db.close()
+            if once or await request.is_disconnected():
+                break
+            if idle_cycles >= 10:
+                yield ": keepalive\n\n"
+                idle_cycles = 0
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _job_event(db: Session, row: PlatformJob, event_type: str, payload: Optional[Dict[str, Any]] = None) -> None:

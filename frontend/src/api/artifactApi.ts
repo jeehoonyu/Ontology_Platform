@@ -39,6 +39,11 @@ export interface PlatformArtifact {
   dirty_revision?: number | null;
   execution?: ArtifactJob | null;
   evidence_links: Array<{ type: string; label: string; href: string }>;
+  collaboration?: {
+    active_participants: number;
+    event_cursor: number;
+    stream_href: string;
+  };
   created_at: number;
   updated_at: number;
 }
@@ -101,6 +106,48 @@ export interface ArtifactLease {
   holder: string;
   token: string;
   expires_at: number;
+}
+
+export interface ArtifactCollaborator {
+  id: string;
+  artifact_id: string;
+  principal_id: string;
+  display_name: string;
+  client_id: string;
+  color: string;
+  cursor: Record<string, unknown>;
+  selection: string[];
+  joined_at: number;
+  heartbeat_at: number;
+  expires_at: number;
+}
+
+export interface ArtifactCollaborationEvent {
+  id: number;
+  artifact_id: string;
+  participant_id?: string | null;
+  actor: string;
+  event_type: string;
+  lock_version: number;
+  revision: number;
+  payload: Record<string, unknown>;
+  created_at: number;
+}
+
+export interface ArtifactCollaborationSession {
+  participant: ArtifactCollaborator;
+  participant_token: string;
+  artifact: PlatformArtifact;
+  event_cursor: number;
+}
+
+export interface ArtifactCollaborationState {
+  artifact_id: string;
+  lock_version: number;
+  revision: number;
+  participants: ArtifactCollaborator[];
+  event_cursor: number;
+  last_updated: number;
 }
 
 export interface ArtifactVersion {
@@ -167,6 +214,55 @@ export function applyArtifactCommands(
     commands,
     message
   });
+}
+
+export function joinArtifactCollaboration(artifactId: string, clientId: string): Promise<ArtifactCollaborationSession> {
+  return postJson<ArtifactCollaborationSession>(`/artifacts/${encodeURIComponent(artifactId)}/collaboration/join`, {
+    client_id: clientId,
+    ttl_seconds: 90
+  });
+}
+
+export function getArtifactCollaboration(artifactId: string): Promise<ArtifactCollaborationState> {
+  return api<ArtifactCollaborationState>(`/artifacts/${encodeURIComponent(artifactId)}/collaboration`);
+}
+
+export function heartbeatArtifactCollaboration(
+  artifactId: string,
+  participantToken: string,
+  selection: string[]
+): Promise<ArtifactCollaborator> {
+  return postJson<ArtifactCollaborator>(`/artifacts/${encodeURIComponent(artifactId)}/collaboration/heartbeat`, {
+    participant_token: participantToken,
+    ttl_seconds: 90,
+    selection
+  });
+}
+
+export function leaveArtifactCollaboration(artifactId: string, participantToken: string): Promise<{ status: string }> {
+  return postJson<{ status: string }>(`/artifacts/${encodeURIComponent(artifactId)}/collaboration/leave`, {
+    participant_token: participantToken
+  });
+}
+
+export function applyCollaborativeCommands(
+  artifact: PlatformArtifact,
+  participantToken: string,
+  commands: BuilderCommand[],
+  message = "Applied collaborative visual edit",
+  idempotencyKey = crypto.randomUUID()
+): Promise<PlatformArtifact> {
+  return postJson<PlatformArtifact>(`/artifacts/${encodeURIComponent(artifact.id)}/collaboration/commands`, {
+    participant_token: participantToken,
+    expected_lock_version: artifact.lock_version,
+    idempotency_key: idempotencyKey,
+    commands,
+    message
+  });
+}
+
+export function artifactCollaborationStreamUrl(artifactId: string, after = 0): string {
+  return `/artifacts/${encodeURIComponent(artifactId)}/collaboration/stream?after=${after}`;
 }
 
 export function previewArtifact(artifactId: string, sampleLimit = 20): Promise<ArtifactPreview> {

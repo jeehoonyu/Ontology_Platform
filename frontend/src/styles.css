@@ -231,6 +231,35 @@ button:disabled {
   background: #fff;
 }
 
+.collaboration-presence {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 8px 3px 5px;
+  border: 1px solid #c6d0d7;
+  border-radius: 6px;
+  background: #f7f9fa;
+}
+
+.collaboration-avatar {
+  width: 24px;
+  height: 24px;
+  margin-right: -5px;
+  display: inline-grid;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.collaboration-presence small {
+  margin-left: 10px;
+  color: #526671;
+  white-space: nowrap;
+}
+
 .builder-breakpoint-control {
   display: inline-flex;
   padding: 2px;
@@ -281,6 +310,41 @@ button:disabled {
 .operation-message button {
   padding: 1px 5px;
   border: 0;
+}
+
+.collaboration-conflict {
+  position: absolute;
+  z-index: 31;
+  top: 92px;
+  left: 50%;
+  translate: -50% 0;
+  width: min(720px, calc(100vw - 40px));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 12px;
+  border: 1px solid #d29424;
+  border-radius: 6px;
+  background: #fff8e8;
+  box-shadow: 0 8px 24px rgb(20 42 55 / 18%);
+}
+
+.collaboration-conflict div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.collaboration-conflict span {
+  color: #6d5b35;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.collaboration-conflict button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .visual-builder-grid {
@@ -1116,6 +1180,11 @@ button:disabled {
 
   .visual-builder-actions select {
     width: 100%;
+  }
+
+  .collaboration-conflict {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .agent-runtime-panel > header,
