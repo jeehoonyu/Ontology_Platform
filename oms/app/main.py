@@ -87,6 +87,7 @@ from . import (
     ontology_packages,
     platform_runtime,
     ingestion_runtime,
+    runtime_observability,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -236,6 +237,7 @@ for _ext_module in (
     ontology_packages,
     platform_runtime,
     ingestion_runtime,
+    runtime_observability,
 ):
     app.include_router(_ext_module.router)
 

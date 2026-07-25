@@ -293,3 +293,84 @@ export function createQuota(body: { scope_type: string; scope_id: string; metric
 export function checkQuota(body: { scope_type: string; scope_id: string; metric: string }): Promise<QuotaCheckResult> {
   return postJson<QuotaCheckResult>("/admin/usage/check-quota", body);
 }
+
+// ---------------------------------------------------------------------------
+// Runtime operations: durable jobs, budgets, and service objectives
+// ---------------------------------------------------------------------------
+export interface RuntimeSummary {
+  project_id: string;
+  total_jobs: number;
+  status_counts: Record<string, number>;
+  availability: number;
+  latency_p95_ms: number;
+  queue_p95_ms: number;
+  compute_seconds: number;
+  token_units: number;
+  record_units: number;
+  estimated_cost_usd: number;
+  warnings: string[];
+  last_updated: number;
+}
+
+export interface RuntimeObservation extends TableRow {
+  id: string;
+  project_id: string;
+  job_id: string;
+  job_type: string;
+  status: string;
+  progress: number;
+  duration_ms: number;
+  queue_latency_ms: number;
+  estimated_cost_usd: number;
+}
+
+export interface RuntimeBudget extends TableRow {
+  id: string;
+  project_id: string;
+  metric: string;
+  limit_value: number;
+  window_seconds: number;
+  enforcement: string;
+  enabled: boolean;
+}
+
+export interface RuntimeSlo extends TableRow {
+  id: string;
+  project_id: string;
+  display_name: string;
+  job_type?: string | null;
+  metric: string;
+  operator: string;
+  threshold: number;
+  window_seconds: number;
+  severity: string;
+  enabled: boolean;
+}
+
+export function getRuntimeSummary(projectId: string): Promise<RuntimeSummary> {
+  return api<RuntimeSummary>(`/runtime/observability/summary?project_id=${encodeURIComponent(projectId)}`);
+}
+
+export function listRuntimeJobs(projectId: string): Promise<RuntimeObservation[]> {
+  return api<RuntimeObservation[]>(`/runtime/observability/jobs?project_id=${encodeURIComponent(projectId)}&limit=50`);
+}
+
+export function listRuntimeBudgets(projectId: string): Promise<RuntimeBudget[]> {
+  return api<RuntimeBudget[]>(`/runtime/observability/budgets?project_id=${encodeURIComponent(projectId)}`);
+}
+
+export function upsertRuntimeBudget(body: Omit<RuntimeBudget, "id">): Promise<RuntimeBudget> {
+  return api<RuntimeBudget>("/runtime/observability/budgets", { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function listRuntimeSlos(projectId: string): Promise<RuntimeSlo[]> {
+  return api<RuntimeSlo[]>(`/runtime/observability/slo-policies?project_id=${encodeURIComponent(projectId)}`);
+}
+
+export function createRuntimeSlo(body: Omit<RuntimeSlo, "id"> & { id?: string }): Promise<RuntimeSlo> {
+  return postJson<RuntimeSlo>("/runtime/observability/slo-policies", body);
+}
+
+export function evaluateRuntimeSlo(policyId: string): Promise<TableRow> {
+  return postJson<TableRow>(`/runtime/observability/slo-policies/${encodeURIComponent(policyId)}/evaluate`, {});
+}

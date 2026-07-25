@@ -11,7 +11,8 @@ const routes = [
   "investigations",
   "entity-resolution",
   "graph",
-  "validation"
+  "validation",
+  "control-panel"
 ];
 
 for (const route of routes) {
@@ -43,6 +44,55 @@ test("command palette supports keyboard navigation", async ({ page }) => {
   await palette.getByPlaceholder("Find a workspace or capability").fill("entity resolution");
   await palette.getByRole("button", { name: /Entity Resolution/ }).click();
   await expect(page).toHaveURL(/\/workspace\/entity-resolution$/);
+});
+
+test("runtime operations shows durable telemetry, budgets, and SLO controls", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful runtime operations workflow once on desktop.");
+  const projectId = `browser-runtime-${Date.now()}`;
+  const queued = await page.request.post("/jobs", { data: {
+    project_id: projectId,
+    job_type: "pipeline.preview",
+    estimated_compute_seconds: 2,
+    estimated_cost_usd: 0.05,
+    estimated_records: 10
+  } });
+  expect(queued.ok()).toBeTruthy();
+  const job = await queued.json() as { id: string };
+  const claimResponse = await page.request.post("/jobs/claim", { data: { worker_id: "browser-worker", job_id: job.id } });
+  const claimed = (await claimResponse.json() as { job: { lease_token: string } }).job;
+  await page.request.post(`/jobs/${job.id}/complete`, { data: {
+    lease_token: claimed.lease_token,
+    result: { compute_seconds: 3, estimated_cost_usd: 0.08, records_out: 12 }
+  } });
+  await page.request.put("/runtime/observability/budgets", { data: {
+    project_id: projectId,
+    metric: "executions",
+    limit_value: 20,
+    window_seconds: 86400,
+    enforcement: "HARD",
+    enabled: true
+  } });
+  const sloResponse = await page.request.post("/runtime/observability/slo-policies", { data: {
+    project_id: projectId,
+    display_name: "Browser availability",
+    metric: "availability",
+    operator: "gte",
+    threshold: 0.99,
+    window_seconds: 86400,
+    severity: "warning",
+    enabled: true
+  } });
+  const slo = await sloResponse.json() as { id: string };
+  await page.request.post(`/runtime/observability/slo-policies/${slo.id}/evaluate`, { data: {} });
+
+  await page.goto("/workspace/control-panel");
+  await page.getByRole("button", { name: "Runtime" }).click();
+  await page.getByLabel("Project").fill(projectId);
+  await expect(page.getByRole("heading", { name: "Durable Job Telemetry" })).toBeVisible();
+  await expect(page.getByText("pipeline.preview", { exact: true })).toBeVisible();
+  await expect(page.getByText("Browser availability", { exact: true })).toBeVisible();
+  const budgetPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Project Budgets" }) });
+  await expect(budgetPanel.getByRole("cell", { name: "executions" })).toBeVisible();
 });
 
 test("visual builder supports typed configuration, preview, save, and publish", async ({ page }, testInfo) => {
