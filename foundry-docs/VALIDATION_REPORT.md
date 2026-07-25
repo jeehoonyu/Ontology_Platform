@@ -34,7 +34,7 @@ Current result:
 | Platform cohesion | Medium-high | Unified events, global search, policy evaluation/simulation, shared activity timeline, visual graph overview |
 | Operational MVP | High | Asset Reliability Command Center bootstrap/import, UI-state, workflow-state, evaluator summary, proof trail, triage, approval, action execution, incident, report, validation dashboard |
 | Data import and project portability | High local analog | CSV/JSON/file import jobs, semantic mapping, transforms, connector previews, stream replay, import-to-ontology drafts, audit/ops events, extended JSON snapshot export/import |
-| Connectors and streaming | High local analog | Live REST/PostgreSQL adapters, encrypted credentials, SSRF/read-only protections, plugin registry, project-scoped source/sync/stream resources, durable execution, cursors, budgets, dead letters, and fetch evidence |
+| Connectors and streaming | High local analog | Live REST/PostgreSQL/S3-compatible adapters, encrypted credentials, SigV4, SSRF/read-only protections, plugin registry, project-scoped source/sync/stream resources, durable execution, cursors, budgets, dead letters, and fetch evidence |
 | Runtime observability and worker control | High local analog | Correlated durable-job spans, p95 latency/queue summaries, project budgets, SLO evaluation, registered worker fleets, fair queues, drain/resume, concurrent claim safety, stale-token fencing, and snapshot recovery |
 | Frontend product foundation | Medium-high | Typed React/Vite core evaluator shell, persistent flow indicator, split workspaces/components, clean state primitives, close-analog pipeline workbench, ontology manager, and legacy fallback |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
@@ -46,7 +46,7 @@ Current result:
 - LLM and model behavior is deterministic. There is no hosted model catalog, GPU runtime, model router, or paid external API dependency.
 - Pipeline Builder compiles to local Python logic and local datasets, not Spark-backed Foundry transforms.
 - UI workspaces are Foundry-style local approximations, not copied Foundry frontends. The React shell covers the evaluator path first and uses screenshot-grounded layout ideas without proprietary assets or internals; legacy workspaces remain during migration.
-- REST and PostgreSQL adapters execute live locally. S3, SFTP, and Kafka remain explicit plugin integrations; portable project snapshots omit connector secrets and require credential rebinding after import.
+- REST, PostgreSQL, and S3-compatible adapters execute live locally. SFTP and Kafka remain explicit plugin integrations; portable project snapshots omit connector secrets and require credential rebinding after import.
 - Private tenant pages are not automated validation sources unless the user provides screenshots or exported documents.
 - Browser screenshot validation depends on available local browser tooling. If unavailable, route smoke checks are still required and visual checks are marked manual.
 
@@ -92,6 +92,6 @@ python test_docs_conformance.py
 
 1. Add browser screenshot capture for `/workspace/command-center`, `/workspace/pipeline`, `/workspace/ontology`, `/workspace/graph`, and `/workspace/validation` when Playwright or Chrome control is available.
 2. Continue React migration for Object Explorer, Workshop, Map, ModelOps, Ops, and Investigations after the evaluator path is stable.
-3. Add reviewed S3, SFTP, and Kafka plugins plus isolated adapter workers without making deterministic tests depend on those services.
+3. Add reviewed SFTP and Kafka plugins plus isolated adapter workers without making deterministic tests depend on those services.
 4. Expand visual conformance notes for Workshop, Pipeline Builder, Object Explorer, Ontology Generator, Graph, Validation, and Map using user-provided screenshots.
 5. Keep public source links current because Palantir documentation changes over time.

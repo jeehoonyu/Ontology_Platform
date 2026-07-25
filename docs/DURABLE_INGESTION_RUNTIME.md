@@ -35,7 +35,9 @@ The local cost estimate is deterministic and intended for governance testing. Pr
 
 ## Connector Adapters
 
-`GET /connectors/adapters` is the executable adapter catalog. REST and JDBC adapters fetch live records inside the durable ingestion boundary. S3, SFTP, and Kafka appear as unavailable until a deployment registers a plugin through `CONNECTOR_PLUGIN_MODULES`; the API does not advertise those integrations as implemented when no adapter is installed.
+`GET /connectors/adapters` is the executable adapter catalog. REST, JDBC, and S3-compatible adapters fetch live records inside the durable ingestion boundary. SFTP and Kafka appear as unavailable until a deployment registers a plugin through `CONNECTOR_PLUGIN_MODULES`; the API does not advertise those integrations as implemented when no adapter is installed.
+
+The S3 adapter signs requests with AWS Signature Version 4 and supports AWS S3 or path-style S3-compatible HTTPS endpoints. Store the secret access key as an `aws` runtime credential and set `access_key_id` (plus optional `session_token`) in credential metadata. Source configuration contains only non-secret fields: `bucket`, `region`, optional `endpoint_url`, `prefix`, `format`, and bounded object/record/byte limits. CSV, JSON arrays/objects, and JSONL are supported. For incremental syncs, use `_source_object_key` as the cursor field; successful object keys become the durable high-water mark.
 
 Live REST sources enforce response limits, timeouts, redirect validation, and SSRF controls. Live JDBC sources accept PostgreSQL or local-development SQLite, reject mutating SQL, and require parameterized limits and cursors for custom queries. SQLite sources are disabled in the production profile unless explicitly enabled.
 
