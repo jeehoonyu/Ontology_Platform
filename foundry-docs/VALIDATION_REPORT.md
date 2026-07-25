@@ -15,6 +15,7 @@ Current result:
 - Guided evaluator flow: Command Center now has UI-state, workflow-state, a persistent flow indicator, evaluator summary, clean state/warning cards, clickable proof trail, import-to-ontology draft generation, backend-backed report export, and linked evidence IDs.
 - Trust dashboard: `/workspace/validation` and `/project/validate` surface matrix status, priority gaps, runtime schema health, persisted migration records, event consistency, route health, and extended project snapshot evidence.
 - Readiness: `/project/readiness`, `/ui-state/imports`, and `/ui-state/validation` expose human-facing checks and sections for technical evaluators.
+- Runtime operations: durable jobs now emit project-scoped correlated observations for queue, claim, heartbeat, retry, recovery, success, failure, and cancellation. Rolling budgets gate admission, SLO evaluations emit breach events, and the Control Panel exposes human-readable latency, availability, usage, and cost evidence.
 - Fidelity: high for local behavioral workflows; intentionally different for hosted infrastructure, proprietary UI internals, and LLM/model routing.
 - Evidence: `foundry-docs/VALIDATION_MATRIX.md`, `oms/test_docs_conformance.py`, and existing focused tests.
 
@@ -34,6 +35,7 @@ Current result:
 | Operational MVP | High | Asset Reliability Command Center bootstrap/import, UI-state, workflow-state, evaluator summary, proof trail, triage, approval, action execution, incident, report, validation dashboard |
 | Data import and project portability | High local analog | CSV/JSON/file import jobs, semantic mapping, transforms, connector previews, stream replay, import-to-ontology drafts, audit/ops events, extended JSON snapshot export/import |
 | Connectors and streaming | High local analog | Project-scoped source/sync/stream resources, durable worker execution, idempotent recovery, rolling budgets, run telemetry, dead letters, and portable evidence |
+| Runtime observability | High local analog | Correlated durable-job spans, p95 latency/queue summaries, project budgets, cost/usage evidence, SLO evaluation, breach events, concurrent backfill safety, and snapshot recovery |
 | Frontend product foundation | Medium-high | Typed React/Vite core evaluator shell, persistent flow indicator, split workspaces/components, clean state primitives, close-analog pipeline workbench, ontology manager, and legacy fallback |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
 | Security/governance | Medium-high | OIDC roles, organization/project isolation, persisted memberships, package integrity, markings, restricted views, scanners, retention, and audit |

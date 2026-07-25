@@ -212,6 +212,10 @@ class JobCreate(BaseModel):
     timeout_seconds: int = Field(default=900, ge=1, le=86400)
     available_at: Optional[int] = None
     idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    estimated_compute_seconds: float = Field(default=0.0, ge=0)
+    estimated_cost_usd: float = Field(default=0.0, ge=0)
+    estimated_tokens: float = Field(default=0.0, ge=0)
+    estimated_records: float = Field(default=0.0, ge=0)
 
 
 class JobClaimRequest(BaseModel):
@@ -1622,6 +1626,8 @@ def _reap_stale_jobs(db: Session) -> int:
             row.status = "FAILED"
             row.completed_at = now
             _job_event(db, row, "job.failed", {"reason": reason, "attempt": row.attempt})
+        from . import runtime_observability
+        runtime_observability.record_job_terminal(db, row, row.status, {"reason": reason}, row.error)
         reaped += 1
     return reaped
 
@@ -1629,6 +1635,13 @@ def _reap_stale_jobs(db: Session) -> int:
 @router.post("/jobs", status_code=201)
 def create_job(body: JobCreate, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     tenancy.assert_project_permission(db, principal, body.project_id, "execute")
+    from . import runtime_observability
+    estimates = {
+        "compute_seconds": body.estimated_compute_seconds,
+        "estimated_cost_usd": body.estimated_cost_usd,
+        "token_units": body.estimated_tokens,
+        "record_units": body.estimated_records,
+    }
     now = _now()
     if body.idempotency_key:
         existing = db.query(PlatformJob).filter(
@@ -1641,6 +1654,7 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
         for candidate in existing:
             if _execution(candidate).get("idempotency_key") == body.idempotency_key:
                 return _job_dict(candidate, db)
+    admission = runtime_observability.check_job_admission(db, body.project_id, estimates)
     payload = dict(body.payload)
     payload["__execution"] = {
         "priority": body.priority,
@@ -1652,6 +1666,7 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
     row = PlatformJob(id=_id("job"), project_id=body.project_id, job_type=body.job_type, status="QUEUED", actor=principal.id, subject_type=body.subject_type, subject_id=body.subject_id, payload=payload, result={}, attempt=1, progress=0, created_at=now, updated_at=now)
     db.add(row)
     db.flush()
+    runtime_observability.record_job_queued(db, row, estimates, admission)
     _job_event(db, row, "job.queued", {"priority": body.priority, "available_at": body.available_at or now})
     _audit(db, principal.id, "job.queued", "platform_job", row.id, {"job_type": row.job_type, "priority": body.priority})
     db.commit()
@@ -1723,6 +1738,8 @@ def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_perm
         row.updated_at = now
         row.error = None
         _job_event(db, row, "job.claimed", {"worker_id": body.worker_id, "attempt": row.attempt, "lease_expires_at": lease.expires_at})
+        from . import runtime_observability
+        runtime_observability.record_job_progress(db, row, "Worker claimed job", {"worker_id": body.worker_id})
         try:
             db.commit()
         except IntegrityError:
@@ -1775,6 +1792,8 @@ def heartbeat_job(job_id: str, body: JobHeartbeatRequest, principal: Principal =
     row.progress = body.progress
     row.updated_at = now
     _job_event(db, row, "job.progress", {"progress": body.progress, "message": body.message, "metrics": body.metrics})
+    from . import runtime_observability
+    runtime_observability.record_job_progress(db, row, body.message, body.metrics)
     db.commit()
     return _job_dict(row, db)
 
@@ -1792,6 +1811,8 @@ def complete_job(job_id: str, body: JobCompleteRequest, principal: Principal = D
     row.error = None
     row.updated_at = row.completed_at = now
     _job_event(db, row, "job.succeeded", {"worker_id": lease.worker_id, "duration_seconds": max(0, now - (row.started_at or now))})
+    from . import runtime_observability
+    runtime_observability.record_job_terminal(db, row, "SUCCEEDED", body.result)
     _release_job_lease(db, row.id)
     _audit(db, principal.id, "job.succeeded", "platform_job", row.id, {"job_type": row.job_type, "attempt": row.attempt})
     db.commit()
@@ -1820,6 +1841,8 @@ def fail_job(job_id: str, body: JobFailRequest, principal: Principal = Depends(r
         row.status = "FAILED"
         row.completed_at = now
         _job_event(db, row, "job.failed", {"worker_id": lease.worker_id, "attempt": row.attempt, "error": body.error, "details": body.details})
+    from . import runtime_observability
+    runtime_observability.record_job_terminal(db, row, row.status, body.details, body.error)
     _audit(db, principal.id, "job.failed" if row.status == "FAILED" else "job.retry_scheduled", "platform_job", row.id, {"job_type": row.job_type, "attempt": row.attempt})
     db.commit()
     return _job_dict(row, db)
@@ -1845,6 +1868,8 @@ def cancel_job(job_id: str, principal: Principal = Depends(require_permission("e
     row.updated_at = row.completed_at = _now()
     _release_job_lease(db, row.id)
     _job_event(db, row, "job.cancelled", {"actor": principal.id})
+    from . import runtime_observability
+    runtime_observability.record_job_terminal(db, row, "CANCELLED", {}, "Cancelled by user")
     _audit(db, principal.id, "job.cancelled", "platform_job", row.id, {})
     db.commit()
     return _job_dict(row, db)
@@ -1865,6 +1890,8 @@ def retry_job(job_id: str, principal: Principal = Depends(require_permission("ex
     _set_execution(row, available_at=_now())
     _release_job_lease(db, row.id)
     _job_event(db, row, "job.retried", {"attempt": row.attempt, "actor": principal.id})
+    from . import runtime_observability
+    runtime_observability.record_job_progress(db, row, "Job manually retried", {"attempt": row.attempt})
     _audit(db, principal.id, "job.retried", "platform_job", row.id, {"attempt": row.attempt})
     db.commit()
     return _job_dict(row, db)
