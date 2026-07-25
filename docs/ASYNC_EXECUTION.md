@@ -49,6 +49,12 @@ Recommended alerts:
 
 The worker API requires the backend `execute` permission. Production workers should use a dedicated service principal with only the job types and downstream permissions they require.
 
+## Fleet and Queue Control
+
+Production workers should register through `PUT /runtime/workers/{worker_name}`. Registration constrains project scope, supported job types, and maximum concurrent leases. Drain and resume endpoints support rolling worker deployment without abandoning active jobs.
+
+Project queue policies configure fair-share weight, hard project concurrency, and claim pause state. Dispatch is fair across projects and priority-ordered within a project. Postgres serializes the final project-capacity decision by locking the queue policy row before a lease is committed. See [Worker Fleet and Fair Queue Control](WORKER_FLEET_CONTROL.md).
+
 ## Pipeline Integration
 
 Pipeline Builder uses the runtime through:

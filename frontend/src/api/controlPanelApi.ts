@@ -374,3 +374,57 @@ export function createRuntimeSlo(body: Omit<RuntimeSlo, "id"> & { id?: string })
 export function evaluateRuntimeSlo(policyId: string): Promise<TableRow> {
   return postJson<TableRow>(`/runtime/observability/slo-policies/${encodeURIComponent(policyId)}/evaluate`, {});
 }
+
+export interface RuntimeWorker extends TableRow {
+  id: string;
+  worker_name: string;
+  project_id?: string | null;
+  status: string;
+  configured_status: string;
+  supported_job_types: string[];
+  max_concurrency: number;
+  active_jobs: number;
+  available_slots: number;
+  heartbeat_at: number;
+}
+
+export interface RuntimeQueuePolicy extends TableRow {
+  id: string;
+  project_id: string;
+  weight: number;
+  max_concurrency: number;
+  paused: boolean;
+}
+
+export interface WorkerFleetState {
+  summary: { workers: number; active: number; draining: number; offline: number; active_jobs: number };
+  primary_actions: string[];
+  sections: { workers: RuntimeWorker[]; queue_policies: RuntimeQueuePolicy[] };
+  warnings: string[];
+  last_updated: number;
+}
+
+export function getWorkerFleet(projectId: string): Promise<WorkerFleetState> {
+  return api<WorkerFleetState>(`/ui-state/worker-fleet?project_id=${encodeURIComponent(projectId)}`);
+}
+
+export function registerRuntimeWorker(workerName: string, body: {
+  project_id: string;
+  supported_job_types: string[];
+  max_concurrency: number;
+  labels?: Record<string, string>;
+}): Promise<RuntimeWorker> {
+  return api<RuntimeWorker>(`/runtime/workers/${encodeURIComponent(workerName)}`, { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function setRuntimeWorkerDrain(workerName: string, draining: boolean): Promise<RuntimeWorker> {
+  return postJson<RuntimeWorker>(`/runtime/workers/${encodeURIComponent(workerName)}/${draining ? "drain" : "resume"}`, {});
+}
+
+export function upsertRuntimeQueuePolicy(projectId: string, body: {
+  weight: number;
+  max_concurrency: number;
+  paused: boolean;
+}): Promise<RuntimeQueuePolicy> {
+  return api<RuntimeQueuePolicy>(`/runtime/queues/${encodeURIComponent(projectId)}`, { method: "PUT", body: JSON.stringify(body) });
+}

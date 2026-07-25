@@ -49,6 +49,7 @@ test("command palette supports keyboard navigation", async ({ page }) => {
 test("runtime operations shows durable telemetry, budgets, and SLO controls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful runtime operations workflow once on desktop.");
   const projectId = `browser-runtime-${Date.now()}`;
+  const workerName = `browser-worker-${Date.now()}`;
   const queued = await page.request.post("/jobs", { data: {
     project_id: projectId,
     job_type: "pipeline.preview",
@@ -58,7 +59,7 @@ test("runtime operations shows durable telemetry, budgets, and SLO controls", as
   } });
   expect(queued.ok()).toBeTruthy();
   const job = await queued.json() as { id: string };
-  const claimResponse = await page.request.post("/jobs/claim", { data: { worker_id: "browser-worker", job_id: job.id } });
+  const claimResponse = await page.request.post("/jobs/claim", { data: { worker_id: workerName, job_id: job.id } });
   const claimed = (await claimResponse.json() as { job: { lease_token: string } }).job;
   await page.request.post(`/jobs/${job.id}/complete`, { data: {
     lease_token: claimed.lease_token,
@@ -84,13 +85,29 @@ test("runtime operations shows durable telemetry, budgets, and SLO controls", as
   } });
   const slo = await sloResponse.json() as { id: string };
   await page.request.post(`/runtime/observability/slo-policies/${slo.id}/evaluate`, { data: {} });
+  await page.request.put(`/runtime/workers/${workerName}`, { data: {
+    project_id: projectId,
+    supported_job_types: ["pipeline.preview"],
+    max_concurrency: 2,
+    labels: { pool: "browser" }
+  } });
+  await page.request.put(`/runtime/queues/${projectId}`, { data: {
+    weight: 2,
+    max_concurrency: 5,
+    paused: false
+  } });
 
   await page.goto("/workspace/control-panel");
   await page.getByRole("button", { name: "Runtime" }).click();
-  await page.getByLabel("Project").fill(projectId);
+  await page.getByLabel("Project", { exact: true }).fill(projectId);
   await expect(page.getByRole("heading", { name: "Durable Job Telemetry" })).toBeVisible();
   await expect(page.getByText("pipeline.preview", { exact: true })).toBeVisible();
   await expect(page.getByText("Browser availability", { exact: true })).toBeVisible();
+  await expect(page.getByText(workerName, { exact: true })).toBeVisible();
+  const fleetPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Worker Fleet" }) });
+  await expect(fleetPanel.getByText("ACTIVE", { exact: true })).toBeVisible();
+  const queuePanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Queue Policy" }) });
+  await expect(queuePanel.getByRole("cell", { name: projectId })).toBeVisible();
   const budgetPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Project Budgets" }) });
   await expect(budgetPanel.getByRole("cell", { name: "executions" })).toBeVisible();
 });

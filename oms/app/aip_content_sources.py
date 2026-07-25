@@ -316,7 +316,7 @@ def _ingest_source(db: Session, source: AcsSource, content: str, event_type: str
 
 
 def _get_source_or_404(db: Session, source_id: str) -> AcsSource:
-    src = db.query(AcsSource).filter(AcsSource.id == source_id).first()
+    src = db.query(AcsSource).filter(AcsSource.id == source_id, AcsSource.ingestion_status != "DELETED").first()
     if not src:
         raise HTTPException(status_code=404, detail=f"AcsSource '{source_id}' not found")
     return src
@@ -403,7 +403,7 @@ def create_source(body: SourceCreate, db: Session = Depends(get_db)):
 
 @router.get("/aip/assist/sources", response_model=List[SourceRead])
 def list_sources(db: Session = Depends(get_db)):
-    return db.query(AcsSource).order_by(AcsSource.created_at).all()
+    return db.query(AcsSource).filter(AcsSource.ingestion_status != "DELETED").order_by(AcsSource.created_at).all()
 
 
 @router.get("/aip/assist/sources/suggest")
@@ -473,7 +473,10 @@ def delete_source(source_id: str, db: Session = Depends(get_db)):
         id=uuid.uuid4().hex, source_id=source_id, event_type="deleted",
         chunk_count=0, status="INGESTED", error_detail=None, created_at=now,
     ))
-    db.delete(src)
+    # Preserve the source identity so its append-only ingest log remains valid.
+    src.ingestion_status = "DELETED"
+    src.raw_content = None
+    src.updated_at = now
     db.commit()
     return {"deleted": True, "source_id": source_id}
 

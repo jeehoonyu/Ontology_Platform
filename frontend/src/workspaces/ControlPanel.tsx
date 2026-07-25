@@ -844,8 +844,11 @@ function RuntimeOperationsSection() {
   const jobs = useAsyncState(() => admin.listRuntimeJobs(projectId), [projectId, refreshKey]);
   const budgets = useAsyncState(() => admin.listRuntimeBudgets(projectId), [projectId, refreshKey]);
   const slos = useAsyncState(() => admin.listRuntimeSlos(projectId), [projectId, refreshKey]);
+  const fleet = useAsyncState(() => admin.getWorkerFleet(projectId), [projectId, refreshKey]);
   const [budgetForm, setBudgetForm] = useState({ metric: "executions", limit_value: "1000", window_seconds: "86400", enforcement: "HARD" });
   const [sloForm, setSloForm] = useState({ display_name: "Runtime availability", job_type: "", metric: "availability", operator: "gte", threshold: "0.99", window_seconds: "86400", severity: "warning" });
+  const [workerForm, setWorkerForm] = useState({ worker_name: "pipeline-worker-1", job_types: "pipeline.preview,pipeline.deliver", max_concurrency: "2" });
+  const [queueForm, setQueueForm] = useState({ weight: "1", max_concurrency: "10", paused: false });
 
   const reload = () => setRefreshKey((key) => key + 1);
 
@@ -896,10 +899,49 @@ function RuntimeOperationsSection() {
     }
   }
 
-  const loading = summary.loading || jobs.loading || budgets.loading || slos.loading;
+  async function saveWorker() {
+    try {
+      await admin.registerRuntimeWorker(workerForm.worker_name, {
+        project_id: projectId,
+        supported_job_types: splitList(workerForm.job_types),
+        max_concurrency: Number(workerForm.max_concurrency),
+        labels: { pool: "default" }
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function setDrain(workerName: string, draining: boolean) {
+    try {
+      await admin.setRuntimeWorkerDrain(workerName, draining);
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function saveQueuePolicy() {
+    try {
+      await admin.upsertRuntimeQueuePolicy(projectId, {
+        weight: Number(queueForm.weight),
+        max_concurrency: Number(queueForm.max_concurrency),
+        paused: queueForm.paused
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  const loading = summary.loading || jobs.loading || budgets.loading || slos.loading || fleet.loading;
   return (
     <>
-      <ErrorBanner message={error || summary.error || jobs.error || budgets.error || slos.error} />
+      <ErrorBanner message={error || summary.error || jobs.error || budgets.error || slos.error || fleet.error} />
       {loading && <LoadingState label="Loading runtime operations..." />}
       <Panel title="Runtime Scope" action={<button onClick={reload}>Refresh</button>}>
         <div className="metadata-edit-grid">
@@ -911,11 +953,44 @@ function RuntimeOperationsSection() {
         <Metric label="P95 execution" value={`${summary.value?.latency_p95_ms || 0} ms`} />
         <Metric label="P95 queue" value={`${summary.value?.queue_p95_ms || 0} ms`} />
         <Metric label="Estimated cost" value={`$${(summary.value?.estimated_cost_usd || 0).toFixed(4)}`} />
+        <Metric label="Active workers" value={fleet.value?.summary.active || 0} />
+        <Metric label="Active jobs" value={fleet.value?.summary.active_jobs || 0} />
       </div>
       {(summary.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      {(fleet.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
       <Panel title="Durable Job Telemetry">
         <DataTable rows={jobs.value || []} empty="No durable jobs have run in this project." />
       </Panel>
+      <div className="two-col">
+        <Panel title="Worker Fleet" action={<button onClick={saveWorker} disabled={!workerForm.worker_name.trim() || Number(workerForm.max_concurrency) < 1}>Register worker</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Worker name" value={workerForm.worker_name} onChange={(value) => setWorkerForm({ ...workerForm, worker_name: value })} />
+            <TextField label="Job types" value={workerForm.job_types} onChange={(value) => setWorkerForm({ ...workerForm, job_types: value })} placeholder="pipeline.preview,agent.invoke" />
+            <TextField label="Concurrency" type="number" value={workerForm.max_concurrency} onChange={(value) => setWorkerForm({ ...workerForm, max_concurrency: value })} />
+          </div>
+          {fleet.value?.sections.workers.length ? (
+            <div className="runtime-slo-list">
+              {fleet.value.sections.workers.map((worker) => (
+                <div key={worker.id} className="runtime-slo-row runtime-worker-row">
+                  <span><strong>{worker.worker_name}</strong><small>{worker.active_jobs}/{worker.max_concurrency} jobs · {worker.supported_job_types.join(", ") || "all job types"}</small></span>
+                  <StatusBadge value={worker.status} />
+                  <button onClick={() => setDrain(worker.worker_name, worker.configured_status === "ACTIVE")}>
+                    {worker.configured_status === "ACTIVE" ? "Drain" : "Resume"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState title="No workers registered" description="Register a project-scoped worker before enabling scheduled execution." />}
+        </Panel>
+        <Panel title="Queue Policy" action={<button onClick={saveQueuePolicy} disabled={!projectId || Number(queueForm.max_concurrency) < 1}>Save policy</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Fair-share weight" type="number" value={queueForm.weight} onChange={(value) => setQueueForm({ ...queueForm, weight: value })} />
+            <TextField label="Project concurrency" type="number" value={queueForm.max_concurrency} onChange={(value) => setQueueForm({ ...queueForm, max_concurrency: value })} />
+            <CheckboxField label="Pause new claims" checked={queueForm.paused} onChange={(value) => setQueueForm({ ...queueForm, paused: value })} />
+          </div>
+          <DataTable rows={fleet.value?.sections.queue_policies || []} empty="This project uses the default fair-share queue policy." />
+        </Panel>
+      </div>
       <div className="two-col">
         <Panel title="Project Budgets" action={<button onClick={saveBudget} disabled={!projectId || Number(budgetForm.limit_value) <= 0}>Save budget</button>}>
           <div className="metadata-edit-grid">

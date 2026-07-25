@@ -221,6 +221,7 @@ class JobCreate(BaseModel):
 class JobClaimRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=200)
     supported_job_types: List[str] = Field(default_factory=list)
+    project_id: Optional[str] = None
     lease_seconds: int = Field(default=60, ge=10, le=900)
     job_id: Optional[str] = None
 
@@ -1714,18 +1715,30 @@ def list_jobs(status: Optional[str] = None, job_type: Optional[str] = None, proj
 def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     now = _now()
     _reap_stale_jobs(db)
+    from . import worker_control
+    constraints = worker_control.worker_claim_constraints(
+        db, principal, body.worker_id, body.supported_job_types, body.project_id,
+    )
+    if not constraints["capacity_available"]:
+        db.commit()
+        return {"job": None, "reason": "WORKER_CAPACITY"}
     query = db.query(PlatformJob).filter(PlatformJob.status == "QUEUED")
     accessible = tenancy.accessible_project_ids(db, principal, "execute")
     if accessible is not None:
         query = query.filter(PlatformJob.project_id.in_(accessible))
+    if constraints["project_id"]:
+        tenancy.assert_project_permission(db, principal, constraints["project_id"], "execute")
+        query = query.filter(PlatformJob.project_id == constraints["project_id"])
     if body.job_id:
         query = query.filter(PlatformJob.id == body.job_id)
-    if body.supported_job_types:
-        query = query.filter(PlatformJob.job_type.in_(body.supported_job_types))
+    if constraints["job_types"]:
+        query = query.filter(PlatformJob.job_type.in_(constraints["job_types"]))
     candidates = query.order_by(PlatformJob.created_at).limit(250).all()
     candidates = [row for row in candidates if int(_execution(row).get("available_at", row.created_at)) <= now]
-    candidates.sort(key=lambda row: (-int(_execution(row).get("priority", 50)), row.created_at, row.id))
+    candidates = worker_control.rank_candidates(db, candidates)
     for row in candidates:
+        if not worker_control.queue_accepts_claim(db, row.project_id):
+            continue
         if _lease_for_job(db, row.id):
             continue
         lease = PlatformJobLease(
@@ -1740,6 +1753,7 @@ def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_perm
         _job_event(db, row, "job.claimed", {"worker_id": body.worker_id, "attempt": row.attempt, "lease_expires_at": lease.expires_at})
         from . import runtime_observability
         runtime_observability.record_job_progress(db, row, "Worker claimed job", {"worker_id": body.worker_id})
+        worker_control.record_worker_claim(constraints["worker"])
         try:
             db.commit()
         except IntegrityError:
@@ -1749,7 +1763,7 @@ def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_perm
         result["lease_token"] = lease.token
         return {"job": result}
     db.commit()
-    return {"job": None}
+    return {"job": None, "reason": "NO_COMPATIBLE_WORK"}
 
 
 @router.get("/jobs/summary")
