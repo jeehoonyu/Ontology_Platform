@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import base64
+import csv
+import datetime
 import fnmatch
 import hashlib
+import hmac
 import importlib
+import io
 import ipaddress
 import json
 import os
@@ -15,6 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -75,7 +80,7 @@ class ConnectorFetchAttempt(Base):
 
 
 class CredentialCreate(BaseModel):
-    credential_type: str = Field(pattern="^(bearer|api_key|basic)$")
+    credential_type: str = Field(pattern="^(bearer|api_key|basic|aws)$")
     secret: str = Field(min_length=1, max_length=16000)
     metadata: Dict[str, str] = Field(default_factory=dict)
     expires_at: Optional[int] = None
@@ -231,12 +236,22 @@ def adapter_id_for_source(source: connectivity.ConnectionSource) -> str:
 
 def _context(db: Session, source: connectivity.ConnectionSource, cursor: Any, cursor_field: Optional[str], limit: int) -> AdapterContext:
     credential = _active_credential(db, source)
+    credential_secret = _decrypt_secret(credential.encrypted_secret) if credential else None
+    credential_metadata = dict(credential.metadata_ or {}) if credential else {}
+    if credential and credential.credential_type == "aws" and credential_secret:
+        try:
+            envelope = json.loads(credential_secret)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=503, detail="AWS connector credential envelope is invalid") from exc
+        credential_secret = str(envelope.get("secret_access_key") or "")
+        if envelope.get("session_token"):
+            credential_metadata["session_token"] = str(envelope["session_token"])
     return AdapterContext(
         source=source,
         config=dict(source.config or {}),
         credential_type=credential.credential_type if credential else None,
-        credential_secret=_decrypt_secret(credential.encrypted_secret) if credential else None,
-        credential_metadata=dict(credential.metadata_ or {}) if credential else {},
+        credential_secret=credential_secret,
+        credential_metadata=credential_metadata,
         cursor=cursor,
         cursor_field=cursor_field,
         limit=limit,
@@ -507,8 +522,165 @@ class SqlPullAdapter:
         return AdapterResult(records=rows, next_cursor=next_cursor, bytes_read=len(encoded), metadata={"backend": url.get_backend_name(), "query_ms": int((time.perf_counter() - started) * 1000)})
 
 
+def _aws_signing_key(secret: str, date_stamp: str, region: str, service: str = "s3") -> bytes:
+    key_date = hmac.new(("AWS4" + secret).encode(), date_stamp.encode(), hashlib.sha256).digest()
+    key_region = hmac.new(key_date, region.encode(), hashlib.sha256).digest()
+    key_service = hmac.new(key_region, service.encode(), hashlib.sha256).digest()
+    return hmac.new(key_service, b"aws4_request", hashlib.sha256).digest()
+
+
+def _aws_query(params: Dict[str, Any]) -> str:
+    pairs = []
+    for key, value in params.items():
+        if value is None:
+            continue
+        pairs.append((urllib.parse.quote(str(key), safe="-_.~"), urllib.parse.quote(str(value), safe="-_.~")))
+    return "&".join(f"{key}={value}" for key, value in sorted(pairs))
+
+
+def _s3_records(raw: bytes, object_key: str, configured_format: str) -> List[Dict[str, Any]]:
+    data_format = configured_format.lower().strip() if configured_format else "auto"
+    if data_format == "auto":
+        suffix = object_key.rsplit(".", 1)[-1].lower() if "." in object_key else "json"
+        data_format = "jsonl" if suffix in {"jsonl", "ndjson"} else suffix
+    try:
+        text_value = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"S3 object '{object_key}' is not UTF-8") from exc
+    try:
+        if data_format == "csv":
+            return [dict(row) for row in csv.DictReader(io.StringIO(text_value))]
+        if data_format == "jsonl":
+            rows = [json.loads(line) for line in text_value.splitlines() if line.strip()]
+        elif data_format == "json":
+            payload = json.loads(text_value)
+            rows = payload if isinstance(payload, list) else [payload]
+        else:
+            raise HTTPException(status_code=422, detail=f"Unsupported S3 object format '{data_format}'")
+    except (csv.Error, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=f"S3 object '{object_key}' is not valid {data_format}") from exc
+    if not all(isinstance(row, dict) for row in rows):
+        raise HTTPException(status_code=422, detail=f"S3 object '{object_key}' must contain object records")
+    return [dict(row) for row in rows]
+
+
+class S3PullAdapter:
+    """Dependency-light S3-compatible snapshot and object-key incremental reader."""
+
+    id = "s3"
+    source_types = ["s3"]
+    modes = ["snapshot", "incremental"]
+
+    def config_schema(self) -> Dict[str, Any]:
+        return {
+            "required": ["bucket", "region"],
+            "properties": {
+                "bucket": {"type": "string"}, "region": {"type": "string"},
+                "endpoint_url": {"type": "string"}, "prefix": {"type": "string"},
+                "format": {"type": "string", "enum": ["auto", "csv", "json", "jsonl"]},
+                "max_objects": {"type": "integer", "default": 100},
+                "max_object_bytes": {"type": "integer", "default": 10000000},
+                "max_records": {"type": "integer", "default": 100000},
+            },
+            "credential": {"type": "aws", "metadata": ["access_key_id", "session_token"]},
+            "incremental_cursor_field": "_source_object_key",
+        }
+
+    def _request(self, context: AdapterContext, method: str, url: str, query: Dict[str, Any], max_bytes: int) -> tuple[bytes, Dict[str, str]]:
+        if context.credential_type != "aws" or not context.credential_secret:
+            raise HTTPException(status_code=422, detail="S3 connector requires an active AWS runtime credential")
+        access_key = str(context.credential_metadata.get("access_key_id") or "").strip()
+        if not access_key:
+            raise HTTPException(status_code=422, detail="S3 credential metadata requires access_key_id")
+        _validate_remote_url(url)
+        parsed = urllib.parse.urlsplit(url)
+        canonical_query = _aws_query(query)
+        request_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, canonical_query, ""))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = now.strftime("%Y%m%d")
+        payload_hash = hashlib.sha256(b"").hexdigest()
+        headers = {
+            "host": parsed.netloc,
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amz_date,
+        }
+        session_token = str(context.credential_metadata.get("session_token") or "").strip()
+        if session_token:
+            headers["x-amz-security-token"] = session_token
+        signed_headers = ";".join(sorted(headers))
+        canonical_headers = "".join(f"{key}:{headers[key].strip()}\n" for key in sorted(headers))
+        canonical_request = "\n".join([method, parsed.path or "/", canonical_query, canonical_headers, signed_headers, payload_hash])
+        region = str(context.config.get("region") or "us-east-1")
+        scope = f"{date_stamp}/{region}/s3/aws4_request"
+        string_to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical_request.encode()).hexdigest()])
+        signature = hmac.new(_aws_signing_key(context.credential_secret, date_stamp, region), string_to_sign.encode(), hashlib.sha256).hexdigest()
+        headers["authorization"] = f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
+        request = urllib.request.Request(request_url, headers=headers, method=method)
+        timeout = max(1, min(120, int(context.config.get("timeout_seconds", 30))))
+        try:
+            with urllib.request.build_opener(_SafeRedirectHandler()).open(request, timeout=timeout) as response:
+                _validate_remote_url(response.geturl())
+                raw = response.read(max_bytes + 1)
+                if len(raw) > max_bytes:
+                    raise HTTPException(status_code=413, detail="S3 response exceeded configured byte limit")
+                return raw, {str(key).lower(): str(value) for key, value in response.headers.items()}
+        except urllib.error.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"S3 endpoint returned HTTP {exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise HTTPException(status_code=502, detail="S3 endpoint request failed") from exc
+
+    def fetch(self, context: AdapterContext) -> AdapterResult:
+        config = context.config
+        bucket = str(config.get("bucket") or "").strip()
+        region = str(config.get("region") or "").strip()
+        if not bucket or not region or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{1,62}", bucket):
+            raise HTTPException(status_code=422, detail="S3 connector requires a valid bucket and region")
+        endpoint = str(config.get("endpoint_url") or f"https://s3.{region}.amazonaws.com").rstrip("/")
+        bucket_url = f"{endpoint}/{urllib.parse.quote(bucket, safe='-_.~')}"
+        max_objects = max(1, min(1000, int(config.get("max_objects", 100)), context.limit))
+        max_object_bytes = max(1024, min(100_000_000, int(config.get("max_object_bytes", 10_000_000))))
+        max_records = max(1, min(1_000_000, int(config.get("max_records", 100_000))))
+        query = {"list-type": "2", "max-keys": max_objects, "prefix": str(config.get("prefix") or "")}
+        if context.cursor is not None:
+            query["start-after"] = str(context.cursor)
+        listing, _ = self._request(context, "GET", bucket_url, query, min(5_000_000, max_object_bytes))
+        try:
+            root = ET.fromstring(listing)
+        except ET.ParseError as exc:
+            raise HTTPException(status_code=502, detail="S3 list response is not valid XML") from exc
+        objects = []
+        for item in root.findall(".//{*}Contents"):
+            key = item.findtext("{*}Key") or ""
+            if key:
+                objects.append({"key": key, "etag": (item.findtext("{*}ETag") or "").strip('"')})
+        records: List[Dict[str, Any]] = []
+        bytes_read = len(listing)
+        last_key = context.cursor
+        for item in objects:
+            key = item["key"]
+            object_url = f"{bucket_url}/{urllib.parse.quote(key, safe='/-_.~')}"
+            raw, _ = self._request(context, "GET", object_url, {}, max_object_bytes)
+            object_records = _s3_records(raw, key, str(config.get("format") or "auto"))
+            if len(records) + len(object_records) > max_records:
+                raise HTTPException(status_code=413, detail="S3 batch exceeded max_records; reduce max_objects or split source objects")
+            for row in object_records:
+                row.setdefault("_source_object_key", key)
+                row.setdefault("_source_object_etag", item["etag"])
+            records.extend(object_records)
+            bytes_read += len(raw)
+            last_key = key
+        return AdapterResult(
+            records=records,
+            next_cursor=last_key,
+            bytes_read=bytes_read,
+            metadata={"bucket": bucket, "prefix": query["prefix"], "objects_read": len(objects), "endpoint_host": urllib.parse.urlsplit(endpoint).hostname},
+        )
+
+
 register_adapter(RestPullAdapter())
 register_adapter(SqlPullAdapter())
+register_adapter(S3PullAdapter())
 _loaded_plugins = _load_plugins()
 
 
@@ -536,10 +708,17 @@ def create_runtime_credential(source_id: str, body: CredentialCreate, principal:
     ).all():
         existing.status = "ROTATED"
         existing.rotated_at = now
+    credential_metadata = dict(body.metadata)
+    secret_value = body.secret
+    if body.credential_type == "aws":
+        if not str(credential_metadata.get("access_key_id") or "").strip():
+            raise HTTPException(status_code=422, detail="AWS credential metadata requires access_key_id")
+        session_token = credential_metadata.pop("session_token", None)
+        secret_value = json.dumps({"secret_access_key": body.secret, "session_token": session_token}, separators=(",", ":"))
     row = ConnectorCredential(
         id=f"credential_{uuid.uuid4().hex}", project_id=source.project_id, source_id=source.id,
-        credential_type=body.credential_type, encrypted_secret=_encrypt_secret(body.secret),
-        metadata_=body.metadata, key_id=os.getenv("CONNECTOR_SECRET_KEY_ID", "default"), status="ACTIVE",
+        credential_type=body.credential_type, encrypted_secret=_encrypt_secret(secret_value),
+        metadata_=credential_metadata, key_id=os.getenv("CONNECTOR_SECRET_KEY_ID", "default"), status="ACTIVE",
         expires_at=body.expires_at, created_by=principal.id, created_at=now, rotated_at=None,
     )
     db.add(row)

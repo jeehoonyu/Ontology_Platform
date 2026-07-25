@@ -15,7 +15,7 @@ export function getConnectorAdapters(): Promise<ConnectorAdapterCatalog> {
 export function createConnectionSource(body: {
   id: string;
   display_name: string;
-  source_type: "rest" | "jdbc";
+  source_type: "rest" | "jdbc" | "s3" | "sftp" | "kafka";
   config: JsonObject;
 }): Promise<ConnectionSource> {
   return postJson<ConnectionSource>("/connections/sources", body);
@@ -26,7 +26,7 @@ export function getConnectionSource(sourceId: string): Promise<ConnectionSource>
 }
 
 export function rotateConnectorCredential(sourceId: string, body: {
-  credential_type: "bearer" | "api_key" | "basic";
+  credential_type: "bearer" | "api_key" | "basic" | "aws";
   secret: string;
   metadata: Record<string, string>;
 }): Promise<ConnectorCredentialMetadata> {

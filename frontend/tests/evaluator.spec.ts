@@ -80,6 +80,22 @@ test("data onboarding previews a live connector with write-only credentials and 
   }
 });
 
+test("data onboarding exposes structured S3 configuration without raw credentials", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the structured connector workflow once on desktop.");
+  await page.goto("/workspace/imports");
+  await page.getByLabel("Adapter").selectOption("s3");
+  await expect(page.getByLabel("S3 endpoint URL")).toBeVisible();
+  await expect(page.getByLabel("Bucket")).toBeVisible();
+  await expect(page.getByLabel("Region")).toBeVisible();
+  await expect(page.getByLabel("Object prefix")).toBeVisible();
+  await expect(page.getByLabel("Authentication")).toHaveValue("aws");
+  await expect(page.getByLabel("Access key ID")).toBeVisible();
+  await expect(page.getByLabel("Secret access key (write only)")).toHaveAttribute("type", "password");
+  await expect(page.getByLabel("Session token (optional, write only)")).toHaveAttribute("type", "password");
+  await expect(page.getByRole("cell", { name: "s3" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /s3 AVAILABLE/ })).toBeVisible();
+});
+
 test("runtime operations shows durable telemetry, budgets, and SLO controls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful runtime operations workflow once on desktop.");
   const projectId = `browser-runtime-${Date.now()}`;

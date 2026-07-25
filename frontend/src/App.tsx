@@ -419,13 +419,17 @@ function DataOnboarding() {
   const [connectorForm, setConnectorForm] = useState({
     sourceId: "react_live_rest_source",
     displayName: "Live Asset REST Source",
-    adapter: "rest" as "rest" | "jdbc",
+    adapter: "rest" as "rest" | "jdbc" | "s3",
     endpoint: "http://localhost:9100",
     recordsPath: "records",
     table: "assets",
-    credentialType: "bearer" as "bearer" | "api_key" | "basic",
+    bucket: "operations-data",
+    region: "us-west-2",
+    prefix: "assets/",
+    credentialType: "bearer" as "bearer" | "api_key" | "basic" | "aws",
     secret: "",
-    identity: ""
+    identity: "",
+    sessionToken: ""
   });
   const [streamReplay, setStreamReplay] = useState<JsonObject | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -494,7 +498,13 @@ function DataOnboarding() {
     try {
       const config: JsonObject = connectorForm.adapter === "rest"
         ? { execution_mode: "live", base_url: connectorForm.endpoint.trim(), records_path: connectorForm.recordsPath.trim() || "records" }
-        : { execution_mode: "live", sqlalchemy_url: connectorForm.endpoint.trim(), table: connectorForm.table.trim(), driver_class: "sqlalchemy" };
+        : connectorForm.adapter === "jdbc"
+          ? { execution_mode: "live", sqlalchemy_url: connectorForm.endpoint.trim(), table: connectorForm.table.trim(), driver_class: "sqlalchemy" }
+          : {
+              execution_mode: "live", endpoint_url: connectorForm.endpoint.trim(), bucket: connectorForm.bucket.trim(),
+              region: connectorForm.region.trim(), prefix: connectorForm.prefix.trim(), format: "auto",
+              max_objects: 100, max_object_bytes: 10_000_000, max_records: 100_000
+            };
       const source = await createConnectionSource({
         id: sourceId,
         display_name: connectorForm.displayName.trim(),
@@ -507,13 +517,15 @@ function DataOnboarding() {
           ? { header_name: connectorForm.identity.trim() || "X-API-Key" }
           : connectorForm.credentialType === "basic"
             ? { username: connectorForm.identity.trim() }
-            : {};
+            : connectorForm.credentialType === "aws"
+              ? { access_key_id: connectorForm.identity.trim(), ...(connectorForm.sessionToken ? { session_token: connectorForm.sessionToken } : {}) }
+              : {};
         await rotateConnectorCredential(source.id, {
           credential_type: connectorForm.credentialType,
           secret: connectorForm.secret,
           metadata
         });
-        setConnectorForm((current) => ({ ...current, secret: "" }));
+        setConnectorForm((current) => ({ ...current, secret: "", sessionToken: "" }));
       }
       const preview = await previewLiveConnector(source.id, 25);
       setSourcePreview(preview.preview_rows || []);
@@ -576,14 +588,22 @@ function DataOnboarding() {
       <div className="two-col connector-onboarding-grid">
         <Panel title="Live Connector" action={<button onClick={connectorPreview} disabled={connectorBusy || !connectorForm.sourceId.trim()}>{connectorBusy ? "Connecting..." : "Save and Preview"}</button>}>
           <div className="connector-form-grid">
-            <label><span>Adapter</span><select value={connectorForm.adapter} onChange={(event) => setConnectorForm((current) => ({ ...current, adapter: event.target.value as "rest" | "jdbc" }))}><option value="rest">REST API</option><option value="jdbc">PostgreSQL / SQL</option></select></label>
+            <label><span>Adapter</span><select value={connectorForm.adapter} onChange={(event) => {
+              const adapter = event.target.value as "rest" | "jdbc" | "s3";
+              setConnectorForm((current) => ({ ...current, adapter, credentialType: adapter === "s3" ? "aws" : current.credentialType === "aws" ? "bearer" : current.credentialType }));
+            }}><option value="rest">REST API</option><option value="jdbc">PostgreSQL / SQL</option><option value="s3">S3-compatible storage</option></select></label>
             <label><span>Source ID</span><input value={connectorForm.sourceId} onChange={(event) => setConnectorForm((current) => ({ ...current, sourceId: event.target.value }))} /></label>
             <label className="connector-wide-field"><span>Display name</span><input value={connectorForm.displayName} onChange={(event) => setConnectorForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
-            <label className="connector-wide-field"><span>{connectorForm.adapter === "rest" ? "Base URL" : "SQLAlchemy URL"}</span><input value={connectorForm.endpoint} onChange={(event) => setConnectorForm((current) => ({ ...current, endpoint: event.target.value }))} placeholder={connectorForm.adapter === "rest" ? "https://api.example.com/assets" : "postgresql+psycopg2://user@host/database"} /></label>
-            {connectorForm.adapter === "rest" ? <label><span>Records path</span><input value={connectorForm.recordsPath} onChange={(event) => setConnectorForm((current) => ({ ...current, recordsPath: event.target.value }))} /></label> : <label><span>Table</span><input value={connectorForm.table} onChange={(event) => setConnectorForm((current) => ({ ...current, table: event.target.value }))} /></label>}
-            <label><span>Authentication</span><select value={connectorForm.credentialType} onChange={(event) => setConnectorForm((current) => ({ ...current, credentialType: event.target.value as "bearer" | "api_key" | "basic" }))}><option value="bearer">Bearer token</option><option value="api_key">API key</option><option value="basic">Username/password</option></select></label>
-            {connectorForm.credentialType !== "bearer" && <label><span>{connectorForm.credentialType === "basic" ? "Username" : "Header name"}</span><input value={connectorForm.identity} onChange={(event) => setConnectorForm((current) => ({ ...current, identity: event.target.value }))} /></label>}
-            <label className="connector-wide-field"><span>{connectorForm.credentialType === "basic" ? "Password" : "Secret (write only)"}</span><input type="password" autoComplete="new-password" value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder={credentials.some((item) => item.status === "ACTIVE") ? "Leave blank to keep active credential" : "Optional for public sources"} /></label>
+            <label className="connector-wide-field"><span>{connectorForm.adapter === "rest" ? "Base URL" : connectorForm.adapter === "jdbc" ? "SQLAlchemy URL" : "S3 endpoint URL"}</span><input value={connectorForm.endpoint} onChange={(event) => setConnectorForm((current) => ({ ...current, endpoint: event.target.value }))} placeholder={connectorForm.adapter === "rest" ? "https://api.example.com/assets" : connectorForm.adapter === "jdbc" ? "postgresql+psycopg2://user@host/database" : "https://s3.us-west-2.amazonaws.com"} /></label>
+            {connectorForm.adapter === "rest" ? <label><span>Records path</span><input value={connectorForm.recordsPath} onChange={(event) => setConnectorForm((current) => ({ ...current, recordsPath: event.target.value }))} /></label> : connectorForm.adapter === "jdbc" ? <label><span>Table</span><input value={connectorForm.table} onChange={(event) => setConnectorForm((current) => ({ ...current, table: event.target.value }))} /></label> : <>
+              <label><span>Bucket</span><input value={connectorForm.bucket} onChange={(event) => setConnectorForm((current) => ({ ...current, bucket: event.target.value }))} /></label>
+              <label><span>Region</span><input value={connectorForm.region} onChange={(event) => setConnectorForm((current) => ({ ...current, region: event.target.value }))} /></label>
+              <label className="connector-wide-field"><span>Object prefix</span><input value={connectorForm.prefix} onChange={(event) => setConnectorForm((current) => ({ ...current, prefix: event.target.value }))} placeholder="assets/" /></label>
+            </>}
+            <label><span>Authentication</span><select value={connectorForm.credentialType} disabled={connectorForm.adapter === "s3"} onChange={(event) => setConnectorForm((current) => ({ ...current, credentialType: event.target.value as "bearer" | "api_key" | "basic" | "aws" }))}>{connectorForm.adapter === "s3" ? <option value="aws">AWS SigV4</option> : <><option value="bearer">Bearer token</option><option value="api_key">API key</option><option value="basic">Username/password</option></>}</select></label>
+            {connectorForm.credentialType !== "bearer" && <label><span>{connectorForm.credentialType === "basic" ? "Username" : connectorForm.credentialType === "aws" ? "Access key ID" : "Header name"}</span><input value={connectorForm.identity} onChange={(event) => setConnectorForm((current) => ({ ...current, identity: event.target.value }))} /></label>}
+            <label className="connector-wide-field"><span>{connectorForm.credentialType === "basic" ? "Password" : connectorForm.credentialType === "aws" ? "Secret access key (write only)" : "Secret (write only)"}</span><input type="password" autoComplete="new-password" value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder={credentials.some((item) => item.status === "ACTIVE") ? "Leave blank to keep active credential" : connectorForm.adapter === "s3" ? "Required for S3 access" : "Optional for public sources"} /></label>
+            {connectorForm.credentialType === "aws" && <label className="connector-wide-field"><span>Session token (optional, write only)</span><input type="password" autoComplete="new-password" value={connectorForm.sessionToken} onChange={(event) => setConnectorForm((current) => ({ ...current, sessionToken: event.target.value }))} /></label>}
           </div>
           <div className="connector-runtime-summary"><StatusBadge value={activeSource?.status || "NOT_CONNECTED"} /><span>{activeSource ? `${activeSource.display_name} uses ${activeSource.source_type}` : "Configure a live source to test access and inspect records."}</span></div>
           <DataTable rows={sourcePreview} empty="No live records previewed." />
