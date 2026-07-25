@@ -103,6 +103,8 @@ REST and JDBC source credentials are encrypted separately from source metadata a
 
 Register every production worker, set project queue concurrency, and drain workers before replacement. Monitor `/ui-state/worker-fleet` together with runtime SLOs; restored worker registrations remain offline until an operator resumes them. See `docs/WORKER_FLEET_CONTROL.md`.
 
+After the API is healthy, create a same-organization worker service account in **Control Panel -> Auth**, issue its one-time project execution token, set `WORKER_TOKEN`, and start the optional `workers` Compose profile. Worker tokens are stored as hashes and must use distinct stable `WORKER_NAME` values per replica. See `docs/WORKER_DAEMON.md`.
+
 Configure runtime-wide execution, compute, token, record, and cost budgets before opening a project to users. The Control Panel Runtime tab and `/runtime/observability/summary` expose project SLOs and correlated durable-job evidence. See `docs/RUNTIME_OBSERVABILITY.md`.
 
 ## Troubleshooting

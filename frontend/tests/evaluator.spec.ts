@@ -146,6 +146,33 @@ test("runtime operations shows durable telemetry, budgets, and SLO controls", as
   await expect(budgetPanel.getByRole("cell", { name: "executions" })).toBeVisible();
 });
 
+test("control panel issues a one-time project worker token and revokes it", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful worker credential workflow once on desktop.");
+  const suffix = Date.now();
+  const accountId = `browser-worker-${suffix}`;
+  await page.goto("/workspace/control-panel");
+  await page.getByRole("button", { name: "Auth", exact: true }).click();
+  const accountPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Create Worker Service Account" }) });
+  await accountPanel.getByLabel("Service account ID").fill(accountId);
+  await accountPanel.getByLabel("Display name").fill(`Browser Worker ${suffix}`);
+  await accountPanel.getByRole("button", { name: "Create" }).click();
+  const tokenPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Issue Project Worker Token" }) });
+  await tokenPanel.getByLabel("Service account").selectOption(accountId);
+  await tokenPanel.getByLabel("Project ID").fill("default");
+  await tokenPanel.getByRole("button", { name: "Issue once" }).click();
+  const secretField = tokenPanel.getByLabel("One-time worker token");
+  await expect(secretField).toHaveValue(/^tok_.{32,}$/);
+  const secret = await secretField.inputValue();
+  const apiTokenPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "API Tokens" }) });
+  await apiTokenPanel.getByLabel("Token to revoke").selectOption({ label: secret.slice(0, 12) });
+  await apiTokenPanel.getByRole("button", { name: "Revoke" }).click();
+  const revokedTokenRow = apiTokenPanel.getByRole("row").filter({ hasText: secret.slice(0, 12) });
+  await expect(revokedTokenRow.getByRole("cell", { name: "true", exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Auth", exact: true }).click();
+  await expect(page.locator("body")).not.toContainText(secret);
+});
+
 test("visual builder supports typed configuration, preview, save, and publish", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful builder workflow once on desktop.");
   await page.goto("/workspace/workshop");
@@ -379,6 +406,8 @@ test("platform graph supports selection, dragging, and neighborhood exploration"
   const canvas = page.locator(".platform-graph-canvas");
   const firstNode = canvas.locator(".react-flow__node").first();
   await expect(firstNode).toBeVisible();
+  await firstNode.click();
+  await expect(page.getByRole("button", { name: "Neighbors" })).toBeEnabled();
   const before = await firstNode.boundingBox();
   expect(before).not.toBeNull();
   await page.mouse.move((before?.x || 0) + (before?.width || 0) / 2, (before?.y || 0) + (before?.height || 0) / 2);
@@ -388,9 +417,7 @@ test("platform graph supports selection, dragging, and neighborhood exploration"
   const after = await firstNode.boundingBox();
   expect(after).not.toBeNull();
   expect(Math.abs((after?.x || 0) - (before?.x || 0)) + Math.abs((after?.y || 0) - (before?.y || 0))).toBeGreaterThan(5);
-  await firstNode.click();
   await expect(page.getByRole("heading", { name: "Selected Resource" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Neighbors" })).toBeEnabled();
 });
 
 test("ontology relationship designer creates a governed link by connecting ports", async ({ page }, testInfo) => {

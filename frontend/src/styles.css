@@ -2827,6 +2827,30 @@ pre {
   font-size: 12px;
 }
 
+.one-time-secret {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #d39b32;
+  border-radius: 6px;
+  background: #fff9eb;
+  color: #5f512f;
+}
+
+.one-time-secret > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.one-time-secret input {
+  width: 100%;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 @media (max-width: 640px) {
   .connector-form-grid {
     grid-template-columns: minmax(0, 1fr);

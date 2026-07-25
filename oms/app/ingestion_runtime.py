@@ -358,8 +358,12 @@ def enqueue_stream_replay(stream_id: str, body: EnqueueReplayRequest, principal:
 
 @router.post("/ingestion/workers/run-next")
 def run_next(body: WorkerRequest = WorkerRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    from . import worker_control
+    supported_job_types = worker_control.effective_worker_job_types(
+        db, principal, body.worker_id, ["ingestion.connector_sync", "ingestion.stream_replay"],
+    )
     claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
-        worker_id=body.worker_id, supported_job_types=["ingestion.connector_sync", "ingestion.stream_replay"],
+        worker_id=body.worker_id, supported_job_types=supported_job_types,
         lease_seconds=body.lease_seconds, job_id=body.job_id,
     ), principal, db).get("job")
     if not claimed:

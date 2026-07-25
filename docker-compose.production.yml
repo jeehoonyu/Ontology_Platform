@@ -39,6 +39,43 @@ services:
       timeout: 5s
       retries: 10
 
+  oms-worker:
+    profiles: ["workers"]
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    command: ["python", "-m", "app.worker_daemon"]
+    restart: unless-stopped
+    environment:
+      WORKER_API_URL: http://oms-api:8000
+      WORKER_TOKEN: ${WORKER_TOKEN:-}
+      WORKER_NAME: ${WORKER_NAME:-ontology-worker-1}
+      WORKER_PROJECT_ID: ${WORKER_PROJECT_ID:-default}
+      WORKER_JOB_TYPES: ${WORKER_JOB_TYPES:-pipeline.preview,pipeline.deliver,aip.agent.invoke,ingestion.connector_sync,ingestion.stream_replay}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-120}
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-20}
+      WORKER_HEALTH_PORT: "8091"
+    expose:
+      - "8091"
+    depends_on:
+      oms-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health/ready', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 256M
+
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped

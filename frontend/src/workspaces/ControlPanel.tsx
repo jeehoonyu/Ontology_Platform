@@ -619,6 +619,10 @@ function AuthSection() {
   const oauthClients = useAsyncState<admin.OAuthClient[]>(admin.listOAuthClients, [refreshKey]);
 
   const [providerForm, setProviderForm] = useState({ name: "", protocol: "saml" });
+  const [serviceForm, setServiceForm] = useState({ id: "", displayName: "", organizationId: "local" });
+  const [tokenForm, setTokenForm] = useState({ principalId: "", projectId: "default", ttlHours: "720" });
+  const [issuedToken, setIssuedToken] = useState<admin.IssuedApiToken | null>(null);
+  const [revokeTokenId, setRevokeTokenId] = useState("");
 
   const reload = () => setRefreshKey((key) => key + 1);
 
@@ -627,6 +631,49 @@ function AuthSection() {
     try {
       await admin.createAuthProvider({ name: providerForm.name.trim(), protocol: providerForm.protocol });
       setProviderForm({ name: "", protocol: "saml" });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function submitServiceAccount() {
+    if (!serviceForm.id.trim() || !serviceForm.displayName.trim()) return;
+    try {
+      const account = await admin.createServiceAccount({
+        id: serviceForm.id.trim(), display_name: serviceForm.displayName.trim(),
+        organization_id: serviceForm.organizationId.trim() || null
+      });
+      setTokenForm((current) => ({ ...current, principalId: account.id }));
+      setServiceForm({ id: "", displayName: "", organizationId: serviceForm.organizationId });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function submitWorkerToken() {
+    if (!tokenForm.principalId || !tokenForm.projectId.trim()) return;
+    try {
+      setIssuedToken(await admin.issueToken({
+        principal_type: "service_account", principal_id: tokenForm.principalId,
+        scopes: [`project:${tokenForm.projectId.trim()}:execute`],
+        ttl_seconds: Math.max(1, Number(tokenForm.ttlHours) || 1) * 3600
+      }));
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function revokeWorkerToken() {
+    if (!revokeTokenId) return;
+    try {
+      await admin.revokeToken(revokeTokenId);
+      setRevokeTokenId("");
       setError("");
       reload();
     } catch (err) {
@@ -663,10 +710,31 @@ function AuthSection() {
         </Panel>
       </div>
       <div className="two-col">
+        <Panel title="Create Worker Service Account" action={<button onClick={submitServiceAccount} disabled={!serviceForm.id.trim() || !serviceForm.displayName.trim()}>Create</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Service account ID" value={serviceForm.id} onChange={(value) => setServiceForm({ ...serviceForm, id: value })} placeholder="pipeline-worker-prod" />
+            <TextField label="Display name" value={serviceForm.displayName} onChange={(value) => setServiceForm({ ...serviceForm, displayName: value })} placeholder="Production pipeline worker" />
+            <TextField label="Organization ID" value={serviceForm.organizationId} onChange={(value) => setServiceForm({ ...serviceForm, organizationId: value })} placeholder="acme" />
+          </div>
+        </Panel>
+        <Panel title="Issue Project Worker Token" action={<button onClick={submitWorkerToken} disabled={!tokenForm.principalId || !tokenForm.projectId.trim()}>Issue once</button>}>
+          <div className="metadata-edit-grid">
+            <SelectField label="Service account" value={tokenForm.principalId} onChange={(value) => setTokenForm({ ...tokenForm, principalId: value })} placeholder="Choose account" options={(serviceAccounts.value || []).map((account) => ({ value: account.id, label: account.display_name }))} />
+            <TextField label="Project ID" value={tokenForm.projectId} onChange={(value) => setTokenForm({ ...tokenForm, projectId: value })} placeholder="operations" />
+            <TextField label="Lifetime (hours)" value={tokenForm.ttlHours} onChange={(value) => setTokenForm({ ...tokenForm, ttlHours: value })} type="number" />
+          </div>
+          {issuedToken ? <div className="one-time-secret" role="status">
+            <strong>Copy this token now</strong>
+            <span>It is shown once and cannot be retrieved again.</span>
+            <div><input aria-label="One-time worker token" readOnly value={issuedToken.token} /><button onClick={() => navigator.clipboard.writeText(issuedToken.token)}>Copy</button></div>
+          </div> : null}
+        </Panel>
+      </div>
+      <div className="two-col">
         <Panel title="Service Accounts">
           <DataTable rows={serviceAccounts.value || []} empty="No service accounts yet." />
         </Panel>
-        <Panel title="API Tokens">
+        <Panel title="API Tokens" action={<div className="button-row"><select aria-label="Token to revoke" value={revokeTokenId} onChange={(event) => setRevokeTokenId(event.target.value)}><option value="">Choose token</option>{(tokens.value || []).filter((token) => !token.revoked).map((token) => <option key={token.id} value={token.id}>{token.token_prefix || token.id}</option>)}</select><button onClick={revokeWorkerToken} disabled={!revokeTokenId}>Revoke</button></div>}>
           <DataTable rows={tokens.value || []} empty="No tokens issued yet." />
         </Panel>
       </div>

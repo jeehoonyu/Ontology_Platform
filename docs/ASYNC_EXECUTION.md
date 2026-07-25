@@ -53,6 +53,8 @@ The worker API requires the backend `execute` permission. Production workers sho
 
 Production workers should register through `PUT /runtime/workers/{worker_name}`. Registration constrains project scope, supported job types, and maximum concurrent leases. Drain and resume endpoints support rolling worker deployment without abandoning active jobs.
 
+The repository includes an independently deployable worker process at `python -m app.worker_daemon` and an optional production Compose `workers` profile. It uses a hashed, project-scoped service token, registers and heartbeats automatically, runs Pipeline, AIP Agent, and ingestion jobs concurrently, exposes container health, and drains on termination. See [Production Worker Daemon](WORKER_DAEMON.md).
+
 Project queue policies configure fair-share weight, hard project concurrency, and claim pause state. Dispatch is fair across projects and priority-ordered within a project. Postgres serializes the final project-capacity decision by locking the queue policy row before a lease is committed. See [Worker Fleet and Fair Queue Control](WORKER_FLEET_CONTROL.md).
 
 ## Pipeline Integration
