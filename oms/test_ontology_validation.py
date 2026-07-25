@@ -1,6 +1,8 @@
 import os
 import tempfile
 
+from sqlalchemy import text
+
 tmpdir = tempfile.TemporaryDirectory()
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'ontology_validation.db')}"
 
@@ -107,17 +109,18 @@ def main():
         assert failing_expectations["status"] == "FAIL"
         assert failing_expectations["summary"]["failure_count"] == 1
 
-        db.add(
-            models.LinkInstance(
-                id="broken_asset_work_order_link",
-                link_type_id="asset_has_work_order",
-                source_object_id="asset_pump_4",
-                target_object_id="missing_work_order",
-                properties={"source": "intentional_test_corruption"},
-                created_at=0,
-            )
-        )
+        # The validator must still detect corruption that originated outside the
+        # application boundary, so bypass enforced FKs explicitly for this row.
+        db.execute(text("PRAGMA foreign_keys=OFF"))
+        db.execute(text("""
+            INSERT INTO link_instances
+                (id, link_type_id, source_object_id, target_object_id, properties, created_at)
+            VALUES
+                ('broken_asset_work_order_link', 'asset_has_work_order', 'asset_pump_4',
+                 'missing_work_order', '{"source":"intentional_test_corruption"}', 0)
+        """))
         db.commit()
+        db.execute(text("PRAGMA foreign_keys=ON"))
 
         failed_validation = validate_ontology(db)
         assert failed_validation["status"] == "FAIL"

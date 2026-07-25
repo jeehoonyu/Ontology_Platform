@@ -393,6 +393,7 @@ def create_repository(body: RepoCreate, db: Session = Depends(get_db)):
                           language=body.language, template=body.template,
                           default_branch=body.default_branch, created_at=now, updated_at=now)
     db.add(repo)
+    db.flush()
     # seed the default branch
     db.add(CodeBranch(id=uuid.uuid4().hex, repository_id=rid, name=body.default_branch,
                       base_branch=body.default_branch, created_at=now))
