@@ -12,6 +12,7 @@ Worker deployment and queue recovery behavior is documented in [Asynchronous Exe
 3. Map provider roles to `viewer`, `editor`, `operator`, `approver`, `publisher`, or `administrator`. Override `OIDC_ROLES_CLAIM` when roles are stored under a different claim.
 4. Emit `organization_id` and a string-array `project_ids` claim. Effective access requires both a global role permission and project membership/claim. See [Project Tenancy And Ontology Packages](TENANCY_AND_PACKAGES.md).
 5. Point `PUBLIC_HOST` at the server. Caddy obtains and renews TLS certificates automatically for public DNS names.
+6. Generate a separate `CONNECTOR_SECRET_KEY`, configure `CONNECTOR_ALLOWED_HOSTS`, and keep private-network connector access disabled unless the API runs in a controlled connector subnet. See [Durable Ingestion Runtime](DURABLE_INGESTION_RUNTIME.md).
 
 Production startup fails when `AUTH_MODE` is not `oidc` or required OIDC settings are missing. The local administrator bypass is therefore unavailable in the production profile.
 
@@ -97,6 +98,8 @@ After restoration, verify `/health/ready`, sign in, inspect `/workspace/validati
 Database backup remains the authoritative disaster-recovery mechanism because it also preserves all audit, security, and runtime tables.
 
 Connector syncs and stream replays should be submitted through the durable `/ingestion/*` APIs in production. Configure project budgets before enabling schedules, monitor `/ingestion/summary`, and drain pending `/ingestion/dead-letters` during incident recovery. See `docs/DURABLE_INGESTION_RUNTIME.md` for the worker and recovery contract.
+
+REST and JDBC source credentials are encrypted separately from source metadata and never appear in portable project exports. Database backups preserve the encrypted values, but a portable project import requires an administrator to bind fresh runtime credentials before live execution.
 
 Register every production worker, set project queue concurrency, and drain workers before replacement. Monitor `/ui-state/worker-fleet` together with runtime SLOs; restored worker registrations remain offline until an operator resumes them. See `docs/WORKER_FLEET_CONTROL.md`.
 

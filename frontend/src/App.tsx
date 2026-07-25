@@ -41,7 +41,19 @@ import { Delivery } from "./workspaces/Delivery";
 import { PlatformGraphWorkspace } from "./workspaces/PlatformGraph";
 import { getAuthSession, logout, type AuthSession } from "./api/authApi";
 import { getJobSummary } from "./api/jobApi";
+import {
+  createConnectionSource,
+  getConnectionSource,
+  getConnectorAdapters,
+  listConnectorCredentials,
+  listConnectorFetchAttempts,
+  previewLiveConnector,
+  rotateConnectorCredential
+} from "./api/connectorApi";
 import type {
+  ConnectionSource,
+  ConnectorCredentialMetadata,
+  ConnectorFetchAttempt,
   CommandCenterSummary,
   CommandCenterUiState,
   ImportsUiState,
@@ -399,10 +411,27 @@ function DataOnboarding() {
   const [job, setJob] = useState<ImportJob | null>(null);
   const [suggestions, setSuggestions] = useState<TableRow[]>([]);
   const [sourcePreview, setSourcePreview] = useState<TableRow[]>([]);
+  const [activeSource, setActiveSource] = useState<ConnectionSource | null>(null);
+  const [credentials, setCredentials] = useState<ConnectorCredentialMetadata[]>([]);
+  const [fetchAttempts, setFetchAttempts] = useState<ConnectorFetchAttempt[]>([]);
+  const [connectorError, setConnectorError] = useState<string | null>(null);
+  const [connectorBusy, setConnectorBusy] = useState(false);
+  const [connectorForm, setConnectorForm] = useState({
+    sourceId: "react_live_rest_source",
+    displayName: "Live Asset REST Source",
+    adapter: "rest" as "rest" | "jdbc",
+    endpoint: "http://localhost:9100",
+    recordsPath: "records",
+    table: "assets",
+    credentialType: "bearer" as "bearer" | "api_key" | "basic",
+    secret: "",
+    identity: ""
+  });
   const [streamReplay, setStreamReplay] = useState<JsonObject | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const importsUi = useAsyncState<ImportsUiState>(getImportsState, [job?.id, streamReplay?.stream_id, refreshKey]);
   const jobs = useAsyncState<ImportJobsResponse>(() => api<ImportJobsResponse>("/imports/jobs"), [job?.id, streamReplay?.stream_id]);
+  const connectorCatalog = useAsyncState(getConnectorAdapters, [refreshKey]);
 
   async function createCsvJob() {
     setJob(await postJson<ImportJob>("/imports/csv", {
@@ -449,28 +478,53 @@ function DataOnboarding() {
     setRefreshKey((key) => key + 1);
   }
 
+  async function refreshConnectorEvidence(sourceId: string) {
+    const [credentialRows, attemptRows] = await Promise.all([
+      listConnectorCredentials(sourceId).catch(() => []),
+      listConnectorFetchAttempts(sourceId)
+    ]);
+    setCredentials(credentialRows);
+    setFetchAttempts(attemptRows);
+  }
+
   async function connectorPreview() {
-    const source = await postJson<JsonObject>("/connections/sources", {
-      id: "react_rest_source",
-      display_name: "React REST Source",
-      source_type: "rest",
-      config: {
-        base_url: "http://localhost:9000/mock-assets",
-        sample_records: [{ asset_id: "asset_connector_1", name: "Connector Pump", status: "RUNNING", criticality: "medium" }]
+    setConnectorBusy(true);
+    setConnectorError(null);
+    const sourceId = connectorForm.sourceId.trim();
+    try {
+      const config: JsonObject = connectorForm.adapter === "rest"
+        ? { execution_mode: "live", base_url: connectorForm.endpoint.trim(), records_path: connectorForm.recordsPath.trim() || "records" }
+        : { execution_mode: "live", sqlalchemy_url: connectorForm.endpoint.trim(), table: connectorForm.table.trim(), driver_class: "sqlalchemy" };
+      const source = await createConnectionSource({
+        id: sourceId,
+        display_name: connectorForm.displayName.trim(),
+        source_type: connectorForm.adapter,
+        config
+      }).catch(() => getConnectionSource(sourceId));
+      setActiveSource(source);
+      if (connectorForm.secret) {
+        const metadata: Record<string, string> = connectorForm.credentialType === "api_key"
+          ? { header_name: connectorForm.identity.trim() || "X-API-Key" }
+          : connectorForm.credentialType === "basic"
+            ? { username: connectorForm.identity.trim() }
+            : {};
+        await rotateConnectorCredential(source.id, {
+          credential_type: connectorForm.credentialType,
+          secret: connectorForm.secret,
+          metadata
+        });
+        setConnectorForm((current) => ({ ...current, secret: "" }));
       }
-    }).catch(() => api<JsonObject>("/connections/sources/react_rest_source"));
-    const sourceId = asString(source.id);
-    const preview = await postJson<{ preview_rows?: TableRow[] }>(`/connections/sources/${encodeURIComponent(sourceId)}/preview`, { limit: 10 });
-    setSourcePreview(preview.preview_rows || []);
-    const importJob = await postJson<{ job?: ImportJob }>(`/connections/sources/${encodeURIComponent(sourceId)}/generate-import-job`, {
-      id: "react_connector_import",
-      display_name: "React Connector Import",
-      target_dataset_id: "react_connector_dataset",
-      template: "asset",
-      actor: "react"
-    }).catch(() => api<ImportJob>("/imports/jobs/react_connector_import"));
-    setJob((importJob as { job?: ImportJob }).job || (importJob as ImportJob));
-    setRefreshKey((key) => key + 1);
+      const preview = await previewLiveConnector(source.id, 25);
+      setSourcePreview(preview.preview_rows || []);
+      await refreshConnectorEvidence(source.id);
+    } catch (error) {
+      setConnectorError(error instanceof Error ? error.message : "Connector preview failed");
+      if (sourceId) await listConnectorFetchAttempts(sourceId).then(setFetchAttempts).catch(() => undefined);
+    } finally {
+      setConnectorBusy(false);
+      setRefreshKey((key) => key + 1);
+    }
   }
 
   async function replayStream() {
@@ -494,7 +548,7 @@ function DataOnboarding() {
 
   return (
     <Page title="Data Onboarding" subtitle="Upload, map, transform, connect, and replay data before promotion.">
-      <ErrorBanner message={importsUi.error} />
+      <ErrorBanner message={importsUi.error || connectorCatalog.error || connectorError || undefined} />
       {(importsUi.loading || jobs.loading) && <LoadingState label="Loading import endpoints..." />}
       <WarningList warnings={importsUi.value?.warnings} />
       <div className="workspace-summary-row">
@@ -519,9 +573,20 @@ function DataOnboarding() {
           <DataTable rows={suggestions} empty="Create an import job, then request mapping suggestions." />
         </Panel>
       </div>
-      <div className="two-col">
-        <Panel title="Hybrid Connector Preview" action={<button onClick={connectorPreview}>Preview REST Source</button>}>
-          <DataTable rows={sourcePreview} />
+      <div className="two-col connector-onboarding-grid">
+        <Panel title="Live Connector" action={<button onClick={connectorPreview} disabled={connectorBusy || !connectorForm.sourceId.trim()}>{connectorBusy ? "Connecting..." : "Save and Preview"}</button>}>
+          <div className="connector-form-grid">
+            <label><span>Adapter</span><select value={connectorForm.adapter} onChange={(event) => setConnectorForm((current) => ({ ...current, adapter: event.target.value as "rest" | "jdbc" }))}><option value="rest">REST API</option><option value="jdbc">PostgreSQL / SQL</option></select></label>
+            <label><span>Source ID</span><input value={connectorForm.sourceId} onChange={(event) => setConnectorForm((current) => ({ ...current, sourceId: event.target.value }))} /></label>
+            <label className="connector-wide-field"><span>Display name</span><input value={connectorForm.displayName} onChange={(event) => setConnectorForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
+            <label className="connector-wide-field"><span>{connectorForm.adapter === "rest" ? "Base URL" : "SQLAlchemy URL"}</span><input value={connectorForm.endpoint} onChange={(event) => setConnectorForm((current) => ({ ...current, endpoint: event.target.value }))} placeholder={connectorForm.adapter === "rest" ? "https://api.example.com/assets" : "postgresql+psycopg2://user@host/database"} /></label>
+            {connectorForm.adapter === "rest" ? <label><span>Records path</span><input value={connectorForm.recordsPath} onChange={(event) => setConnectorForm((current) => ({ ...current, recordsPath: event.target.value }))} /></label> : <label><span>Table</span><input value={connectorForm.table} onChange={(event) => setConnectorForm((current) => ({ ...current, table: event.target.value }))} /></label>}
+            <label><span>Authentication</span><select value={connectorForm.credentialType} onChange={(event) => setConnectorForm((current) => ({ ...current, credentialType: event.target.value as "bearer" | "api_key" | "basic" }))}><option value="bearer">Bearer token</option><option value="api_key">API key</option><option value="basic">Username/password</option></select></label>
+            {connectorForm.credentialType !== "bearer" && <label><span>{connectorForm.credentialType === "basic" ? "Username" : "Header name"}</span><input value={connectorForm.identity} onChange={(event) => setConnectorForm((current) => ({ ...current, identity: event.target.value }))} /></label>}
+            <label className="connector-wide-field"><span>{connectorForm.credentialType === "basic" ? "Password" : "Secret (write only)"}</span><input type="password" autoComplete="new-password" value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder={credentials.some((item) => item.status === "ACTIVE") ? "Leave blank to keep active credential" : "Optional for public sources"} /></label>
+          </div>
+          <div className="connector-runtime-summary"><StatusBadge value={activeSource?.status || "NOT_CONNECTED"} /><span>{activeSource ? `${activeSource.display_name} uses ${activeSource.source_type}` : "Configure a live source to test access and inspect records."}</span></div>
+          <DataTable rows={sourcePreview} empty="No live records previewed." />
         </Panel>
         <Panel title="Stream Replay" action={<button onClick={replayStream}>Replay Sensor Stream</button>}>
           {streamReplay ? <KeyValueGrid data={{
@@ -530,6 +595,14 @@ function DataOnboarding() {
             target_asset_id: streamReplay.target_asset_id,
             record_count: streamReplay.record_count,
           }} /> : <div className="empty">Replay stream data into a local dataset.</div>}
+        </Panel>
+      </div>
+      <div className="two-col">
+        <Panel title="Connector Adapters">
+          <DataTable rows={(connectorCatalog.value?.adapters || []).map((adapter) => ({ adapter: adapter.id, status: adapter.available ? "AVAILABLE" : "PLUGIN_REQUIRED", modes: adapter.modes?.join(", ") || "-", reason: adapter.reason || "Installed" }))} empty="No connector adapters are registered." />
+        </Panel>
+        <Panel title="Fetch Evidence">
+          <DataTable rows={fetchAttempts.map((attempt) => ({ status: attempt.status, adapter: attempt.adapter_id, operation: attempt.operation, records: attempt.records_read, bytes: attempt.bytes_read, duration_ms: attempt.duration_ms, error: attempt.error || "-" }))} empty="Run a live preview to create durable fetch evidence." />
         </Panel>
       </div>
       <Panel title="Sample Templates">
