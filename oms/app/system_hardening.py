@@ -38,6 +38,7 @@ from . import (
     streaming,
     tenancy,
     webhooks_ops,
+    worker_control,
 )
 from .database import Base, get_db
 
@@ -105,6 +106,8 @@ CORE_TABLES = [
     "runtime_budget_policies",
     "runtime_slo_policies",
     "runtime_slo_evaluations",
+    "runtime_workers",
+    "runtime_queue_policies",
     "auth_sessions",
     "auth_oidc_flows",
     "connection_sources",
@@ -127,7 +130,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -139,6 +142,7 @@ MIGRATIONS = [
     {"version": 8, "name": "project_tenancy_and_governed_ontology_packages", "status": "applied"},
     {"version": 9, "name": "project_scoped_durable_ingestion_runtime", "status": "applied"},
     {"version": 10, "name": "runtime_observability_budgets_and_slos", "status": "applied"},
+    {"version": 11, "name": "distributed_worker_fleet_and_queue_policies", "status": "applied"},
 ]
 
 
@@ -191,6 +195,8 @@ def _ensure_runtime_tables(db: Session) -> None:
         runtime_observability.RuntimeBudgetPolicy.__table__,
         runtime_observability.RuntimeSloPolicy.__table__,
         runtime_observability.RuntimeSloEvaluation.__table__,
+        worker_control.RuntimeWorker.__table__,
+        worker_control.RuntimeQueuePolicy.__table__,
     ):
         table.create(bind=db.get_bind(), checkfirst=True)
     _ensure_column(db, "streams", "archive_policy", "JSON")
@@ -463,6 +469,14 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "project_id", "policy_id", "status", "observed_value", "threshold", "sample_count", "details", "created_at"])
             for row in db.query(runtime_observability.RuntimeSloEvaluation).all()
         ],
+        "runtime_workers": [
+            _row_dict(row, ["id", "organization_id", "worker_name", "principal_id", "project_id", "status", "supported_job_types", "max_concurrency", "labels", "started_at", "heartbeat_at", "last_claimed_at", "drain_requested_at"])
+            for row in db.query(worker_control.RuntimeWorker).all()
+        ],
+        "runtime_queue_policies": [
+            _row_dict(row, ["id", "project_id", "weight", "max_concurrency", "paused", "updated_by", "created_at", "updated_at"])
+            for row in db.query(worker_control.RuntimeQueuePolicy).all()
+        ],
     }
 
 
@@ -582,6 +596,8 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "runtime_budget_policies",
         "runtime_slo_policies",
         "runtime_slo_evaluations",
+        "runtime_workers",
+        "runtime_queue_policies",
     ]
     missing = [key for key in expected if key not in snapshot]
     counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
@@ -1075,6 +1091,15 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
     for row in snapshot.get("runtime_slo_evaluations") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, runtime_observability.RuntimeSloEvaluation, row, ["id", "project_id", "policy_id", "status", "observed_value", "threshold", "sample_count", "details", "created_at"]))
+    for row in snapshot.get("runtime_workers") or []:
+        row.setdefault("started_at", now)
+        row.setdefault("heartbeat_at", now)
+        row["status"] = "OFFLINE"
+        track(_upsert_model(db, worker_control.RuntimeWorker, row, ["id", "organization_id", "worker_name", "principal_id", "project_id", "status", "supported_job_types", "max_concurrency", "labels", "started_at", "heartbeat_at", "last_claimed_at", "drain_requested_at"]))
+    for row in snapshot.get("runtime_queue_policies") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, worker_control.RuntimeQueuePolicy, row, ["id", "project_id", "weight", "max_concurrency", "paused", "updated_by", "created_at", "updated_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
