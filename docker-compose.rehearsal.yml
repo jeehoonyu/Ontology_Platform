@@ -48,6 +48,9 @@ services:
       OIDC_REDIRECT_URI: http://localhost:18000/auth/callback
       SESSION_TTL_SECONDS: "3600"
       FORWARDED_ALLOW_IPS: "*"
+      CONNECTOR_SECRET_KEY: ${REHEARSAL_CONNECTOR_SECRET_KEY:?set REHEARSAL_CONNECTOR_SECRET_KEY}
+      CONNECTOR_SECRET_KEY_ID: rehearsal-v1
+      CONNECTOR_ALLOW_PRIVATE_NETWORKS: "false"
     extra_hosts:
       - "idp.localhost:host-gateway"
     ports:

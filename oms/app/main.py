@@ -89,6 +89,7 @@ from . import (
     ingestion_runtime,
     runtime_observability,
     worker_control,
+    connector_runtime,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -240,6 +241,7 @@ for _ext_module in (
     ingestion_runtime,
     runtime_observability,
     worker_control,
+    connector_runtime,
 ):
     app.include_router(_ext_module.router)
 

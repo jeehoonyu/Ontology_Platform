@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base, get_db
 from .production_auth import Principal, require_permission
-from . import admin_usage, connectivity, models, models_action, ops_control, platform_runtime, streaming, tenancy
+from . import admin_usage, connectivity, connectivity_ops, connector_runtime, models, models_action, ops_control, platform_runtime, streaming, tenancy
 
 router = APIRouter(tags=["ingestion_runtime"])
 
@@ -219,18 +219,65 @@ def _execute_sync(db: Session, run: IngestionRun, payload: Dict[str, Any]) -> Di
     asset = db.get(models.DataAsset, sync.target_asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail=f"Target dataset '{sync.target_asset_id}' not found")
-    records, rejected = _valid_records(db, run, payload.get("records") if payload.get("records") is not None else list(sync.sample_records or []))
+    source = db.get(connectivity.ConnectionSource, sync.source_id)
+    if not source or source.project_id != run.project_id:
+        raise HTTPException(status_code=404, detail="Project-scoped connection source not found")
+    supplied_records = payload.get("records")
+    live = supplied_records is None and str((source.config or {}).get("execution_mode") or "sample").lower() == "live"
+    state = db.get(connectivity_ops.SyncCursorState, sync.id) if sync.mode == "incremental" else None
+    previous_cursor = state.last_value.get("value") if state and isinstance(state.last_value, dict) else None
+    adapter_result = None
+    if live:
+        adapter_result = connector_runtime.fetch_records(
+            db, source, cursor=previous_cursor, cursor_field=sync.cursor_field,
+            limit=max(1, min(100000, int((source.config or {}).get("batch_size", 1000)))),
+            sync_id=sync.id, ingestion_run_id=run.id, operation="sync",
+        )
+        source_records: List[Any] = adapter_result.records
+    else:
+        source_records = supplied_records if supplied_records is not None else list(sync.sample_records or [])
+    if sync.mode == "incremental":
+        if not sync.cursor_field:
+            raise HTTPException(status_code=422, detail="Incremental sync requires a cursor_field")
+
+        def newer(value: Any) -> bool:
+            if previous_cursor is None:
+                return True
+            try:
+                return value > previous_cursor
+            except TypeError:
+                return str(value) > str(previous_cursor)
+
+        source_records = [row for row in source_records if isinstance(row, dict) and row.get(sync.cursor_field) is not None and newer(row.get(sync.cursor_field))]
+    records, rejected = _valid_records(db, run, source_records)
     payload_bytes = _payload_size(records)
     budget_checks = _budget_check(db, run.project_id, len(records), payload_bytes)
     asset.records = list(asset.records or []) + records
-    asset.asset_schema = {**dict(asset.asset_schema or {}), "project_id": run.project_id, "last_ingestion_run_id": run.id}
+    asset.asset_schema = {**dict(asset.asset_schema or {}), "project_id": run.project_id, "last_ingestion_run_id": run.id, "source_adapter_id": connector_runtime.adapter_id_for_source(source) if live else "sample"}
     asset.updated_at = _now()
+    next_cursor = previous_cursor
+    if sync.mode == "incremental" and sync.cursor_field:
+        cursor_values = [row.get(sync.cursor_field) for row in records if row.get(sync.cursor_field) is not None]
+        next_cursor = max(cursor_values) if cursor_values else previous_cursor
+        if state:
+            state.last_value = {"value": next_cursor}
+            state.cursor_field = sync.cursor_field
+            state.runs += 1
+            state.updated_at = _now()
+        else:
+            db.add(connectivity_ops.SyncCursorState(sync_id=sync.id, cursor_field=sync.cursor_field, last_value={"value": next_cursor}, runs=1, updated_at=_now()))
     sync_run = connectivity.SyncRun(
         id=f"sync_{run.id}", sync_id=sync.id, status="completed" if not rejected else "completed_with_errors",
         records_in=len(records) + rejected, records_out=len(records), created_at=run.started_at or _now(), completed_at=_now(),
     )
     db.add(sync_run)
-    return {"records_in": len(records) + rejected, "records_out": len(records), "rejected": rejected, "bytes_processed": payload_bytes, "budget_checks": budget_checks, "target_asset_id": sync.target_asset_id}
+    return {
+        "records_in": len(records) + rejected, "records_out": len(records), "rejected": rejected,
+        "bytes_processed": payload_bytes, "budget_checks": budget_checks, "target_asset_id": sync.target_asset_id,
+        "adapter_id": connector_runtime.adapter_id_for_source(source) if live else "sample", "live_fetch": live,
+        "previous_cursor": previous_cursor, "next_cursor": next_cursor,
+        "fetch_metadata": adapter_result.metadata if adapter_result else {},
+    }
 
 
 def _execute_replay(db: Session, run: IngestionRun, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,13 +339,8 @@ def _finish_run(db: Session, run: IngestionRun, result: Dict[str, Any]) -> None:
 
 @router.get("/ingestion/connectors/catalog")
 def connector_catalog(principal: Principal = Depends(require_permission("view"))):
-    return {"adapters": [
-        {"id": "rest", "modes": ["snapshot", "incremental"], "config_fields": ["base_url", "endpoint"], "supports_preview": True},
-        {"id": "jdbc", "modes": ["snapshot", "incremental"], "config_fields": ["host", "database"], "supports_preview": True},
-        {"id": "s3", "modes": ["snapshot", "incremental"], "config_fields": ["bucket"], "supports_preview": True},
-        {"id": "sftp", "modes": ["snapshot", "incremental"], "config_fields": ["host", "path"], "supports_preview": True},
-        {"id": "kafka", "modes": ["stream"], "config_fields": ["brokers", "topic"], "supports_preview": True},
-    ], "runtime": "durable_project_scoped"}
+    catalog = connector_runtime.adapter_catalog(principal)
+    return {**catalog, "runtime": "durable_project_scoped_live_adapters"}
 
 
 @router.post("/ingestion/syncs/{sync_id}/enqueue", status_code=202)

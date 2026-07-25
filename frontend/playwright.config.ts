@@ -25,7 +25,9 @@ export default defineConfig({
     env: {
       DATABASE_URL: "sqlite:///playwright.db",
       APP_ENV: "test",
-      AUTH_MODE: "local"
+      AUTH_MODE: "local",
+      CONNECTOR_ALLOW_PRIVATE_NETWORKS: "true",
+      CONNECTOR_SECRET_KEY: "playwright-isolated-connector-key"
     },
     reuseExistingServer: false,
     timeout: 120_000

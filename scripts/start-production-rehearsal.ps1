@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PilotViewerPassword,
     [string]$PostgresPassword = "rehearsal-postgres-only",
+    [string]$ConnectorSecretKey = "",
     [string]$ProjectName = "ontology_rehearsal"
 )
 
@@ -14,6 +15,12 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $projectRoot "docker-compose.rehearsal.yml"
 $env:REHEARSAL_KEYCLOAK_ADMIN_PASSWORD = $KeycloakAdminPassword
 $env:REHEARSAL_POSTGRES_PASSWORD = $PostgresPassword
+if (-not $ConnectorSecretKey) {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $ConnectorSecretKey = [Convert]::ToBase64String($bytes)
+}
+$env:REHEARSAL_CONNECTOR_SECRET_KEY = $ConnectorSecretKey
 $compose = @("compose", "-p", $ProjectName, "-f", $composeFile)
 
 & docker @compose up --build -d

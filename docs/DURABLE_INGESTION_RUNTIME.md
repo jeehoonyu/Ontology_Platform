@@ -35,4 +35,17 @@ The local cost estimate is deterministic and intended for governance testing. Pr
 
 ## Connector Adapters
 
-`GET /ingestion/connectors/catalog` describes the built-in REST, JDBC, S3, SFTP, and Kafka adapter contracts. The deterministic local runtime uses configured sample records in tests; external adapter processes can supply fetched records to the enqueue contract without bypassing project authorization, budgets, job leases, or audit evidence.
+`GET /connectors/adapters` is the executable adapter catalog. REST and JDBC adapters fetch live records inside the durable ingestion boundary. S3, SFTP, and Kafka appear as unavailable until a deployment registers a plugin through `CONNECTOR_PLUGIN_MODULES`; the API does not advertise those integrations as implemented when no adapter is installed.
+
+Live REST sources enforce response limits, timeouts, redirect validation, and SSRF controls. Live JDBC sources accept PostgreSQL or local-development SQLite, reject mutating SQL, and require parameterized limits and cursors for custom queries. SQLite sources are disabled in the production profile unless explicitly enabled.
+
+Credentials are stored separately from source configuration using Fernet encryption. Set `CONNECTOR_SECRET_KEY` and rotate `CONNECTOR_SECRET_KEY_ID` through deployment operations. Credential read APIs return metadata only; secrets are write-only. Portable project JSON exports intentionally omit credentials, while database backup and restore preserve encrypted credential rows. Rebind credentials after importing a portable project snapshot.
+
+Use these operational APIs:
+
+- `POST /connections/sources/{id}/runtime-credentials` rotates a bearer token, API key, or basic-auth password.
+- `POST /connections/sources/{id}/live-preview` verifies a live source and persists fetch evidence.
+- `GET /connections/sources/{id}/fetch-attempts` returns durable success/failure evidence without exposing secrets.
+- `/ingestion/syncs/{id}/enqueue` and `/ingestion/workers/run-next` execute live fetches through leases, retries, cursor commits, budgets, dead letters, and idempotent dataset writes.
+
+Production REST egress denies private, loopback, link-local, and unspecified addresses by default. Use `CONNECTOR_ALLOWED_HOSTS` for explicit destination names. `CONNECTOR_ALLOW_PRIVATE_NETWORKS=true` is intended only for controlled connector networks and local demonstrations.

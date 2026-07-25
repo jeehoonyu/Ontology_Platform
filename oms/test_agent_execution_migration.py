@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(agent_tool_runs)")}
 
     assert {"retrieval", "policy_summary", "execution_job_id"} <= columns, columns
-    assert version == "0009_worker_fleet_control", version
+    assert version == "0010_live_connector_runtime", version
     assert legacy == ("legacy-run", "legacy answer"), legacy
     assert "ix_agent_tool_runs_execution_job_id" in indexes, indexes
     assert {"platform_artifact_collaborators", "platform_artifact_collaboration_events"} <= tables, tables
@@ -61,5 +61,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
     assert {"ingestion_runs", "ingestion_budgets", "ingestion_dead_letters"} <= tables, tables
     assert {"runtime_job_observations", "runtime_budget_policies", "runtime_slo_policies", "runtime_slo_evaluations"} <= tables, tables
     assert {"runtime_workers", "runtime_queue_policies"} <= tables, tables
+    assert {"connector_credentials", "connector_fetch_attempts"} <= tables, tables
 
 print("\nAgent execution migration verified: legacy evidence preserved and schema upgraded.")

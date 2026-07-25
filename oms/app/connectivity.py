@@ -6,7 +6,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import String, Integer, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
@@ -117,6 +117,19 @@ class ConnectionSourceRead(BaseModel):
     status: str
     created_at: int
 
+    @field_serializer("config")
+    def serialize_config(self, value: Dict[str, Any]) -> Dict[str, Any]:
+        sensitive = ("password", "secret", "token", "api_key", "private_key", "authorization")
+
+        def redact(item: Any) -> Any:
+            if isinstance(item, dict):
+                return {key: ("***" if any(marker in str(key).lower() for marker in sensitive) else redact(child)) for key, child in item.items()}
+            if isinstance(item, list):
+                return [redact(child) for child in item]
+            return item
+
+        return redact(value or {})
+
 
 class ConnectionSyncCreate(BaseModel):
     id: Optional[str] = None
@@ -194,7 +207,7 @@ class SyncValidateRequest(BaseModel):
 # a requirement is either a single key (str) that must be present, or a tuple of
 # alternative keys where at least one must be present (e.g. password OR private_key).
 REQUIRED_CONFIG_KEYS: Dict[str, List[Any]] = {
-    "jdbc": ["jdbc_url", "driver_class"],
+    "jdbc": [("jdbc_url", "sqlalchemy_url"), "driver_class"],
     "s3": ["bucket", "region"],
     "sftp": ["host", "username", ("password", "private_key")],
     "rest": ["base_url"],
@@ -357,7 +370,11 @@ def test_source(source_id: str, actor: str = Query(default="system"), principal:
 
     checks = _validate_source_config(source.source_type, source.config or {})
     ok = all(c["present"] for c in checks)
-    missing = [c["key"] for c in checks if not c["present"]]
+    missing = [
+        key
+        for check in checks if not check["present"]
+        for key in str(check["key"]).split(" | ")
+    ]
 
     db.add(models_action.AuditLog(
         id=uuid.uuid4().hex,

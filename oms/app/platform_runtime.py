@@ -509,11 +509,20 @@ def _event_dict(row: ArtifactCollaborationEvent) -> Dict[str, Any]:
 
 
 def _prune_collaborators(db: Session, row: PlatformArtifact) -> int:
+    cutoff = _now()
     expired = db.query(ArtifactCollaborationParticipant).filter(
         ArtifactCollaborationParticipant.artifact_id == row.id,
-        ArtifactCollaborationParticipant.expires_at <= _now(),
+        ArtifactCollaborationParticipant.expires_at <= cutoff,
     ).all()
+    removed = 0
     for participant in expired:
+        deleted = db.query(ArtifactCollaborationParticipant).filter(
+            ArtifactCollaborationParticipant.id == participant.id,
+            ArtifactCollaborationParticipant.expires_at <= cutoff,
+        ).delete(synchronize_session=False)
+        if not deleted:
+            continue
+        removed += 1
         _collaboration_event(
             db,
             row,
@@ -522,8 +531,8 @@ def _prune_collaborators(db: Session, row: PlatformArtifact) -> int:
             participant_id=participant.id,
             payload={"reason": "expired", "client_id": participant.client_id},
         )
-        db.delete(participant)
-    return len(expired)
+        db.expunge(participant)
+    return removed
 
 
 def _require_collaborator(
@@ -1356,20 +1365,40 @@ def heartbeat_artifact_collaboration(
 ):
     row = _artifact_for(db, artifact_id, principal, "edit")
     participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
-    participant.cursor = body.cursor
-    participant.selection = [str(value) for value in body.selection]
-    participant.heartbeat_at = _now()
-    participant.expires_at = participant.heartbeat_at + body.ttl_seconds
+    participant_id = participant.id
+    participant_payload = _participant_dict(participant)
+    now = _now()
+    selection = [str(value) for value in body.selection]
+    expires_at = now + body.ttl_seconds
+    updated = db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.id == participant_id,
+        ArtifactCollaborationParticipant.principal_id == principal.id,
+        ArtifactCollaborationParticipant.expires_at > now,
+    ).update({
+        ArtifactCollaborationParticipant.cursor: body.cursor,
+        ArtifactCollaborationParticipant.selection: selection,
+        ArtifactCollaborationParticipant.heartbeat_at: now,
+        ArtifactCollaborationParticipant.expires_at: expires_at,
+    }, synchronize_session=False)
+    if not updated:
+        db.rollback()
+        raise HTTPException(status_code=410, detail="Collaboration participant session expired")
     _collaboration_event(
         db,
         row,
         "presence.updated",
         actor=principal.id,
-        participant_id=participant.id,
-        payload={"cursor": body.cursor, "selection": participant.selection},
+        participant_id=participant_id,
+        payload={"cursor": body.cursor, "selection": selection},
     )
     db.commit()
-    return _participant_dict(participant)
+    return {
+        **participant_payload,
+        "cursor": body.cursor,
+        "selection": selection,
+        "heartbeat_at": now,
+        "expires_at": expires_at,
+    }
 
 
 @router.post("/artifacts/{artifact_id}/collaboration/leave")
