@@ -22,6 +22,7 @@ from . import (
     apps,
     connectivity,
     connectivity_ops,
+    connector_runtime,
     imports_ops,
     ingestion_runtime,
     investigations,
@@ -108,6 +109,8 @@ CORE_TABLES = [
     "runtime_slo_evaluations",
     "runtime_workers",
     "runtime_queue_policies",
+    "connector_credentials",
+    "connector_fetch_attempts",
     "auth_sessions",
     "auth_oidc_flows",
     "connection_sources",
@@ -130,7 +133,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -143,6 +146,7 @@ MIGRATIONS = [
     {"version": 9, "name": "project_scoped_durable_ingestion_runtime", "status": "applied"},
     {"version": 10, "name": "runtime_observability_budgets_and_slos", "status": "applied"},
     {"version": 11, "name": "distributed_worker_fleet_and_queue_policies", "status": "applied"},
+    {"version": 12, "name": "encrypted_live_connector_adapter_runtime", "status": "applied"},
 ]
 
 
@@ -197,6 +201,8 @@ def _ensure_runtime_tables(db: Session) -> None:
         runtime_observability.RuntimeSloEvaluation.__table__,
         worker_control.RuntimeWorker.__table__,
         worker_control.RuntimeQueuePolicy.__table__,
+        connector_runtime.ConnectorCredential.__table__,
+        connector_runtime.ConnectorFetchAttempt.__table__,
     ):
         table.create(bind=db.get_bind(), checkfirst=True)
     _ensure_column(db, "streams", "archive_policy", "JSON")
@@ -477,6 +483,10 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "project_id", "weight", "max_concurrency", "paused", "updated_by", "created_at", "updated_at"])
             for row in db.query(worker_control.RuntimeQueuePolicy).all()
         ],
+        "connector_fetch_attempts": [
+            _row_dict(row, ["id", "project_id", "source_id", "sync_id", "ingestion_run_id", "adapter_id", "operation", "status", "records_read", "bytes_read", "duration_ms", "cursor_in", "cursor_out", "metadata_", "error", "created_at"])
+            for row in db.query(connector_runtime.ConnectorFetchAttempt).all()
+        ],
     }
 
 
@@ -598,6 +608,7 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "runtime_slo_evaluations",
         "runtime_workers",
         "runtime_queue_policies",
+        "connector_fetch_attempts",
     ]
     missing = [key for key in expected if key not in snapshot]
     counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
@@ -1100,6 +1111,9 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, worker_control.RuntimeQueuePolicy, row, ["id", "project_id", "weight", "max_concurrency", "paused", "updated_by", "created_at", "updated_at"]))
+    for row in snapshot.get("connector_fetch_attempts") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, connector_runtime.ConnectorFetchAttempt, row, ["id", "project_id", "source_id", "sync_id", "ingestion_run_id", "adapter_id", "operation", "status", "records_read", "bytes_read", "duration_ms", "cursor_in", "cursor_out", "metadata_", "error", "created_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)

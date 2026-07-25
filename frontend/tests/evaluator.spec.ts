@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { createServer } from "node:http";
 
 const routes = [
   "command-center",
@@ -44,6 +45,39 @@ test("command palette supports keyboard navigation", async ({ page }) => {
   await palette.getByPlaceholder("Find a workspace or capability").fill("entity resolution");
   await palette.getByRole("button", { name: /Entity Resolution/ }).click();
   await expect(page).toHaveURL(/\/workspace\/entity-resolution$/);
+});
+
+test("data onboarding previews a live connector with write-only credentials and fetch evidence", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful live connector workflow once on desktop.");
+  const server = createServer((request, response) => {
+    if (request.headers.authorization !== "Bearer browser-secret") {
+      response.writeHead(401).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ records: [
+      { asset_id: "browser-live-1", name: "Live Browser Pump", status: "DEGRADED" },
+      { asset_id: "browser-live-2", name: "Live Browser Chiller", status: "RUNNING" }
+    ] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Could not determine connector test server port");
+    await page.goto("/workspace/imports");
+    await expect(page.getByRole("heading", { name: "Live Connector" })).toBeVisible();
+    await page.getByLabel("Source ID").fill(`browser_live_source_${Date.now()}`);
+    await page.getByLabel("Base URL").fill(`http://127.0.0.1:${address.port}`);
+    await page.getByLabel("Secret (write only)").fill("browser-secret");
+    await page.getByRole("button", { name: "Save and Preview" }).click();
+    await expect(page.getByText("Live Browser Pump", { exact: true })).toBeVisible();
+    await expect(page.getByText("SUCCEEDED", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Secret (write only)")).toHaveValue("");
+    await expect(page.getByRole("cell", { name: "s3" })).toBeVisible();
+    await expect(page.getByText("PLUGIN_REQUIRED", { exact: true }).first()).toBeVisible();
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test("runtime operations shows durable telemetry, budgets, and SLO controls", async ({ page }, testInfo) => {

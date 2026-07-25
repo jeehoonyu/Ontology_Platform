@@ -88,6 +88,72 @@ export interface ImportsUiState extends HumanUiState {
   jobs: TableRow[];
 }
 
+export interface ConnectorAdapterCatalogItem {
+  id: string;
+  source_types?: string[];
+  modes?: string[];
+  available: boolean;
+  reason?: string;
+  config_schema?: JsonObject;
+}
+
+export interface ConnectorAdapterCatalog {
+  adapters: ConnectorAdapterCatalogItem[];
+  plugin_modules: string[];
+  runtime: string;
+}
+
+export interface ConnectionSource {
+  id: string;
+  project_id: string;
+  display_name: string;
+  source_type: string;
+  config: JsonObject;
+  uses_agent: boolean;
+  status: string;
+  created_at: number;
+}
+
+export interface ConnectorCredentialMetadata {
+  id: string;
+  source_id: string;
+  credential_type: string;
+  metadata: JsonObject;
+  key_id: string;
+  status: string;
+  expires_at?: number | null;
+  expired: boolean;
+  created_by: string;
+  created_at: number;
+  rotated_at?: number | null;
+}
+
+export interface ConnectorFetchAttempt {
+  id: string;
+  source_id: string;
+  adapter_id: string;
+  operation: string;
+  status: string;
+  records_read: number;
+  bytes_read: number;
+  duration_ms: number;
+  cursor_in?: string | null;
+  cursor_out?: string | null;
+  error?: string | null;
+  created_at: number;
+}
+
+export interface ConnectorLivePreview {
+  source_id: string;
+  adapter_id: string;
+  status: string;
+  record_count: number;
+  preview_rows: TableRow[];
+  next_cursor?: JsonValue;
+  bytes_read: number;
+  metadata: JsonObject;
+}
+
 export interface ValidationUiState extends HumanUiState {
   rows: TableRow[];
 }
