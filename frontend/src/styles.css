@@ -552,6 +552,34 @@ button:disabled {
   color: #526671;
 }
 
+.runtime-slo-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.runtime-slo-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-height: 48px;
+  padding: 8px 0;
+}
+
+.runtime-slo-row > span:first-child {
+  display: grid;
+  min-width: 0;
+}
+
+.runtime-slo-row small {
+  color: #526671;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-runtime-controls {
   gap: 7px;
   flex-wrap: wrap;

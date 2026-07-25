@@ -53,11 +53,12 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(agent_tool_runs)")}
 
     assert {"retrieval", "policy_summary", "execution_job_id"} <= columns, columns
-    assert version == "0007_project_ingestion_runtime", version
+    assert version == "0008_runtime_observability", version
     assert legacy == ("legacy-run", "legacy answer"), legacy
     assert "ix_agent_tool_runs_execution_job_id" in indexes, indexes
     assert {"platform_artifact_collaborators", "platform_artifact_collaboration_events"} <= tables, tables
     assert {"platform_organizations", "platform_projects", "platform_project_memberships", "ontology_packages", "ontology_package_versions", "ontology_package_installations", "ontology_package_resources"} <= tables, tables
     assert {"ingestion_runs", "ingestion_budgets", "ingestion_dead_letters"} <= tables, tables
+    assert {"runtime_job_observations", "runtime_budget_policies", "runtime_slo_policies", "runtime_slo_evaluations"} <= tables, tables
 
 print("\nAgent execution migration verified: legacy evidence preserved and schema upgraded.")

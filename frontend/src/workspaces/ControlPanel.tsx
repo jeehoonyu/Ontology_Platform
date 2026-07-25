@@ -20,7 +20,8 @@ const SECTIONS = [
   { id: "groups", label: "Groups" },
   { id: "roles", label: "Roles" },
   { id: "auth", label: "Auth" },
-  { id: "usage", label: "Usage" }
+  { id: "usage", label: "Usage" },
+  { id: "operations", label: "Runtime" }
 ];
 
 const SCOPE_TYPES = ["enrollment", "organization", "space", "project"];
@@ -31,6 +32,8 @@ const PROTOCOLS = ["saml", "oidc"];
 const USAGE_METRICS = ["compute_seconds", "storage_bytes", "rows"];
 const QUOTA_SCOPES = ["project", "organization"];
 const GROUP_BY = ["project", "principal", "organization", "resource", "metric"];
+const RUNTIME_METRICS = ["executions", "compute_seconds", "token_units", "record_units", "estimated_cost_usd"];
+const SLO_METRICS = ["availability", "error_rate", "latency_p95_ms", "queue_p95_ms", "cost_usd", "throughput_per_minute"];
 
 function toOptions(values: string[]): Array<{ value: string; label: string }> {
   return values.map((value) => ({ value, label: value }));
@@ -74,6 +77,7 @@ export function ControlPanel() {
       {section === "roles" && <RolesSection />}
       {section === "auth" && <AuthSection />}
       {section === "usage" && <UsageSection />}
+      {section === "operations" && <RuntimeOperationsSection />}
     </Page>
   );
 }
@@ -826,6 +830,122 @@ function UsageSection() {
           ) : (
             <EmptyState title="No quota check run" description="Compare current usage against a configured quota." />
           )}
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function RuntimeOperationsSection() {
+  const [projectId, setProjectId] = useState("default");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [error, setError] = useState("");
+  const summary = useAsyncState(() => admin.getRuntimeSummary(projectId), [projectId, refreshKey]);
+  const jobs = useAsyncState(() => admin.listRuntimeJobs(projectId), [projectId, refreshKey]);
+  const budgets = useAsyncState(() => admin.listRuntimeBudgets(projectId), [projectId, refreshKey]);
+  const slos = useAsyncState(() => admin.listRuntimeSlos(projectId), [projectId, refreshKey]);
+  const [budgetForm, setBudgetForm] = useState({ metric: "executions", limit_value: "1000", window_seconds: "86400", enforcement: "HARD" });
+  const [sloForm, setSloForm] = useState({ display_name: "Runtime availability", job_type: "", metric: "availability", operator: "gte", threshold: "0.99", window_seconds: "86400", severity: "warning" });
+
+  const reload = () => setRefreshKey((key) => key + 1);
+
+  async function saveBudget() {
+    try {
+      await admin.upsertRuntimeBudget({
+        project_id: projectId,
+        metric: budgetForm.metric,
+        limit_value: Number(budgetForm.limit_value),
+        window_seconds: Number(budgetForm.window_seconds),
+        enforcement: budgetForm.enforcement,
+        enabled: true
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function saveSlo() {
+    try {
+      await admin.createRuntimeSlo({
+        project_id: projectId,
+        display_name: sloForm.display_name,
+        job_type: sloForm.job_type || null,
+        metric: sloForm.metric,
+        operator: sloForm.operator,
+        threshold: Number(sloForm.threshold),
+        window_seconds: Number(sloForm.window_seconds),
+        severity: sloForm.severity,
+        enabled: true
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function evaluate(policyId: string) {
+    try {
+      await admin.evaluateRuntimeSlo(policyId);
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  const loading = summary.loading || jobs.loading || budgets.loading || slos.loading;
+  return (
+    <>
+      <ErrorBanner message={error || summary.error || jobs.error || budgets.error || slos.error} />
+      {loading && <LoadingState label="Loading runtime operations..." />}
+      <Panel title="Runtime Scope" action={<button onClick={reload}>Refresh</button>}>
+        <div className="metadata-edit-grid">
+          <TextField label="Project" value={projectId} onChange={setProjectId} placeholder="default" />
+        </div>
+      </Panel>
+      <div className="grid metrics">
+        <Metric label="Availability" value={`${Math.round((summary.value?.availability || 0) * 10000) / 100}%`} />
+        <Metric label="P95 execution" value={`${summary.value?.latency_p95_ms || 0} ms`} />
+        <Metric label="P95 queue" value={`${summary.value?.queue_p95_ms || 0} ms`} />
+        <Metric label="Estimated cost" value={`$${(summary.value?.estimated_cost_usd || 0).toFixed(4)}`} />
+      </div>
+      {(summary.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      <Panel title="Durable Job Telemetry">
+        <DataTable rows={jobs.value || []} empty="No durable jobs have run in this project." />
+      </Panel>
+      <div className="two-col">
+        <Panel title="Project Budgets" action={<button onClick={saveBudget} disabled={!projectId || Number(budgetForm.limit_value) <= 0}>Save budget</button>}>
+          <div className="metadata-edit-grid">
+            <SelectField label="Metric" value={budgetForm.metric} onChange={(value) => setBudgetForm({ ...budgetForm, metric: value })} options={toOptions(RUNTIME_METRICS)} />
+            <TextField label="Limit" type="number" value={budgetForm.limit_value} onChange={(value) => setBudgetForm({ ...budgetForm, limit_value: value })} />
+            <TextField label="Window seconds" type="number" value={budgetForm.window_seconds} onChange={(value) => setBudgetForm({ ...budgetForm, window_seconds: value })} />
+            <SelectField label="Enforcement" value={budgetForm.enforcement} onChange={(value) => setBudgetForm({ ...budgetForm, enforcement: value })} options={toOptions(["HARD", "WARN"])} />
+          </div>
+          <DataTable rows={budgets.value || []} empty="No runtime budgets configured." />
+        </Panel>
+        <Panel title="Service Objectives" action={<button onClick={saveSlo} disabled={!sloForm.display_name.trim()}>Create SLO</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Name" value={sloForm.display_name} onChange={(value) => setSloForm({ ...sloForm, display_name: value })} />
+            <TextField label="Job type (optional)" value={sloForm.job_type} onChange={(value) => setSloForm({ ...sloForm, job_type: value })} placeholder="pipeline.preview" />
+            <SelectField label="Metric" value={sloForm.metric} onChange={(value) => setSloForm({ ...sloForm, metric: value })} options={toOptions(SLO_METRICS)} />
+            <SelectField label="Operator" value={sloForm.operator} onChange={(value) => setSloForm({ ...sloForm, operator: value })} options={[{ value: "gte", label: "At least" }, { value: "lte", label: "At most" }]} />
+            <TextField label="Threshold" type="number" value={sloForm.threshold} onChange={(value) => setSloForm({ ...sloForm, threshold: value })} />
+            <TextField label="Window seconds" type="number" value={sloForm.window_seconds} onChange={(value) => setSloForm({ ...sloForm, window_seconds: value })} />
+          </div>
+          {slos.value?.length ? (
+            <div className="runtime-slo-list">
+              {slos.value.map((slo) => (
+                <div key={slo.id} className="runtime-slo-row">
+                  <span><strong>{slo.display_name}</strong><small>{slo.metric} {slo.operator} {slo.threshold}</small></span>
+                  <StatusBadge value={slo.severity} />
+                  <button onClick={() => evaluate(slo.id)}>Evaluate</button>
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState title="No SLOs configured" description="Create an availability, latency, queue, cost, or throughput objective." />}
         </Panel>
       </div>
     </>

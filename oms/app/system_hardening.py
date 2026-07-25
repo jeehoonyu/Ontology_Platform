@@ -33,6 +33,7 @@ from . import (
     ops_control,
     platform_core,
     platform_runtime,
+    runtime_observability,
     schedules,
     streaming,
     tenancy,
@@ -100,6 +101,10 @@ CORE_TABLES = [
     "ingestion_runs",
     "ingestion_budgets",
     "ingestion_dead_letters",
+    "runtime_job_observations",
+    "runtime_budget_policies",
+    "runtime_slo_policies",
+    "runtime_slo_evaluations",
     "auth_sessions",
     "auth_oidc_flows",
     "connection_sources",
@@ -122,7 +127,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -133,6 +138,7 @@ MIGRATIONS = [
     {"version": 7, "name": "artifact_collaboration_presence_and_events", "status": "applied"},
     {"version": 8, "name": "project_tenancy_and_governed_ontology_packages", "status": "applied"},
     {"version": 9, "name": "project_scoped_durable_ingestion_runtime", "status": "applied"},
+    {"version": 10, "name": "runtime_observability_budgets_and_slos", "status": "applied"},
 ]
 
 
@@ -181,6 +187,10 @@ def _ensure_runtime_tables(db: Session) -> None:
         ingestion_runtime.IngestionRun.__table__,
         ingestion_runtime.IngestionBudget.__table__,
         ingestion_runtime.IngestionDeadLetter.__table__,
+        runtime_observability.RuntimeJobObservation.__table__,
+        runtime_observability.RuntimeBudgetPolicy.__table__,
+        runtime_observability.RuntimeSloPolicy.__table__,
+        runtime_observability.RuntimeSloEvaluation.__table__,
     ):
         table.create(bind=db.get_bind(), checkfirst=True)
     _ensure_column(db, "streams", "archive_policy", "JSON")
@@ -437,6 +447,22 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "project_id", "run_id", "resource_type", "resource_id", "payload", "error", "status", "replay_job_id", "attempts", "created_at", "updated_at"])
             for row in db.query(ingestion_runtime.IngestionDeadLetter).all()
         ],
+        "runtime_job_observations": [
+            _row_dict(row, ["id", "project_id", "job_id", "correlation_id", "job_type", "actor", "status", "attempt", "progress", "queue_latency_ms", "duration_ms", "compute_seconds", "token_units", "record_units", "estimated_cost_usd", "metrics", "spans", "error", "created_at", "updated_at", "completed_at"])
+            for row in db.query(runtime_observability.RuntimeJobObservation).all()
+        ],
+        "runtime_budget_policies": [
+            _row_dict(row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "enabled", "created_at", "updated_at"])
+            for row in db.query(runtime_observability.RuntimeBudgetPolicy).all()
+        ],
+        "runtime_slo_policies": [
+            _row_dict(row, ["id", "project_id", "display_name", "job_type", "metric", "operator", "threshold", "window_seconds", "severity", "enabled", "created_at", "updated_at"])
+            for row in db.query(runtime_observability.RuntimeSloPolicy).all()
+        ],
+        "runtime_slo_evaluations": [
+            _row_dict(row, ["id", "project_id", "policy_id", "status", "observed_value", "threshold", "sample_count", "details", "created_at"])
+            for row in db.query(runtime_observability.RuntimeSloEvaluation).all()
+        ],
     }
 
 
@@ -552,6 +578,10 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "ingestion_runs",
         "ingestion_budgets",
         "ingestion_dead_letters",
+        "runtime_job_observations",
+        "runtime_budget_policies",
+        "runtime_slo_policies",
+        "runtime_slo_evaluations",
     ]
     missing = [key for key in expected if key not in snapshot]
     counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
@@ -1030,6 +1060,21 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, ingestion_runtime.IngestionDeadLetter, row, ["id", "project_id", "run_id", "resource_type", "resource_id", "payload", "error", "status", "replay_job_id", "attempts", "created_at", "updated_at"]))
+    for row in snapshot.get("runtime_job_observations") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, runtime_observability.RuntimeJobObservation, row, ["id", "project_id", "job_id", "correlation_id", "job_type", "actor", "status", "attempt", "progress", "queue_latency_ms", "duration_ms", "compute_seconds", "token_units", "record_units", "estimated_cost_usd", "metrics", "spans", "error", "created_at", "updated_at", "completed_at"]))
+    for row in snapshot.get("runtime_budget_policies") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, runtime_observability.RuntimeBudgetPolicy, row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "enabled", "created_at", "updated_at"]))
+    for row in snapshot.get("runtime_slo_policies") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, runtime_observability.RuntimeSloPolicy, row, ["id", "project_id", "display_name", "job_type", "metric", "operator", "threshold", "window_seconds", "severity", "enabled", "created_at", "updated_at"]))
+    for row in snapshot.get("runtime_slo_evaluations") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, runtime_observability.RuntimeSloEvaluation, row, ["id", "project_id", "policy_id", "status", "observed_value", "threshold", "sample_count", "details", "created_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
