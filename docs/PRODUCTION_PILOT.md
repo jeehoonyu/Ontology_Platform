@@ -70,15 +70,22 @@ To target an isolated or non-default Compose project explicitly:
   -DatabaseName ontology
 ```
 
-Restore requires downtime and explicit confirmation:
+Restore requires explicit confirmation. The script validates the archive, restores into a staging database, stops configured writers, and swaps databases only after the staging migration check passes:
 
 ```powershell
-docker compose stop oms-api
-./scripts/restore.ps1 -BackupPath ./backups/ontology-YYYYMMDD-HHMMSS.dump -ConfirmRestore
-docker compose start oms-api
+./scripts/restore.ps1 `
+  -BackupPath ./backups/ontology-YYYYMMDD-HHMMSS.dump `
+  -ConfirmRestore `
+  -KeepPreviousDatabase
 ```
 
-Pass the same `ComposeFile`, `ProjectName`, `DatabaseUser`, and `DatabaseName` options to `restore.ps1` for non-default stacks. Stop the API before restore so connection pools cannot write during replacement.
+Pass the same `ComposeFile`, `ProjectName`, `DatabaseUser`, and `DatabaseName` options to `restore.ps1` for non-default stacks. Backups include adjacent SHA-256 and JSON manifests. See `docs/RECOVERY.md` for staged swap, rollback, credential rebinding, and acceptance procedures.
+
+Rehearse backup and restore against a fresh isolated Postgres volume:
+
+```powershell
+./scripts/rehearse-recovery.ps1
+```
 
 After restoration, verify `/health/ready`, sign in, inspect `/workspace/validation`, and compare artifact, object, audit, incident, and report counts. Editing leases and login sessions are intentionally ephemeral and are not part of project JSON exports.
 
@@ -92,8 +99,9 @@ After restoration, verify `/health/ready`, sign in, inspect `/workspace/validati
 ## Demo Reset and Project Transfer
 
 - `POST /project/demo/reset` returns the deterministic evaluator scenario to a known state.
-- `GET /project/export` exports portable project resources, including visual artifact revisions, job evidence, tenancy memberships, ontology packages/installations, and collaboration events.
-- `POST /project/import` restores a project JSON snapshot in merge mode.
+- `GET /project/export` exports an integrity-protected version 2 portable snapshot, including visual artifact revisions, job evidence, tenancy memberships, ontology packages/installations, and collaboration events.
+- `POST /project/import/validate` verifies checksum, compatibility, counts, and credential-rebind requirements without mutation.
+- `POST /project/import` supports dry-run validation and transactional merge restore.
 
 Database backup remains the authoritative disaster-recovery mechanism because it also preserves all audit, security, and runtime tables.
 

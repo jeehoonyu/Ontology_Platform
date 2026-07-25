@@ -328,7 +328,7 @@ assert_true(event_consistency["counts"]["import_jobs"] >= 1, "event consistency 
 project_validation = ok(client.get("/project/validate"), "project validation")
 assert_true(project_validation["sections"]["snapshot_coverage"]["status"] == "PASS", "project validation includes snapshot coverage", project_validation)
 project_snapshot = ok(client.get("/project/export"), "project export snapshot")
-assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export includes datasets", project_snapshot)
+assert_true(project_snapshot["snapshot_version"] >= 2 and project_snapshot["integrity"]["checksum"] and project_snapshot["data_assets"], "project export includes integrity-protected datasets", project_snapshot)
 for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "connection_sources", "streams", "stream_records", "incidents", "investigation_reports"):
     assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 
