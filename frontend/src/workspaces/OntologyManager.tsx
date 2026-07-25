@@ -670,7 +670,7 @@ function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { o
             onConnect={createRelationship}
             nodesDraggable
             nodesConnectable
-            fitView
+            defaultViewport={{ x: 20, y: 20, zoom: 0.75 }}
             minZoom={0.25}
           >
             <Background gap={22} color="#d6dde1" />

@@ -7,6 +7,9 @@ deliberately small and deterministic so they work with SQLite or Postgres.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 import time
 import uuid
 from pathlib import Path
@@ -15,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Integer, String, inspect, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import (
@@ -42,6 +45,7 @@ from . import (
     worker_control,
 )
 from .database import Base, get_db
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["system_hardening"])
 
@@ -133,7 +137,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -148,6 +152,7 @@ MIGRATIONS = [
     {"version": 11, "name": "distributed_worker_fleet_and_queue_policies", "status": "applied"},
     {"version": 12, "name": "encrypted_live_connector_adapter_runtime", "status": "applied"},
     {"version": 13, "name": "hashed_service_account_tokens", "status": "applied"},
+    {"version": 14, "name": "integrity_protected_transactional_recovery", "status": "applied"},
 ]
 
 
@@ -155,6 +160,131 @@ class ProjectImportRequest(BaseModel):
     snapshot: Dict[str, Any] = Field(default_factory=dict)
     mode: str = "merge"
     actor: str = "workspace"
+    dry_run: bool = False
+    allow_legacy: bool = False
+
+
+PORTABLE_SNAPSHOT_FORMAT = "ontology-platform-portable"
+PORTABLE_SNAPSHOT_VERSION = 2
+_SENSITIVE_CONFIG_KEYS = {
+    "api_key", "apikey", "auth_secret", "authorization", "bearer_token", "client_secret",
+    "credential", "credentials", "password", "private_key", "secret", "token",
+}
+
+
+def _redact_config(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_redact_config(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result: Dict[str, Any] = {}
+    for key, item in value.items():
+        normalized = str(key).lower().replace("-", "_")
+        result[key] = "[REDACTED]" if normalized in _SENSITIVE_CONFIG_KEYS else _redact_config(item)
+    return result
+
+
+def _canonical_snapshot(snapshot: Dict[str, Any]) -> bytes:
+    payload = {key: value for key, value in snapshot.items() if key != "integrity"}
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(key): normalize(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, bool) or value is None or isinstance(value, str):
+            return value
+        if isinstance(value, int):
+            return value if abs(value) <= 9_007_199_254_740_991 else f"~integer:{value}"
+        if isinstance(value, float):
+            if value == 0:
+                return 0
+            if value.is_integer() and abs(value) <= 9_007_199_254_740_991:
+                return int(value)
+            return f"~float:{format(value, '.17g')}"
+        return str(value)
+
+    return json.dumps(normalize(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def _snapshot_checksum(snapshot: Dict[str, Any]) -> str:
+    return hashlib.sha256(_canonical_snapshot(snapshot)).hexdigest()
+
+
+def _finalize_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    safe = copy.deepcopy(snapshot)
+    rebind: List[Dict[str, str]] = []
+    for listener in safe.get("webhook_listeners") or []:
+        if listener.get("auth_secret"):
+            rebind.append({"resource_type": "webhook_listener", "resource_id": str(listener.get("id", "")), "field": "auth_secret"})
+        listener["auth_secret"] = None
+    for source in safe.get("connection_sources") or []:
+        original = source.get("config") or {}
+        sanitized = _redact_config(original)
+        if sanitized != original:
+            rebind.append({"resource_type": "connection_source", "resource_id": str(source.get("id", "")), "field": "config"})
+        source["config"] = sanitized
+    for attempt in safe.get("connector_fetch_attempts") or []:
+        attempt["metadata_"] = _redact_config(attempt.get("metadata_") or {})
+    for event in safe.get("webhook_listener_events") or []:
+        event["raw_payload"] = _redact_config(event.get("raw_payload") or {})
+    safe["snapshot_format"] = PORTABLE_SNAPSHOT_FORMAT
+    safe["snapshot_version"] = PORTABLE_SNAPSHOT_VERSION
+    safe["rebind_required"] = rebind
+    counts = {key: len(value) for key, value in safe.items() if isinstance(value, list) and key != "rebind_required"}
+    safe["integrity"] = {
+        "algorithm": "sha256",
+        "checksum": _snapshot_checksum(safe),
+        "counts": counts,
+        "resource_count": sum(counts.values()),
+    }
+    return safe
+
+
+def _validate_portable_snapshot(snapshot: Dict[str, Any], *, allow_legacy: bool = False) -> Dict[str, Any]:
+    errors: List[str] = []
+    warnings: List[str] = []
+    if not isinstance(snapshot, dict):
+        return {"status": "INVALID", "errors": ["Snapshot must be an object"], "warnings": [], "counts": {}}
+    version = snapshot.get("snapshot_version", 1)
+    if version not in {1, PORTABLE_SNAPSHOT_VERSION}:
+        errors.append(f"Unsupported snapshot version: {version}")
+    if version == 1:
+        warnings.append("Legacy snapshot has no integrity manifest; export it again before production recovery")
+        if not allow_legacy:
+            errors.append("Legacy snapshot import requires explicit allow_legacy confirmation")
+    else:
+        if snapshot.get("snapshot_format") != PORTABLE_SNAPSHOT_FORMAT:
+            errors.append("Snapshot format marker is missing or invalid")
+        integrity = snapshot.get("integrity")
+        if not isinstance(integrity, dict) or integrity.get("algorithm") != "sha256":
+            errors.append("SHA-256 integrity manifest is missing")
+        elif integrity.get("checksum") != _snapshot_checksum(snapshot):
+            errors.append("Snapshot checksum does not match its contents")
+    counts: Dict[str, int] = {}
+    for key, value in snapshot.items():
+        if key in {"rebind_required"}:
+            continue
+        if isinstance(value, list):
+            counts[key] = len(value)
+            if any(not isinstance(row, dict) for row in value):
+                errors.append(f"Resource collection '{key}' contains a non-object row")
+    manifest_counts = (snapshot.get("integrity") or {}).get("counts") if isinstance(snapshot.get("integrity"), dict) else None
+    if version == PORTABLE_SNAPSHOT_VERSION and manifest_counts != counts:
+        errors.append("Snapshot resource counts do not match the integrity manifest")
+    if version == PORTABLE_SNAPSHOT_VERSION and (snapshot.get("integrity") or {}).get("resource_count") != sum(counts.values()):
+        errors.append("Snapshot resource total does not match the integrity manifest")
+    if snapshot.get("rebind_required"):
+        warnings.append(f"{len(snapshot['rebind_required'])} runtime credential binding(s) must be recreated after import")
+    return {
+        "status": "VALID" if not errors else "INVALID",
+        "snapshot_version": version,
+        "errors": errors,
+        "warnings": warnings,
+        "counts": counts,
+        "resource_count": sum(counts.values()),
+        "rebind_required": snapshot.get("rebind_required") or [],
+    }
 
 
 def _now() -> int:
@@ -269,8 +399,8 @@ def _row_dict(row: Any, fields: List[str]) -> Dict[str, Any]:
 
 def _snapshot(db: Session) -> Dict[str, Any]:
     _ensure_runtime_tables(db)
-    return {
-        "snapshot_version": 1,
+    snapshot = {
+        "snapshot_version": PORTABLE_SNAPSHOT_VERSION,
         "exported_at": _now(),
         "object_types": [
             _row_dict(row, ["id", "display_name", "description", "properties", "created_at", "updated_at"])
@@ -489,6 +619,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(connector_runtime.ConnectorFetchAttempt).all()
         ],
     }
+    return _finalize_snapshot(snapshot)
 
 
 def _upsert_model(db: Session, model_cls: Any, data: Dict[str, Any], fields: List[str]) -> str:
@@ -943,22 +1074,44 @@ def validation_ui_state(db: Session = Depends(get_db)):
 
 
 @router.get("/project/export")
-def export_project(db: Session = Depends(get_db)):
+def export_project(
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_permission("administer")),
+):
     snapshot = _snapshot(db)
-    _audit(db, "workspace", "project.snapshot.exported", "project", "local", {
+    _audit(db, principal.id, "project.snapshot.exported", "project", "local", {
         "snapshot_version": snapshot["snapshot_version"],
+        "checksum": snapshot["integrity"]["checksum"],
         "counts": {key: len(value) for key, value in snapshot.items() if isinstance(value, list)},
     })
     db.commit()
     return snapshot
 
 
+@router.post("/project/import/validate")
+def validate_project_import(
+    body: ProjectImportRequest,
+    principal: Principal = Depends(require_permission("administer")),
+):
+    _ = principal
+    return _validate_portable_snapshot(body.snapshot or {}, allow_legacy=body.allow_legacy)
+
+
 @router.post("/project/import")
-def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
+def import_project(
+    body: ProjectImportRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_permission("administer")),
+):
     _ensure_runtime_tables(db)
     if body.mode not in {"merge"}:
         raise HTTPException(status_code=400, detail="Only merge mode is supported")
     snapshot = body.snapshot or {}
+    validation = _validate_portable_snapshot(snapshot, allow_legacy=body.allow_legacy)
+    if validation["status"] != "VALID":
+        raise HTTPException(status_code=400, detail={"message": "Snapshot validation failed", **validation})
+    if body.dry_run:
+        return {"status": "VALIDATED", "mode": body.mode, "validation": validation}
     counts = {"created": 0, "updated": 0, "skipped": 0}
 
     def track(result: str) -> None:
@@ -1047,7 +1200,10 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         track(_upsert_model(db, schedules.Build, row, ["id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"]))
     for row in snapshot.get("webhook_listeners") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, webhooks_ops.WhListener, row, ["id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"]))
+        listener_fields = ["id", "display_name", "auth_type", "target_asset_id", "event_schema", "created_at"]
+        if row.get("auth_secret"):
+            listener_fields.append("auth_secret")
+        track(_upsert_model(db, webhooks_ops.WhListener, row, listener_fields))
     for row in snapshot.get("webhook_listener_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, webhooks_ops.WhListenerEvent, row, ["id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"]))
@@ -1155,7 +1311,7 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         row.setdefault("created_at", now)
         track(_upsert_model(db, platform_runtime.ArtifactCollaborationEvent, row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"]))
 
-    _audit(db, body.actor, "project.snapshot.imported", "project", "local", counts)
+    _audit(db, principal.id, "project.snapshot.imported", "project", "local", counts)
     ops_control.record_ops_event(
         db,
         source="project",
@@ -1166,5 +1322,10 @@ def import_project(body: ProjectImportRequest, db: Session = Depends(get_db)):
         subject_id="local",
         payload=counts,
     )
-    db.commit()
-    return {"status": "IMPORTED", "mode": body.mode, "counts": counts}
+    try:
+        db.flush()
+        db.commit()
+    except (IntegrityError, SQLAlchemyError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Snapshot import failed integrity checks; no changes were applied") from exc
+    return {"status": "IMPORTED", "mode": body.mode, "counts": counts, "validation": validation}

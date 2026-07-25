@@ -112,6 +112,10 @@ class WhListener(Base):
     event_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer)
 
+    @property
+    def credential_configured(self) -> bool:
+        return bool(self.auth_secret) if self.auth_type != "none" else True
+
 
 class WhListenerEvent(Base):
     __tablename__ = "wh_listener_events"
@@ -234,7 +238,7 @@ class ListenerRead(BaseModel):
     id: str
     display_name: str
     auth_type: str
-    auth_secret: Optional[str] = None
+    credential_configured: bool = False
     target_asset_id: Optional[str] = None
     event_schema: Any
     created_at: int

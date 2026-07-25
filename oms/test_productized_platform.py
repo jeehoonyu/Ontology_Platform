@@ -242,7 +242,7 @@ report = client.get("/scenarios/asset-reliability/report?format=markdown")
 assert_true(report.status_code == 200 and "Asset Reliability Command Center Report" in report.text, "scenario report exports markdown", report.text[:200])
 
 project_snapshot = ok(client.get("/project/export"), "project export")
-assert_true(project_snapshot["snapshot_version"] == 1 and project_snapshot["data_assets"], "project export returns snapshot", project_snapshot)
+assert_true(project_snapshot["snapshot_version"] >= 2 and project_snapshot["integrity"]["checksum"] and project_snapshot["data_assets"], "project export returns integrity-protected snapshot", project_snapshot)
 for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "model_monitor_runs", "model_prediction_logs", "connection_sources", "connection_syncs", "streams", "stream_records", "schedules", "builds", "webhook_listeners", "incidents", "investigation_evidence", "investigation_reports"):
     assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 imported = ok(client.post("/project/import", json={"snapshot": project_snapshot, "mode": "merge", "actor": "test"}), "project import merge")

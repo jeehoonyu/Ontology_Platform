@@ -122,6 +122,11 @@ assert ok(client.get("/ontology-packages"), "cross-organization package list fil
 active_principal = production_auth.Principal("alice", "Alice", "alice@example.test", ["publisher"], ["view", "edit", "publish", "restore", "export"], organization_id="acme", project_ids=[])
 exported = ok(client.get("/ontology-packages/asset_reliability/versions/1.0.0/export"), "export package")
 assert exported["integrity"]["verified"] is True
+ok(client.get("/project/export"), "project publisher cannot export the full installation", 403)
+active_principal = production_auth.Principal(
+    "platform-admin", "Platform Admin", "admin@example.test", ["administrator"], ["*"],
+    organization_id="acme", project_ids=["*"],
+)
 snapshot = ok(client.get("/project/export"), "export project recovery snapshot")
 assert snapshot["ontology_packages"] and snapshot["ontology_package_versions"] and snapshot["ontology_package_installations"]
 assert snapshot["projects"] and snapshot["project_memberships"]
