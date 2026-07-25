@@ -403,9 +403,13 @@ def run_next_agent_job(
     principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
+    from . import worker_control
+    supported_job_types = worker_control.effective_worker_job_types(
+        db, principal, body.worker_id, ["aip.agent.invoke"],
+    )
     claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
         worker_id=body.worker_id,
-        supported_job_types=["aip.agent.invoke"],
+        supported_job_types=supported_job_types,
         lease_seconds=body.lease_seconds,
         job_id=body.job_id,
     ), principal, db).get("job")

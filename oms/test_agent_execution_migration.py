@@ -51,9 +51,10 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         legacy = connection.execute("SELECT id, answer FROM agent_tool_runs WHERE id = 'legacy-run'").fetchone()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(agent_tool_runs)")}
+        token_columns = {row[1] for row in connection.execute("PRAGMA table_info(admin_api_tokens)")}
 
     assert {"retrieval", "policy_summary", "execution_job_id"} <= columns, columns
-    assert version == "0010_live_connector_runtime", version
+    assert version == "0011_hashed_service_tokens", version
     assert legacy == ("legacy-run", "legacy answer"), legacy
     assert "ix_agent_tool_runs_execution_job_id" in indexes, indexes
     assert {"platform_artifact_collaborators", "platform_artifact_collaboration_events"} <= tables, tables
@@ -62,5 +63,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
     assert {"runtime_job_observations", "runtime_budget_policies", "runtime_slo_policies", "runtime_slo_evaluations"} <= tables, tables
     assert {"runtime_workers", "runtime_queue_policies"} <= tables, tables
     assert {"connector_credentials", "connector_fetch_attempts"} <= tables, tables
+    assert {"token_hash", "token_prefix", "last_used_at"} <= token_columns, token_columns
 
 print("\nAgent execution migration verified: legacy evidence preserved and schema upgraded.")

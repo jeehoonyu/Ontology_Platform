@@ -1763,9 +1763,13 @@ def enqueue_graph_delivery(graph_id: str, body: PipelineAsyncDeliverRequest = Pi
 
 @router.post("/pipeline-builder/workers/run-next")
 def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    from . import worker_control
+    supported_job_types = worker_control.effective_worker_job_types(
+        db, principal, body.worker_id, ["pipeline.preview", "pipeline.deliver"],
+    )
     claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
         worker_id=body.worker_id,
-        supported_job_types=["pipeline.preview", "pipeline.deliver"],
+        supported_job_types=supported_job_types,
         lease_seconds=body.lease_seconds,
         job_id=body.job_id,
     ), principal, db).get("job")
