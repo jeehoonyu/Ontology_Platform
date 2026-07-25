@@ -85,6 +85,23 @@ def registered_worker(db: Session, principal: Principal, worker_name: str) -> Op
     return _worker_query(db, principal, worker_name).first()
 
 
+def effective_worker_job_types(
+    db: Session,
+    principal: Principal,
+    worker_name: str,
+    domain_job_types: List[str],
+) -> List[str]:
+    """Constrain a domain adapter to the registered worker capability subset."""
+    worker = registered_worker(db, principal, worker_name)
+    if not worker:
+        return list(domain_job_types)
+    registered = {str(value) for value in (worker.supported_job_types or [])}
+    effective = [job_type for job_type in domain_job_types if job_type in registered]
+    if not effective:
+        raise HTTPException(status_code=403, detail="Worker has no capability for this execution domain")
+    return effective
+
+
 def worker_claim_constraints(
     db: Session,
     principal: Principal,

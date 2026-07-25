@@ -173,7 +173,7 @@ def _bearer_principal(db: Session, authorization: Optional[str]) -> Optional[Pri
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     secret = authorization.split(" ", 1)[1].strip()
-    token = db.query(admin_auth.ApiToken).filter(admin_auth.ApiToken.token == secret).first()
+    token = admin_auth.find_token(db, secret)
     if not token or token.revoked or (token.expires_at is not None and token.expires_at <= _now()):
         return None
     scopes = [str(item) for item in (token.scopes or [])]
@@ -183,6 +183,10 @@ def _bearer_principal(db: Session, authorization: Optional[str]) -> Optional[Pri
     if token.principal_type == "service_account":
         account = db.get(admin_auth.ServiceAccount, token.principal_id)
         organization_id = account.organization_id if account else None
+    now = _now()
+    if token.last_used_at is None or token.last_used_at < now - 60:
+        token.last_used_at = now
+        db.flush()
     return Principal(token.principal_id, token.principal_id, None, [token.principal_type], _permissions([], permissions), organization_id=organization_id, project_ids=project_ids)
 
 
@@ -389,6 +393,12 @@ def _permission_for_request(method: str, path: str) -> str:
     if method.upper() in {"GET", "HEAD", "OPTIONS"}:
         return "view"
     lowered = path.lower()
+    if (
+        lowered.startswith("/runtime/workers/")
+        or lowered.endswith("/workers/run-next")
+        or (lowered.startswith("/jobs/") and any(part in lowered for part in ("/heartbeat", "/complete", "/fail")))
+    ):
+        return "execute"
     if "/approve" in lowered or "/reject" in lowered or "/decisions" in lowered:
         return "approve"
     if "/deploy" in lowered:

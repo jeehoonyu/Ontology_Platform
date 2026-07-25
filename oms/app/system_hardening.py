@@ -133,7 +133,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -147,6 +147,7 @@ MIGRATIONS = [
     {"version": 10, "name": "runtime_observability_budgets_and_slos", "status": "applied"},
     {"version": 11, "name": "distributed_worker_fleet_and_queue_policies", "status": "applied"},
     {"version": 12, "name": "encrypted_live_connector_adapter_runtime", "status": "applied"},
+    {"version": 13, "name": "hashed_service_account_tokens", "status": "applied"},
 ]
 
 

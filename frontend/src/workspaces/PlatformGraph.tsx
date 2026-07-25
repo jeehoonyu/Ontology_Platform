@@ -151,9 +151,10 @@ export function PlatformGraphWorkspace() {
               edges={visibleEdges}
               onNodesChange={onNodesChange}
               onNodeClick={(_, node) => setSelectedId(node.id)}
+              onNodeDragStop={(_, node) => setSelectedId(node.id)}
               nodesDraggable
               nodesConnectable={false}
-              fitView
+              defaultViewport={{ x: 24, y: 24, zoom: 0.75 }}
               minZoom={0.15}
               maxZoom={2}
             >

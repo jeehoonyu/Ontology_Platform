@@ -193,8 +193,20 @@ export interface ServiceAccount extends TableRow {
 export interface ApiToken extends TableRow {
   id: string;
   principal_id: string;
+  principal_type: string;
+  token_prefix: string | null;
   scopes: string[];
   revoked: boolean;
+  expires_at: number | null;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+export interface IssuedApiToken {
+  id: string;
+  token: string;
+  principal_id: string;
+  scopes: string[];
   expires_at: number | null;
 }
 
@@ -292,6 +304,23 @@ export function createQuota(body: { scope_type: string; scope_id: string; metric
 
 export function checkQuota(body: { scope_type: string; scope_id: string; metric: string }): Promise<QuotaCheckResult> {
   return postJson<QuotaCheckResult>("/admin/usage/check-quota", body);
+}
+
+export function createServiceAccount(body: { id?: string; display_name: string; organization_id?: string | null }): Promise<ServiceAccount> {
+  return postJson<ServiceAccount>("/admin/service-accounts", body);
+}
+
+export function issueToken(body: {
+  principal_type: "user" | "service_account";
+  principal_id: string;
+  scopes: string[];
+  ttl_seconds?: number;
+}): Promise<IssuedApiToken> {
+  return postJson<IssuedApiToken>("/admin/tokens", body);
+}
+
+export function revokeToken(tokenId: string): Promise<{ id: string; revoked: boolean }> {
+  return postJson(`/admin/tokens/${encodeURIComponent(tokenId)}/revoke`, {});
 }
 
 // ---------------------------------------------------------------------------
