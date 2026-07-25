@@ -173,6 +173,25 @@ test("control panel issues a one-time project worker token and revokes it", asyn
   await expect(page.locator("body")).not.toContainText(secret);
 });
 
+test("control panel validates, dry-runs, and restores an integrity-protected snapshot", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful recovery workflow once on desktop.");
+  await page.goto("/workspace/control-panel");
+  await page.getByRole("button", { name: "Recovery", exact: true }).click();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download snapshot" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^ontology-platform-.*\.json$/);
+  const validationPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Recovery Validation" }) });
+  await expect(validationPanel).toContainText("VALID");
+  await expect(validationPanel).toContainText("Resources");
+  const controls = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Restore Controls" }) });
+  await controls.getByRole("button", { name: "Run dry run" }).click();
+  await expect(controls).toContainText("VALIDATED");
+  await controls.getByLabel("Type RESTORE to confirm").fill("RESTORE");
+  await controls.getByRole("button", { name: "Restore snapshot" }).click();
+  await expect(controls).toContainText("IMPORTED");
+});
+
 test("visual builder supports typed configuration, preview, save, and publish", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful builder workflow once on desktop.");
   await page.goto("/workspace/workshop");

@@ -306,6 +306,60 @@ export function checkQuota(body: { scope_type: string; scope_id: string; metric:
   return postJson<QuotaCheckResult>("/admin/usage/check-quota", body);
 }
 
+// ---------------------------------------------------------------------------
+// Recovery
+// ---------------------------------------------------------------------------
+export interface SnapshotIntegrity {
+  algorithm: "sha256";
+  checksum: string;
+  counts: Record<string, number>;
+  resource_count: number;
+}
+
+export interface CredentialRebind extends TableRow {
+  resource_type: string;
+  resource_id: string;
+  field: string;
+}
+
+export interface PortableSnapshot {
+  snapshot_format: string;
+  snapshot_version: number;
+  exported_at: number;
+  integrity: SnapshotIntegrity;
+  rebind_required: CredentialRebind[];
+  [key: string]: unknown;
+}
+
+export interface SnapshotValidation {
+  status: "VALID" | "INVALID";
+  snapshot_version: number;
+  errors: string[];
+  warnings: string[];
+  counts: Record<string, number>;
+  resource_count: number;
+  rebind_required: CredentialRebind[];
+}
+
+export interface SnapshotImportResult {
+  status: "VALIDATED" | "IMPORTED";
+  mode: string;
+  counts?: Record<string, number>;
+  validation: SnapshotValidation;
+}
+
+export function exportPortableSnapshot(): Promise<PortableSnapshot> {
+  return api<PortableSnapshot>("/project/export");
+}
+
+export function validatePortableSnapshot(snapshot: PortableSnapshot): Promise<SnapshotValidation> {
+  return postJson<SnapshotValidation>("/project/import/validate", { snapshot, mode: "merge" });
+}
+
+export function importPortableSnapshot(snapshot: PortableSnapshot, dryRun: boolean): Promise<SnapshotImportResult> {
+  return postJson<SnapshotImportResult>("/project/import", { snapshot, mode: "merge", dry_run: dryRun });
+}
+
 export function createServiceAccount(body: { id?: string; display_name: string; organization_id?: string | null }): Promise<ServiceAccount> {
   return postJson<ServiceAccount>("/admin/service-accounts", body);
 }

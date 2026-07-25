@@ -21,6 +21,7 @@ const SECTIONS = [
   { id: "roles", label: "Roles" },
   { id: "auth", label: "Auth" },
   { id: "usage", label: "Usage" },
+  { id: "recovery", label: "Recovery" },
   { id: "operations", label: "Runtime" }
 ];
 
@@ -77,6 +78,7 @@ export function ControlPanel() {
       {section === "roles" && <RolesSection />}
       {section === "auth" && <AuthSection />}
       {section === "usage" && <UsageSection />}
+      {section === "recovery" && <RecoverySection />}
       {section === "operations" && <RuntimeOperationsSection />}
     </Page>
   );
@@ -900,6 +902,116 @@ function UsageSection() {
           )}
         </Panel>
       </div>
+    </>
+  );
+}
+
+function RecoverySection() {
+  const [snapshot, setSnapshot] = useState<admin.PortableSnapshot | null>(null);
+  const [validation, setValidation] = useState<admin.SnapshotValidation | null>(null);
+  const [result, setResult] = useState<admin.SnapshotImportResult | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  async function downloadSnapshot() {
+    setBusy("export");
+    try {
+      const exported = await admin.exportPortableSnapshot();
+      setSnapshot(exported);
+      setValidation(await admin.validatePortableSnapshot(exported));
+      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `ontology-platform-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      link.click();
+      URL.revokeObjectURL(href);
+      setError("");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loadSnapshot(file: File | undefined) {
+    if (!file) return;
+    setBusy("validate");
+    setResult(null);
+    setConfirmation("");
+    try {
+      const parsed = JSON.parse(await file.text()) as admin.PortableSnapshot;
+      const checked = await admin.validatePortableSnapshot(parsed);
+      setSnapshot(parsed);
+      setValidation(checked);
+      setError("");
+    } catch (err) {
+      setSnapshot(null);
+      setValidation(null);
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runRestore(dryRun: boolean) {
+    if (!snapshot) return;
+    setBusy(dryRun ? "dry-run" : "restore");
+    try {
+      const next = await admin.importPortableSnapshot(snapshot, dryRun);
+      setResult(next);
+      setValidation(next.validation);
+      if (!dryRun) setConfirmation("");
+      setError("");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <ErrorBanner message={error} />
+      <div className="two-col">
+        <Panel title="Portable Snapshot" action={<button onClick={downloadSnapshot} disabled={Boolean(busy)}>{busy === "export" ? "Exporting..." : "Download snapshot"}</button>}>
+          <p className="panel-description">Exports versioned platform resources with a SHA-256 integrity manifest. Runtime credentials and login sessions are excluded.</p>
+          <label className="file-picker">
+            <span>Load snapshot for recovery</span>
+            <input type="file" accept="application/json,.json" onChange={(event) => loadSnapshot(event.target.files?.[0])} />
+          </label>
+          {snapshot ? <KeyValueGrid data={{
+            format: snapshot.snapshot_format,
+            version: snapshot.snapshot_version,
+            resources: snapshot.integrity?.resource_count,
+            checksum: snapshot.integrity?.checksum,
+            exported_at: new Date(snapshot.exported_at * 1000).toLocaleString()
+          }} /> : <EmptyState title="No snapshot loaded" description="Download the current state or choose a portable JSON snapshot to validate." />}
+        </Panel>
+        <Panel title="Recovery Validation" action={validation ? <StatusBadge value={validation.status} /> : undefined}>
+          {busy === "validate" ? <LoadingState label="Validating snapshot..." /> : null}
+          {validation ? <>
+            <div className="metric-grid compact-metrics">
+              <Metric label="Resources" value={validation.resource_count} />
+              <Metric label="Credential rebinds" value={validation.rebind_required.length} />
+              <Metric label="Errors" value={validation.errors.length} />
+            </div>
+            {validation.errors.map((message) => <div key={message} className="inline-alert error">{message}</div>)}
+            {validation.warnings.map((message) => <div key={message} className="inline-alert warning">{message}</div>)}
+            {validation.rebind_required.length ? <DataTable rows={validation.rebind_required} empty="No credential rebinds required." /> : null}
+          </> : <EmptyState title="Validation required" description="A snapshot must pass integrity validation before dry run or restore." />}
+        </Panel>
+      </div>
+      <Panel title="Restore Controls">
+        <p className="panel-description">Dry run first. Restore uses transactional merge semantics and preserves existing credential bindings when the portable snapshot contains redacted values.</p>
+        <div className="recovery-action-row">
+          <button onClick={() => runRestore(true)} disabled={!snapshot || validation?.status !== "VALID" || Boolean(busy)}>{busy === "dry-run" ? "Checking..." : "Run dry run"}</button>
+          <label><span>Type RESTORE to confirm</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+          <button className="danger-button" onClick={() => runRestore(false)} disabled={!snapshot || validation?.status !== "VALID" || confirmation !== "RESTORE" || Boolean(busy)}>{busy === "restore" ? "Restoring..." : "Restore snapshot"}</button>
+          {result ? <StatusBadge value={result.status} /> : null}
+        </div>
+      </Panel>
     </>
   );
 }
