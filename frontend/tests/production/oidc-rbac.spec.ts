@@ -112,6 +112,39 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(onboarding.outsidePipeline.status).toBe(403);
   expect(onboarding.outsidePipeline.body.detail.project_id).toBe("outside-project");
 
+  const workshopBoundary = await page.evaluate(async (suffix) => {
+    const request = async (path: string, method = "GET", body?: unknown) => {
+      const response = await fetch(path, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const workshopId = `pilot-workshop-${suffix}`;
+    const created = await request("/apps/workshop", "POST", {
+      id: workshopId,
+      project_id: "default",
+      display_name: "Pilot reliability console",
+      variables: { headline: { definition_type: "static", value: "Operational" } },
+      widgets: [{ type: "metric", title: "State", variable: "headline" }]
+    });
+    const rendered = await request(`/apps/workshop/${workshopId}/render-live`, "POST", { state: {} });
+    const published = await request(`/apps/workshop/${workshopId}/publish`, "POST", { actor: "spoofed", note: "OIDC acceptance" });
+    const outside = await request("/apps/workshop", "POST", {
+      project_id: "outside-project",
+      display_name: "Forbidden Workshop"
+    });
+    return { workshopId, created, rendered, published, outside };
+  }, adminMutation.body.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12));
+  expect(workshopBoundary.created.status).toBe(200);
+  expect(workshopBoundary.created.body.project_id).toBe("default");
+  expect(workshopBoundary.rendered.status).toBe(200);
+  expect(workshopBoundary.rendered.body.widgets[0].value).toBe("Operational");
+  expect(workshopBoundary.published.status).toBe(200);
+  expect(workshopBoundary.outside.status).toBe(403);
+  expect(workshopBoundary.outside.body.detail.project_id).toBe("outside-project");
+
   const tenantBoundary = await page.evaluate(async () => {
     const response = await fetch("/tenancy/organizations", {
       method: "POST",
@@ -442,7 +475,7 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerSession.permissions).toEqual(["view"]);
   expect(viewerSession.project_ids).toContain("default");
 
-  const viewerAccess = await page.evaluate(async (graphId) => {
+  const viewerAccess = await page.evaluate(async ({ graphId, workshopId }) => {
     const read = await fetch("/artifacts");
     const edit = await fetch("/artifacts", {
       method: "POST",
@@ -460,19 +493,36 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       headers: { "content-type": "application/json" },
       body: "{}"
     });
+    const workshopRead = await fetch(`/apps/workshop/${workshopId}`);
+    const workshopEvent = await fetch(`/apps/workshop/${workshopId}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state: {}, events: [] })
+    });
+    const workshopPublish = await fetch(`/apps/workshop/${workshopId}/publish`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
     return {
       read: read.status,
       edit: edit.status,
       detail: await edit.json(),
       importStatus: importAttempt.status,
       graphReadStatus: graphRead.status,
-      graphPreviewStatus: graphPreview.status
+      graphPreviewStatus: graphPreview.status,
+      workshopReadStatus: workshopRead.status,
+      workshopEventStatus: workshopEvent.status,
+      workshopPublishStatus: workshopPublish.status
     };
-  }, onboarding.applied.body.pipeline_graph_id);
+  }, { graphId: onboarding.applied.body.pipeline_graph_id, workshopId: workshopBoundary.workshopId });
   expect(viewerAccess.read).toBe(200);
   expect(viewerAccess.edit).toBe(403);
   expect(viewerAccess.importStatus).toBe(403);
   expect(viewerAccess.graphReadStatus).toBe(200);
   expect(viewerAccess.graphPreviewStatus).toBe(403);
+  expect(viewerAccess.workshopReadStatus).toBe(200);
+  expect(viewerAccess.workshopEventStatus).toBe(403);
+  expect(viewerAccess.workshopPublishStatus).toBe(403);
   expect(viewerAccess.detail.detail).toContain("Permission 'edit' is required");
 });

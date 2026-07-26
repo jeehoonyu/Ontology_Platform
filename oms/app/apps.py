@@ -14,8 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, tenancy
 from .database import Base, get_db
+from .production_auth import Principal, require_permission
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy ORM Models
@@ -28,6 +29,7 @@ class WorkshopModule(Base):
     __tablename__ = "workshop_modules"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     variables: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -110,6 +112,7 @@ class WidgetSchema(BaseModel):
 
 class WorkshopModuleCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     variables: Optional[Dict[str, Any]] = Field(default_factory=dict)
@@ -122,6 +125,7 @@ class WorkshopModuleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     description: Optional[str] = None
     variables: Dict[str, Any]
@@ -289,16 +293,24 @@ def _append_audit(
     )
 
 
-def _get_workshop_module_or_404(db: Session, module_id: str) -> WorkshopModule:
+def _get_workshop_module_or_404(
+    db: Session,
+    module_id: str,
+    principal: Optional[Principal] = None,
+    permission: str = "view",
+) -> WorkshopModule:
     obj = db.query(WorkshopModule).filter(WorkshopModule.id == module_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail=f"WorkshopModule '{module_id}' not found")
+    if principal:
+        tenancy.assert_project_permission(db, principal, obj.project_id, permission)
     return obj
 
 
 def _workshop_snapshot(module: WorkshopModule) -> Dict[str, Any]:
     return {
         "id": module.id,
+        "project_id": module.project_id,
         "display_name": module.display_name,
         "description": module.description,
         "variables": module.variables or {},
@@ -306,6 +318,35 @@ def _workshop_snapshot(module: WorkshopModule) -> Dict[str, Any]:
         "layout": module.layout or {},
         "updated_at": module.updated_at,
     }
+
+
+def _assert_workshop_object_type_references(
+    db: Session,
+    project_id: str,
+    variables: Dict[str, Any],
+    widgets: List[Any],
+) -> None:
+    referenced = {
+        str(spec.get("object_type_id"))
+        for spec in (variables or {}).values()
+        if isinstance(spec, dict) and spec.get("object_type_id")
+    }
+    referenced.update(
+        str(widget.get("object_type_id"))
+        for widget in (widgets or [])
+        if isinstance(widget, dict) and widget.get("object_type_id")
+    )
+    for object_type_id in sorted(referenced):
+        object_type = db.get(models.ObjectType, object_type_id)
+        if not object_type:
+            raise HTTPException(status_code=422, detail=f"Object type '{object_type_id}' not found")
+        owning_project = str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+        if owning_project != project_id:
+            raise HTTPException(status_code=403, detail={
+                "message": "Workshop cannot reference an object type owned by another project",
+                "project_id": project_id,
+                "object_type_id": object_type_id,
+            })
 
 
 def _get_slate_app_or_404(db: Session, app_id: str) -> SlateApp:
@@ -334,8 +375,10 @@ def _slate_snapshot(app_obj: SlateApp) -> Dict[str, Any]:
 @router.post("/apps/workshop", response_model=WorkshopModuleRead)
 def create_workshop_module(
     body: WorkshopModuleCreate,
+    principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ) -> WorkshopModule:
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     module_id = body.id or _gen_id()
     existing = db.query(WorkshopModule).filter(WorkshopModule.id == module_id).first()
     if existing:
@@ -346,8 +389,10 @@ def create_workshop_module(
         w.model_dump() if isinstance(w, WidgetSchema) else w
         for w in (body.widgets or [])
     ]
+    _assert_workshop_object_type_references(db, body.project_id, body.variables or {}, widgets_data)
     db_obj = WorkshopModule(
         id=module_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         description=body.description,
         variables=body.variables or {},
@@ -359,11 +404,11 @@ def create_workshop_module(
     db.add(db_obj)
     _append_audit(
         db,
-        actor=body.actor or "system",
+        actor=principal.id,
         event_type="apps.workshop.created",
         subject_type="workshop_module",
         subject_id=module_id,
-        payload={"display_name": body.display_name, "widget_count": len(widgets_data)},
+        payload={"project_id": body.project_id, "display_name": body.display_name, "widget_count": len(widgets_data)},
     )
     db.commit()
     db.refresh(db_obj)
@@ -371,27 +416,44 @@ def create_workshop_module(
 
 
 @router.get("/apps/workshop", response_model=List[WorkshopModuleRead])
-def list_workshop_modules(db: Session = Depends(get_db)) -> List[WorkshopModule]:
-    return db.query(WorkshopModule).order_by(WorkshopModule.updated_at.desc()).all()
+def list_workshop_modules(
+    project_id: Optional[str] = None,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+) -> List[WorkshopModule]:
+    query = db.query(WorkshopModule)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(WorkshopModule.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(WorkshopModule.project_id.in_(accessible)) if accessible else query.filter(WorkshopModule.id == "__none__")
+    return query.order_by(WorkshopModule.updated_at.desc()).all()
 
 
 @router.get("/apps/workshop/{module_id}", response_model=WorkshopModuleRead)
 def get_workshop_module(
     module_id: str,
+    principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ) -> WorkshopModule:
-    return _get_workshop_module_or_404(db, module_id)
+    return _get_workshop_module_or_404(db, module_id, principal, "view")
 
 
 @router.patch("/apps/workshop/{module_id}", response_model=WorkshopModuleRead)
 def update_workshop_module(
     module_id: str,
     body: WorkshopModuleUpdate,
+    principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ) -> WorkshopModule:
-    obj = _get_workshop_module_or_404(db, module_id)
+    obj = _get_workshop_module_or_404(db, module_id, principal, "edit")
     patch = body.model_dump(exclude_unset=True)
-    actor = patch.pop("actor", None) or "system"
+    patch.pop("actor", None)
+    prospective_variables = patch.get("variables", obj.variables or {})
+    prospective_widgets = patch.get("widgets", obj.widgets or [])
+    _assert_workshop_object_type_references(db, obj.project_id, prospective_variables, prospective_widgets)
     changed: List[str] = []
 
     for field in ("display_name", "description", "variables", "widgets", "layout"):
@@ -403,11 +465,11 @@ def update_workshop_module(
         obj.updated_at = _now()
         _append_audit(
             db,
-            actor=actor,
+            actor=principal.id,
             event_type="apps.workshop.updated",
             subject_type="workshop_module",
             subject_id=module_id,
-            payload={"changed": changed},
+            payload={"project_id": obj.project_id, "changed": changed},
         )
     db.commit()
     db.refresh(obj)
@@ -418,9 +480,10 @@ def update_workshop_module(
 def publish_workshop_module(
     module_id: str,
     body: WorkshopPublishRequest = WorkshopPublishRequest(),
+    principal: Principal = Depends(require_permission("publish")),
     db: Session = Depends(get_db),
 ) -> WorkshopModuleVersion:
-    module = _get_workshop_module_or_404(db, module_id)
+    module = _get_workshop_module_or_404(db, module_id, principal, "publish")
     latest = (
         db.query(WorkshopModuleVersion)
         .filter(WorkshopModuleVersion.module_id == module_id)
@@ -433,17 +496,17 @@ def publish_workshop_module(
         version_number=(latest.version_number + 1) if latest else 1,
         snapshot=_workshop_snapshot(module),
         note=body.note,
-        actor=body.actor or "system",
+        actor=principal.id,
         created_at=_now(),
     )
     db.add(version)
     _append_audit(
         db,
-        actor=body.actor or "system",
+        actor=principal.id,
         event_type="apps.workshop.published",
         subject_type="workshop_module",
         subject_id=module_id,
-        payload={"version_number": version.version_number, "version_id": version.id},
+        payload={"project_id": module.project_id, "version_number": version.version_number, "version_id": version.id},
     )
     db.commit()
     db.refresh(version)
@@ -453,9 +516,10 @@ def publish_workshop_module(
 @router.get("/apps/workshop/{module_id}/versions", response_model=List[WorkshopModuleVersionRead])
 def list_workshop_versions(
     module_id: str,
+    principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ) -> List[WorkshopModuleVersion]:
-    _get_workshop_module_or_404(db, module_id)
+    _get_workshop_module_or_404(db, module_id, principal, "view")
     return (
         db.query(WorkshopModuleVersion)
         .filter(WorkshopModuleVersion.module_id == module_id)
@@ -469,9 +533,10 @@ def restore_workshop_version(
     module_id: str,
     version_id: str,
     body: WorkshopPublishRequest = WorkshopPublishRequest(),
+    principal: Principal = Depends(require_permission("restore")),
     db: Session = Depends(get_db),
 ) -> WorkshopModule:
-    module = _get_workshop_module_or_404(db, module_id)
+    module = _get_workshop_module_or_404(db, module_id, principal, "restore")
     version_query = db.query(WorkshopModuleVersion).filter(
         WorkshopModuleVersion.module_id == module_id,
         WorkshopModuleVersion.id == version_id,
@@ -494,11 +559,11 @@ def restore_workshop_version(
     module.updated_at = _now()
     _append_audit(
         db,
-        actor=body.actor or "system",
+        actor=principal.id,
         event_type="apps.workshop.version_restored",
         subject_type="workshop_module",
         subject_id=module_id,
-        payload={"version_number": version.version_number, "version_id": version.id},
+        payload={"project_id": module.project_id, "version_number": version.version_number, "version_id": version.id},
     )
     db.commit()
     db.refresh(module)
@@ -508,6 +573,7 @@ def restore_workshop_version(
 @router.get("/apps/workshop/{module_id}/render", response_model=WorkshopRenderResponse)
 def render_workshop_module(
     module_id: str,
+    principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -517,9 +583,7 @@ def render_workshop_module(
     - action_type widgets: return action display_name
     - other widgets: pass through with empty resolved dict
     """
-    obj = db.query(WorkshopModule).filter(WorkshopModule.id == module_id).first()
-    if not obj:
-        raise HTTPException(status_code=404, detail=f"WorkshopModule '{module_id}' not found")
+    obj = _get_workshop_module_or_404(db, module_id, principal, "view")
 
     resolved_widgets: List[Dict[str, Any]] = []
     for raw_widget in obj.widgets or []:
@@ -841,6 +905,7 @@ def list_carbon_workspaces(db: Session = Depends(get_db)) -> List[CarbonWorkspac
 @router.get("/apps/carbon/{workspace_id}", response_model=CarbonWorkspaceDetail)
 def get_carbon_workspace(
     workspace_id: str,
+    principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Return workspace with resolved display names for each referenced module."""
@@ -854,6 +919,7 @@ def get_carbon_workspace(
     for mid in obj.module_ids or []:
         mod = db.query(WorkshopModule).filter(WorkshopModule.id == mid).first()
         if mod:
+            tenancy.assert_project_permission(db, principal, mod.project_id, "view")
             resolved_modules.append(
                 {"id": mod.id, "display_name": mod.display_name, "widget_count": len(mod.widgets or [])}
             )

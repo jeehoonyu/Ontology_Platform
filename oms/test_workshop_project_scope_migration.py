@@ -1,4 +1,4 @@
-"""Alembic backfills project ownership for legacy Pipeline Builder graphs."""
+"""Alembic backfills project ownership for legacy Workshop modules."""
 import os
 from pathlib import Path
 import sqlite3
@@ -8,25 +8,24 @@ import tempfile
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-    database_path = Path(tmpdir) / "legacy_pipeline_graphs.db"
+    database_path = Path(tmpdir) / "legacy_workshop.db"
     with sqlite3.connect(database_path) as connection:
         connection.executescript(
             """
             CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY);
-            INSERT INTO alembic_version (version_num) VALUES ('0014_import_project_scope');
-            CREATE TABLE pipeline_builder_graphs (
+            INSERT INTO alembic_version (version_num) VALUES ('0015_pipeline_project_scope');
+            CREATE TABLE workshop_modules (
                 id VARCHAR NOT NULL PRIMARY KEY,
                 display_name VARCHAR NOT NULL,
                 description VARCHAR,
-                nodes JSON NOT NULL,
-                edges JSON NOT NULL,
-                parameters JSON NOT NULL,
-                status VARCHAR NOT NULL,
+                variables JSON NOT NULL,
+                widgets JSON NOT NULL,
+                layout JSON NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
-            INSERT INTO pipeline_builder_graphs VALUES (
-                'legacy-graph', 'Legacy graph', NULL, '[]', '[]', '{}', 'DRAFT', 1, 1
+            INSERT INTO workshop_modules VALUES (
+                'legacy-workshop', 'Legacy workshop', NULL, '{}', '[]', '{}', 1, 1
             );
             """
         )
@@ -47,11 +46,11 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
 
     with sqlite3.connect(database_path) as connection:
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        project_id = connection.execute("SELECT project_id FROM pipeline_builder_graphs WHERE id='legacy-graph'").fetchone()[0]
-        indexes = {row[1] for row in connection.execute("PRAGMA index_list('pipeline_builder_graphs')").fetchall()}
+        project_id = connection.execute("SELECT project_id FROM workshop_modules WHERE id='legacy-workshop'").fetchone()[0]
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list('workshop_modules')").fetchall()}
 
     assert version == "0016_workshop_project_scope", version
     assert project_id == "default", project_id
-    assert "ix_pipeline_builder_graphs_project_id" in indexes, indexes
+    assert "ix_workshop_modules_project_id" in indexes, indexes
 
-print("\nPipeline project-scope migration verified: legacy graphs are retained under the default project.")
+print("\nWorkshop project-scope migration verified: legacy modules are retained under the default project.")
