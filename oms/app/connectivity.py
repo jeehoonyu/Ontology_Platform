@@ -450,6 +450,7 @@ def generate_import_job_from_source(source_id: str, body: SourceGenerateImportJo
         raise HTTPException(status_code=400, detail="Source has no sample records to import")
     job = imports_ops._create_job(
         db,
+        project_id=source.project_id,
         source_type=f"connection:{source.source_type}",
         filename=f"{source.id}.connection",
         display_name=body.display_name or f"{source.display_name} Preview Import",
@@ -457,15 +458,15 @@ def generate_import_job_from_source(source_id: str, body: SourceGenerateImportJo
         records=rows,
         errors=[],
         requested_id=body.id,
-        actor=body.actor,
+        actor=principal.id,
     )
     if body.template:
         validation = imports_ops._validate_job_template(job, body.template)
         imports_ops._apply_validation(job, validation)
-        imports_ops._audit(db, body.actor, "import.job.validated", "import_job", job.id, validation)
+        imports_ops._audit(db, principal.id, "import.job.validated", "import_job", job.id, validation)
     models_action_row = models_action.AuditLog(
         id=uuid.uuid4().hex,
-        actor=body.actor,
+        actor=principal.id,
         event_type="connection.source.generated_import_job",
         subject_type="connection_source",
         subject_id=source.id,

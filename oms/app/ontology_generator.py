@@ -16,8 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, ontology_core, ontology_versioning, pipeline_builder_ops
+from . import models, models_action, ontology_core, ontology_versioning, pipeline_builder_ops, tenancy
 from .database import Base, get_db
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["ontology_generator"])
 
@@ -37,6 +38,7 @@ class OntologyGeneratorDraft(Base):
 
 class DraftCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     asset_id: str
     object_type_id: Optional[str] = None
     display_name: Optional[str] = None
@@ -370,6 +372,7 @@ def _upsert_action(db: Session, *, action_id: str, display_name: str, descriptio
 
 def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -> Dict[str, Any]:
     draft = dict(row.draft or {})
+    project_id = str(draft.get("__project_id") or "default")
     validation = _validate_draft(db, draft)
     row.validation = validation
     row.updated_at = _now()
@@ -390,8 +393,12 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         }
         for prop in included
     }
+    object_properties["__manager"] = {"project_id": project_id}
     obj_type = db.get(models.ObjectType, object_type_id)
     if obj_type:
+        existing_project = str(((obj_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+        if existing_project != project_id:
+            raise HTTPException(status_code=409, detail="Object type ID is owned by another project")
         obj_type.display_name = draft.get("display_name") or obj_type.display_name
         obj_type.description = draft.get("description")
         obj_type.properties = object_properties
@@ -478,11 +485,14 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         graph_id = graph.get("id") or f"{object_type_id}_ontology_graph"
         existing_graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, graph_id)
         if existing_graph:
+            existing_project = str((existing_graph.parameters or {}).get("project_id") or "default")
+            if existing_project != project_id:
+                raise HTTPException(status_code=409, detail="Pipeline graph ID is owned by another project")
             existing_graph.display_name = graph.get("display_name") or existing_graph.display_name
             existing_graph.description = graph.get("description")
             existing_graph.nodes = graph.get("nodes") or []
             existing_graph.edges = graph.get("edges") or []
-            existing_graph.parameters = graph.get("parameters") or {}
+            existing_graph.parameters = {**(graph.get("parameters") or {}), "project_id": project_id}
             existing_graph.status = graph.get("status") or "DRAFT"
             existing_graph.updated_at = now
         else:
@@ -492,7 +502,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
                 description=graph.get("description"),
                 nodes=graph.get("nodes") or [],
                 edges=graph.get("edges") or [],
-                parameters=graph.get("parameters") or {},
+                parameters={**(graph.get("parameters") or {}), "project_id": project_id},
                 status=graph.get("status") or "DRAFT",
                 created_at=now,
                 updated_at=now,
@@ -537,7 +547,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         event_type="ontology.generator.applied",
         subject_type="object_type",
         subject_id=object_type_id,
-        payload={"draft_id": row.id, "graph_id": graph_id, "actions": created_actions},
+        payload={"project_id": project_id, "draft_id": row.id, "graph_id": graph_id, "actions": created_actions},
     ))
     try:
         from . import ops_control
@@ -549,7 +559,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
             title=f"Ontology draft {row.id} applied",
             subject_type="object_type",
             subject_id=object_type_id,
-            payload={"draft_id": row.id, "graph_id": graph_id, "actions": created_actions},
+            payload={"project_id": project_id, "draft_id": row.id, "graph_id": graph_id, "actions": created_actions},
         )
     except Exception:
         pass
@@ -574,12 +584,27 @@ def _read(row: OntologyGeneratorDraft) -> DraftRead:
     return DraftRead.model_validate(row)
 
 
-@router.post("/ontology-generator/drafts", response_model=DraftRead, status_code=201)
-def create_draft(body: DraftCreate, db: Session = Depends(get_db)):
+def _draft_project(row: OntologyGeneratorDraft) -> str:
+    return str((row.draft or {}).get("__project_id") or "default")
+
+
+def _draft_for(db: Session, draft_id: str, principal: Principal, permission: str) -> OntologyGeneratorDraft:
+    row = db.get(OntologyGeneratorDraft, draft_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"OntologyGeneratorDraft '{draft_id}' not found")
+    tenancy.assert_project_permission(db, principal, _draft_project(row), permission)
+    return row
+
+
+def _create_draft_record(db: Session, body: DraftCreate) -> OntologyGeneratorDraft:
     asset = db.get(models.DataAsset, body.asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail=f"DataAsset '{body.asset_id}' not found")
-    draft = body.draft or _generate_draft(asset, body)
+    asset_project = str((asset.asset_schema or {}).get("project_id") or "default")
+    if asset_project != body.project_id:
+        raise HTTPException(status_code=409, detail="DataAsset is owned by another project")
+    draft = dict(body.draft or _generate_draft(asset, body))
+    draft["__project_id"] = body.project_id
     draft["pipeline_graph"] = draft.get("pipeline_graph") or _pipeline_graph_draft(draft)
     validation = _validate_draft(db, draft)
     draft_id = body.id or _new_id()
@@ -602,24 +627,27 @@ def create_draft(body: DraftCreate, db: Session = Depends(get_db)):
     return row
 
 
+@router.post("/ontology-generator/drafts", response_model=DraftRead, status_code=201)
+def create_draft(body: DraftCreate, principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "deploy")
+    return _create_draft_record(db, body)
+
+
 @router.get("/ontology-generator/drafts", response_model=List[DraftRead])
-def list_drafts(db: Session = Depends(get_db)):
-    return db.query(OntologyGeneratorDraft).order_by(OntologyGeneratorDraft.updated_at.desc()).all()
+def list_drafts(principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    rows = db.query(OntologyGeneratorDraft).order_by(OntologyGeneratorDraft.updated_at.desc()).all()
+    accessible = tenancy.accessible_project_ids(db, principal, "view")
+    return rows if accessible is None else [row for row in rows if _draft_project(row) in accessible]
 
 
 @router.get("/ontology-generator/drafts/{draft_id}", response_model=DraftRead)
-def get_draft(draft_id: str, db: Session = Depends(get_db)):
-    row = db.get(OntologyGeneratorDraft, draft_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"OntologyGeneratorDraft '{draft_id}' not found")
-    return row
+def get_draft(draft_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    return _draft_for(db, draft_id, principal, "view")
 
 
 @router.post("/ontology-generator/drafts/{draft_id}/validate")
-def validate_draft(draft_id: str, db: Session = Depends(get_db)):
-    row = db.get(OntologyGeneratorDraft, draft_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"OntologyGeneratorDraft '{draft_id}' not found")
+def validate_draft(draft_id: str, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    row = _draft_for(db, draft_id, principal, "edit")
     validation = _validate_draft(db, row.draft or {})
     row.validation = validation
     row.status = "INVALID" if validation["errors"] else "DRAFT"
@@ -629,8 +657,6 @@ def validate_draft(draft_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/ontology-generator/drafts/{draft_id}/apply")
-def apply_draft(draft_id: str, body: ApplyRequest = ApplyRequest(), db: Session = Depends(get_db)):
-    row = db.get(OntologyGeneratorDraft, draft_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"OntologyGeneratorDraft '{draft_id}' not found")
-    return _apply_draft(db, row, body)
+def apply_draft(draft_id: str, body: ApplyRequest = ApplyRequest(), principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
+    row = _draft_for(db, draft_id, principal, "deploy")
+    return _apply_draft(db, row, body.model_copy(update={"actor": principal.id}))
