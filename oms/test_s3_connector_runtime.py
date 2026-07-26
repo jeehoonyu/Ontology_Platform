@@ -130,7 +130,7 @@ with SessionLocal() as db:
 
 catalog = ok(client.get("/connectors/adapters"), "connector catalog")
 adapters = {row["id"]: row for row in catalog["adapters"]}
-assert adapters["s3"]["available"] is True and adapters["sftp"]["available"] is True and adapters["kafka"]["available"] is False
+assert adapters["s3"]["available"] is True and adapters["sftp"]["available"] is True and adapters["kafka"]["available"] is True
 assert adapters["s3"]["config_schema"]["incremental_cursor_field"] == "_source_object_key"
 
 endpoint = f"http://127.0.0.1:{server.server_port}"

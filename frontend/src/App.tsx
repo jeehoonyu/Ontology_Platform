@@ -419,7 +419,7 @@ function DataOnboarding() {
   const [connectorForm, setConnectorForm] = useState({
     sourceId: "react_live_rest_source",
     displayName: "Live Asset REST Source",
-    adapter: "rest" as "rest" | "jdbc" | "s3" | "sftp",
+    adapter: "rest" as "rest" | "jdbc" | "s3" | "sftp" | "kafka",
     endpoint: "http://localhost:9100",
     recordsPath: "records",
     table: "assets",
@@ -430,7 +430,10 @@ function DataOnboarding() {
     username: "operator",
     remotePath: "/incoming",
     hostKey: "",
-    credentialType: "bearer" as "bearer" | "api_key" | "basic" | "aws" | "sftp_password" | "sftp_private_key",
+    topic: "asset-events",
+    securityProtocol: "PLAINTEXT" as "PLAINTEXT" | "SSL" | "SASL_PLAINTEXT" | "SASL_SSL",
+    saslMechanism: "PLAIN" as "PLAIN" | "SCRAM-SHA-256" | "SCRAM-SHA-512",
+    credentialType: "bearer" as "none" | "bearer" | "api_key" | "basic" | "aws" | "sftp_password" | "sftp_private_key" | "kafka_sasl_plain",
     secret: "",
     identity: "",
     sessionToken: ""
@@ -508,11 +511,15 @@ function DataOnboarding() {
               execution_mode: "live", endpoint_url: connectorForm.endpoint.trim(), bucket: connectorForm.bucket.trim(),
               region: connectorForm.region.trim(), prefix: connectorForm.prefix.trim(), format: "auto",
               max_objects: 100, max_object_bytes: 10_000_000, max_records: 100_000
-            } : {
+            } : connectorForm.adapter === "sftp" ? {
               execution_mode: "live", host: connectorForm.endpoint.trim(), port: Number(connectorForm.port),
               username: connectorForm.username.trim(), remote_path: connectorForm.remotePath.trim(),
               host_key_sha256: connectorForm.hostKey.trim(), format: "auto",
               max_files: 100, max_file_bytes: 10_000_000, max_records: 100_000
+            } : {
+              execution_mode: "live", bootstrap_servers: connectorForm.endpoint.trim(), topic: connectorForm.topic.trim(),
+              security_protocol: connectorForm.securityProtocol, sasl_mechanism: connectorForm.saslMechanism,
+              auto_offset_reset: "earliest", poll_timeout_ms: 1000, max_records: 1000
             };
       const source = await createConnectionSource({
         id: sourceId,
@@ -521,14 +528,16 @@ function DataOnboarding() {
         config
       }).catch(() => getConnectionSource(sourceId));
       setActiveSource(source);
-      if (connectorForm.secret) {
+      if (connectorForm.secret && connectorForm.credentialType !== "none") {
         const metadata: Record<string, string> = connectorForm.credentialType === "api_key"
           ? { header_name: connectorForm.identity.trim() || "X-API-Key" }
           : connectorForm.credentialType === "basic"
             ? { username: connectorForm.identity.trim() }
             : connectorForm.credentialType === "aws"
               ? { access_key_id: connectorForm.identity.trim(), ...(connectorForm.sessionToken ? { session_token: connectorForm.sessionToken } : {}) }
-              : {};
+              : connectorForm.credentialType === "kafka_sasl_plain"
+                ? { username: connectorForm.identity.trim() }
+                : {};
         await rotateConnectorCredential(source.id, {
           credential_type: connectorForm.credentialType,
           secret: connectorForm.secret,
@@ -598,28 +607,35 @@ function DataOnboarding() {
         <Panel title="Live Connector" action={<button onClick={connectorPreview} disabled={connectorBusy || !connectorForm.sourceId.trim()}>{connectorBusy ? "Connecting..." : "Save and Preview"}</button>}>
           <div className="connector-form-grid">
             <label><span>Adapter</span><select value={connectorForm.adapter} onChange={(event) => {
-              const adapter = event.target.value as "rest" | "jdbc" | "s3" | "sftp";
+              const adapter = event.target.value as "rest" | "jdbc" | "s3" | "sftp" | "kafka";
               setConnectorForm((current) => ({
                 ...current, adapter,
-                credentialType: adapter === "s3" ? "aws" : adapter === "sftp" ? "sftp_password" : ["aws", "sftp_password", "sftp_private_key"].includes(current.credentialType) ? "bearer" : current.credentialType
+                credentialType: adapter === "s3" ? "aws" : adapter === "sftp" ? "sftp_password" : adapter === "kafka" ? "none" : ["aws", "sftp_password", "sftp_private_key", "kafka_sasl_plain", "none"].includes(current.credentialType) ? "bearer" : current.credentialType
               }));
-            }}><option value="rest">REST API</option><option value="jdbc">PostgreSQL / SQL</option><option value="s3">S3-compatible storage</option><option value="sftp">SFTP files</option></select></label>
+            }}><option value="rest">REST API</option><option value="jdbc">PostgreSQL / SQL</option><option value="s3">S3-compatible storage</option><option value="sftp">SFTP files</option><option value="kafka">Kafka stream</option></select></label>
             <label><span>Source ID</span><input value={connectorForm.sourceId} onChange={(event) => setConnectorForm((current) => ({ ...current, sourceId: event.target.value }))} /></label>
             <label className="connector-wide-field"><span>Display name</span><input value={connectorForm.displayName} onChange={(event) => setConnectorForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
-            <label className="connector-wide-field"><span>{connectorForm.adapter === "rest" ? "Base URL" : connectorForm.adapter === "jdbc" ? "SQLAlchemy URL" : connectorForm.adapter === "s3" ? "S3 endpoint URL" : "SFTP host"}</span><input value={connectorForm.endpoint} onChange={(event) => setConnectorForm((current) => ({ ...current, endpoint: event.target.value }))} placeholder={connectorForm.adapter === "rest" ? "https://api.example.com/assets" : connectorForm.adapter === "jdbc" ? "postgresql+psycopg2://user@host/database" : connectorForm.adapter === "s3" ? "https://s3.us-west-2.amazonaws.com" : "files.example.com"} /></label>
+            <label className="connector-wide-field"><span>{connectorForm.adapter === "rest" ? "Base URL" : connectorForm.adapter === "jdbc" ? "SQLAlchemy URL" : connectorForm.adapter === "s3" ? "S3 endpoint URL" : connectorForm.adapter === "sftp" ? "SFTP host" : "Bootstrap servers"}</span><input value={connectorForm.endpoint} onChange={(event) => setConnectorForm((current) => ({ ...current, endpoint: event.target.value }))} placeholder={connectorForm.adapter === "rest" ? "https://api.example.com/assets" : connectorForm.adapter === "jdbc" ? "postgresql+psycopg2://user@host/database" : connectorForm.adapter === "s3" ? "https://s3.us-west-2.amazonaws.com" : connectorForm.adapter === "sftp" ? "files.example.com" : "kafka.example.com:9093"} /></label>
             {connectorForm.adapter === "rest" ? <label><span>Records path</span><input value={connectorForm.recordsPath} onChange={(event) => setConnectorForm((current) => ({ ...current, recordsPath: event.target.value }))} /></label> : connectorForm.adapter === "jdbc" ? <label><span>Table</span><input value={connectorForm.table} onChange={(event) => setConnectorForm((current) => ({ ...current, table: event.target.value }))} /></label> : connectorForm.adapter === "s3" ? <>
               <label><span>Bucket</span><input value={connectorForm.bucket} onChange={(event) => setConnectorForm((current) => ({ ...current, bucket: event.target.value }))} /></label>
               <label><span>Region</span><input value={connectorForm.region} onChange={(event) => setConnectorForm((current) => ({ ...current, region: event.target.value }))} /></label>
               <label className="connector-wide-field"><span>Object prefix</span><input value={connectorForm.prefix} onChange={(event) => setConnectorForm((current) => ({ ...current, prefix: event.target.value }))} placeholder="assets/" /></label>
-            </> : <>
+            </> : connectorForm.adapter === "sftp" ? <>
               <label><span>Port</span><input inputMode="numeric" value={connectorForm.port} onChange={(event) => setConnectorForm((current) => ({ ...current, port: event.target.value }))} /></label>
               <label><span>Username</span><input value={connectorForm.username} onChange={(event) => setConnectorForm((current) => ({ ...current, username: event.target.value }))} /></label>
               <label className="connector-wide-field"><span>Remote path</span><input value={connectorForm.remotePath} onChange={(event) => setConnectorForm((current) => ({ ...current, remotePath: event.target.value }))} /></label>
               <label className="connector-wide-field"><span>Host key SHA256</span><input value={connectorForm.hostKey} onChange={(event) => setConnectorForm((current) => ({ ...current, hostKey: event.target.value }))} placeholder="SHA256:..." /></label>
+            </> : <>
+              <label><span>Topic</span><input value={connectorForm.topic} onChange={(event) => setConnectorForm((current) => ({ ...current, topic: event.target.value }))} /></label>
+              <label><span>Security protocol</span><select value={connectorForm.securityProtocol} onChange={(event) => {
+                const securityProtocol = event.target.value as "PLAINTEXT" | "SSL" | "SASL_PLAINTEXT" | "SASL_SSL";
+                setConnectorForm((current) => ({ ...current, securityProtocol, credentialType: securityProtocol.startsWith("SASL") ? "kafka_sasl_plain" : "none" }));
+              }}><option value="PLAINTEXT">PLAINTEXT (development)</option><option value="SSL">TLS</option><option value="SASL_PLAINTEXT">SASL plaintext</option><option value="SASL_SSL">SASL over TLS</option></select></label>
+              {connectorForm.securityProtocol.startsWith("SASL") && <label><span>SASL mechanism</span><select value={connectorForm.saslMechanism} onChange={(event) => setConnectorForm((current) => ({ ...current, saslMechanism: event.target.value as "PLAIN" | "SCRAM-SHA-256" | "SCRAM-SHA-512" }))}><option value="PLAIN">PLAIN</option><option value="SCRAM-SHA-256">SCRAM-SHA-256</option><option value="SCRAM-SHA-512">SCRAM-SHA-512</option></select></label>}
             </>}
-            <label><span>Authentication</span><select value={connectorForm.credentialType} disabled={connectorForm.adapter === "s3"} onChange={(event) => setConnectorForm((current) => ({ ...current, credentialType: event.target.value as "bearer" | "api_key" | "basic" | "aws" | "sftp_password" | "sftp_private_key" }))}>{connectorForm.adapter === "s3" ? <option value="aws">AWS SigV4</option> : connectorForm.adapter === "sftp" ? <><option value="sftp_password">Password</option><option value="sftp_private_key">Private key</option></> : <><option value="bearer">Bearer token</option><option value="api_key">API key</option><option value="basic">Username/password</option></>}</select></label>
-            {["basic", "api_key", "aws"].includes(connectorForm.credentialType) && <label><span>{connectorForm.credentialType === "basic" ? "Username" : connectorForm.credentialType === "aws" ? "Access key ID" : "Header name"}</span><input value={connectorForm.identity} onChange={(event) => setConnectorForm((current) => ({ ...current, identity: event.target.value }))} /></label>}
-            {connectorForm.credentialType === "sftp_private_key" ? <label className="connector-wide-field"><span>Private key (write only)</span><textarea value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" /></label> : <label className="connector-wide-field"><span>{connectorForm.credentialType === "basic" || connectorForm.credentialType === "sftp_password" ? "Password" : connectorForm.credentialType === "aws" ? "Secret access key (write only)" : "Secret (write only)"}</span><input type="password" autoComplete="new-password" value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder={credentials.some((item) => item.status === "ACTIVE") ? "Leave blank to keep active credential" : connectorForm.adapter === "s3" || connectorForm.adapter === "sftp" ? "Required for source access" : "Optional for public sources"} /></label>}
+            <label><span>Authentication</span><select value={connectorForm.credentialType} disabled={connectorForm.adapter === "s3" || connectorForm.adapter === "kafka"} onChange={(event) => setConnectorForm((current) => ({ ...current, credentialType: event.target.value as "none" | "bearer" | "api_key" | "basic" | "aws" | "sftp_password" | "sftp_private_key" | "kafka_sasl_plain" }))}>{connectorForm.adapter === "s3" ? <option value="aws">AWS SigV4</option> : connectorForm.adapter === "sftp" ? <><option value="sftp_password">Password</option><option value="sftp_private_key">Private key</option></> : connectorForm.adapter === "kafka" ? <option value={connectorForm.securityProtocol.startsWith("SASL") ? "kafka_sasl_plain" : "none"}>{connectorForm.securityProtocol.startsWith("SASL") ? "SASL credential" : "No credential"}</option> : <><option value="bearer">Bearer token</option><option value="api_key">API key</option><option value="basic">Username/password</option></>}</select></label>
+            {["basic", "api_key", "aws", "kafka_sasl_plain"].includes(connectorForm.credentialType) && <label><span>{connectorForm.credentialType === "basic" || connectorForm.credentialType === "kafka_sasl_plain" ? "Username" : connectorForm.credentialType === "aws" ? "Access key ID" : "Header name"}</span><input value={connectorForm.identity} onChange={(event) => setConnectorForm((current) => ({ ...current, identity: event.target.value }))} /></label>}
+            {connectorForm.credentialType !== "none" && (connectorForm.credentialType === "sftp_private_key" ? <label className="connector-wide-field"><span>Private key (write only)</span><textarea value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" /></label> : <label className="connector-wide-field"><span>{connectorForm.credentialType === "basic" || connectorForm.credentialType === "sftp_password" || connectorForm.credentialType === "kafka_sasl_plain" ? "Password" : connectorForm.credentialType === "aws" ? "Secret access key (write only)" : "Secret (write only)"}</span><input type="password" autoComplete="new-password" value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder={credentials.some((item) => item.status === "ACTIVE") ? "Leave blank to keep active credential" : connectorForm.adapter === "s3" || connectorForm.adapter === "sftp" || connectorForm.credentialType === "kafka_sasl_plain" ? "Required for source access" : "Optional for public sources"} /></label>)}
             {connectorForm.credentialType === "aws" && <label className="connector-wide-field"><span>Session token (optional, write only)</span><input type="password" autoComplete="new-password" value={connectorForm.sessionToken} onChange={(event) => setConnectorForm((current) => ({ ...current, sessionToken: event.target.value }))} /></label>}
           </div>
           <div className="connector-runtime-summary"><StatusBadge value={activeSource?.status || "NOT_CONNECTED"} /><span>{activeSource ? `${activeSource.display_name} uses ${activeSource.source_type}` : "Configure a live source to test access and inspect records."}</span></div>
