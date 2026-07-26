@@ -149,6 +149,14 @@ assert summary["reaped_stale_jobs"] == 1 and summary["active_leases"] == 0, summ
 recovered = ok(client.get(f"/jobs/{stale['id']}"), "inspect recovered job")
 assert recovered["status"] == "QUEUED" and recovered["attempt"] == 2, recovered
 assert any(event["event_type"] == "job.requeued" for event in recovered["events"]), recovered
+recovery_event = next(event for event in recovered["events"] if event["event_type"] == "job.requeued")
+assert recovery_event["payload"]["prior_worker_id"] == "model-worker-1"
+observation = ok(client.get(f"/runtime/observability/jobs/{stale['id']}"), "inspect recovery telemetry")
+assert observation["status"] == "QUEUED" and observation["completed_at"] is None, observation
+assert observation["spans"][-1]["name"] == "recovery" and observation["metrics"]["recovery_count"] == 1, observation
+ops_events = ok(client.get("/ops/events?source=runtime"), "inspect recovery operations event")
+assert any(event["event_type"] == "job.requeued" and event["subject_id"] == stale["id"] for event in ops_events), ops_events
+passed += 3
 
 listed = ok(client.get("/jobs?status=SUCCEEDED&job_type=pipeline.preview"), "filter job list")
 assert [row["id"] for row in listed] == [high["id"]], listed

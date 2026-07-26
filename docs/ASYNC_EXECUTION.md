@@ -29,9 +29,12 @@ Only the current lease owner can report progress or terminate an execution. A st
 
 - An expired worker lease or execution timeout is detected during queue reads, claims, summaries, or job inspection.
 - Work is requeued while its retry budget remains; otherwise it becomes `FAILED`.
+- PostgreSQL reapers lock stale jobs with `FOR UPDATE SKIP LOCKED`, so concurrent API replicas produce one recovery transition and one evidence trail.
 - Retriable worker failures can set a delay before the next claim.
 - Cancellation releases any active lease immediately.
 - Every transition writes a `PlatformJobEvent` for SSE, audit, UI evidence, and incident correlation.
+
+Recovery records the abandoned worker, prior lease expiry, incremented attempt, a dedicated runtime-observability `recovery` span, audit evidence, and a warning Ops event. A replacement worker receives a new lease token; completion with the abandoned token is fenced with `409`.
 
 Workers should make side effects idempotent because a process can fail after performing work but before acknowledging completion. Use the platform job ID as the downstream idempotency key when writing datasets, invoking actions, or publishing reports.
 
