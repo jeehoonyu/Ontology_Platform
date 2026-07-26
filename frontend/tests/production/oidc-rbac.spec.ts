@@ -74,6 +74,99 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(loadProbe.nodeCounts).toEqual(Array(50).fill(1));
   expect(loadProbe.elapsedMs).toBeLessThan(15_000);
 
+  const sharedArtifact = await page.evaluate(async () => {
+    const response = await fetch("/artifacts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        artifact_type: "pipeline",
+        display_name: "Cross-replica collaboration",
+        state: {
+          nodes: [{ id: "source", type: "input", position: { x: 80, y: 120 }, data: { label: "Source", nodeType: "input_dataset" } }],
+          edges: []
+        },
+        layout: {}
+      })
+    });
+    return response.json();
+  }) as { id: string; lock_version: number };
+  const joinedPrimary = await page.evaluate(async (artifactId) => {
+    const response = await fetch(`/artifacts/${artifactId}/collaboration/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: "production-primary-client" })
+    });
+    return response.json();
+  }, sharedArtifact.id) as { event_cursor: number; participant_token: string };
+
+  const peer = await page.context().newPage();
+  await peer.goto("http://localhost:18001/workspace/pipeline");
+  const peerSession = await peer.evaluate(async () => (await fetch("/auth/session")).json());
+  expect(peerSession.authenticated).toBe(true);
+  const joinedPeer = await peer.evaluate(async (artifactId) => {
+    const response = await fetch(`/artifacts/${artifactId}/collaboration/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: "production-peer-client" })
+    });
+    return response.json();
+  }, sharedArtifact.id) as { participant_token: string };
+
+  await page.evaluate(({ artifactId, cursor }) => {
+    const holder = window as unknown as {
+      crossReplicaEvent?: Promise<Record<string, unknown>>;
+      crossReplicaStream?: EventSource;
+    };
+    holder.crossReplicaEvent = new Promise((resolve, reject) => {
+      const stream = new EventSource(`/artifacts/${artifactId}/collaboration/stream?after=${cursor}`);
+      holder.crossReplicaStream = stream;
+      const timeout = window.setTimeout(() => {
+        stream.close();
+        reject(new Error("Timed out waiting for a cross-replica collaboration event"));
+      }, 15_000);
+      stream.addEventListener("artifact.commands", (raw) => {
+        window.clearTimeout(timeout);
+        stream.close();
+        resolve(JSON.parse((raw as MessageEvent<string>).data));
+      });
+      stream.onerror = () => {
+        window.clearTimeout(timeout);
+        stream.close();
+        reject(new Error("Cross-replica collaboration stream disconnected"));
+      };
+    });
+  }, { artifactId: sharedArtifact.id, cursor: joinedPrimary.event_cursor });
+
+  const peerEdit = await peer.evaluate(async ({ artifactId, participantToken, lockVersion }) => {
+    const response = await fetch(`/artifacts/${artifactId}/collaboration/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        participant_token: participantToken,
+        expected_lock_version: lockVersion,
+        idempotency_key: "production-cross-replica-edit",
+        commands: [{
+          command_id: "production-add-filter",
+          command: "add_node",
+          payload: { node: { id: "filter", type: "transform", position: { x: 320, y: 120 }, data: { label: "Filter", nodeType: "filter" } } }
+        }],
+        message: "Edit through peer API"
+      })
+    });
+    return { status: response.status, body: await response.json() };
+  }, { artifactId: sharedArtifact.id, participantToken: joinedPeer.participant_token, lockVersion: sharedArtifact.lock_version });
+  expect(peerEdit.status).toBe(200);
+  const crossReplicaEvent = await page.evaluate(async () => {
+    const holder = window as unknown as { crossReplicaEvent?: Promise<Record<string, unknown>> };
+    return holder.crossReplicaEvent;
+  });
+  expect(crossReplicaEvent?.artifact_id).toBe(sharedArtifact.id);
+  expect(crossReplicaEvent?.lock_version).toBe(2);
+  const synchronized = await page.evaluate(async (artifactId) => (await fetch(`/artifacts/${artifactId}`)).json(), sharedArtifact.id);
+  expect(synchronized.lock_version).toBe(2);
+  expect(synchronized.state.nodes).toHaveLength(2);
+  await peer.close();
+
   const workflow = await page.evaluate(async () => {
     const json = async (path: string, method = "GET", body?: unknown) => {
       const response = await fetch(path, {

@@ -2,7 +2,7 @@ from logging.config import fileConfig
 import os
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 os.environ["SKIP_CREATE_ALL"] = "1"
 from app.main import models  # noqa: E402
@@ -29,6 +29,10 @@ def run_migrations_online():
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
         with context.begin_transaction():
+            if connection.dialect.name == "postgresql":
+                # All API replicas run the same entrypoint. Serialize migration DDL
+                # inside the transaction so only one replica can advance the schema.
+                connection.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": 781230947125})
             context.run_migrations()
 
 
