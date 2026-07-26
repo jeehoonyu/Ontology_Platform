@@ -96,6 +96,22 @@ test("data onboarding exposes structured S3 configuration without raw credential
   await expect(page.getByRole("row", { name: /s3 AVAILABLE/ })).toBeVisible();
 });
 
+test("data onboarding exposes pinned-host SFTP configuration", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the structured connector workflow once on desktop.");
+  await page.goto("/workspace/imports");
+  await page.getByLabel("Adapter").selectOption("sftp");
+  await expect(page.getByLabel("SFTP host")).toBeVisible();
+  await expect(page.getByLabel("Port")).toBeVisible();
+  await expect(page.getByLabel("Username")).toBeVisible();
+  await expect(page.getByLabel("Remote path")).toBeVisible();
+  await expect(page.getByLabel("Host key SHA256")).toBeVisible();
+  await expect(page.getByLabel("Authentication")).toHaveValue("sftp_password");
+  await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "password");
+  await page.getByLabel("Authentication").selectOption("sftp_private_key");
+  await expect(page.getByLabel("Private key (write only)")).toBeVisible();
+  await expect(page.getByRole("row", { name: /sftp AVAILABLE/ })).toBeVisible();
+});
+
 test("runtime operations shows durable telemetry, budgets, and SLO controls", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful runtime operations workflow once on desktop.");
   const projectId = `browser-runtime-${Date.now()}`;

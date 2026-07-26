@@ -103,9 +103,9 @@ ok(client.post("/connections/sources", json={"id": "s_good", "display_name": "Go
 t_good = ok(client.post("/connections/sources/s_good/test"), "test s_good")
 assert t_good["ok"] is True and t_good["missing"] == [], t_good
 
-# sftp alternative-key requirement: private_key alone satisfies (password|private_key)
+# SFTP validation requires a remote path and pinned host key; credentials are write-only runtime resources.
 ok(client.post("/connections/sources", json={"id": "s_sftp", "display_name": "SFTP",
-    "source_type": "sftp", "config": {"host": "h", "username": "u", "private_key": "KEY"}}), "create s_sftp")
+    "source_type": "sftp", "config": {"host": "h", "username": "u", "remote_path": "/incoming", "host_key_sha256": "SHA256:fixture"}}), "create s_sftp")
 t_sftp = ok(client.post("/connections/sources/s_sftp/test"), "test s_sftp")
 assert t_sftp["ok"] is True, t_sftp
 

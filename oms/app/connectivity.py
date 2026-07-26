@@ -209,7 +209,7 @@ class SyncValidateRequest(BaseModel):
 REQUIRED_CONFIG_KEYS: Dict[str, List[Any]] = {
     "jdbc": [("jdbc_url", "sqlalchemy_url"), "driver_class"],
     "s3": ["bucket", "region"],
-    "sftp": ["host", "username", ("password", "private_key")],
+    "sftp": ["host", "username", "remote_path", "host_key_sha256"],
     "rest": ["base_url"],
     "kafka": ["bootstrap_servers", "topic"],
 }
