@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint
@@ -1560,6 +1560,7 @@ async def stream_artifact_collaboration_events(
     request: Request,
     after: int = 0,
     once: bool = False,
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
     principal: Principal = Depends(require_permission("view")),
 ):
     db = next(get_db())
@@ -1568,8 +1569,15 @@ async def stream_artifact_collaboration_events(
     finally:
         db.close()
 
+    resume_cursor = after
+    if last_event_id:
+        try:
+            resume_cursor = max(after, int(last_event_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Last-Event-ID must be an integer event cursor") from exc
+
     async def generate():
-        cursor = after
+        cursor = resume_cursor
         idle_cycles = 0
         while True:
             event_db = next(get_db())
