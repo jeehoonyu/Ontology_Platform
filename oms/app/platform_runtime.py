@@ -1816,7 +1816,9 @@ def _release_job_lease(db: Session, job_id: str) -> None:
 def _reap_stale_jobs(db: Session) -> int:
     now = _now()
     reaped = 0
-    running = db.query(PlatformJob).filter(PlatformJob.status == "RUNNING").all()
+    running = db.query(PlatformJob).filter(
+        PlatformJob.status == "RUNNING",
+    ).with_for_update(skip_locked=True).all()
     for row in running:
         lease = _lease_for_job(db, row.id)
         execution = _execution(row)
@@ -1826,6 +1828,8 @@ def _reap_stale_jobs(db: Session) -> int:
             continue
         max_attempts = int(execution.get("max_attempts", 3))
         reason = "timeout" if timed_out else "lease_expired"
+        prior_worker_id = lease.worker_id if lease else None
+        prior_lease_expires_at = lease.expires_at if lease else None
         _release_job_lease(db, row.id)
         row.updated_at = now
         row.error = f"Worker execution {reason.replace('_', ' ')}"
@@ -1835,13 +1839,41 @@ def _reap_stale_jobs(db: Session) -> int:
             row.progress = 0
             row.started_at = None
             _set_execution(row, available_at=now)
-            _job_event(db, row, "job.requeued", {"reason": reason, "attempt": row.attempt})
+            _job_event(db, row, "job.requeued", {
+                "reason": reason, "attempt": row.attempt, "prior_worker_id": prior_worker_id,
+                "prior_lease_expires_at": prior_lease_expires_at,
+            })
         else:
             row.status = "FAILED"
             row.completed_at = now
-            _job_event(db, row, "job.failed", {"reason": reason, "attempt": row.attempt})
+            _job_event(db, row, "job.failed", {
+                "reason": reason, "attempt": row.attempt, "prior_worker_id": prior_worker_id,
+                "prior_lease_expires_at": prior_lease_expires_at,
+            })
         from . import runtime_observability
-        runtime_observability.record_job_terminal(db, row, row.status, {"reason": reason}, row.error)
+        if row.status == "QUEUED":
+            runtime_observability.record_job_recovery(db, row, reason, prior_worker_id)
+        else:
+            runtime_observability.record_job_terminal(db, row, row.status, {"reason": reason}, row.error)
+        evidence = {
+            "job_type": row.job_type,
+            "project_id": row.project_id,
+            "reason": reason,
+            "attempt": row.attempt,
+            "prior_worker_id": prior_worker_id,
+        }
+        _audit(db, "system", "job.requeued" if row.status == "QUEUED" else "job.failed", "platform_job", row.id, evidence)
+        ops_control.record_ops_event(
+            db,
+            source="runtime",
+            event_type="job.requeued" if row.status == "QUEUED" else "job.retry_exhausted",
+            severity="warning" if row.status == "QUEUED" else "error",
+            title=f"Job {row.id} {'recovered' if row.status == 'QUEUED' else 'exhausted retries'}",
+            message=row.error,
+            subject_type="platform_job",
+            subject_id=row.id,
+            payload=evidence,
+        )
         reaped += 1
     return reaped
 

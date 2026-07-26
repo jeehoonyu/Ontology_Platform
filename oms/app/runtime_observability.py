@@ -224,6 +224,28 @@ def record_job_progress(db: Session, job: Any, message: Optional[str], metrics: 
     row.spans = list(row.spans or []) + [{"name": "progress", "status": job.status, "progress": job.progress, "message": message, "metrics": metrics, "timestamp": now}]
 
 
+def record_job_recovery(db: Session, job: Any, reason: str, worker_id: Optional[str]) -> None:
+    row = db.query(RuntimeJobObservation).filter(RuntimeJobObservation.job_id == job.id).first()
+    if not row:
+        return
+    now = _now()
+    row.status, row.attempt, row.progress, row.updated_at = job.status, job.attempt, job.progress, now
+    row.completed_at = None
+    row.error = job.error
+    metrics = dict(row.metrics or {})
+    metrics["recovery_count"] = int(metrics.get("recovery_count") or 0) + 1
+    metrics["latest_recovery"] = {"reason": reason, "worker_id": worker_id, "attempt": job.attempt}
+    row.metrics = metrics
+    row.spans = list(row.spans or []) + [{
+        "name": "recovery",
+        "status": job.status,
+        "attempt": job.attempt,
+        "reason": reason,
+        "worker_id": worker_id,
+        "timestamp": now,
+    }]
+
+
 def record_job_terminal(db: Session, job: Any, status: str, metrics: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
     row = db.query(RuntimeJobObservation).filter(RuntimeJobObservation.job_id == job.id).first()
     if not row:
