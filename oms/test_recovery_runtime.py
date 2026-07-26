@@ -57,6 +57,13 @@ ok(client.post("/artifacts/recovery-builder/commands", json={
         "payload": {"node": {"id": "source", "position": {"x": 40, "y": 80}, "data": {"label": "Source", "nodeType": "dataset_input"}}},
     }],
 }), "create durable command receipt")
+recovery_job = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "subject_type": "report",
+    "subject_id": "recovery-report",
+    "payload": {"format": "markdown"},
+    "idempotency_key": "recovery-report-job-v1",
+}), "create durable job idempotency receipt", 201)
 
 snapshot = ok(client.get("/project/export"), "export portable snapshot")
 assert snapshot["snapshot_version"] == 2
@@ -72,10 +79,14 @@ assert source_snapshot["config"]["password"] == "[REDACTED]" and source_snapshot
 assert any(row["resource_id"] == "recovery-source" for row in snapshot["rebind_required"])
 assert len(snapshot["platform_artifact_command_receipts"]) == 1
 assert snapshot["platform_artifact_command_receipts"][0]["request_hash"]
+assert len(snapshot["platform_job_idempotency_receipts"]) == 1
+assert snapshot["platform_job_idempotency_receipts"][0]["job_id"] == recovery_job["id"]
+assert snapshot["platform_job_idempotency_receipts"][0]["request_hash"]
 with SessionLocal() as db:
     db.query(platform_runtime.ArtifactCommandReceipt).delete()
+    db.query(platform_runtime.PlatformJobIdempotencyReceipt).delete()
     db.commit()
-passed += 10
+passed += 13
 
 validation = ok(client.post("/project/import/validate", json={"snapshot": snapshot}), "validate clean snapshot")
 assert validation["status"] == "VALID" and validation["resource_count"] > 0
@@ -124,7 +135,11 @@ with SessionLocal() as db:
         platform_runtime.ArtifactCommandReceipt.artifact_id == "recovery-builder"
     ).one()
     assert receipt.idempotency_key == "recovery-builder-command-v1" and receipt.request_hash
-    passed += 1
+    job_receipt = db.query(platform_runtime.PlatformJobIdempotencyReceipt).filter(
+        platform_runtime.PlatformJobIdempotencyReceipt.job_id == recovery_job["id"]
+    ).one()
+    assert job_receipt.idempotency_key == "recovery-report-job-v1" and job_receipt.request_hash
+    passed += 2
 
 same_logical_receipt = copy.deepcopy(snapshot)
 same_logical_receipt["platform_artifact_command_receipts"][0]["id"] = "alternate-generated-receipt-id"
@@ -141,6 +156,23 @@ conflicting_receipt = system_hardening._finalize_snapshot(conflicting_receipt)
 ok(client.post("/project/import", json={"snapshot": conflicting_receipt}), "reject contradictory receipt evidence", 409)
 with SessionLocal() as db:
     assert db.query(platform_runtime.ArtifactCommandReceipt).one().request_hash != "f" * 64
+    passed += 1
+
+same_job_receipt = copy.deepcopy(snapshot)
+same_job_receipt["platform_job_idempotency_receipts"][0]["id"] = "alternate-job-receipt-id"
+same_job_receipt = system_hardening._finalize_snapshot(same_job_receipt)
+reconciled_job = ok(client.post("/project/import", json={"snapshot": same_job_receipt}), "reconcile job receipt by scope hash")
+assert reconciled_job["counts"]["skipped"] >= 1
+with SessionLocal() as db:
+    assert db.query(platform_runtime.PlatformJobIdempotencyReceipt).count() == 1
+    passed += 1
+
+conflicting_job_receipt = copy.deepcopy(same_job_receipt)
+conflicting_job_receipt["platform_job_idempotency_receipts"][0]["request_hash"] = "e" * 64
+conflicting_job_receipt = system_hardening._finalize_snapshot(conflicting_job_receipt)
+ok(client.post("/project/import", json={"snapshot": conflicting_job_receipt}), "reject contradictory job receipt evidence", 409)
+with SessionLocal() as db:
+    assert db.query(platform_runtime.PlatformJobIdempotencyReceipt).one().request_hash != "e" * 64
     passed += 1
 
 # Portable recovery is an installation-level operation until every legacy resource has project ownership.
