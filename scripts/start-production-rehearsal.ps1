@@ -17,7 +17,8 @@ $env:REHEARSAL_KEYCLOAK_ADMIN_PASSWORD = $KeycloakAdminPassword
 $env:REHEARSAL_POSTGRES_PASSWORD = $PostgresPassword
 if (-not $ConnectorSecretKey) {
     $bytes = New-Object byte[] 32
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $generator.GetBytes($bytes) } finally { $generator.Dispose() }
     $ConnectorSecretKey = [Convert]::ToBase64String($bytes)
 }
 $env:REHEARSAL_CONNECTOR_SECRET_KEY = $ConnectorSecretKey
@@ -44,6 +45,9 @@ $kcadm = "/opt/keycloak/bin/kcadm.sh"
 & docker @compose exec -T keycloak $kcadm config credentials --server http://localhost:8080 --realm master --user rehearsal-admin --password $KeycloakAdminPassword | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not authenticate to the rehearsal identity provider." }
 
+& docker @compose exec -T keycloak $kcadm update users/profile -r ontology -f /opt/keycloak/conf/ontology-user-profile.json | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not register tenant attributes in the rehearsal identity provider." }
+
 function Ensure-RealmUser([string]$Username, [string]$Password, [string]$Role) {
     $json = & docker @compose exec -T keycloak $kcadm get users -r ontology -q "username=$Username"
     if ($LASTEXITCODE -ne 0) { throw "Could not query Keycloak user $Username." }
@@ -57,8 +61,14 @@ function Ensure-RealmUser([string]$Username, [string]$Password, [string]$Role) {
         $users = @($parsedUsers) | Where-Object { $_ -and $_.username }
     }
     $userId = $users[0].id
-    & docker @compose exec -T keycloak $kcadm update "users/$userId" -r ontology -s enabled=true -s emailVerified=true -s firstName=Pilot -s "lastName=$Role" -s 'requiredActions=[]' -s 'attributes={"organization_id":["pilot"],"project_ids":["default"]}' | Out-Null
+    & docker @compose exec -T keycloak $kcadm update "users/$userId" -r ontology -s enabled=true -s emailVerified=true -s firstName=Pilot -s "lastName=$Role" -s 'requiredActions=[]' -s 'attributes.organization_id=pilot' -s 'attributes.project_ids=default' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not complete the profile for $Username." }
+    $updatedJson = & docker @compose exec -T keycloak $kcadm get "users/$userId" -r ontology
+    if ($LASTEXITCODE -ne 0) { throw "Could not verify the profile for $Username." }
+    $updated = ($updatedJson -join "`n") | ConvertFrom-Json
+    if ($updated.attributes.organization_id -notcontains "pilot" -or $updated.attributes.project_ids -notcontains "default") {
+        throw "Tenant attributes were not persisted for $Username."
+    }
     & docker @compose exec -T keycloak $kcadm set-password -r ontology --username $Username --new-password $Password | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not set password for $Username." }
     & docker @compose exec -T keycloak $kcadm add-roles -r ontology --uusername $Username --rolename $Role | Out-Null

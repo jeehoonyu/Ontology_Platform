@@ -25,7 +25,7 @@ services:
       start_period: 15s
 
   postgres:
-    image: postgis/postgis:15-3.4
+    image: postgis/postgis@sha256:3f4a5d48e0be9580ed70ed618cd039ce57bbb2dd113053d3836e28513f1f87cd
     container_name: ontology_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}

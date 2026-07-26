@@ -49,6 +49,31 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   });
   expect(adminMutation.status).toBe(201);
 
+  const tenantBoundary = await page.evaluate(async () => {
+    const response = await fetch("/tenancy/organizations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "outside", display_name: "Outside Organization" })
+    });
+    return { status: response.status, body: await response.json() };
+  });
+  expect(tenantBoundary.status).toBe(403);
+  expect(tenantBoundary.body.detail).toContain("another organization");
+
+  const loadProbe = await page.evaluate(async (artifactId) => {
+    const started = performance.now();
+    const responses = await Promise.all(Array.from({ length: 50 }, () => fetch(`/artifacts/${artifactId}`)));
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+    return {
+      statuses: responses.map((response) => response.status),
+      nodeCounts: bodies.map((body) => body.state?.widgets?.length ?? -1),
+      elapsedMs: performance.now() - started
+    };
+  }, adminMutation.body.id);
+  expect(loadProbe.statuses).toEqual(Array(50).fill(200));
+  expect(loadProbe.nodeCounts).toEqual(Array(50).fill(1));
+  expect(loadProbe.elapsedMs).toBeLessThan(15_000);
+
   const workflow = await page.evaluate(async () => {
     const json = async (path: string, method = "GET", body?: unknown) => {
       const response = await fetch(path, {
