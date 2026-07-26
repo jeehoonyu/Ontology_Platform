@@ -358,10 +358,11 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, principal: Principa
         if not asset and body.create_target_asset:
             asset = models.DataAsset(
                 id=target_asset_id,
+                project_id=stream.project_id,
                 display_name=body.target_display_name or f"{stream.display_name} Replay Archive",
                 description=f"Archived replay records from stream {stream.id}.",
                 kind="dataset",
-                asset_schema={"source_stream_id": stream.id, "record_count": len(records)},
+                asset_schema={"project_id": stream.project_id, "source_stream_id": stream.id, "record_count": len(records)},
                 records=[],
                 created_at=now,
                 updated_at=now,
@@ -369,6 +370,8 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, principal: Principa
             db.add(asset)
         if not asset:
             raise HTTPException(status_code=404, detail=f"DataAsset '{target_asset_id}' not found")
+        if asset.project_id != stream.project_id:
+            raise HTTPException(status_code=409, detail="Target dataset belongs to another project")
         asset.records = list(asset.records or []) + records
         asset.updated_at = now
         archived = len(records)

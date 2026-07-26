@@ -414,9 +414,10 @@ def install_package_version(package_id: str, version: str, body: PackageInstallR
         if item.get("primary_key"):
             properties.setdefault("__manager", {})["primary_key"] = item["primary_key"]
         if existing:
+            existing.project_id = body.target_project_id
             existing.display_name, existing.description, existing.properties, existing.updated_at = item["display_name"], item.get("description"), properties, now
         else:
-            db.add(models.ObjectType(id=resource_id, display_name=item["display_name"], description=item.get("description"), properties=properties, created_at=now, updated_at=now))
+            db.add(models.ObjectType(id=resource_id, project_id=body.target_project_id, display_name=item["display_name"], description=item.get("description"), properties=properties, created_at=now, updated_at=now))
         profile_values = item.get("profile")
         if isinstance(profile_values, dict):
             values = {
@@ -444,9 +445,10 @@ def install_package_version(package_id: str, version: str, body: PackageInstallR
         prior_state.append({"resource_type": "link_type", "resource_id": resource_id, "state": {"display_name": existing.display_name, "description": existing.description, "source_object_type_id": existing.source_object_type_id, "target_object_type_id": existing.target_object_type_id, "cardinality": existing.cardinality} if existing else None})
         values = {"display_name": item["display_name"], "description": item.get("description"), "source_object_type_id": object_id_map[item["source_object_type_id"]], "target_object_type_id": object_id_map[item["target_object_type_id"]], "cardinality": item.get("cardinality", "MANY_TO_MANY")}
         if existing:
+            existing.project_id = body.target_project_id
             for key, value in values.items(): setattr(existing, key, value)
         else:
-            db.add(models.LinkType(id=resource_id, **values))
+            db.add(models.LinkType(id=resource_id, project_id=body.target_project_id, **values))
         if ownership:
             ownership.installation_id, ownership.updated_at = installation_id, now
         else:

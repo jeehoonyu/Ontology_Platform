@@ -21,7 +21,7 @@ from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, ops_control
+from . import models, models_action, ops_control, production_auth, semantic_scope, tenancy
 from .database import Base, get_db
 
 router = APIRouter(tags=["platform_core"])
@@ -363,15 +363,18 @@ def _add_search_result(results: List[Dict[str, Any]], *, kind: str, resource_id:
     results.append(row)
 
 
-def _safe_all(db: Session, model) -> List[Any]:
+def _safe_all(db: Session, model, principal: production_auth.Principal) -> List[Any]:
     try:
+        if hasattr(model, "project_id"):
+            return semantic_scope.accessible_query(db, principal, model).all()
         return db.query(model).all()
     except OperationalError:
         db.rollback()
         return []
 
 
-def _search_resources(db: Session, query: str, kinds: List[str], limit: int, include_payload: bool) -> List[Dict[str, Any]]:
+def _search_resources(db: Session, query: str, kinds: List[str], limit: int, include_payload: bool,
+                      principal: production_auth.Principal) -> List[Dict[str, Any]]:
     kind_filter = {kind.lower() for kind in kinds if kind}
     results: List[Dict[str, Any]] = []
 
@@ -379,37 +382,41 @@ def _search_resources(db: Session, query: str, kinds: List[str], limit: int, inc
         return not kind_filter or kind in kind_filter
 
     if allowed("object_type"):
-        for row in _safe_all(db, models.ObjectType):
+        for row in _safe_all(db, models.ObjectType, principal):
             _add_search_result(results, kind="object_type", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "Ontology object type", url=f"/workspace/object-explorer?type={row.id}", query=query, payload={"properties": row.properties or {}}, include_payload=include_payload)
 
     if allowed("object"):
-        for row in _safe_all(db, models.ObjectInstance):
+        for row in _safe_all(db, models.ObjectInstance, principal):
             title = (row.properties or {}).get("name") or (row.properties or {}).get("title") or row.id
             _add_search_result(results, kind="object", resource_id=row.id, title=str(title), subtitle=f"{row.object_type_id} object", url=f"/objects/{row.object_type_id}/{row.id}/profile", query=query, payload={"object_type_id": row.object_type_id, "properties": row.properties or {}}, include_payload=include_payload)
 
     if allowed("dataset"):
-        for row in _safe_all(db, models.DataAsset):
+        for row in _safe_all(db, models.DataAsset, principal):
             _add_search_result(results, kind="dataset", resource_id=row.id, title=row.display_name or row.id, subtitle=f"{row.kind} - {len(row.records or [])} records", url=f"/data-assets/{row.id}", query=query, payload={"schema": row.asset_schema or {}}, include_payload=include_payload)
 
     if allowed("pipeline"):
-        for row in _safe_all(db, models.PipelineDefinition):
+        for row in _safe_all(db, models.PipelineDefinition, principal):
             _add_search_result(results, kind="pipeline", resource_id=row.id, title=row.display_name or row.id, subtitle=f"{row.mode} pipeline", url=f"/pipelines/{row.id}", query=query, payload={"input_asset_id": row.input_asset_id, "output_asset_id": row.output_asset_id, "steps": row.steps or []}, include_payload=include_payload)
 
     if allowed("action"):
-        for row in _safe_all(db, models.ActionType):
+        for row in _safe_all(db, models.ActionType, principal):
             _add_search_result(results, kind="action", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "Governed action type", url=f"/action-types/{row.id}", query=query, payload={"parameters": row.parameters or {}, "rules": row.rules or {}}, include_payload=include_payload)
 
     if allowed("logic"):
-        for row in _safe_all(db, models.LogicFunction):
+        for row in _safe_all(db, models.LogicFunction, principal):
             _add_search_result(results, kind="logic", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "AIP Logic function", url=f"/logic-functions/{row.id}", query=query, payload={"blocks": row.blocks or []}, include_payload=include_payload)
 
     if allowed("agent"):
-        for row in _safe_all(db, models.AgentDefinition):
+        for row in _safe_all(db, models.AgentDefinition, principal):
             _add_search_result(results, kind="agent", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "Agent", url=f"/agents/{row.id}", query=query, payload={"allowed_object_types": row.allowed_object_types or [], "allowed_actions": row.allowed_actions or []}, include_payload=include_payload)
 
     if allowed("event"):
         ops_control._ensure_tables(db)
+        accessible = tenancy.accessible_project_ids(db, semantic_scope.effective_principal(principal), "view")
         for row in db.query(ops_control.OpsEvent).all():
+            event_project = (row.payload or {}).get("project_id")
+            if accessible is not None and event_project not in accessible:
+                continue
             _add_search_result(results, kind="event", resource_id=row.id, title=row.title, subtitle=f"{row.source} {row.event_type} {row.severity}", url=f"/events/{row.id}", query=query, payload=_event_dict(row), include_payload=include_payload)
 
     if allowed("incident"):
@@ -420,7 +427,7 @@ def _search_resources(db: Session, query: str, kinds: List[str], limit: int, inc
     try:
         from . import investigations
         if allowed("investigation"):
-            for row in db.query(investigations.InvestigationWorkspace).all():
+            for row in _safe_all(db, investigations.InvestigationWorkspace, principal):
                 _add_search_result(results, kind="investigation", resource_id=row.id, title=row.display_name, subtitle=f"{row.status} investigation", url=f"/investigations/{row.id}", query=query, payload={"object_refs": row.object_refs or []}, include_payload=include_payload)
     except OperationalError:
         db.rollback()
@@ -428,7 +435,7 @@ def _search_resources(db: Session, query: str, kinds: List[str], limit: int, inc
     try:
         from . import modeling
         if allowed("model"):
-            for row in db.query(modeling.ModelingObjective).all():
+            for row in _safe_all(db, modeling.ModelingObjective, principal):
                 _add_search_result(results, kind="model", resource_id=row.id, title=row.display_name, subtitle=f"{row.problem_type} objective", url=f"/modeling/objectives/{row.id}", query=query, payload={"target_field": row.target_field, "feature_fields": row.feature_fields or []}, include_payload=include_payload)
     except OperationalError:
         db.rollback()
@@ -650,7 +657,7 @@ def _build_timeline(db: Session, *, subject_type: Optional[str], subject_id: Opt
     }
 
 
-def _graph_overview(db: Session, limit: int) -> Dict[str, Any]:
+def _graph_overview(db: Session, limit: int, principal: Optional[production_auth.Principal] = None) -> Dict[str, Any]:
     nodes: Dict[str, Dict[str, Any]] = {}
     edges: List[Dict[str, Any]] = []
 
@@ -662,20 +669,22 @@ def _graph_overview(db: Session, limit: int) -> Dict[str, Any]:
         if source in nodes and target in nodes:
             edges.append({"source": source, "target": target, "kind": kind, "label": label or kind})
 
-    for ot in db.query(models.ObjectType).limit(limit).all():
+    for ot in semantic_scope.accessible_query(db, principal, models.ObjectType).limit(limit).all():
         add_node("object_type", ot.id, ot.display_name or ot.id)
-    for obj in db.query(models.ObjectInstance).limit(limit).all():
+    visible_objects = semantic_scope.accessible_query(db, principal, models.ObjectInstance).limit(limit).all()
+    visible_object_ids = {obj.id for obj in visible_objects}
+    for obj in visible_objects:
         label = (obj.properties or {}).get("name") or (obj.properties or {}).get("title") or obj.id
         add_node("object", obj.id, str(label), {"object_type_id": obj.object_type_id})
         add_edge(f"object_type:{obj.object_type_id}", f"object:{obj.id}", "has_instance")
         if obj.source_asset_id:
             add_node("dataset", obj.source_asset_id, obj.source_asset_id)
             add_edge(f"dataset:{obj.source_asset_id}", f"object:{obj.id}", "hydrates")
-    for link in db.query(models.LinkInstance).limit(limit).all():
+    for link in semantic_scope.accessible_query(db, principal, models.LinkInstance).limit(limit).all():
         add_edge(f"object:{link.source_object_id}", f"object:{link.target_object_id}", "object_link", link.link_type_id)
-    for asset in db.query(models.DataAsset).limit(limit).all():
+    for asset in semantic_scope.accessible_query(db, principal, models.DataAsset).limit(limit).all():
         add_node("dataset", asset.id, asset.display_name or asset.id, {"kind": asset.kind})
-    for pipeline in db.query(models.PipelineDefinition).limit(limit).all():
+    for pipeline in semantic_scope.accessible_query(db, principal, models.PipelineDefinition).limit(limit).all():
         add_node("pipeline", pipeline.id, pipeline.display_name or pipeline.id)
         add_node("dataset", pipeline.input_asset_id, pipeline.input_asset_id)
         add_edge(f"dataset:{pipeline.input_asset_id}", f"pipeline:{pipeline.id}", "pipeline_input")
@@ -683,7 +692,11 @@ def _graph_overview(db: Session, limit: int) -> Dict[str, Any]:
             add_node("dataset", pipeline.output_asset_id, pipeline.output_asset_id)
             add_edge(f"pipeline:{pipeline.id}", f"dataset:{pipeline.output_asset_id}", "pipeline_output")
     ops_control._ensure_tables(db)
+    accessible_projects = tenancy.accessible_project_ids(db, semantic_scope.effective_principal(principal), "view")
     for incident in db.query(ops_control.Incident).limit(limit).all():
+        linked_ids = {str(ref.get("object_id")) for ref in (incident.linked_objects or []) if ref.get("object_id")}
+        if accessible_projects is not None and (not linked_ids or not linked_ids.intersection(visible_object_ids)):
+            continue
         add_node("incident", incident.id, incident.display_name, {"severity": incident.severity, "status": incident.status})
         for ref in incident.linked_objects or []:
             add_edge(f"incident:{incident.id}", f"object:{ref.get('object_id')}", "incident_object")
@@ -806,16 +819,18 @@ def evaluate_event_subscription(subscription_id: str, limit: int = Query(100, ge
 
 
 @router.post("/search/query")
-def search_query(body: SearchRequest, db: Session = Depends(get_db)):
+def search_query(body: SearchRequest, db: Session = Depends(get_db),
+                 principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    results = _search_resources(db, body.q.strip(), body.kinds, body.limit, body.include_payload)
+    results = _search_resources(db, body.q.strip(), body.kinds, body.limit, body.include_payload, principal)
     return {"query": body.q, "count": len(results), "results": results}
 
 
 @router.get("/search")
-def search_get(q: str = "", kind: Optional[str] = None, limit: int = Query(25, ge=1, le=250), db: Session = Depends(get_db)):
+def search_get(q: str = "", kind: Optional[str] = None, limit: int = Query(25, ge=1, le=250), db: Session = Depends(get_db),
+               principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     kinds = [kind] if kind else []
-    results = _search_resources(db, q.strip(), kinds, limit, False)
+    results = _search_resources(db, q.strip(), kinds, limit, False, principal)
     return {"query": q, "count": len(results), "results": results}
 
 
@@ -981,6 +996,7 @@ def object_activity_timeline(object_type_id: str, object_id: str, limit: int = Q
 
 
 @router.get("/graph/overview")
-def graph_overview(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db)):
+def graph_overview(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    return _graph_overview(db, limit)
+    return _graph_overview(db, limit, principal)

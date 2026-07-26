@@ -90,6 +90,7 @@ from . import (
     runtime_observability,
     worker_control,
     connector_runtime,
+    semantic_scope,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -424,7 +425,10 @@ def read_root():
 # --- Object Type Endpoints ---
 
 @app.post("/object-types", response_model=schemas.ObjectType)
-def create_object_type(obj: schemas.ObjectTypeCreate, db: Session = Depends(get_db)):
+def create_object_type(obj: schemas.ObjectTypeCreate,
+                       db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, obj.project_id, "edit")
     db_obj = db.query(models.ObjectType).filter(models.ObjectType.id == obj.id).first()
     if db_obj:
         raise HTTPException(status_code=400, detail="ObjectType already exists")
@@ -434,7 +438,7 @@ def create_object_type(obj: schemas.ObjectTypeCreate, db: Session = Depends(get_
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         event_type="ontology.object_type.created",
         subject_type="object_type",
         subject_id=obj.id,
@@ -445,17 +449,28 @@ def create_object_type(obj: schemas.ObjectTypeCreate, db: Session = Depends(get_
     return db_model
 
 @app.get("/object-types", response_model=List[schemas.ObjectType])
-def list_object_types(db: Session = Depends(get_db)):
-    return db.query(models.ObjectType).all()
+def list_object_types(db: Session = Depends(get_db), project_id: Optional[str] = None,
+                      principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    if project_id:
+        semantic_scope.assert_project(db, principal, project_id, "view")
+        return db.query(models.ObjectType).filter(models.ObjectType.project_id == project_id).all()
+    return semantic_scope.accessible_query(db, principal, models.ObjectType).all()
 
 
 # --- Object Instance Endpoints ---
 
 @app.post("/objects", response_model=schemas.ObjectInstance)
-def create_object_instance(obj: schemas.ObjectInstanceCreate, db: Session = Depends(get_db)):
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == obj.object_type_id).first()
-    if not object_type:
-        _not_found("ObjectType", obj.object_type_id)
+def create_object_instance(obj: schemas.ObjectInstanceCreate,
+                           db: Session = Depends(get_db),
+                           principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, obj.project_id, "edit")
+    object_type = semantic_scope.object_type_for(db, principal, obj.object_type_id, "edit")
+    if object_type.project_id != obj.project_id:
+        raise HTTPException(status_code=409, detail="Object type belongs to another project")
+    if obj.source_asset_id:
+        source_asset = semantic_scope.asset_for(db, principal, obj.source_asset_id, "view")
+        if source_asset.project_id != obj.project_id:
+            raise HTTPException(status_code=409, detail="Source dataset belongs to another project")
 
     object_id = obj.id or stable_object_id(obj.object_type_id, obj.properties)
     existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == object_id).first()
@@ -495,6 +510,7 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate, db: Session = Depe
     now = now_ts()
     db_model = models.ObjectInstance(
         id=object_id,
+        project_id=obj.project_id,
         object_type_id=obj.object_type_id,
         properties=obj.properties,
         source_asset_id=obj.source_asset_id,
@@ -505,17 +521,17 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate, db: Session = Depe
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         event_type="ontology.object.created",
         subject_type="object_instance",
         subject_id=object_id,
-        payload={"object_type_id": obj.object_type_id, "lineage": obj.lineage},
+        payload={"project_id": obj.project_id, "object_type_id": obj.object_type_id, "lineage": obj.lineage},
     )
     decision_intelligence.record_object_snapshot(
         db,
         db_model,
         event_type="ontology.object.created",
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         source_type="object_api",
         source_id=object_id,
     )
@@ -529,19 +545,21 @@ def list_object_instances(
     object_type_id: str,
     limit: int = 100,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ):
+    object_type = semantic_scope.object_type_for(db, principal, object_type_id, "view")
     return db.query(models.ObjectInstance).filter(
-        models.ObjectInstance.object_type_id == object_type_id
+        models.ObjectInstance.object_type_id == object_type_id,
+        models.ObjectInstance.project_id == object_type.project_id,
     ).limit(limit).all()
 
 
 @app.get("/objects/{object_type_id}/{object_id}", response_model=schemas.ObjectInstance)
-def get_object_instance(object_type_id: str, object_id: str, db: Session = Depends(get_db)):
-    db_obj = db.query(models.ObjectInstance).filter(
-        models.ObjectInstance.object_type_id == object_type_id,
-        models.ObjectInstance.id == object_id,
-    ).first()
-    if not db_obj:
+def get_object_instance(object_type_id: str, object_id: str,
+                        db: Session = Depends(get_db),
+                        principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    db_obj = semantic_scope.object_for(db, principal, object_id, "view")
+    if db_obj.object_type_id != object_type_id:
         _not_found("ObjectInstance", object_id)
     return db_obj
 
@@ -552,12 +570,17 @@ def get_object_profile(
     object_id: str,
     linked_limit: int = 50,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ):
+    db_obj = semantic_scope.object_for(db, principal, object_id, "view")
+    if db_obj.object_type_id != object_type_id:
+        _not_found("ObjectInstance", object_id)
     try:
         return build_object_profile(
             db,
             object_type_id=object_type_id,
             object_id=object_id,
+            project_id=db_obj.project_id,
             linked_limit=linked_limit,
         )
     except ValueError as exc:
@@ -566,23 +589,24 @@ def get_object_profile(
 # --- Link Type Endpoints ---
 
 @app.post("/link-types", response_model=schemas.LinkType)
-def create_link_type(link: schemas.LinkTypeCreate, db: Session = Depends(get_db)):
+def create_link_type(link: schemas.LinkTypeCreate,
+                     db: Session = Depends(get_db),
+                     principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, link.project_id, "edit")
     db_obj = db.query(models.LinkType).filter(models.LinkType.id == link.id).first()
     if db_obj:
         raise HTTPException(status_code=400, detail="LinkType already exists")
 
-    source = db.query(models.ObjectType).filter(models.ObjectType.id == link.source_object_type_id).first()
-    target = db.query(models.ObjectType).filter(models.ObjectType.id == link.target_object_type_id).first()
-    if not source:
-        _not_found("ObjectType", link.source_object_type_id)
-    if not target:
-        _not_found("ObjectType", link.target_object_type_id)
+    source = semantic_scope.object_type_for(db, principal, link.source_object_type_id, "edit")
+    target = semantic_scope.object_type_for(db, principal, link.target_object_type_id, "edit")
+    if source.project_id != link.project_id or target.project_id != link.project_id:
+        raise HTTPException(status_code=409, detail="Link endpoints must belong to the same project")
     
     db_model = models.LinkType(**link.model_dump())
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         event_type="ontology.link_type.created",
         subject_type="link_type",
         subject_id=link.id,
@@ -593,42 +617,46 @@ def create_link_type(link: schemas.LinkTypeCreate, db: Session = Depends(get_db)
     return db_model
 
 @app.get("/link-types", response_model=List[schemas.LinkType])
-def list_link_types(db: Session = Depends(get_db)):
-    return db.query(models.LinkType).all()
+def list_link_types(db: Session = Depends(get_db), project_id: Optional[str] = None,
+                    principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    if project_id:
+        semantic_scope.assert_project(db, principal, project_id, "view")
+        return db.query(models.LinkType).filter(models.LinkType.project_id == project_id).all()
+    return semantic_scope.accessible_query(db, principal, models.LinkType).all()
 
 
 @app.patch("/link-types/{link_type_id}", response_model=schemas.LinkType)
-def update_link_type(link_type_id: str, patch: schemas.LinkTypePatch, db: Session = Depends(get_db)):
-    row = db.get(models.LinkType, link_type_id)
-    if not row:
-        _not_found("LinkType", link_type_id)
+def update_link_type(link_type_id: str, patch: schemas.LinkTypePatch,
+                     db: Session = Depends(get_db),
+                     principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    row = semantic_scope.link_type_for(db, principal, link_type_id, "edit")
     changes = patch.model_dump(exclude_unset=True)
     cardinality = changes.get("cardinality")
     if cardinality is not None and cardinality not in {"ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY"}:
         raise HTTPException(status_code=422, detail="Unsupported link cardinality")
     for field in ("source_object_type_id", "target_object_type_id"):
-        if field in changes and not db.get(models.ObjectType, changes[field]):
-            raise HTTPException(status_code=422, detail=f"ObjectType '{changes[field]}' not found")
+        if field in changes:
+            endpoint_type = semantic_scope.object_type_for(db, principal, changes[field], "edit")
+            if endpoint_type.project_id != row.project_id:
+                raise HTTPException(status_code=409, detail="Link endpoints must belong to the same project")
     for field, value in changes.items():
         setattr(row, field, value)
-    create_audit_log(db, actor="system", event_type="ontology.link_type.updated", subject_type="link_type", subject_id=link_type_id, payload=changes)
+    create_audit_log(db, actor=semantic_scope.principal_id(principal), event_type="ontology.link_type.updated", subject_type="link_type", subject_id=link_type_id, payload={"project_id": row.project_id, **changes})
     db.commit()
     db.refresh(row)
     return row
 
 
 @app.post("/links", response_model=schemas.LinkInstance)
-def create_link_instance(link: schemas.LinkInstanceCreate, db: Session = Depends(get_db)):
-    link_type = db.query(models.LinkType).filter(models.LinkType.id == link.link_type_id).first()
-    if not link_type:
-        _not_found("LinkType", link.link_type_id)
-
-    source = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == link.source_object_id).first()
-    target = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == link.target_object_id).first()
-    if not source:
-        _not_found("ObjectInstance", link.source_object_id)
-    if not target:
-        _not_found("ObjectInstance", link.target_object_id)
+def create_link_instance(link: schemas.LinkInstanceCreate,
+                         db: Session = Depends(get_db),
+                         principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, link.project_id, "edit")
+    link_type = semantic_scope.link_type_for(db, principal, link.link_type_id, "edit")
+    source = semantic_scope.object_for(db, principal, link.source_object_id, "edit")
+    target = semantic_scope.object_for(db, principal, link.target_object_id, "edit")
+    if any(row.project_id != link.project_id for row in (link_type, source, target)):
+        raise HTTPException(status_code=409, detail="Link resources must belong to the same project")
 
     link_id = link.id or f"{link.link_type_id}:{link.source_object_id}:{link.target_object_id}"
     existing = db.query(models.LinkInstance).filter(models.LinkInstance.id == link_id).first()
@@ -647,6 +675,7 @@ def create_link_instance(link: schemas.LinkInstanceCreate, db: Session = Depends
 
     db_model = models.LinkInstance(
         id=link_id,
+        project_id=link.project_id,
         link_type_id=link.link_type_id,
         source_object_id=link.source_object_id,
         target_object_id=link.target_object_id,
@@ -656,7 +685,7 @@ def create_link_instance(link: schemas.LinkInstanceCreate, db: Session = Depends
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         event_type="ontology.link.created",
         subject_type="link_instance",
         subject_id=link_id,
@@ -668,21 +697,32 @@ def create_link_instance(link: schemas.LinkInstanceCreate, db: Session = Depends
 
 
 @app.get("/links", response_model=List[schemas.LinkInstance])
-def list_link_instances(link_type_id: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(models.LinkInstance)
+def list_link_instances(link_type_id: Optional[str] = None, db: Session = Depends(get_db), project_id: Optional[str] = None,
+                        principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    if project_id:
+        semantic_scope.assert_project(db, principal, project_id, "view")
+        query = db.query(models.LinkInstance).filter(models.LinkInstance.project_id == project_id)
+    else:
+        query = semantic_scope.accessible_query(db, principal, models.LinkInstance)
     if link_type_id:
-        query = query.filter(models.LinkInstance.link_type_id == link_type_id)
+        link_type = semantic_scope.link_type_for(db, principal, link_type_id, "view")
+        query = query.filter(models.LinkInstance.link_type_id == link_type_id,
+                             models.LinkInstance.project_id == link_type.project_id)
     return query.all()
 
 
 # --- Object Set and Graph Exploration Endpoints ---
 
 @app.post("/object-sets/search", response_model=schemas.ObjectSetResponse)
-def search_object_sets(request: schemas.ObjectSetQuery, db: Session = Depends(get_db)):
+def search_object_sets(request: schemas.ObjectSetQuery,
+                       db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "view")
     try:
         return query_object_set(
             db,
             object_type_id=request.object_type_id,
+            project_id=object_type.project_id,
             filters=request.filters,
             limit=request.limit,
             offset=request.offset,
@@ -695,11 +735,15 @@ def search_object_sets(request: schemas.ObjectSetQuery, db: Session = Depends(ge
 
 
 @app.post("/object-sets/aggregate", response_model=schemas.ObjectSetAggregateResponse)
-def aggregate_object_sets(request: schemas.ObjectSetAggregateRequest, db: Session = Depends(get_db)):
+def aggregate_object_sets(request: schemas.ObjectSetAggregateRequest,
+                          db: Session = Depends(get_db),
+                          principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "view")
     try:
         return aggregate_object_set(
             db,
             object_type_id=request.object_type_id,
+            project_id=object_type.project_id,
             filters=request.filters,
             group_by=request.group_by,
             metrics=request.metrics,
@@ -709,11 +753,27 @@ def aggregate_object_sets(request: schemas.ObjectSetAggregateRequest, db: Sessio
 
 
 @app.post("/object-sets/search-around", response_model=schemas.ObjectSetSearchAroundResponse)
-def search_around_object_set(request: schemas.ObjectSetSearchAroundRequest, db: Session = Depends(get_db)):
+def search_around_object_set(request: schemas.ObjectSetSearchAroundRequest,
+                             db: Session = Depends(get_db),
+                             principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    seed_rows = [semantic_scope.object_for(db, principal, object_id, "view") for object_id in request.object_ids]
+    project_ids = {row.project_id for row in seed_rows}
+    if len(project_ids) != 1:
+        raise HTTPException(status_code=409, detail="Search-around seeds must belong to one project")
+    project_id = next(iter(project_ids)) if project_ids else "default"
+    if request.link_type_id:
+        link_type = semantic_scope.link_type_for(db, principal, request.link_type_id, "view")
+        if link_type.project_id != project_id:
+            raise HTTPException(status_code=409, detail="Link type belongs to another project")
+    if request.target_object_type_id:
+        target_type = semantic_scope.object_type_for(db, principal, request.target_object_type_id, "view")
+        if target_type.project_id != project_id:
+            raise HTTPException(status_code=409, detail="Target object type belongs to another project")
     try:
         return search_around_objects(
             db,
             object_ids=request.object_ids,
+            project_id=project_id,
             link_type_id=request.link_type_id,
             direction=request.direction,
             target_object_type_id=request.target_object_type_id,
@@ -724,13 +784,16 @@ def search_around_object_set(request: schemas.ObjectSetSearchAroundRequest, db: 
 
 
 @app.post("/object-sets/saved", response_model=schemas.SavedObjectSet)
-def create_saved_object_set(request: schemas.SavedObjectSetCreate, db: Session = Depends(get_db)):
+def create_saved_object_set(request: schemas.SavedObjectSetCreate,
+                            db: Session = Depends(get_db),
+                            principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, request.project_id, "edit")
     existing = db.query(models.SavedObjectSet).filter(models.SavedObjectSet.id == request.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="SavedObjectSet already exists")
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == request.object_type_id).first()
-    if not object_type:
-        _not_found("ObjectType", request.object_type_id)
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "view")
+    if object_type.project_id != request.project_id:
+        raise HTTPException(status_code=409, detail="Object type belongs to another project")
 
     now = now_ts()
     db_model = models.SavedObjectSet(
@@ -741,7 +804,7 @@ def create_saved_object_set(request: schemas.SavedObjectSetCreate, db: Session =
     db.add(db_model)
     create_audit_log(
         db,
-        actor=request.owner,
+        actor=semantic_scope.principal_id(principal),
         event_type="object_set.saved.created",
         subject_type="saved_object_set",
         subject_id=request.id,
@@ -753,15 +816,15 @@ def create_saved_object_set(request: schemas.SavedObjectSetCreate, db: Session =
 
 
 @app.get("/object-sets/saved", response_model=List[schemas.SavedObjectSet])
-def list_saved_object_sets(db: Session = Depends(get_db)):
-    return db.query(models.SavedObjectSet).order_by(models.SavedObjectSet.updated_at.desc()).all()
+def list_saved_object_sets(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.accessible_query(db, principal, models.SavedObjectSet).order_by(models.SavedObjectSet.updated_at.desc()).all()
 
 
 @app.get("/object-sets/saved/{object_set_id}", response_model=schemas.SavedObjectSet)
-def get_saved_object_set(object_set_id: str, db: Session = Depends(get_db)):
-    saved = db.query(models.SavedObjectSet).filter(models.SavedObjectSet.id == object_set_id).first()
-    if not saved:
-        _not_found("SavedObjectSet", object_set_id)
+def get_saved_object_set(object_set_id: str,
+                         db: Session = Depends(get_db),
+                         principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    saved = semantic_scope.owned_row(db, principal, models.SavedObjectSet, object_set_id, "view", "SavedObjectSet")
     return saved
 
 
@@ -771,26 +834,31 @@ def evaluate_saved_object_set_endpoint(
     limit: int = 100,
     include_lineage: bool = True,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ):
-    saved = db.query(models.SavedObjectSet).filter(models.SavedObjectSet.id == object_set_id).first()
-    if not saved:
-        _not_found("SavedObjectSet", object_set_id)
+    saved = semantic_scope.owned_row(db, principal, models.SavedObjectSet, object_set_id, "view", "SavedObjectSet")
     return evaluate_saved_object_set(db, saved_object_set=saved, limit=limit, include_lineage=include_lineage)
 
 
 @app.get("/ontology/validate", response_model=schemas.OntologyValidationResponse)
-def validate_ontology(db: Session = Depends(get_db)):
-    return validate_ontology_integrity(db)
+def validate_ontology(db: Session = Depends(get_db), project_id: str = "default",
+                      principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    semantic_scope.assert_project(db, principal, project_id, "view")
+    return validate_ontology_integrity(db, project_id=project_id)
 
 
 # --- GIS and Spatial Intelligence Endpoints ---
 
 @app.post("/gis/spatial-query", response_model=schemas.GISSpatialQueryResponse)
-def query_gis_spatial_objects(request: schemas.GISSpatialQuery, db: Session = Depends(get_db)):
+def query_gis_spatial_objects(request: schemas.GISSpatialQuery,
+                              db: Session = Depends(get_db),
+                              principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "view")
     try:
         return spatial_query_objects(
             db,
             object_type_id=request.object_type_id,
+            project_id=object_type.project_id,
             filters=request.filters,
             geometry_field=request.geometry_field,
             near=request.near,
@@ -805,11 +873,15 @@ def query_gis_spatial_objects(request: schemas.GISSpatialQuery, db: Session = De
 
 
 @app.post("/gis/feature-collection", response_model=schemas.GISFeatureCollectionResponse)
-def export_gis_feature_collection(request: schemas.GISFeatureCollectionRequest, db: Session = Depends(get_db)):
+def export_gis_feature_collection(request: schemas.GISFeatureCollectionRequest,
+                                  db: Session = Depends(get_db),
+                                  principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "view")
     try:
         return object_set_feature_collection(
             db,
             object_type_id=request.object_type_id,
+            project_id=object_type.project_id,
             filters=request.filters,
             geometry_field=request.geometry_field,
             limit=request.limit,
@@ -820,11 +892,15 @@ def export_gis_feature_collection(request: schemas.GISFeatureCollectionRequest, 
 
 
 @app.post("/gis/geofence/evaluate", response_model=schemas.GISGeofenceResponse)
-def evaluate_gis_geofence(request: schemas.GISGeofenceRequest, db: Session = Depends(get_db)):
+def evaluate_gis_geofence(request: schemas.GISGeofenceRequest,
+                          db: Session = Depends(get_db),
+                          principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "execute")
     try:
         result = evaluate_geofence(
             db,
             object_type_id=request.object_type_id,
+            project_id=object_type.project_id,
             geofence=request.geofence,
             bbox=request.bbox,
             filters=request.filters,
@@ -841,7 +917,7 @@ def evaluate_gis_geofence(request: schemas.GISGeofenceRequest, db: Session = Dep
             subject_type="object_type",
             subject_id=request.object_type_id,
             object_type_id=request.object_type_id,
-            payload=summary,
+            payload={"project_id": object_type.project_id, **summary},
         )
         db.commit()
         return result
@@ -866,17 +942,20 @@ def decode_gis_mgrs(request: schemas.MGRSDecodeRequest):
 
 
 @app.post("/gis/map-layers", response_model=schemas.MapLayerDefinition)
-def create_map_layer(request: schemas.MapLayerDefinitionCreate, db: Session = Depends(get_db)):
+def create_map_layer(request: schemas.MapLayerDefinitionCreate,
+                     db: Session = Depends(get_db),
+                     principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, request.project_id, "edit")
     existing = db.query(models.MapLayerDefinition).filter(models.MapLayerDefinition.id == request.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="MapLayerDefinition already exists")
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == request.object_type_id).first()
-    if not object_type:
-        _not_found("ObjectType", request.object_type_id)
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "view")
+    if object_type.project_id != request.project_id:
+        raise HTTPException(status_code=409, detail="Map layer object type belongs to another project")
     if request.saved_object_set_id:
-        saved = db.query(models.SavedObjectSet).filter(models.SavedObjectSet.id == request.saved_object_set_id).first()
-        if not saved:
-            _not_found("SavedObjectSet", request.saved_object_set_id)
+        saved = semantic_scope.owned_row(db, principal, models.SavedObjectSet, request.saved_object_set_id, "view", "SavedObjectSet")
+        if saved.project_id != request.project_id or saved.object_type_id != request.object_type_id:
+            raise HTTPException(status_code=409, detail="Saved object set belongs to another project or object type")
 
     now = now_ts()
     db_model = models.MapLayerDefinition(
@@ -887,7 +966,7 @@ def create_map_layer(request: schemas.MapLayerDefinitionCreate, db: Session = De
     db.add(db_model)
     create_audit_log(
         db,
-        actor=request.owner,
+        actor=semantic_scope.principal_id(principal),
         event_type="gis.map_layer.created",
         subject_type="map_layer",
         subject_id=request.id,
@@ -899,23 +978,23 @@ def create_map_layer(request: schemas.MapLayerDefinitionCreate, db: Session = De
 
 
 @app.get("/gis/map-layers", response_model=List[schemas.MapLayerDefinition])
-def list_map_layers(db: Session = Depends(get_db)):
-    return db.query(models.MapLayerDefinition).order_by(models.MapLayerDefinition.updated_at.desc()).all()
+def list_map_layers(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.accessible_query(db, principal, models.MapLayerDefinition).order_by(models.MapLayerDefinition.updated_at.desc()).all()
 
 
 @app.get("/gis/map-layers/{layer_id}", response_model=schemas.MapLayerDefinition)
-def get_map_layer(layer_id: str, db: Session = Depends(get_db)):
-    layer = db.query(models.MapLayerDefinition).filter(models.MapLayerDefinition.id == layer_id).first()
-    if not layer:
-        _not_found("MapLayerDefinition", layer_id)
+def get_map_layer(layer_id: str,
+                  db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    layer = semantic_scope.owned_row(db, principal, models.MapLayerDefinition, layer_id, "view", "MapLayerDefinition")
     return layer
 
 
 @app.get("/gis/map-layers/{layer_id}/features", response_model=schemas.MapLayerFeatureCollectionResponse)
-def render_gis_map_layer(layer_id: str, limit: int = 1000, db: Session = Depends(get_db)):
-    layer = db.query(models.MapLayerDefinition).filter(models.MapLayerDefinition.id == layer_id).first()
-    if not layer:
-        _not_found("MapLayerDefinition", layer_id)
+def render_gis_map_layer(layer_id: str, limit: int = 1000,
+                         db: Session = Depends(get_db),
+                         principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    layer = semantic_scope.owned_row(db, principal, models.MapLayerDefinition, layer_id, "view", "MapLayerDefinition")
     try:
         return render_map_layer(db, layer=layer, limit=limit)
     except ValueError as exc:
@@ -941,7 +1020,7 @@ def create_action_type(
     db.add(db_model)
     create_audit_log(
         db,
-        actor=principal.id,
+        actor=semantic_scope.principal_id(principal),
         event_type="ontology.action_type.created",
         subject_type="action_type",
         subject_id=action.id,
@@ -980,21 +1059,26 @@ def update_action_type(action_type_id: str, patch: schemas.ActionTypePatch, prin
 # --- Data Assets and Pipeline Builder ---
 
 @app.post("/data-assets", response_model=schemas.DataAsset)
-def create_data_asset(asset: schemas.DataAssetCreate, db: Session = Depends(get_db)):
+def create_data_asset(asset: schemas.DataAssetCreate,
+                      db: Session = Depends(get_db),
+                      principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, asset.project_id, "edit")
     existing = db.query(models.DataAsset).filter(models.DataAsset.id == asset.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="DataAsset already exists")
 
     now = now_ts()
-    db_model = models.DataAsset(**asset.model_dump(), created_at=now, updated_at=now)
+    payload = asset.model_dump()
+    payload["asset_schema"] = {**(payload.get("asset_schema") or {}), "project_id": asset.project_id}
+    db_model = models.DataAsset(**payload, created_at=now, updated_at=now)
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         event_type="data.asset.created",
         subject_type="data_asset",
         subject_id=asset.id,
-        payload={"kind": asset.kind, "record_count": len(asset.records)},
+        payload={"project_id": asset.project_id, "kind": asset.kind, "record_count": len(asset.records)},
     )
     db.commit()
     db.refresh(db_model)
@@ -1002,16 +1086,19 @@ def create_data_asset(asset: schemas.DataAssetCreate, db: Session = Depends(get_
 
 
 @app.get("/data-assets", response_model=List[schemas.DataAsset])
-def list_data_assets(db: Session = Depends(get_db)):
-    return db.query(models.DataAsset).all()
+def list_data_assets(db: Session = Depends(get_db), project_id: Optional[str] = None,
+                     principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    if project_id:
+        semantic_scope.assert_project(db, principal, project_id, "view")
+        return db.query(models.DataAsset).filter(models.DataAsset.project_id == project_id).all()
+    return semantic_scope.accessible_query(db, principal, models.DataAsset).all()
 
 
 @app.get("/data-assets/{asset_id}", response_model=schemas.DataAsset)
-def get_data_asset(asset_id: str, db: Session = Depends(get_db)):
-    db_obj = db.query(models.DataAsset).filter(models.DataAsset.id == asset_id).first()
-    if not db_obj:
-        _not_found("DataAsset", asset_id)
-    return db_obj
+def get_data_asset(asset_id: str,
+                   db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.asset_for(db, principal, asset_id, "view")
 
 
 @app.post("/data-assets/{asset_id}/expectations/run", response_model=schemas.DataExpectationsResponse)
@@ -1019,19 +1106,18 @@ def run_data_asset_expectations(
     asset_id: str,
     request: schemas.DataExpectationsRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("execute")),
 ):
-    asset = db.query(models.DataAsset).filter(models.DataAsset.id == asset_id).first()
-    if not asset:
-        _not_found("DataAsset", asset_id)
+    asset = semantic_scope.asset_for(db, principal, asset_id, "execute")
 
     result = evaluate_data_expectations(asset.records or [], request.expectations)
     create_audit_log(
         db,
-        actor="data_health",
+        actor=semantic_scope.principal_id(principal),
         event_type="data.expectations.evaluated",
         subject_type="data_asset",
         subject_id=asset_id,
-        payload={"status": result["status"], "summary": result["summary"]},
+        payload={"project_id": asset.project_id, "status": result["status"], "summary": result["summary"]},
     )
     ops_control.record_ops_event(
         db,
@@ -1041,36 +1127,39 @@ def run_data_asset_expectations(
         title=f"Data expectations {result['status']} for {asset.display_name}",
         subject_type="data_asset",
         subject_id=asset_id,
-        payload={"status": result["status"], "summary": result["summary"]},
+        payload={"project_id": asset.project_id, "status": result["status"], "summary": result["summary"]},
     )
     db.commit()
     return result
 
 
 @app.post("/pipelines", response_model=schemas.PipelineDefinition)
-def create_pipeline(pipeline: schemas.PipelineDefinitionCreate, db: Session = Depends(get_db)):
+def create_pipeline(pipeline: schemas.PipelineDefinitionCreate,
+                    db: Session = Depends(get_db),
+                    principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, pipeline.project_id, "edit")
     existing = db.query(models.PipelineDefinition).filter(models.PipelineDefinition.id == pipeline.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="PipelineDefinition already exists")
 
-    input_asset = db.query(models.DataAsset).filter(models.DataAsset.id == pipeline.input_asset_id).first()
-    if not input_asset:
-        _not_found("DataAsset", pipeline.input_asset_id)
+    input_asset = semantic_scope.asset_for(db, principal, pipeline.input_asset_id, "view")
+    if input_asset.project_id != pipeline.project_id:
+        raise HTTPException(status_code=409, detail="Pipeline input belongs to another project")
     if pipeline.output_asset_id:
-        output_asset = db.query(models.DataAsset).filter(models.DataAsset.id == pipeline.output_asset_id).first()
-        if not output_asset:
-            _not_found("DataAsset", pipeline.output_asset_id)
+        output_asset = semantic_scope.asset_for(db, principal, pipeline.output_asset_id, "view")
+        if output_asset.project_id != pipeline.project_id:
+            raise HTTPException(status_code=409, detail="Pipeline output belongs to another project")
 
     now = now_ts()
     db_model = models.PipelineDefinition(**pipeline.model_dump(), created_at=now, updated_at=now)
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=semantic_scope.principal_id(principal),
         event_type="pipeline.definition.created",
         subject_type="pipeline",
         subject_id=pipeline.id,
-        payload={"input_asset_id": pipeline.input_asset_id, "steps": pipeline.steps},
+        payload={"project_id": pipeline.project_id, "input_asset_id": pipeline.input_asset_id, "steps": pipeline.steps},
     )
     db.commit()
     db.refresh(db_model)
@@ -1078,23 +1167,20 @@ def create_pipeline(pipeline: schemas.PipelineDefinitionCreate, db: Session = De
 
 
 @app.get("/pipelines", response_model=List[schemas.PipelineDefinition])
-def list_pipelines(db: Session = Depends(get_db)):
-    return db.query(models.PipelineDefinition).all()
+def list_pipelines(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.accessible_query(db, principal, models.PipelineDefinition).all()
 
 
 @app.post("/pipelines/{pipeline_id}/run", response_model=schemas.PipelineRun)
-def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(get_db)):
-    pipeline = db.query(models.PipelineDefinition).filter(models.PipelineDefinition.id == pipeline_id).first()
-    if not pipeline:
-        _not_found("PipelineDefinition", pipeline_id)
-
-    input_asset = db.query(models.DataAsset).filter(models.DataAsset.id == pipeline.input_asset_id).first()
-    if not input_asset:
-        _not_found("DataAsset", pipeline.input_asset_id)
+def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(get_db),
+                 principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    pipeline = semantic_scope.pipeline_for(db, principal, pipeline_id, "execute")
+    input_asset = semantic_scope.asset_for(db, principal, pipeline.input_asset_id, "view")
 
     run_id = str(uuid.uuid4())
     run = models.PipelineRun(
         id=run_id,
+        project_id=pipeline.project_id,
         pipeline_id=pipeline.id,
         status="RUNNING",
         input_asset_id=input_asset.id,
@@ -1108,11 +1194,11 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
     db.add(run)
     create_audit_log(
         db,
-        actor=actor,
+        actor=semantic_scope.principal_id(principal),
         event_type="pipeline.run.started",
         subject_type="pipeline_run",
         subject_id=run_id,
-        payload={"pipeline_id": pipeline.id},
+        payload={"project_id": pipeline.project_id, "pipeline_id": pipeline.id},
     )
     ops_control.record_ops_event(
         db,
@@ -1122,7 +1208,7 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
         title=f"Pipeline {pipeline.display_name} started",
         subject_type="pipeline_run",
         subject_id=run_id,
-        payload={"pipeline_id": pipeline.id, "input_asset_id": input_asset.id},
+        payload={"project_id": pipeline.project_id, "pipeline_id": pipeline.id, "input_asset_id": input_asset.id},
     )
     db.commit()
     db.refresh(run)
@@ -1137,13 +1223,16 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
 
         output_asset_id = pipeline.output_asset_id or f"{pipeline.id}_output"
         output_asset = db.query(models.DataAsset).filter(models.DataAsset.id == output_asset_id).first()
+        if output_asset and output_asset.project_id != pipeline.project_id:
+            raise HTTPException(status_code=409, detail="Pipeline output identifier belongs to another project")
         if not output_asset:
             output_asset = models.DataAsset(
                 id=output_asset_id,
+                project_id=pipeline.project_id,
                 display_name=f"{pipeline.display_name} Output",
                 description=f"Materialized output of pipeline {pipeline.id}",
                 kind="dataset",
-                asset_schema={},
+                asset_schema={"project_id": pipeline.project_id},
                 records=[],
                 created_at=now_ts(),
                 updated_at=now_ts(),
@@ -1161,11 +1250,11 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
         run.completed_at = now_ts()
         create_audit_log(
             db,
-            actor=actor,
+            actor=semantic_scope.principal_id(principal),
             event_type="pipeline.run.completed",
             subject_type="pipeline_run",
             subject_id=run_id,
-            payload={"records_out": len(output_records), "metrics": metrics},
+            payload={"project_id": pipeline.project_id, "records_out": len(output_records), "metrics": metrics},
         )
         ops_control.record_ops_event(
             db,
@@ -1175,24 +1264,27 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
             title=f"Pipeline {pipeline.display_name} completed",
             subject_type="pipeline_run",
             subject_id=run_id,
-            payload={"pipeline_id": pipeline.id, "records_out": len(output_records), "metrics": metrics},
+            payload={"project_id": pipeline.project_id, "pipeline_id": pipeline.id, "records_out": len(output_records), "metrics": metrics},
         )
         db.commit()
         db.refresh(run)
         return run
     except Exception as exc:
         db.rollback()
-        failed_run = db.query(models.PipelineRun).filter(models.PipelineRun.id == run_id).first()
+        failed_run = db.query(models.PipelineRun).filter(
+            models.PipelineRun.id == run_id,
+            models.PipelineRun.project_id == pipeline.project_id,
+        ).first()
         failed_run.status = "FAILED"
         failed_run.error = str(exc)
         failed_run.completed_at = now_ts()
         create_audit_log(
             db,
-            actor=actor,
+            actor=semantic_scope.principal_id(principal),
             event_type="pipeline.run.failed",
             subject_type="pipeline_run",
             subject_id=run_id,
-            payload={"error": str(exc)},
+            payload={"project_id": pipeline.project_id, "error": str(exc)},
         )
         ops_control.record_ops_event(
             db,
@@ -1202,7 +1294,7 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
             title=f"Pipeline {pipeline.display_name} failed",
             subject_type="pipeline_run",
             subject_id=run_id,
-            payload={"pipeline_id": pipeline.id, "error": str(exc)},
+            payload={"project_id": pipeline.project_id, "pipeline_id": pipeline.id, "error": str(exc)},
         )
         db.commit()
         db.refresh(failed_run)
@@ -1210,10 +1302,13 @@ def run_pipeline(pipeline_id: str, actor: str = "system", db: Session = Depends(
 
 
 @app.get("/pipeline-runs", response_model=List[schemas.PipelineRun])
-def list_pipeline_runs(pipeline_id: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(models.PipelineRun)
+def list_pipeline_runs(pipeline_id: Optional[str] = None, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    query = semantic_scope.accessible_query(db, principal, models.PipelineRun)
     if pipeline_id:
-        query = query.filter(models.PipelineRun.pipeline_id == pipeline_id)
+        pipeline = semantic_scope.pipeline_for(db, principal, pipeline_id, "view")
+        query = query.filter(models.PipelineRun.pipeline_id == pipeline_id,
+                             models.PipelineRun.project_id == pipeline.project_id)
     return query.order_by(models.PipelineRun.created_at.desc()).all()
 
 
@@ -1701,8 +1796,16 @@ def bootstrap_maintenance_domain(
     result = bootstrap_maintenance_copilot(db, actor=request.actor)
     pipeline_runs = []
     if request.run_pipelines:
+        bootstrap_principal = production_auth.Principal(
+            id=request.actor,
+            display_name=request.actor,
+            email=None,
+            roles=["system"],
+            permissions=["*"],
+            project_ids=["*"],
+        )
         for pipeline_id in result["recommended_pipeline_order"]:
-            run = run_pipeline(pipeline_id, actor=request.actor, db=db)
+            run = run_pipeline(pipeline_id, actor=request.actor, principal=bootstrap_principal, db=db)
             pipeline_runs.append({
                 "id": run.id,
                 "pipeline_id": run.pipeline_id,

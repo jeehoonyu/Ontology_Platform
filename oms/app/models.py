@@ -10,6 +10,7 @@ class ObjectType(Base):
     __tablename__ = "object_types"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     properties: Mapped[dict] = mapped_column(JSON) # Schema of properties
@@ -26,6 +27,7 @@ class LinkType(Base):
     __tablename__ = "link_types"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"))
@@ -60,6 +62,7 @@ class ObjectInstance(Base):
     __table_args__ = (Index("ix_object_instances_type_created", "object_type_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
     properties: Mapped[dict] = mapped_column(JSON)
     source_asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -77,6 +80,7 @@ class LinkInstance(Base):
     __tablename__ = "link_instances"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     link_type_id: Mapped[str] = mapped_column(String, ForeignKey("link_types.id"), index=True)
     source_object_id: Mapped[str] = mapped_column(String, ForeignKey("object_instances.id"), index=True)
     target_object_id: Mapped[str] = mapped_column(String, ForeignKey("object_instances.id"), index=True)
@@ -97,6 +101,7 @@ class DataAsset(Base):
     __tablename__ = "data_assets"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     kind: Mapped[str] = mapped_column(String, default="dataset")
@@ -118,6 +123,7 @@ class PipelineDefinition(Base):
     __tablename__ = "pipeline_definitions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     input_asset_id: Mapped[str] = mapped_column(String, ForeignKey("data_assets.id"), index=True)
@@ -139,6 +145,7 @@ class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     pipeline_id: Mapped[str] = mapped_column(String, ForeignKey("pipeline_definitions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     input_asset_id: Mapped[str] = mapped_column(String, index=True)
@@ -239,6 +246,7 @@ class SavedObjectSet(Base):
     __tablename__ = "saved_object_sets"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
@@ -258,6 +266,7 @@ class MapLayerDefinition(Base):
     __tablename__ = "map_layer_definitions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)

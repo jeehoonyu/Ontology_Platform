@@ -398,8 +398,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
     object_properties["__manager"] = {"project_id": project_id}
     obj_type = db.get(models.ObjectType, object_type_id)
     if obj_type:
-        existing_project = str(((obj_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
-        if existing_project != project_id:
+        if obj_type.project_id != project_id:
             raise HTTPException(status_code=409, detail="Object type ID is owned by another project")
         obj_type.display_name = draft.get("display_name") or obj_type.display_name
         obj_type.description = draft.get("description")
@@ -408,6 +407,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
     else:
         obj_type = models.ObjectType(
             id=object_type_id,
+            project_id=project_id,
             display_name=draft.get("display_name") or object_type_id,
             description=draft.get("description"),
             properties=object_properties,
@@ -606,8 +606,7 @@ def _create_draft_record(db: Session, body: DraftCreate) -> OntologyGeneratorDra
     asset = db.get(models.DataAsset, body.asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail=f"DataAsset '{body.asset_id}' not found")
-    asset_project = str((asset.asset_schema or {}).get("project_id") or "default")
-    if asset_project != body.project_id:
+    if asset.project_id != body.project_id:
         raise HTTPException(status_code=409, detail="DataAsset is owned by another project")
     draft = dict(body.draft or _generate_draft(asset, body))
     draft["__project_id"] = body.project_id
