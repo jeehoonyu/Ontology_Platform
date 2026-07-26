@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
 from . import models, models_action
-from . import production_auth, runtime, tenancy
+from . import production_auth, runtime, semantic_scope, tenancy
 
 router = APIRouter(tags=["ontology_core"])
 
@@ -124,6 +124,7 @@ class ActionLog(Base):
     """
     __tablename__ = "act_action_log"
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     action_type_id: Mapped[str] = mapped_column(String, index=True)
     actor: Mapped[str] = mapped_column(String, default="system", index=True)
     parameters: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -261,6 +262,7 @@ class OntologyDatasourceMappingRequest(BaseModel):
 class ActionLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     action_type_id: str
     actor: str
     parameters: Dict[str, Any]
@@ -299,10 +301,9 @@ def validate_api_name_endpoint(body: ApiNameRequest):
 # Object-type profiles
 # ---------------------------------------------------------------------------
 @router.put("/ontology/object-types/{object_type_id}/profile", response_model=ProfileRead)
-def upsert_profile(object_type_id: str, body: ProfileUpsert, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def upsert_profile(object_type_id: str, body: ProfileUpsert, db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
 
     errors: List[str] = []
     # API names
@@ -348,14 +349,16 @@ def upsert_profile(object_type_id: str, body: ProfileUpsert, db: Session = Depen
             groups=body.groups, properties=props, created_at=now, updated_at=now,
         )
         db.add(profile)
-    _audit(db, "system", "ontology.object_type.profile_set", "object_type", object_type_id,
+    _audit(db, semantic_scope.principal_id(principal), "ontology.object_type.profile_set", "object_type", object_type_id,
            {"api_name": body.api_name, "primary_key": body.primary_key})
     db.commit(); db.refresh(profile)
     return profile
 
 
 @router.get("/ontology/object-types/{object_type_id}/profile", response_model=ProfileRead)
-def get_profile(object_type_id: str, db: Session = Depends(get_db)):
+def get_profile(object_type_id: str, db: Session = Depends(get_db),
+                principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    semantic_scope.object_type_for(db, principal, object_type_id, "view")
     profile = db.get(ObjectTypeProfile, object_type_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not set for this object type")
@@ -363,10 +366,9 @@ def get_profile(object_type_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/ontology/object-types/{object_type_id}/full")
-def get_full_object_type(object_type_id: str, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def get_full_object_type(object_type_id: str, db: Session = Depends(get_db),
+                         principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "view")
     profile = db.get(ObjectTypeProfile, object_type_id)
     return {
         "id": obj_type.id,
@@ -593,6 +595,8 @@ def _mapping_preview(db: Session, body: OntologyMappingPreviewRequest) -> Dict[s
         raise HTTPException(status_code=404, detail=f"DataAsset '{body.asset_id}' not found")
     if not obj_type:
         raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+    if asset.project_id != obj_type.project_id:
+        raise HTTPException(status_code=409, detail="Dataset and object type belong to different projects")
     profile = db.get(ObjectTypeProfile, body.object_type_id)
     properties, _profile_backed = _property_store(obj_type, profile)
     rows = list(asset.records or [])
@@ -664,7 +668,7 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
             "description": action.description,
             "parameter_count": len(action.parameters or {}),
         }
-        for action in db.query(models.ActionType).all()
+        for action in db.query(models.ActionType).filter(models.ActionType.project_id == obj_type.project_id).all()
         if _references_object_type(action.rules or {}, object_type_id) or object_type_id in str(action.id)
     ]
     link_types = [
@@ -676,13 +680,20 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
             "cardinality": link.cardinality,
         }
         for link in db.query(models.LinkType).filter(
+            models.LinkType.project_id == obj_type.project_id,
             (models.LinkType.source_object_type_id == object_type_id) | (models.LinkType.target_object_type_id == object_type_id)
         ).all()
     ]
-    object_count = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id).count()
+    object_count = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.object_type_id == object_type_id,
+        models.ObjectInstance.project_id == obj_type.project_id,
+    ).count()
     source_asset_ids = sorted({
         row.source_asset_id
-        for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id).all()
+        for row in db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id == object_type_id,
+            models.ObjectInstance.project_id == obj_type.project_id,
+        ).all()
         if row.source_asset_id
     })
     manager_config = (obj_type.properties or {}).get("__manager", {}) if isinstance(obj_type.properties, dict) else {}
@@ -690,7 +701,9 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
     pipeline_dependents: List[Dict[str, Any]] = []
     try:
         from . import pipeline_builder_ops
-        for graph in db.query(pipeline_builder_ops.PipelineBuilderGraph).all():
+        for graph in db.query(pipeline_builder_ops.PipelineBuilderGraph).filter(
+            pipeline_builder_ops.PipelineBuilderGraph.project_id == obj_type.project_id,
+        ).all():
             for node in graph.nodes or []:
                 config = node.get("config") or {}
                 if config.get("object_type_id") == object_type_id:
@@ -839,8 +852,9 @@ def _object_type_section_state(db: Session, object_type_id: str, section_id: str
 
 
 @router.get("/ui-state/ontology")
-def ontology_ui_state(db: Session = Depends(get_db)):
-    object_types = db.query(models.ObjectType).order_by(models.ObjectType.updated_at.desc()).all()
+def ontology_ui_state(db: Session = Depends(get_db),
+                      principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_types = semantic_scope.accessible_query(db, principal, models.ObjectType).order_by(models.ObjectType.updated_at.desc()).all()
     selected = object_types[0] if object_types else None
     return {
         "summary": {
@@ -870,34 +884,47 @@ def ontology_ui_state(db: Session = Depends(get_db)):
 
 
 @router.get("/ui-state/ontology/object-types/{object_type_id}")
-def ontology_object_type_ui_state(object_type_id: str, db: Session = Depends(get_db)):
+def ontology_object_type_ui_state(object_type_id: str, db: Session = Depends(get_db),
+                                  principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    semantic_scope.object_type_for(db, principal, object_type_id, "view")
     return _object_type_manager_state(db, object_type_id)
 
 
 @router.get("/ui-state/ontology/object-types/{object_type_id}/walkthrough")
-def ontology_object_type_walkthrough(object_type_id: str, db: Session = Depends(get_db)):
+def ontology_object_type_walkthrough(object_type_id: str, db: Session = Depends(get_db),
+                                     principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    semantic_scope.object_type_for(db, principal, object_type_id, "view")
     return _object_type_walkthrough(db, object_type_id)
 
 
 @router.get("/ui-state/ontology/object-types/{object_type_id}/sections/{section_id}")
-def ontology_object_type_section(object_type_id: str, section_id: str, db: Session = Depends(get_db)):
+def ontology_object_type_section(object_type_id: str, section_id: str, db: Session = Depends(get_db),
+                                 principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    semantic_scope.object_type_for(db, principal, object_type_id, "view")
     return _object_type_section_state(db, object_type_id, section_id)
 
 
 @router.post("/ontology/mappings/preview")
-def preview_ontology_mapping(body: OntologyMappingPreviewRequest, db: Session = Depends(get_db)):
+def preview_ontology_mapping(body: OntologyMappingPreviewRequest, db: Session = Depends(get_db),
+                             principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    semantic_scope.asset_for(db, principal, body.asset_id, "view")
+    semantic_scope.object_type_for(db, principal, body.object_type_id, "view")
     return _mapping_preview(db, body)
 
 
 @router.post("/ontology/object-types/{object_type_id}/datasource-mappings")
-def save_ontology_datasource_mapping(object_type_id: str, body: OntologyDatasourceMappingRequest, db: Session = Depends(get_db)):
+def save_ontology_datasource_mapping(object_type_id: str, body: OntologyDatasourceMappingRequest, db: Session = Depends(get_db),
+                                     principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
+    asset = semantic_scope.asset_for(db, principal, body.asset_id, "view")
+    if asset.project_id != obj_type.project_id:
+        raise HTTPException(status_code=409, detail="Dataset and object type belong to different projects")
     preview_body = OntologyMappingPreviewRequest(
         asset_id=body.asset_id, object_type_id=object_type_id, mappings=body.mappings, limit=20,
     )
     preview = _mapping_preview(db, preview_body)
     if preview["errors"]:
         raise HTTPException(status_code=422, detail={"message": "Datasource mapping is invalid", "preview": preview})
-    obj_type = db.get(models.ObjectType, object_type_id)
     properties = dict(obj_type.properties or {})
     manager = dict(properties.get("__manager") or {})
     existing = [item for item in list(manager.get("datasource_mappings") or []) if item.get("asset_id") != body.asset_id]
@@ -918,10 +945,9 @@ def save_ontology_datasource_mapping(object_type_id: str, body: OntologyDatasour
 
 
 @router.patch("/ontology/object-types/{object_type_id}/metadata")
-def update_object_type_metadata(object_type_id: str, body: ObjectTypeManagerMetadataRequest, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def update_object_type_metadata(object_type_id: str, body: ObjectTypeManagerMetadataRequest, db: Session = Depends(get_db),
+                                principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     if body.display_name is not None:
         obj_type.display_name = body.display_name
     if body.description is not None:
@@ -950,10 +976,9 @@ def update_object_type_metadata(object_type_id: str, body: ObjectTypeManagerMeta
 
 
 @router.post("/ontology/object-types/{object_type_id}/index")
-def index_object_type(object_type_id: str, body: ObjectTypeIndexRequest = ObjectTypeIndexRequest(), db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def index_object_type(object_type_id: str, body: ObjectTypeIndexRequest = ObjectTypeIndexRequest(), db: Session = Depends(get_db),
+                      principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     properties = dict(obj_type.properties or {})
     manager = dict(properties.get("__manager") or {})
     manager["index_status"] = "indexed"
@@ -967,12 +992,13 @@ def index_object_type(object_type_id: str, body: ObjectTypeIndexRequest = Object
 
 
 @router.post("/ontology/object-types/{object_type_id}/open-from-pipeline")
-def open_object_type_from_pipeline(object_type_id: str, body: ObjectTypeOpenFromPipelineRequest, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def open_object_type_from_pipeline(object_type_id: str, body: ObjectTypeOpenFromPipelineRequest, db: Session = Depends(get_db),
+                                   principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     from . import pipeline_builder_ops
-    pipeline_builder_ops._get_graph(db, body.graph_id)
+    graph = pipeline_builder_ops._get_graph(db, body.graph_id)
+    if graph.project_id != obj_type.project_id:
+        raise HTTPException(status_code=409, detail="Pipeline graph belongs to another project")
     properties = dict(obj_type.properties or {})
     manager = dict(properties.get("__manager") or {})
     manager["last_opened_pipeline_graph_id"] = body.graph_id
@@ -987,10 +1013,9 @@ def open_object_type_from_pipeline(object_type_id: str, body: ObjectTypeOpenFrom
 
 
 @router.post("/ontology/object-types/{object_type_id}/properties")
-def add_object_type_property(object_type_id: str, body: ObjectTypePropertyCreate, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def add_object_type_property(object_type_id: str, body: ObjectTypePropertyCreate, db: Session = Depends(get_db),
+                             principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     profile = db.get(ObjectTypeProfile, object_type_id)
     properties, profile_backed = _property_store(obj_type, profile)
     name = str(body.name).strip()
@@ -1015,10 +1040,9 @@ def add_object_type_property(object_type_id: str, body: ObjectTypePropertyCreate
 
 
 @router.patch("/ontology/object-types/{object_type_id}/properties/order")
-def reorder_object_type_properties(object_type_id: str, body: ObjectTypePropertyOrderRequest, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def reorder_object_type_properties(object_type_id: str, body: ObjectTypePropertyOrderRequest, db: Session = Depends(get_db),
+                                   principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     profile = db.get(ObjectTypeProfile, object_type_id)
     properties, profile_backed = _property_store(obj_type, profile)
     requested = [str(name).strip() for name in body.order if str(name).strip()]
@@ -1037,10 +1061,9 @@ def reorder_object_type_properties(object_type_id: str, body: ObjectTypeProperty
 
 
 @router.patch("/ontology/object-types/{object_type_id}/properties/{property_name}")
-def update_object_type_property(object_type_id: str, property_name: str, body: ObjectTypePropertyPatch, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def update_object_type_property(object_type_id: str, property_name: str, body: ObjectTypePropertyPatch, db: Session = Depends(get_db),
+                                principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     profile = db.get(ObjectTypeProfile, object_type_id)
     properties, profile_backed = _property_store(obj_type, profile)
     if property_name not in properties:
@@ -1086,10 +1109,9 @@ def update_object_type_property(object_type_id: str, property_name: str, body: O
 
 
 @router.delete("/ontology/object-types/{object_type_id}/properties/{property_name}")
-def archive_object_type_property(object_type_id: str, property_name: str, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def archive_object_type_property(object_type_id: str, property_name: str, db: Session = Depends(get_db),
+                                 principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     profile = db.get(ObjectTypeProfile, object_type_id)
     properties, profile_backed = _property_store(obj_type, profile)
     if property_name not in properties:
@@ -1285,7 +1307,7 @@ def _run_function_backed(action: models.ActionType, function_id: str,
 
 
 def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
-                        action_type_id: str, now: int, db: Session,
+                        action_type_id: str, project_id: str, now: int, db: Session,
                         mutated_objects: List[str], links_changed: List[str],
                         reversal: List[Dict[str, Any]]) -> None:
     """Apply the documented mutation set, capturing before-values for undo."""
@@ -1303,12 +1325,14 @@ def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
                     raise HTTPException(status_code=422, detail="create-object requires object_type_id")
                 new_id = str(oid) if oid else uuid.uuid4().hex
                 inst = models.ObjectInstance(
-                    id=new_id, object_type_id=otype, properties=sets, source_asset_id=None,
+                    id=new_id, project_id=project_id, object_type_id=otype, properties=sets, source_asset_id=None,
                     lineage={"created_by_action": action_type_id}, created_at=now, updated_at=now)
                 db.add(inst)
                 mutated_objects.append(new_id)
                 reversal.append({"op": "create-object", "object_id": new_id})
             else:
+                if existing.project_id != project_id:
+                    raise HTTPException(status_code=409, detail="Object mutation crosses a project boundary")
                 before = dict(existing.properties or {})
                 existing.properties = {**before, **sets}
                 existing.lineage = {**(existing.lineage or {}), "last_action_id": action_type_id}
@@ -1323,6 +1347,8 @@ def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
             inst = db.get(models.ObjectInstance, str(oid)) if oid else None
             if inst is None:
                 raise HTTPException(status_code=404, detail=f"Object '{oid}' not found for delete")
+            if inst.project_id != project_id:
+                raise HTTPException(status_code=409, detail="Object mutation crosses a project boundary")
             reversal.append({"op": "delete-object", "object_id": str(oid),
                              "object_type_id": inst.object_type_id,
                              "before": dict(inst.properties or {})})
@@ -1334,15 +1360,24 @@ def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
             tgt = _resolve(m.get("target_object_id"), params)
             link_id = f"{ltype}:{src}:{tgt}"
             if op == "add-link":
+                link_type = db.get(models.LinkType, ltype)
+                source = db.get(models.ObjectInstance, str(src))
+                target = db.get(models.ObjectInstance, str(tgt))
+                if not link_type or not source or not target:
+                    raise HTTPException(status_code=422, detail="Link mutation references missing resources")
+                if any(row.project_id != project_id for row in (link_type, source, target)):
+                    raise HTTPException(status_code=409, detail="Link mutation crosses a project boundary")
                 if not db.get(models.LinkInstance, link_id):
                     db.add(models.LinkInstance(
-                        id=link_id, link_type_id=ltype, source_object_id=str(src),
+                        id=link_id, project_id=project_id, link_type_id=ltype, source_object_id=str(src),
                         target_object_id=str(tgt), properties={}, created_at=now))
                     reversal.append({"op": "add-link", "link_id": link_id})
                 links_changed.append(link_id)
             else:
                 link = db.get(models.LinkInstance, link_id)
                 if link:
+                    if link.project_id != project_id:
+                        raise HTTPException(status_code=409, detail="Link mutation crosses a project boundary")
                     reversal.append({"op": "remove-link", "link_id": link_id, "link_type_id": ltype,
                                      "source_object_id": str(src), "target_object_id": str(tgt),
                                      "properties": dict(link.properties or {})})
@@ -1377,8 +1412,7 @@ def execute_action_faithful(
             object_type = db.get(models.ObjectType, object_type_id)
             if not object_type:
                 raise HTTPException(status_code=422, detail=f"Unknown object type '{object_type_id}'")
-            object_project_id = ((object_type.properties or {}).get("__manager") or {}).get("project_id", "default")
-            if object_project_id != project_id:
+            if object_type.project_id != project_id:
                 raise HTTPException(status_code=409, detail="Action mutation crosses a project boundary")
     params = body.parameters
     actor = principal.id if production_auth.auth_mode() == "oidc" else (body.actor or principal.id)
@@ -1411,11 +1445,11 @@ def execute_action_faithful(
     #     returned edits (in addition to any inline mutations on the action).
     if function_id:
         fn_mutations = _run_function_backed(action, function_id, params, db)
-        _apply_mutation_set(fn_mutations, params, action_type_id, now, db,
+        _apply_mutation_set(fn_mutations, params, action_type_id, project_id, now, db,
                             mutated_objects, links_changed, reversal)
 
     # 3b) inline mutation set
-    _apply_mutation_set(mutations, params, action_type_id, now, db,
+    _apply_mutation_set(mutations, params, action_type_id, project_id, now, db,
                         mutated_objects, links_changed, reversal)
 
     # 4) side effects
@@ -1436,7 +1470,7 @@ def execute_action_faithful(
     # 5) queryable action log (Act/act_) + control-plane audit
     log_id = uuid.uuid4().hex
     db.add(ActionLog(
-        id=log_id, action_type_id=action_type_id, actor=actor,
+        id=log_id, project_id=project_id, action_type_id=action_type_id, actor=actor,
         parameters=params, mutated_object_ids=mutated_objects, reversal=reversal,
         function_id=function_id, undone=0, created_at=now))
     _audit(db, actor, "ontology.action.executed", "action_type", action_type_id,
@@ -1460,8 +1494,9 @@ def list_action_log(
     actor: Optional[str] = None,
     limit: int = 100,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ):
-    q = db.query(ActionLog)
+    q = semantic_scope.accessible_query(db, principal, ActionLog)
     if action_type_id is not None:
         q = q.filter(ActionLog.action_type_id == action_type_id)
     if actor is not None:
@@ -1471,18 +1506,16 @@ def list_action_log(
 
 
 @router.get("/ontology/action-log/{log_id}", response_model=ActionLogRead)
-def get_action_log(log_id: str, db: Session = Depends(get_db)):
-    row = db.get(ActionLog, log_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"ActionLog '{log_id}' not found")
+def get_action_log(log_id: str, db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    row = semantic_scope.owned_row(db, principal, ActionLog, log_id, "view", "ActionLog")
     return row
 
 
 @router.post("/ontology/action-log/{log_id}/undo")
-def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(get_db)):
-    row = db.get(ActionLog, log_id)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"ActionLog '{log_id}' not found")
+def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(get_db),
+                    principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    row = semantic_scope.owned_row(db, principal, ActionLog, log_id, "execute", "ActionLog")
     if row.undone:
         raise HTTPException(status_code=409, detail=f"ActionLog '{log_id}' has already been undone")
 
@@ -1515,7 +1548,7 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
         elif op == "delete-object":
             if db.get(models.ObjectInstance, entry.get("object_id")) is None:
                 db.add(models.ObjectInstance(
-                    id=entry.get("object_id"), object_type_id=entry.get("object_type_id"),
+                    id=entry.get("object_id"), project_id=row.project_id, object_type_id=entry.get("object_type_id"),
                     properties=dict(entry.get("before") or {}), source_asset_id=None,
                     lineage={"restored_by_undo": log_id}, created_at=now, updated_at=now))
                 restored.append(entry.get("object_id"))
@@ -1526,7 +1559,7 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
         elif op == "remove-link":
             if db.get(models.LinkInstance, entry.get("link_id")) is None:
                 db.add(models.LinkInstance(
-                    id=entry.get("link_id"), link_type_id=entry.get("link_type_id"),
+                    id=entry.get("link_id"), project_id=row.project_id, link_type_id=entry.get("link_type_id"),
                     source_object_id=entry.get("source_object_id"),
                     target_object_id=entry.get("target_object_id"),
                     properties=dict(entry.get("properties") or {}), created_at=now))

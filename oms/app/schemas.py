@@ -9,6 +9,7 @@ class ResourceBase(BaseModel):
 
 # --- OBJECT TYPES ---
 class ObjectTypeCreate(ResourceBase):
+    project_id: str = "default"
     properties: Dict[str, Any]
 
 class ObjectType(ObjectTypeCreate):
@@ -20,6 +21,7 @@ class ObjectType(ObjectTypeCreate):
 # --- OBJECT INSTANCES ---
 class ObjectInstanceCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     object_type_id: str
     properties: Dict[str, Any]
     source_asset_id: Optional[str] = None
@@ -27,6 +29,7 @@ class ObjectInstanceCreate(BaseModel):
 
 class ObjectInstance(BaseModel):
     id: str
+    project_id: str
     object_type_id: str
     properties: Dict[str, Any]
     source_asset_id: Optional[str] = None
@@ -38,6 +41,7 @@ class ObjectInstance(BaseModel):
 
 # --- LINK TYPES ---
 class LinkTypeCreate(ResourceBase):
+    project_id: str = "default"
     source_object_type_id: str
     target_object_type_id: str
     cardinality: str # ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY
@@ -54,6 +58,7 @@ class LinkTypePatch(BaseModel):
 
 class LinkInstanceCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     link_type_id: str
     source_object_id: str
     target_object_id: str
@@ -61,6 +66,7 @@ class LinkInstanceCreate(BaseModel):
 
 class LinkInstance(BaseModel):
     id: str
+    project_id: str
     link_type_id: str
     source_object_id: str
     target_object_id: str
@@ -115,6 +121,7 @@ class ObjectSetSearchAroundResponse(BaseModel):
     edges: List[Dict[str, Any]] = Field(default_factory=list)
 
 class SavedObjectSetCreate(ResourceBase):
+    project_id: str = "default"
     object_type_id: str
     filters: Any = Field(default_factory=dict)
     owner: str = "system"
@@ -215,6 +222,7 @@ class MGRSCoordinateResponse(BaseModel):
     utm: Dict[str, Any] = Field(default_factory=dict)
 
 class MapLayerDefinitionCreate(ResourceBase):
+    project_id: str = "default"
     object_type_id: str
     saved_object_set_id: Optional[str] = None
     geometry_field: str = "geometry"
@@ -264,6 +272,7 @@ class ActionExecutionResponse(BaseModel):
 
 # --- DATA ASSETS AND PIPELINES ---
 class DataAssetCreate(ResourceBase):
+    project_id: str = "default"
     kind: str = "dataset"
     asset_schema: Dict[str, Any] = Field(default_factory=dict)
     records: List[Dict[str, Any]] = Field(default_factory=list)
@@ -284,6 +293,7 @@ class DataExpectationsResponse(BaseModel):
     checks: List[Dict[str, Any]] = Field(default_factory=list)
 
 class PipelineDefinitionCreate(ResourceBase):
+    project_id: str = "default"
     input_asset_id: str
     output_asset_id: Optional[str] = None
     mode: str = "batch"
@@ -298,6 +308,7 @@ class PipelineDefinition(PipelineDefinitionCreate):
 
 class PipelineRun(BaseModel):
     id: str
+    project_id: str
     pipeline_id: str
     status: str
     input_asset_id: str

@@ -617,6 +617,7 @@ def _compare_filter(value: Any, op: str, expected: Any) -> bool:
 def _object_to_dict(obj: models.ObjectInstance, *, include_lineage: bool = True) -> Dict[str, Any]:
     payload = {
         "id": obj.id,
+        "project_id": obj.project_id,
         "object_type_id": obj.object_type_id,
         "properties": obj.properties or {},
         "source_asset_id": obj.source_asset_id,
@@ -631,6 +632,7 @@ def _object_to_dict(obj: models.ObjectInstance, *, include_lineage: bool = True)
 def _link_to_dict(link: models.LinkInstance) -> Dict[str, Any]:
     return {
         "id": link.id,
+        "project_id": link.project_id,
         "link_type_id": link.link_type_id,
         "source_object_id": link.source_object_id,
         "target_object_id": link.target_object_id,
@@ -682,9 +684,13 @@ def _query_object_rows(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
 ) -> List[models.ObjectInstance]:
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first()
+    object_type_query = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id)
+    if project_id is not None:
+        object_type_query = object_type_query.filter(models.ObjectType.project_id == project_id)
+    object_type = object_type_query.first()
     if not object_type:
         raise ValueError(f"ObjectType '{object_type_id}' not found")
 
@@ -693,6 +699,8 @@ def _query_object_rows(
     query = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.object_type_id == object_type_id
     )
+    if project_id is not None:
+        query = query.filter(models.ObjectInstance.project_id == project_id)
     # Narrow candidates in SQL for simple equality predicates; Python confirms below.
     for cond in _pushdown_equalities(db, normalized_filters):
         query = query.filter(cond)
@@ -736,6 +744,7 @@ def query_object_set(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     limit: int = 100,
     offset: int = 0,
@@ -751,15 +760,20 @@ def query_object_set(
         # No residual predicates -> paginate in SQL. Order-free offset/limit on SQLite
         # returns rowid (insertion) order, matching the previous ``.all()[:limit]`` output
         # for the default call, so results stay backward compatible.
-        if not db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first():
+        type_query = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id)
+        if project_id is not None:
+            type_query = type_query.filter(models.ObjectType.project_id == project_id)
+        if not type_query.first():
             raise ValueError(f"ObjectType '{object_type_id}' not found")
         base = db.query(models.ObjectInstance).filter(
             models.ObjectInstance.object_type_id == object_type_id
         )
+        if project_id is not None:
+            base = base.filter(models.ObjectInstance.project_id == project_id)
         total = base.count() if with_total else None
         selected = base.offset(start).limit(bounded_limit).all() if bounded_limit else []
     else:
-        rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
+        rows = _query_object_rows(db, object_type_id=object_type_id, project_id=project_id, filters=filters)
         total = len(rows) if with_total else None
         selected = rows[start:start + bounded_limit] if bounded_limit else []
 
@@ -785,11 +799,12 @@ def aggregate_object_set(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     group_by: Optional[str] = None,
     metrics: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
+    rows = _query_object_rows(db, object_type_id=object_type_id, project_id=project_id, filters=filters)
     grouped: Dict[str, List[models.ObjectInstance]] = {}
     for row in rows:
         record = _object_to_dict(row, include_lineage=True)
@@ -844,6 +859,7 @@ def search_around_objects(
     db: Session,
     *,
     object_ids: List[str],
+    project_id: Optional[str] = None,
     link_type_id: Optional[str] = None,
     direction: str = "both",
     target_object_type_id: Optional[str] = None,
@@ -852,9 +868,15 @@ def search_around_objects(
     direction = direction.lower()
     if direction not in {"incoming", "outgoing", "both"}:
         raise ValueError("direction must be incoming, outgoing, or both")
-    if link_type_id and not db.query(models.LinkType).filter(models.LinkType.id == link_type_id).first():
+    link_type_query = db.query(models.LinkType).filter(models.LinkType.id == link_type_id) if link_type_id else None
+    if link_type_query is not None and project_id is not None:
+        link_type_query = link_type_query.filter(models.LinkType.project_id == project_id)
+    if link_type_id and not link_type_query.first():
         raise ValueError(f"LinkType '{link_type_id}' not found")
-    if target_object_type_id and not db.query(models.ObjectType).filter(models.ObjectType.id == target_object_type_id).first():
+    target_query = db.query(models.ObjectType).filter(models.ObjectType.id == target_object_type_id) if target_object_type_id else None
+    if target_query is not None and project_id is not None:
+        target_query = target_query.filter(models.ObjectType.project_id == project_id)
+    if target_object_type_id and not target_query.first():
         raise ValueError(f"ObjectType '{target_object_type_id}' not found")
 
     bounded_depth = max(1, min(int(depth), 6))
@@ -869,6 +891,8 @@ def search_around_objects(
             break
         next_frontier: Set[str] = set()
         query = db.query(models.LinkInstance)
+        if project_id is not None:
+            query = query.filter(models.LinkInstance.project_id == project_id)
         if link_type_id:
             query = query.filter(models.LinkInstance.link_type_id == link_type_id)
         links = query.all()
@@ -879,7 +903,10 @@ def search_around_objects(
             if direction in {"incoming", "both"} and link.target_object_id in frontier:
                 candidates.append((link.target_object_id, link.source_object_id))
             for _, neighbor_id in candidates:
-                neighbor = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == neighbor_id).first()
+                neighbor_query = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == neighbor_id)
+                if project_id is not None:
+                    neighbor_query = neighbor_query.filter(models.ObjectInstance.project_id == project_id)
+                neighbor = neighbor_query.first()
                 if not neighbor:
                     continue
                 if target_object_type_id and neighbor.object_type_id != target_object_type_id:
@@ -894,11 +921,17 @@ def search_around_objects(
 
     nodes = [
         _object_to_dict(row, include_lineage=True)
-        for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.id.in_(node_ids)).all()
+        for row in db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.id.in_(node_ids),
+            *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+        ).all()
     ] if node_ids else []
     edges = [
         _link_to_dict(row)
-        for row in db.query(models.LinkInstance).filter(models.LinkInstance.id.in_(edge_ids)).all()
+        for row in db.query(models.LinkInstance).filter(
+            models.LinkInstance.id.in_(edge_ids),
+            *([models.LinkInstance.project_id == project_id] if project_id is not None else []),
+        ).all()
     ] if edge_ids else []
 
     return {
@@ -914,6 +947,7 @@ def spatial_query_objects(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     geometry_field: str = "geometry",
     near: Optional[Dict[str, Any]] = None,
@@ -923,7 +957,7 @@ def spatial_query_objects(
     limit: int = 100,
     include_lineage: bool = True,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
+    rows = _query_object_rows(db, object_type_id=object_type_id, project_id=project_id, filters=filters)
     bounded_limit = max(0, min(int(limit), 10000))
     near_point = geometry_reference_point(normalize_geometry(near) or {}) if near else None
     normalized_polygon = normalize_geometry(polygon) if polygon else None
@@ -1014,6 +1048,7 @@ def object_set_feature_collection(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     geometry_field: str = "geometry",
     limit: int = 1000,
@@ -1022,6 +1057,7 @@ def object_set_feature_collection(
     query = spatial_query_objects(
         db,
         object_type_id=object_type_id,
+        project_id=project_id,
         filters=filters,
         geometry_field=geometry_field,
         limit=limit,
@@ -1056,6 +1092,7 @@ def evaluate_saved_object_set(
     return query_object_set(
         db,
         object_type_id=saved_object_set.object_type_id,
+        project_id=saved_object_set.project_id,
         filters=saved_object_set.filters or {},
         limit=limit,
         include_lineage=include_lineage,
@@ -1071,7 +1108,10 @@ def render_map_layer(
     filters = layer.filters or {}
     object_type_id = layer.object_type_id
     if layer.saved_object_set_id:
-        saved = db.query(models.SavedObjectSet).filter(models.SavedObjectSet.id == layer.saved_object_set_id).first()
+        saved = db.query(models.SavedObjectSet).filter(
+            models.SavedObjectSet.id == layer.saved_object_set_id,
+            models.SavedObjectSet.project_id == layer.project_id,
+        ).first()
         if not saved:
             raise ValueError(f"SavedObjectSet '{layer.saved_object_set_id}' not found")
         object_type_id = saved.object_type_id
@@ -1080,6 +1120,7 @@ def render_map_layer(
     collection = object_set_feature_collection(
         db,
         object_type_id=object_type_id,
+        project_id=layer.project_id,
         filters=filters,
         geometry_field=layer.geometry_field,
         limit=limit,
@@ -1107,24 +1148,33 @@ def build_object_profile(
     *,
     object_type_id: str,
     object_id: str,
+    project_id: Optional[str] = None,
     linked_limit: int = 50,
 ) -> Dict[str, Any]:
     obj = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.id == object_id,
         models.ObjectInstance.object_type_id == object_type_id,
+        *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
     ).first()
     if not obj:
         raise ValueError(f"ObjectInstance '{object_id}' not found")
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first()
+    object_type = db.query(models.ObjectType).filter(
+        models.ObjectType.id == object_type_id,
+        *([models.ObjectType.project_id == project_id] if project_id is not None else []),
+    ).first()
     if not object_type:
         raise ValueError(f"ObjectType '{object_type_id}' not found")
 
-    outbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.source_object_id == object_id).all()
-    inbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.target_object_id == object_id).all()
+    project_filters = [models.LinkInstance.project_id == project_id] if project_id is not None else []
+    outbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.source_object_id == object_id, *project_filters).all()
+    inbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.target_object_id == object_id, *project_filters).all()
     neighbor_ids = [link.target_object_id for link in outbound_links] + [link.source_object_id for link in inbound_links]
     linked_objects = [
         _object_to_dict(row, include_lineage=True)
-        for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.id.in_(neighbor_ids)).limit(linked_limit).all()
+        for row in db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.id.in_(neighbor_ids),
+            *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+        ).limit(linked_limit).all()
     ] if neighbor_ids else []
 
     geometry = extract_geometry(obj.properties or {})
@@ -1162,6 +1212,7 @@ def evaluate_geofence(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     geofence: Optional[Dict[str, Any]] = None,
     bbox: Optional[List[float]] = None,
     filters: Optional[Any] = None,
@@ -1182,6 +1233,7 @@ def evaluate_geofence(
     query = spatial_query_objects(
         db,
         object_type_id=object_type_id,
+        project_id=project_id,
         filters=filters,
         geometry_field=geometry_field,
         limit=limit,
@@ -1233,7 +1285,10 @@ def validate_link_instance_candidate(
         )
 
     cardinality = (link_type.cardinality or "MANY_TO_MANY").upper()
-    query = db.query(models.LinkInstance).filter(models.LinkInstance.link_type_id == link_type.id)
+    query = db.query(models.LinkInstance).filter(
+        models.LinkInstance.link_type_id == link_type.id,
+        models.LinkInstance.project_id == link_type.project_id,
+    )
     if exclude_link_id:
         query = query.filter(models.LinkInstance.id != exclude_link_id)
     existing_links = query.all()
@@ -1439,6 +1494,8 @@ def hydrate_objects(
             "operation": "map_to_ontology",
         }
         if existing:
+            if existing.project_id != object_type.project_id:
+                raise ValueError(f"ObjectInstance '{object_id}' belongs to another project")
             if not upsert:
                 raise ValueError(f"ObjectInstance '{object_id}' already exists")
             existing.properties = {**(existing.properties or {}), **properties}
@@ -1457,6 +1514,7 @@ def hydrate_objects(
         else:
             created = models.ObjectInstance(
                 id=str(object_id),
+                project_id=object_type.project_id,
                 object_type_id=object_type_id,
                 properties=properties,
                 source_asset_id=source_asset_id,
@@ -1509,6 +1567,8 @@ def hydrate_links(
         if not source or not target:
             skipped += 1
             continue
+        if source.project_id != link_type.project_id or target.project_id != link_type.project_id:
+            raise ValueError("Link hydration crosses a project boundary")
         link_id = str(step.get("link_id") or f"{link_type_id}:{source_id}:{target_id}")
         link_errors = validate_link_instance_candidate(
             db,
@@ -1529,6 +1589,7 @@ def hydrate_links(
         }
         db.add(models.LinkInstance(
             id=link_id,
+            project_id=link_type.project_id,
             link_type_id=link_type_id,
             source_object_id=str(source_id),
             target_object_id=str(target_id),
@@ -1903,17 +1964,23 @@ def _validation_issue(
     })
 
 
-def validate_ontology_integrity(db: Session) -> Dict[str, Any]:
+def validate_ontology_integrity(db: Session, project_id: Optional[str] = None) -> Dict[str, Any]:
     issues: List[Dict[str, Any]] = []
-    object_types = {item.id: item for item in db.query(models.ObjectType).all()}
-    link_types = {item.id: item for item in db.query(models.LinkType).all()}
-    objects = {item.id: item for item in db.query(models.ObjectInstance).all()}
+    def project_rows(model: Any) -> List[Any]:
+        query = db.query(model)
+        if project_id is not None and hasattr(model, "project_id"):
+            query = query.filter(model.project_id == project_id)
+        return query.all()
+
+    object_types = {item.id: item for item in project_rows(models.ObjectType)}
+    link_types = {item.id: item for item in project_rows(models.LinkType)}
+    objects = {item.id: item for item in project_rows(models.ObjectInstance)}
     actions = {item.id: item for item in db.query(models.ActionType).all()}
-    data_assets = {item.id: item for item in db.query(models.DataAsset).all()}
-    pipelines = {item.id: item for item in db.query(models.PipelineDefinition).all()}
+    data_assets = {item.id: item for item in project_rows(models.DataAsset)}
+    pipelines = {item.id: item for item in project_rows(models.PipelineDefinition)}
     agents = {item.id: item for item in db.query(models.AgentDefinition).all()}
-    saved_object_sets = {item.id: item for item in db.query(models.SavedObjectSet).all()}
-    map_layers = {item.id: item for item in db.query(models.MapLayerDefinition).all()}
+    saved_object_sets = {item.id: item for item in project_rows(models.SavedObjectSet)}
+    map_layers = {item.id: item for item in project_rows(models.MapLayerDefinition)}
 
     for object_type in object_types.values():
         if not isinstance(object_type.properties, dict):
@@ -2008,7 +2075,7 @@ def validate_ontology_integrity(db: Session) -> Dict[str, Any]:
                 message=f"Source asset '{obj.source_asset_id}' does not exist.",
             )
 
-    links = db.query(models.LinkInstance).all()
+    links = project_rows(models.LinkInstance)
     source_counts: Dict[Tuple[str, str], int] = {}
     target_counts: Dict[Tuple[str, str], int] = {}
     for link in links:
@@ -2318,6 +2385,7 @@ def apply_action_mutations(
                 raise ValueError(f"ObjectInstance '{object_id}' not found")
             existing = models.ObjectInstance(
                 id=str(object_id),
+                project_id=object_type.project_id,
                 object_type_id=object_type_id,
                 properties={},
                 source_asset_id=None,
@@ -2326,6 +2394,8 @@ def apply_action_mutations(
                 updated_at=now_ts(),
             )
             db.add(existing)
+        elif existing.project_id != object_type.project_id:
+            raise ValueError(f"ObjectInstance '{object_id}' belongs to another project")
 
         updates = {
             field: resolve_value(expression, parameters)
@@ -2952,11 +3022,15 @@ def _logic_cmp(op: str, left: Any, right: Any) -> bool:
     return False
 
 
-def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any], limit: int = 1000):
+def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any], limit: int = 1000,
+                       project_id: Optional[str] = None):
     """Query an object set with simple equality filters (AIP Logic 'Query Objects')."""
     instances = (
         db.query(models.ObjectInstance)
-        .filter(models.ObjectInstance.object_type_id == object_type_id)
+        .filter(
+            models.ObjectInstance.object_type_id == object_type_id,
+            *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+        )
         .all()
     )
     filters = filters or {}

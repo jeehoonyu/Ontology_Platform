@@ -94,6 +94,9 @@ CORE_TABLES = [
     "data_assets",
     "pipeline_definitions",
     "pipeline_runs",
+    "saved_object_sets",
+    "map_layer_definitions",
+    "act_action_log",
     "pipeline_builder_graphs",
     "pipeline_builder_builds",
     "approval_requests",
@@ -164,7 +167,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -188,6 +191,7 @@ MIGRATIONS = [
     {"version": 20, "name": "project_scoped_governed_automation", "status": "applied"},
     {"version": 21, "name": "project_scoped_ai_evaluations", "status": "applied"},
     {"version": 22, "name": "project_scoped_modelops_lifecycle", "status": "applied"},
+    {"version": 23, "name": "project_scoped_semantic_data_plane", "status": "applied"},
 ]
 
 
@@ -438,11 +442,11 @@ def _snapshot(db: Session) -> Dict[str, Any]:
         "snapshot_version": PORTABLE_SNAPSHOT_VERSION,
         "exported_at": _now(),
         "object_types": [
-            _row_dict(row, ["id", "display_name", "description", "properties", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "properties", "created_at", "updated_at"])
             for row in db.query(models.ObjectType).all()
         ],
         "link_types": [
-            _row_dict(row, ["id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"])
             for row in db.query(models.LinkType).all()
         ],
         "action_types": [
@@ -494,20 +498,32 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(aip_evals.AipEvalRun).all()
         ],
         "object_instances": [
-            _row_dict(row, ["id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
             for row in db.query(models.ObjectInstance).all()
         ],
         "link_instances": [
-            _row_dict(row, ["id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"])
+            _row_dict(row, ["id", "project_id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"])
             for row in db.query(models.LinkInstance).all()
         ],
         "data_assets": [
-            _row_dict(row, ["id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"])
             for row in db.query(models.DataAsset).all()
         ],
         "pipeline_definitions": [
-            _row_dict(row, ["id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"])
             for row in db.query(models.PipelineDefinition).all()
+        ],
+        "pipeline_runs": [
+            _row_dict(row, ["id", "project_id", "pipeline_id", "status", "input_asset_id", "output_asset_id", "records_in", "records_out", "lineage", "metrics", "error", "created_at", "completed_at"])
+            for row in db.query(models.PipelineRun).all()
+        ],
+        "saved_object_sets": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "owner", "created_at", "updated_at"])
+            for row in db.query(models.SavedObjectSet).all()
+        ],
+        "map_layer_definitions": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "saved_object_set_id", "filters", "geometry_field", "style", "created_at", "updated_at"])
+            for row in db.query(models.MapLayerDefinition).all()
         ],
         "pipeline_builder_graphs": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "nodes", "edges", "parameters", "status", "created_at", "updated_at"])
@@ -530,7 +546,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(apps.WorkshopModuleVersion).all()
         ],
         "object_explorer_explorations": [
-            _row_dict(row, ["id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"])
             for row in db.query(object_explorer_ops.ObjectExplorerExploration).all()
         ],
         "modeling_objectives": [
@@ -1332,13 +1348,15 @@ def import_project(
 
     now = _now()
     for row in snapshot.get("object_types") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, models.ObjectType, row, ["id", "display_name", "description", "properties", "created_at", "updated_at"]))
+        track(_upsert_model(db, models.ObjectType, row, ["id", "project_id", "display_name", "description", "properties", "created_at", "updated_at"]))
     for row in snapshot.get("data_assets") or []:
+        row.setdefault("project_id", str((row.get("asset_schema") or {}).get("project_id") or "default"))
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, models.DataAsset, row, ["id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"]))
+        track(_upsert_model(db, models.DataAsset, row, ["id", "project_id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"]))
     for row in snapshot.get("action_types") or []:
         row.setdefault("project_id", "default")
         track(_upsert_model(db, models.ActionType, row, ["id", "project_id", "display_name", "description", "parameters", "rules"]))
@@ -1386,18 +1404,36 @@ def import_project(
         row.setdefault("created_at", now)
         track(_upsert_model(db, aip_evals.AipEvalRun, row, ["id", "project_id", "target", "total", "passed", "pass_rate", "results", "created_at"]))
     for row in snapshot.get("link_types") or []:
-        track(_upsert_model(db, models.LinkType, row, ["id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, models.LinkType, row, ["id", "project_id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"]))
     for row in snapshot.get("object_instances") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, models.ObjectInstance, row, ["id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"]))
+        track(_upsert_model(db, models.ObjectInstance, row, ["id", "project_id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"]))
     for row in snapshot.get("link_instances") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
-        track(_upsert_model(db, models.LinkInstance, row, ["id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"]))
+        track(_upsert_model(db, models.LinkInstance, row, ["id", "project_id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"]))
     for row in snapshot.get("pipeline_definitions") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, models.PipelineDefinition, row, ["id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"]))
+        track(_upsert_model(db, models.PipelineDefinition, row, ["id", "project_id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"]))
+    for row in snapshot.get("pipeline_runs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, models.PipelineRun, row, ["id", "project_id", "pipeline_id", "status", "input_asset_id", "output_asset_id", "records_in", "records_out", "lineage", "metrics", "error", "created_at", "completed_at"]))
+    for row in snapshot.get("saved_object_sets") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, models.SavedObjectSet, row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "owner", "created_at", "updated_at"]))
+    for row in snapshot.get("map_layer_definitions") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, models.MapLayerDefinition, row, ["id", "project_id", "display_name", "description", "object_type_id", "saved_object_set_id", "filters", "geometry_field", "style", "created_at", "updated_at"]))
     for row in snapshot.get("pipeline_builder_graphs") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
@@ -1430,9 +1466,10 @@ def import_project(
         row.setdefault("created_at", now)
         track(_upsert_model(db, apps.WorkshopModuleVersion, row, ["id", "module_id", "version_number", "snapshot", "note", "actor", "created_at"]))
     for row in snapshot.get("object_explorer_explorations") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, object_explorer_ops.ObjectExplorerExploration, row, ["id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"]))
+        track(_upsert_model(db, object_explorer_ops.ObjectExplorerExploration, row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"]))
     model_restore_specs = [
         ("modeling_objectives", modeling.ModelingObjective, ["id", "project_id", "display_name", "description", "problem_type", "target_field", "feature_fields", "input_asset_id", "created_at", "updated_at"]),
         ("model_submissions", modeling.ModelSubmission, ["id", "project_id", "objective_id", "algorithm", "metrics", "released", "status", "trainer_type", "training_dataset_id", "target_column", "eval_metric", "quality_preset", "created_at"]),
