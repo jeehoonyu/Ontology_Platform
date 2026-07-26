@@ -36,6 +36,7 @@ from . import (
     ontology_packages,
     ops_control,
     platform_core,
+    pipeline_builder_ops,
     platform_runtime,
     runtime_observability,
     schedules,
@@ -84,6 +85,8 @@ CORE_TABLES = [
     "data_assets",
     "pipeline_definitions",
     "pipeline_runs",
+    "pipeline_builder_graphs",
+    "pipeline_builder_builds",
     "approval_requests",
     "audit_logs",
     "ops_events",
@@ -139,7 +142,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -158,6 +161,7 @@ MIGRATIONS = [
     {"version": 15, "name": "durable_artifact_command_receipts", "status": "applied"},
     {"version": 16, "name": "durable_job_idempotency_receipts", "status": "applied"},
     {"version": 17, "name": "project_scoped_import_jobs", "status": "applied"},
+    {"version": 18, "name": "project_scoped_pipeline_graphs", "status": "applied"},
 ]
 
 
@@ -434,6 +438,14 @@ def _snapshot(db: Session) -> Dict[str, Any]:
         "pipeline_definitions": [
             _row_dict(row, ["id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"])
             for row in db.query(models.PipelineDefinition).all()
+        ],
+        "pipeline_builder_graphs": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "nodes", "edges", "parameters", "status", "created_at", "updated_at"])
+            for row in db.query(pipeline_builder_ops.PipelineBuilderGraph).all()
+        ],
+        "pipeline_builder_builds": [
+            _row_dict(row, ["id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at"])
+            for row in db.query(pipeline_builder_ops.PipelineBuilderBuild).all()
         ],
         "import_jobs": [
             imports_ops._job_dict(row, include_records=True)
@@ -783,6 +795,8 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "object_types",
         "data_assets",
         "pipeline_definitions",
+        "pipeline_builder_graphs",
+        "pipeline_builder_builds",
         "import_jobs",
         "model_monitors",
         "model_monitor_runs",
@@ -1227,6 +1241,19 @@ def import_project(
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, models.PipelineDefinition, row, ["id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"]))
+    for row in snapshot.get("pipeline_builder_graphs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, pipeline_builder_ops.PipelineBuilderGraph, row, [
+            "id", "project_id", "display_name", "description", "nodes", "edges", "parameters",
+            "status", "created_at", "updated_at",
+        ]))
+    for row in snapshot.get("pipeline_builder_builds") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, pipeline_builder_ops.PipelineBuilderBuild, row, [
+            "id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at",
+        ]))
     for row in snapshot.get("import_jobs") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)

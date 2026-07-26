@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, platform_runtime
+from . import models, models_action, platform_runtime, tenancy
 from .database import Base, get_db
 from .datasets_ext import DatasetTransaction, _fold, _next_seq, _txns_for
 from .production_auth import Principal, require_permission
@@ -205,6 +205,7 @@ class PipelineBuilderGraph(Base):
     __tablename__ = "pipeline_builder_graphs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     nodes: Mapped[list] = mapped_column(JSON, default=list)
@@ -231,6 +232,7 @@ class PipelineBuilderBuild(Base):
 
 class PipelineGraphCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     nodes: List[Dict[str, Any]] = Field(default_factory=list)
@@ -252,6 +254,7 @@ class PipelineGraphRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     description: Optional[str] = None
     nodes: List[Dict[str, Any]]
@@ -334,7 +337,7 @@ def _new_id() -> str:
 
 
 @router.get("/pipeline-builder/node-types")
-def list_node_types():
+def list_node_types(_principal: Principal = Depends(require_permission("view"))):
     return {"node_types": _node_catalog_payload()}
 
 
@@ -343,8 +346,12 @@ def _node_catalog_payload() -> List[Dict[str, Any]]:
 
 
 @router.get("/ui-state/pipeline")
-def pipeline_ui_state(db: Session = Depends(get_db)):
-    graphs = db.query(PipelineBuilderGraph).order_by(PipelineBuilderGraph.updated_at.desc()).all()
+def pipeline_ui_state(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = _accessible_graphs(db, principal, "view")
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(PipelineBuilderGraph.project_id == project_id)
+    graphs = query.order_by(PipelineBuilderGraph.updated_at.desc()).all()
     selected = graphs[0] if graphs else None
     return {
         "summary": {
@@ -375,6 +382,20 @@ def _get_graph(db: Session, graph_id: str) -> PipelineBuilderGraph:
     if not graph:
         raise HTTPException(status_code=404, detail=f"PipelineBuilderGraph '{graph_id}' not found")
     return graph
+
+
+def _graph_for(db: Session, graph_id: str, principal: Principal, permission: str) -> PipelineBuilderGraph:
+    graph = _get_graph(db, graph_id)
+    tenancy.assert_project_permission(db, principal, graph.project_id, permission)
+    return graph
+
+
+def _accessible_graphs(db: Session, principal: Principal, permission: str = "view"):
+    query = db.query(PipelineBuilderGraph)
+    project_ids = tenancy.accessible_project_ids(db, principal, permission)
+    if project_ids is not None:
+        query = query.filter(PipelineBuilderGraph.project_id.in_(project_ids)) if project_ids else query.filter(PipelineBuilderGraph.id == "__none__")
+    return query
 
 
 def _node_type(node: Dict[str, Any]) -> str:
@@ -416,7 +437,7 @@ def _audit_graph(db: Session, actor: str, event_type: str, graph: PipelineBuilde
         event_type=event_type,
         subject_type="pipeline_builder_graph",
         subject_id=graph.id,
-        payload=payload,
+        payload={"project_id": graph.project_id, **payload},
     ))
 
 
@@ -728,8 +749,19 @@ def _validate_graph(db: Session, graph: PipelineBuilderGraph) -> Dict[str, Any]:
             asset_id = _config(node).get("asset_id") or _config(node).get("dataset_id")
             if not asset_id:
                 errors.append({"code": "MISSING_INPUT_ASSET", "node_id": node_id, "message": "Input dataset node needs asset_id"})
-            elif not db.get(models.DataAsset, asset_id):
-                errors.append({"code": "INPUT_ASSET_NOT_FOUND", "node_id": node_id, "message": f"DataAsset '{asset_id}' not found"})
+            else:
+                asset = db.get(models.DataAsset, asset_id)
+                if not asset:
+                    errors.append({"code": "INPUT_ASSET_NOT_FOUND", "node_id": node_id, "message": f"DataAsset '{asset_id}' not found"})
+                elif str((asset.asset_schema or {}).get("project_id") or "default") != graph.project_id:
+                    errors.append({"code": "INPUT_ASSET_PROJECT_MISMATCH", "node_id": node_id, "message": f"DataAsset '{asset_id}' belongs to another project"})
+        if node_type == "ontology_output":
+            object_type_id = _config(node).get("object_type_id")
+            object_type = db.get(models.ObjectType, object_type_id) if object_type_id else None
+            if object_type:
+                object_project = str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+                if object_project != graph.project_id:
+                    errors.append({"code": "ONTOLOGY_OUTPUT_PROJECT_MISMATCH", "node_id": node_id, "message": f"Object type '{object_type_id}' belongs to another project"})
 
     for edge in edges:
         source = str(edge.get("source") or edge.get("from") or "")
@@ -1437,19 +1469,22 @@ def _commit_snapshot_transaction(db: Session, asset: models.DataAsset, rows: Lis
     )
     db.add(txn)
     asset.records = _fold(_txns_for(db, asset.id, "master") + [txn])
-    asset.asset_schema = _schema(asset.records or [])
+    project_id = str((asset.asset_schema or {}).get("project_id") or "default")
+    asset.asset_schema = {**_schema(asset.records or []), "project_id": project_id}
     asset.updated_at = _now()
     return txn
 
 
 @router.post("/pipeline-builder/graphs", response_model=PipelineGraphRead, status_code=201)
-def create_graph(body: PipelineGraphCreate, db: Session = Depends(get_db)):
+def create_graph(body: PipelineGraphCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     graph_id = body.id or _new_id()
     if db.get(PipelineBuilderGraph, graph_id):
         raise HTTPException(status_code=400, detail="PipelineBuilderGraph already exists")
     now = _now()
     graph = PipelineBuilderGraph(
         id=graph_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         description=body.description,
         nodes=body.nodes,
@@ -1466,30 +1501,34 @@ def create_graph(body: PipelineGraphCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/pipeline-builder/graphs", response_model=List[PipelineGraphRead])
-def list_graphs(db: Session = Depends(get_db)):
-    return db.query(PipelineBuilderGraph).order_by(PipelineBuilderGraph.updated_at.desc()).all()
+def list_graphs(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = _accessible_graphs(db, principal, "view")
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(PipelineBuilderGraph.project_id == project_id)
+    return query.order_by(PipelineBuilderGraph.updated_at.desc()).all()
 
 
 @router.get("/pipeline-builder/graphs/{graph_id}", response_model=PipelineGraphRead)
-def get_graph(graph_id: str, db: Session = Depends(get_db)):
-    return _get_graph(db, graph_id)
+def get_graph(graph_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    return _graph_for(db, graph_id, principal, "view")
 
 
 @router.get("/ui-state/pipeline/{graph_id}/canvas")
-def pipeline_canvas_state(graph_id: str, selected_node_id: Optional[str] = None, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def pipeline_canvas_state(graph_id: str, selected_node_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "view")
     return _canvas_payload(db, graph, selected_node_id=selected_node_id)
 
 
 @router.get("/ui-state/pipeline/{graph_id}/nodes/{node_id}/details")
-def pipeline_node_details(graph_id: str, node_id: str, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def pipeline_node_details(graph_id: str, node_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "view")
     return _node_details_payload(db, graph, node_id)
 
 
 @router.get("/ui-state/pipeline/{graph_id}/outputs")
-def pipeline_outputs_state(graph_id: str, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def pipeline_outputs_state(graph_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "view")
     canvas = _canvas_payload(db, graph)
     return {
         "graph_id": graph.id,
@@ -1507,8 +1546,8 @@ def pipeline_outputs_state(graph_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/pipeline-builder/graphs/{graph_id}", response_model=PipelineGraphRead)
-def update_graph(graph_id: str, body: PipelineGraphUpdate, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def update_graph(graph_id: str, body: PipelineGraphUpdate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "edit")
     patch = body.model_dump(exclude_unset=True)
     for field, value in patch.items():
         setattr(graph, field, value)
@@ -1520,8 +1559,8 @@ def update_graph(graph_id: str, body: PipelineGraphUpdate, db: Session = Depends
 
 
 @router.patch("/pipeline-builder/graphs/{graph_id}/layout")
-def update_graph_layout(graph_id: str, body: PipelineLayoutRequest, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def update_graph_layout(graph_id: str, body: PipelineLayoutRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "edit")
     positions = dict(body.positions or {})
     for item in body.nodes or []:
         node_id = str(item.get("id") or item.get("node_id") or "")
@@ -1541,15 +1580,15 @@ def update_graph_layout(graph_id: str, body: PipelineLayoutRequest, db: Session 
         updated_nodes.append(next_node)
     graph.nodes = updated_nodes
     graph.updated_at = _now()
-    _audit_graph(db, "pipeline_builder", "pipeline_builder.graph.layout_updated", graph, {"positions": positions})
+    _audit_graph(db, principal.id, "pipeline_builder.graph.layout_updated", graph, {"positions": positions})
     db.commit()
     db.refresh(graph)
     return _canvas_payload(db, graph)
 
 
 @router.patch("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}")
-def update_pipeline_node(graph_id: str, node_id: str, body: PipelineNodeUpdateRequest, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def update_pipeline_node(graph_id: str, node_id: str, body: PipelineNodeUpdateRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "edit")
     index, node = _find_node(graph, node_id)
     next_node = copy.deepcopy(node)
     if body.label is not None:
@@ -1566,7 +1605,7 @@ def update_pipeline_node(graph_id: str, node_id: str, body: PipelineNodeUpdateRe
     nodes[index] = next_node
     graph.nodes = nodes
     graph.updated_at = _now()
-    _audit_graph(db, body.actor, "pipeline_builder.node.updated", graph, {
+    _audit_graph(db, principal.id, "pipeline_builder.node.updated", graph, {
         "node_id": node_id, "node_type": _node_type(node), "config_fields": sorted((body.config or {}).keys()),
     })
     db.commit()
@@ -1575,8 +1614,8 @@ def update_pipeline_node(graph_id: str, node_id: str, body: PipelineNodeUpdateRe
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes")
-def create_pipeline_node(graph_id: str, body: PipelineCreateNodeRequest, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def create_pipeline_node(graph_id: str, body: PipelineCreateNodeRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "edit")
     new_node = _node_from_request(graph, body, {"x": 180, "y": 180})
     next_edges = [copy.deepcopy(edge) for edge in graph.edges or []]
     if body.connect_from_node_id:
@@ -1590,7 +1629,7 @@ def create_pipeline_node(graph_id: str, body: PipelineCreateNodeRequest, db: Ses
     graph.nodes = [copy.deepcopy(node) for node in graph.nodes or []] + [new_node]
     graph.edges = next_edges
     graph.updated_at = _now()
-    _audit_graph(db, body.actor, "pipeline_builder.node.created", graph, {
+    _audit_graph(db, principal.id, "pipeline_builder.node.created", graph, {
         "node_id": new_node["id"],
         "node_type": new_node["type"],
         "position": new_node["position"],
@@ -1602,8 +1641,8 @@ def create_pipeline_node(graph_id: str, body: PipelineCreateNodeRequest, db: Ses
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/insert-after")
-def insert_node_after(graph_id: str, node_id: str, body: PipelineInsertNodeRequest, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def insert_node_after(graph_id: str, node_id: str, body: PipelineInsertNodeRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "edit")
     source_index, source_node = _find_node(graph, node_id)
     source_position = _node_position(source_node, source_index)
     new_node = _node_from_request(graph, body, {"x": source_position["x"] + 260, "y": source_position["y"]})
@@ -1622,7 +1661,7 @@ def insert_node_after(graph_id: str, node_id: str, body: PipelineInsertNodeReque
     graph.nodes = (graph.nodes or []) + [new_node]
     graph.edges = next_edges
     graph.updated_at = _now()
-    _audit_graph(db, "pipeline_builder", "pipeline_builder.node.inserted", graph, {
+    _audit_graph(db, principal.id, "pipeline_builder.node.inserted", graph, {
         "node_id": new_node["id"],
         "node_type": new_node["type"],
         "inserted_after": node_id,
@@ -1633,8 +1672,8 @@ def insert_node_after(graph_id: str, node_id: str, body: PipelineInsertNodeReque
 
 
 @router.delete("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}")
-def delete_pipeline_node(graph_id: str, node_id: str, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def delete_pipeline_node(graph_id: str, node_id: str, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "edit")
     _find_node(graph, node_id)
     incoming = [copy.deepcopy(edge) for edge in graph.edges or [] if _edge_target(edge) == node_id]
     outgoing = [copy.deepcopy(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id]
@@ -1662,7 +1701,7 @@ def delete_pipeline_node(graph_id: str, node_id: str, db: Session = Depends(get_
     ]
     graph.edges = next_edges
     graph.updated_at = _now()
-    _audit_graph(db, "pipeline_builder", "pipeline_builder.node.deleted", graph, {
+    _audit_graph(db, principal.id, "pipeline_builder.node.deleted", graph, {
         "node_id": node_id,
         "incoming_edges": len(incoming),
         "outgoing_edges": len(outgoing),
@@ -1674,8 +1713,8 @@ def delete_pipeline_node(graph_id: str, node_id: str, db: Session = Depends(get_
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/preview")
-def preview_pipeline_node(graph_id: str, node_id: str, body: PipelineNodePreviewRequest = PipelineNodePreviewRequest(), db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def preview_pipeline_node(graph_id: str, node_id: str, body: PipelineNodePreviewRequest = PipelineNodePreviewRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "execute")
     _find_node(graph, node_id)
     execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=False)
     output = execution["node_outputs"].get(node_id)
@@ -1698,14 +1737,14 @@ def preview_pipeline_node(graph_id: str, node_id: str, body: PipelineNodePreview
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/suggestions")
-def suggest_pipeline_node_actions(graph_id: str, node_id: str, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def suggest_pipeline_node_actions(graph_id: str, node_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "view")
     return _node_suggestions_payload(db, graph, node_id)
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/validate")
-def validate_graph(graph_id: str, db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def validate_graph(graph_id: str, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "execute")
     validation = _validate_graph(db, graph)
     try:
         from . import ops_control
@@ -1727,8 +1766,9 @@ def validate_graph(graph_id: str, db: Session = Depends(get_db)):
 
 @router.post("/pipeline-builder/graphs/{graph_id}/preview/async", status_code=202)
 def enqueue_graph_preview(graph_id: str, body: PipelineAsyncPreviewRequest = PipelineAsyncPreviewRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+    graph = _graph_for(db, graph_id, principal, "execute")
     return platform_runtime.create_job(platform_runtime.JobCreate(
+        project_id=graph.project_id,
         job_type="pipeline.preview",
         subject_type="pipeline_builder_graph",
         subject_id=graph.id,
@@ -1742,8 +1782,9 @@ def enqueue_graph_preview(graph_id: str, body: PipelineAsyncPreviewRequest = Pip
 
 @router.post("/pipeline-builder/graphs/{graph_id}/deliver/async", status_code=202)
 def enqueue_graph_delivery(graph_id: str, body: PipelineAsyncDeliverRequest = PipelineAsyncDeliverRequest(), principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+    graph = _graph_for(db, graph_id, principal, "deploy")
     return platform_runtime.create_job(platform_runtime.JobCreate(
+        project_id=graph.project_id,
         job_type="pipeline.deliver",
         subject_type="pipeline_builder_graph",
         subject_id=graph.id,
@@ -1781,7 +1822,7 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
     payload = dict(claimed.get("payload") or {})
     graph_id = str(payload.get("graph_id") or claimed.get("subject_id") or "")
     try:
-        graph = _get_graph(db, graph_id)
+        graph = _graph_for(db, graph_id, principal, "execute")
         validation = _validate_graph(db, graph)
         if validation.get("errors"):
             failed = platform_runtime.fail_job(job_id, platform_runtime.JobFailRequest(
@@ -1804,7 +1845,7 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
             result = preview_graph(graph_id, PipelinePreviewRequest(
                 limit=int(payload.get("limit") or 50),
                 parameters=dict(payload.get("parameters") or {}),
-            ), db)
+            ), principal, db)
         else:
             result = deliver_graph(graph_id, PipelineDeliverRequest(
                 output_asset_id=payload.get("output_asset_id"),
@@ -1813,7 +1854,7 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
                 parameters=dict(payload.get("parameters") or {}),
                 execution_job_id=job_id,
                 execution_lease_token=lease_token,
-            ), db)
+            ), principal, db)
 
         db.expire_all()
         current = db.get(platform_runtime.PlatformJob, job_id)
@@ -1851,8 +1892,8 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/preview")
-def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewRequest(), db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "execute")
     execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=False)
     limit = max(1, min(int(body.limit), 500))
     result = {
@@ -1875,7 +1916,7 @@ def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewR
             title=f"Pipeline graph {graph.display_name} previewed",
             subject_type="pipeline_builder_graph",
             subject_id=graph.id,
-            payload={"row_count": result["row_count"], "schema": result["schema"]},
+            payload={"project_id": graph.project_id, "row_count": result["row_count"], "schema": result["schema"]},
         )
         db.commit()
     except Exception:
@@ -1884,8 +1925,8 @@ def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewR
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/deliver")
-def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverRequest(), db: Session = Depends(get_db)):
-    graph = _get_graph(db, graph_id)
+def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverRequest(), principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "execute" if body.execution_job_id else "deploy")
     if body.execution_job_id:
         prior_builds = db.query(PipelineBuilderBuild).filter(PipelineBuilderBuild.graph_id == graph.id).order_by(PipelineBuilderBuild.created_at.desc()).all()
         prior = next((build for build in prior_builds if (build.metrics or {}).get("execution_job_id") == body.execution_job_id), None)
@@ -1906,13 +1947,15 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
     output_asset_id = _output_asset_id(graph, body.output_asset_id)
     now = _now()
     asset = db.get(models.DataAsset, output_asset_id)
+    if asset and str((asset.asset_schema or {}).get("project_id") or "default") != graph.project_id:
+        raise HTTPException(status_code=409, detail="Output DataAsset ID is owned by another project")
     if not asset:
         asset = models.DataAsset(
             id=output_asset_id,
             display_name=f"{graph.display_name} Output",
             description=f"Delivered output from Pipeline Builder graph {graph.id}",
             kind="dataset",
-            asset_schema={},
+            asset_schema={"project_id": graph.project_id},
             records=[],
             created_at=now,
             updated_at=now,
@@ -1973,11 +2016,11 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
     db.add(build)
     db.add(models_action.AuditLog(
         id=_new_id(),
-        actor=body.actor,
+        actor=principal.id,
         event_type="pipeline_builder.graph.delivered",
         subject_type="pipeline_builder_graph",
         subject_id=graph.id,
-        payload={"run_id": run.id, "output_asset_id": asset.id, "records_out": len(execution["rows"])},
+        payload={"project_id": graph.project_id, "run_id": run.id, "output_asset_id": asset.id, "records_out": len(execution["rows"])},
     ))
     try:
         from . import ops_control
@@ -1989,7 +2032,7 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
             title=f"Pipeline graph {graph.display_name} delivered",
             subject_type="pipeline_builder_graph",
             subject_id=graph.id,
-            payload={"run_id": run.id, "output_asset_id": asset.id, "records_out": len(execution["rows"])},
+            payload={"project_id": graph.project_id, "run_id": run.id, "output_asset_id": asset.id, "records_out": len(execution["rows"])},
         )
     except Exception:
         pass

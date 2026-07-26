@@ -262,6 +262,7 @@ export interface AgentRunResult {
 
 export interface PipelineGraph {
   id: string;
+  project_id: string;
   display_name: string;
   description?: string | null;
   nodes: PipelineNodeRaw[];
