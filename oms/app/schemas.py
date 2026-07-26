@@ -234,6 +234,7 @@ class MapLayerFeatureCollectionResponse(GISFeatureCollectionResponse):
 
 # --- ACTION TYPES ---
 class ActionTypeCreate(ResourceBase):
+    project_id: str = "default"
     parameters: Dict[str, Any]
     rules: Dict[str, Any]
 
@@ -328,6 +329,7 @@ class ModelEndpoint(ModelEndpointCreate):
 # --- GOVERNANCE ---
 class ApprovalRequest(BaseModel):
     id: str
+    project_id: str
     action_type_id: str
     requester: str
     parameters: Dict[str, Any]
@@ -356,6 +358,7 @@ class AuditLog(BaseModel):
 
 # --- AGENTS AND EVALS ---
 class AgentDefinitionCreate(ResourceBase):
+    project_id: str = "default"
     system_prompt: Optional[str] = None
     allowed_object_types: List[str] = Field(default_factory=list)
     allowed_actions: List[str] = Field(default_factory=list)
@@ -556,6 +559,7 @@ class AIPThread(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class LogicFunctionCreate(ResourceBase):
+    project_id: str = "default"
     blocks: List[Dict[str, Any]] = Field(default_factory=list)
     input_schema: Dict[str, Any] = Field(default_factory=dict)
     output_schema: Dict[str, Any] = Field(default_factory=dict)

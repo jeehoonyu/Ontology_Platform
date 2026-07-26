@@ -358,15 +358,17 @@ def _graph_from_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
     return _pipeline_graph_draft(draft)
 
 
-def _upsert_action(db: Session, *, action_id: str, display_name: str, description: str, parameters: Dict[str, Any], rules: Dict[str, Any]) -> str:
+def _upsert_action(db: Session, *, project_id: str, action_id: str, display_name: str, description: str, parameters: Dict[str, Any], rules: Dict[str, Any]) -> str:
     row = db.get(models.ActionType, action_id)
     if row:
+        if row.project_id != project_id:
+            raise HTTPException(status_code=409, detail=f"Action type '{action_id}' belongs to another project")
         row.display_name = display_name
         row.description = description
         row.parameters = parameters
         row.rules = rules
     else:
-        db.add(models.ActionType(id=action_id, display_name=display_name, description=description, parameters=parameters, rules=rules))
+        db.add(models.ActionType(id=action_id, project_id=project_id, display_name=display_name, description=description, parameters=parameters, rules=rules))
     return action_id
 
 
@@ -456,6 +458,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         set_map = {prop["api_name"]: f"${prop['api_name']}" for prop in included}
         created_actions.append(_upsert_action(
             db,
+            project_id=project_id,
             action_id=f"create_{object_type_id}",
             display_name=f"Create {draft.get('display_name')}",
             description=f"Generated create action for {object_type_id}.",
@@ -464,6 +467,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         ))
         created_actions.append(_upsert_action(
             db,
+            project_id=project_id,
             action_id=f"edit_{object_type_id}",
             display_name=f"Edit {draft.get('display_name')}",
             description=f"Generated edit action for {object_type_id}.",
@@ -472,6 +476,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         ))
         created_actions.append(_upsert_action(
             db,
+            project_id=project_id,
             action_id=f"delete_{object_type_id}",
             display_name=f"Delete {draft.get('display_name')}",
             description=f"Generated delete action for {object_type_id}.",

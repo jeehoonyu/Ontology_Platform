@@ -145,6 +145,62 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(workshopBoundary.outside.status).toBe(403);
   expect(workshopBoundary.outside.body.detail.project_id).toBe("outside-project");
 
+  const automationBoundary = await page.evaluate(async (suffix) => {
+    const request = async (path: string, method = "GET", body?: unknown) => {
+      const response = await fetch(path, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const actionId = `pilot-action-${suffix}`;
+    const logicId = `pilot-logic-${suffix}`;
+    const agentId = `pilot-agent-${suffix}`;
+    const action = await request("/action-types", "POST", {
+      id: actionId, project_id: "default", display_name: "Pilot governed action", description: null,
+      parameters: {}, rules: { requires_approval: true, object_mutations: [] }
+    });
+    const logic = await request("/logic-functions", "POST", {
+      id: logicId, project_id: "default", display_name: "Pilot governed logic", description: null,
+      blocks: [{ type: "propose_action", action_type_id: actionId, parameters: {} }]
+    });
+    const logicRun = await request(`/logic-functions/${logicId}/run`, "POST", { inputs: {}, actor: "spoofed" });
+    const agent = await request("/agents", "POST", {
+      id: agentId, project_id: "default", display_name: "Pilot governed agent", description: null,
+      allowed_object_types: [], allowed_actions: [actionId], approval_required: true
+    });
+    const tools = await request(`/aip/agents/${agentId}/tools`, "PUT", {
+      retrieval: {}, tools: [{ name: "propose", type: "action", action_type_id: actionId, always: true }]
+    });
+    const job = await request(`/aip/agents/${agentId}/invoke/async`, "POST", {
+      prompt: "propose", parameters: {}, idempotency_key: `pilot-agent-job-${suffix}`
+    });
+    const outsideAction = await request("/action-types", "POST", {
+      id: `outside-action-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null,
+      parameters: {}, rules: {}
+    });
+    const outsideLogic = await request("/logic-functions", "POST", {
+      id: `outside-logic-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null,
+      blocks: []
+    });
+    const outsideAgent = await request("/agents", "POST", {
+      id: `outside-agent-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null
+    });
+    return { actionId, logicId, agentId, action, logic, logicRun, agent, tools, job, outsideAction, outsideLogic, outsideAgent };
+  }, adminMutation.body.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12));
+  expect(automationBoundary.action.status).toBe(200);
+  expect(automationBoundary.action.body.project_id).toBe("default");
+  expect(automationBoundary.logic.status).toBe(200);
+  expect(automationBoundary.logicRun.body.status).toBe("ACTION_PROPOSED");
+  expect(automationBoundary.agent.status).toBe(200);
+  expect(automationBoundary.tools.status).toBe(200);
+  expect(automationBoundary.job.status).toBe(202);
+  expect(automationBoundary.job.body.project_id).toBe("default");
+  expect(automationBoundary.outsideAction.status).toBe(403);
+  expect(automationBoundary.outsideLogic.status).toBe(403);
+  expect(automationBoundary.outsideAgent.status).toBe(403);
+
   const tenantBoundary = await page.evaluate(async () => {
     const response = await fetch("/tenancy/organizations", {
       method: "POST",
@@ -475,7 +531,7 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerSession.permissions).toEqual(["view"]);
   expect(viewerSession.project_ids).toContain("default");
 
-  const viewerAccess = await page.evaluate(async ({ graphId, workshopId }) => {
+  const viewerAccess = await page.evaluate(async ({ graphId, workshopId, actionId, logicId, agentId }) => {
     const read = await fetch("/artifacts");
     const edit = await fetch("/artifacts", {
       method: "POST",
@@ -504,6 +560,17 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       headers: { "content-type": "application/json" },
       body: "{}"
     });
+    const actionList = await fetch("/action-types");
+    const actionExecute = await fetch("/actions/execute", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action_type_id: actionId, parameters: {}, idempotency_key: "viewer-forbidden", actor: "viewer" })
+    });
+    const logicRun = await fetch(`/logic-functions/${logicId}/run`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ inputs: {} })
+    });
+    const agentInvoke = await fetch(`/aip/agents/${agentId}/invoke`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "run", parameters: {} })
+    });
     return {
       read: read.status,
       edit: edit.status,
@@ -513,9 +580,19 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       graphPreviewStatus: graphPreview.status,
       workshopReadStatus: workshopRead.status,
       workshopEventStatus: workshopEvent.status,
-      workshopPublishStatus: workshopPublish.status
+      workshopPublishStatus: workshopPublish.status,
+      actionListStatus: actionList.status,
+      actionExecuteStatus: actionExecute.status,
+      logicRunStatus: logicRun.status,
+      agentInvokeStatus: agentInvoke.status
     };
-  }, { graphId: onboarding.applied.body.pipeline_graph_id, workshopId: workshopBoundary.workshopId });
+  }, {
+    graphId: onboarding.applied.body.pipeline_graph_id,
+    workshopId: workshopBoundary.workshopId,
+    actionId: automationBoundary.actionId,
+    logicId: automationBoundary.logicId,
+    agentId: automationBoundary.agentId
+  });
   expect(viewerAccess.read).toBe(200);
   expect(viewerAccess.edit).toBe(403);
   expect(viewerAccess.importStatus).toBe(403);
@@ -524,5 +601,9 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerAccess.workshopReadStatus).toBe(200);
   expect(viewerAccess.workshopEventStatus).toBe(403);
   expect(viewerAccess.workshopPublishStatus).toBe(403);
+  expect(viewerAccess.actionListStatus).toBe(200);
+  expect(viewerAccess.actionExecuteStatus).toBe(403);
+  expect(viewerAccess.logicRunStatus).toBe(403);
+  expect(viewerAccess.agentInvokeStatus).toBe(403);
   expect(viewerAccess.detail.detail).toContain("Permission 'edit' is required");
 });
