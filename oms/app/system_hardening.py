@@ -30,6 +30,8 @@ from . import (
     imports_ops,
     ingestion_runtime,
     investigations,
+    modeling,
+    modeling_evaluation_ops,
     modelops,
     models,
     models_action,
@@ -144,12 +146,25 @@ CORE_TABLES = [
     "workshop_modules",
     "object_explorer_explorations",
     "model_monitors",
+    "model_monitor_runs",
+    "model_prediction_logs",
+    "modeling_objectives",
+    "model_submissions",
+    "model_deployments",
+    "mev_releases",
+    "mev_checks",
+    "mev_check_results",
+    "mev_eval_datasets",
+    "mev_eval_subsets",
+    "mev_experiments",
+    "mev_adapters",
+    "mev_deployment_configs",
     "ops_incidents",
     "investigation_workspaces",
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -172,6 +187,7 @@ MIGRATIONS = [
     {"version": 19, "name": "project_scoped_workshop_modules", "status": "applied"},
     {"version": 20, "name": "project_scoped_governed_automation", "status": "applied"},
     {"version": 21, "name": "project_scoped_ai_evaluations", "status": "applied"},
+    {"version": 22, "name": "project_scoped_modelops_lifecycle", "status": "applied"},
 ]
 
 
@@ -517,6 +533,26 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"])
             for row in db.query(object_explorer_ops.ObjectExplorerExploration).all()
         ],
+        "modeling_objectives": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "problem_type", "target_field", "feature_fields", "input_asset_id", "created_at", "updated_at"])
+            for row in db.query(modeling.ModelingObjective).all()
+        ],
+        "model_submissions": [
+            _row_dict(row, ["id", "project_id", "objective_id", "algorithm", "metrics", "released", "status", "trainer_type", "training_dataset_id", "target_column", "eval_metric", "quality_preset", "created_at"])
+            for row in db.query(modeling.ModelSubmission).all()
+        ],
+        "model_deployments": [
+            _row_dict(row, ["id", "project_id", "objective_id", "submission_id", "mode", "status", "created_at"])
+            for row in db.query(modeling.ModelDeployment).all()
+        ],
+        "mev_releases": [_row_dict(row, ["id", "project_id", "objective_id", "submission_id", "version", "environment", "notes", "created_at"]) for row in db.query(modeling_evaluation_ops.MevRelease).all()],
+        "mev_checks": [_row_dict(row, ["id", "project_id", "objective_id", "name", "check_type", "metric", "operator", "threshold", "created_at"]) for row in db.query(modeling_evaluation_ops.MevCheck).all()],
+        "mev_check_results": [_row_dict(row, ["id", "project_id", "submission_id", "check_id", "status", "reviewer", "comment", "decided_at"]) for row in db.query(modeling_evaluation_ops.MevCheckResult).all()],
+        "mev_eval_datasets": [_row_dict(row, ["id", "project_id", "objective_id", "asset_id", "display_name", "created_at"]) for row in db.query(modeling_evaluation_ops.MevEvalDataset).all()],
+        "mev_eval_subsets": [_row_dict(row, ["id", "project_id", "eval_dataset_id", "name", "filter_column", "filter_values", "created_at"]) for row in db.query(modeling_evaluation_ops.MevEvalSubset).all()],
+        "mev_experiments": [_row_dict(row, ["id", "project_id", "submission_id", "hyperparameters", "metrics", "artifacts", "created_at"]) for row in db.query(modeling_evaluation_ops.MevExperiment).all()],
+        "mev_adapters": [_row_dict(row, ["id", "project_id", "submission_id", "input_schema", "output_schema", "created_at"]) for row in db.query(modeling_evaluation_ops.MevAdapter).all()],
+        "mev_deployment_configs": [_row_dict(row, ["id", "project_id", "deployment_id", "release_id", "kind", "spark_profile", "replicas", "cpu", "gpu", "created_at"]) for row in db.query(modeling_evaluation_ops.MevDeploymentConfig).all()],
         "model_monitors": [
             modelops._monitor_dict(row)
             for row in db.query(modelops.ModelMonitor).all()
@@ -864,6 +900,17 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "pipeline_builder_graphs",
         "pipeline_builder_builds",
         "import_jobs",
+        "modeling_objectives",
+        "model_submissions",
+        "model_deployments",
+        "mev_releases",
+        "mev_checks",
+        "mev_check_results",
+        "mev_eval_datasets",
+        "mev_eval_subsets",
+        "mev_experiments",
+        "mev_adapters",
+        "mev_deployment_configs",
         "model_monitors",
         "model_monitor_runs",
         "model_prediction_logs",
@@ -1386,16 +1433,39 @@ def import_project(
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, object_explorer_ops.ObjectExplorerExploration, row, ["id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"]))
+    model_restore_specs = [
+        ("modeling_objectives", modeling.ModelingObjective, ["id", "project_id", "display_name", "description", "problem_type", "target_field", "feature_fields", "input_asset_id", "created_at", "updated_at"]),
+        ("model_submissions", modeling.ModelSubmission, ["id", "project_id", "objective_id", "algorithm", "metrics", "released", "status", "trainer_type", "training_dataset_id", "target_column", "eval_metric", "quality_preset", "created_at"]),
+        ("model_deployments", modeling.ModelDeployment, ["id", "project_id", "objective_id", "submission_id", "mode", "status", "created_at"]),
+        ("mev_releases", modeling_evaluation_ops.MevRelease, ["id", "project_id", "objective_id", "submission_id", "version", "environment", "notes", "created_at"]),
+        ("mev_checks", modeling_evaluation_ops.MevCheck, ["id", "project_id", "objective_id", "name", "check_type", "metric", "operator", "threshold", "created_at"]),
+        ("mev_check_results", modeling_evaluation_ops.MevCheckResult, ["id", "project_id", "submission_id", "check_id", "status", "reviewer", "comment", "decided_at"]),
+        ("mev_eval_datasets", modeling_evaluation_ops.MevEvalDataset, ["id", "project_id", "objective_id", "asset_id", "display_name", "created_at"]),
+        ("mev_eval_subsets", modeling_evaluation_ops.MevEvalSubset, ["id", "project_id", "eval_dataset_id", "name", "filter_column", "filter_values", "created_at"]),
+        ("mev_experiments", modeling_evaluation_ops.MevExperiment, ["id", "project_id", "submission_id", "hyperparameters", "metrics", "artifacts", "created_at"]),
+        ("mev_adapters", modeling_evaluation_ops.MevAdapter, ["id", "project_id", "submission_id", "input_schema", "output_schema", "created_at"]),
+        ("mev_deployment_configs", modeling_evaluation_ops.MevDeploymentConfig, ["id", "project_id", "deployment_id", "release_id", "kind", "spark_profile", "replicas", "cpu", "gpu", "created_at"]),
+    ]
+    for snapshot_key, model_class, fields in model_restore_specs:
+        for row in snapshot.get(snapshot_key) or []:
+            row.setdefault("project_id", "default")
+            row.setdefault("created_at", now)
+            if "updated_at" in fields:
+                row.setdefault("updated_at", now)
+            track(_upsert_model(db, model_class, row, fields))
     for row in snapshot.get("model_monitors") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, modelops.ModelMonitor, row, ["id", "display_name", "description", "objective_id", "deployment_id", "baseline_asset_id", "feature_fields", "prediction_field", "target_field", "thresholds", "enabled", "created_at", "updated_at"]))
+        track(_upsert_model(db, modelops.ModelMonitor, row, ["id", "project_id", "display_name", "description", "objective_id", "deployment_id", "baseline_asset_id", "feature_fields", "prediction_field", "target_field", "thresholds", "enabled", "created_at", "updated_at"]))
     for row in snapshot.get("model_monitor_runs") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
-        track(_upsert_model(db, modelops.ModelMonitorRun, row, ["id", "monitor_id", "objective_id", "deployment_id", "baseline_asset_id", "current_asset_id", "baseline_profile", "current_profile", "drift_metrics", "quality_metrics", "alerts", "status", "created_at"]))
+        track(_upsert_model(db, modelops.ModelMonitorRun, row, ["id", "project_id", "monitor_id", "objective_id", "deployment_id", "baseline_asset_id", "current_asset_id", "baseline_profile", "current_profile", "drift_metrics", "quality_metrics", "alerts", "status", "created_at"]))
     for row in snapshot.get("model_prediction_logs") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
-        track(_upsert_model(db, modelops.ModelPredictionLog, row, ["id", "deployment_id", "objective_id", "submission_id", "request_shape", "input_count", "output_count", "prediction_summary", "created_at"]))
+        track(_upsert_model(db, modelops.ModelPredictionLog, row, ["id", "project_id", "deployment_id", "objective_id", "submission_id", "request_shape", "input_count", "output_count", "prediction_summary", "created_at"]))
     for row in snapshot.get("connection_sources") or []:
         row.setdefault("created_at", now)
         row.setdefault("project_id", "default")
