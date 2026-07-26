@@ -186,6 +186,49 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(crossReplicaReplay.status).toBe(200);
   expect(crossReplicaReplay.body.idempotent_replay).toBe(true);
   expect(crossReplicaReplay.body.lock_version).toBe(2);
+
+  const durableJobRequest = {
+    project_id: "default",
+    job_type: "report.generate",
+    subject_type: "artifact",
+    subject_id: sharedArtifact.id,
+    payload: { format: "markdown", artifact_id: sharedArtifact.id },
+    idempotency_key: `cross-replica-job-${sharedArtifact.id}`
+  };
+  const [primaryJob, peerJob] = await Promise.all([
+    page.evaluate(async (body) => {
+      const response = await fetch("/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      return { status: response.status, body: await response.json() };
+    }, durableJobRequest),
+    peer.evaluate(async (body) => {
+      const response = await fetch("/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      return { status: response.status, body: await response.json() };
+    }, durableJobRequest)
+  ]);
+  expect(primaryJob.status).toBe(201);
+  expect(peerJob.status).toBe(201);
+  expect(primaryJob.body.id).toBe(peerJob.body.id);
+  expect([primaryJob.body.idempotent_replay, peerJob.body.idempotent_replay].sort()).toEqual([false, true]);
+  expect(primaryJob.body.idempotency_receipt_id).toBe(peerJob.body.idempotency_receipt_id);
+
+  const changedJobRequest = await page.evaluate(async (body) => {
+    const response = await fetch("/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, payload: { ...body.payload, format: "json" } })
+    });
+    return { status: response.status, body: await response.json() };
+  }, durableJobRequest);
+  expect(changedJobRequest.status).toBe(409);
+  expect(changedJobRequest.body.detail.message).toContain("different job request");
   await peer.close();
 
   const workflow = await page.evaluate(async () => {

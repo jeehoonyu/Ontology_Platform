@@ -150,6 +150,22 @@ class PlatformJob(Base):
     completed_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
+class PlatformJobIdempotencyReceipt(Base):
+    __tablename__ = "platform_job_idempotency_receipts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    scope_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    job_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, index=True)
+    actor: Mapped[str] = mapped_column(String, index=True)
+    job_type: Mapped[str] = mapped_column(String, index=True)
+    subject_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    subject_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String)
+    request_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
 class PlatformJobEvent(Base):
     __tablename__ = "platform_job_events"
 
@@ -1731,6 +1747,53 @@ def _set_execution(row: PlatformJob, **changes: Any) -> None:
     row.payload = payload
 
 
+def _job_idempotency_scope(body: JobCreate, actor: str) -> str:
+    identity = {
+        "project_id": body.project_id,
+        "actor": actor,
+        "job_type": body.job_type,
+        "subject_type": body.subject_type,
+        "subject_id": body.subject_id,
+        "idempotency_key": body.idempotency_key,
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _job_request_hash(body: JobCreate) -> str:
+    request = body.model_dump(exclude={"idempotency_key"})
+    encoded = json.dumps(request, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _job_replay(
+    db: Session,
+    scope_hash: str,
+    request_hash: str,
+) -> Optional[Dict[str, Any]]:
+    receipt = db.query(PlatformJobIdempotencyReceipt).filter(
+        PlatformJobIdempotencyReceipt.scope_hash == scope_hash,
+    ).first()
+    if not receipt:
+        return None
+    if receipt.request_hash and receipt.request_hash != request_hash:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Idempotency key was already used for a different job request",
+                "job_id": receipt.job_id,
+                "receipt_id": receipt.id,
+            },
+        )
+    row = db.get(PlatformJob, receipt.job_id)
+    if not row:
+        raise HTTPException(status_code=409, detail="Idempotency receipt references a missing job")
+    result = _job_dict(row, db)
+    result["idempotent_replay"] = True
+    result["idempotency_receipt_id"] = receipt.id
+    return result
+
+
 def _lease_for_job(db: Session, job_id: str) -> Optional[PlatformJobLease]:
     return db.query(PlatformJobLease).filter(PlatformJobLease.job_id == job_id).first()
 
@@ -1787,6 +1850,12 @@ def _reap_stale_jobs(db: Session) -> int:
 def create_job(body: JobCreate, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     tenancy.assert_project_permission(db, principal, body.project_id, "execute")
     from . import runtime_observability
+    scope_hash = _job_idempotency_scope(body, principal.id) if body.idempotency_key else None
+    request_hash = _job_request_hash(body) if body.idempotency_key else None
+    if scope_hash and request_hash:
+        replay = _job_replay(db, scope_hash, request_hash)
+        if replay:
+            return replay
     estimates = {
         "compute_seconds": body.estimated_compute_seconds,
         "estimated_cost_usd": body.estimated_cost_usd,
@@ -1794,17 +1863,6 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
         "record_units": body.estimated_records,
     }
     now = _now()
-    if body.idempotency_key:
-        existing = db.query(PlatformJob).filter(
-            PlatformJob.project_id == body.project_id,
-            PlatformJob.actor == principal.id,
-            PlatformJob.job_type == body.job_type,
-            PlatformJob.subject_type == body.subject_type,
-            PlatformJob.subject_id == body.subject_id,
-        ).order_by(PlatformJob.created_at.desc()).limit(250).all()
-        for candidate in existing:
-            if _execution(candidate).get("idempotency_key") == body.idempotency_key:
-                return _job_dict(candidate, db)
     admission = runtime_observability.check_job_admission(db, body.project_id, estimates)
     payload = dict(body.payload)
     payload["__execution"] = {
@@ -1817,11 +1875,33 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
     row = PlatformJob(id=_id("job"), project_id=body.project_id, job_type=body.job_type, status="QUEUED", actor=principal.id, subject_type=body.subject_type, subject_id=body.subject_id, payload=payload, result={}, attempt=1, progress=0, created_at=now, updated_at=now)
     db.add(row)
     db.flush()
+    receipt = None
+    if scope_hash and request_hash:
+        receipt = PlatformJobIdempotencyReceipt(
+            id=_id("jobreceipt"), scope_hash=scope_hash, job_id=row.id,
+            project_id=row.project_id, actor=row.actor, job_type=row.job_type,
+            subject_type=row.subject_type, subject_id=row.subject_id,
+            idempotency_key=str(body.idempotency_key), request_hash=request_hash,
+            created_at=now,
+        )
+        db.add(receipt)
     runtime_observability.record_job_queued(db, row, estimates, admission)
     _job_event(db, row, "job.queued", {"priority": body.priority, "available_at": body.available_at or now})
     _audit(db, principal.id, "job.queued", "platform_job", row.id, {"job_type": row.job_type, "priority": body.priority})
-    db.commit()
-    return _job_dict(row, db)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if scope_hash and request_hash:
+            replay = _job_replay(db, scope_hash, request_hash)
+            if replay:
+                return replay
+        raise
+    result = _job_dict(row, db)
+    result["idempotent_replay"] = False
+    if receipt:
+        result["idempotency_receipt_id"] = receipt.id
+    return result
 
 
 def _job_dict(row: PlatformJob, db: Optional[Session] = None) -> Dict[str, Any]:

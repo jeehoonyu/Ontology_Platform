@@ -95,6 +95,7 @@ CORE_TABLES = [
     "platform_jobs",
     "platform_job_events",
     "platform_job_leases",
+    "platform_job_idempotency_receipts",
     "platform_artifact_collaborators",
     "platform_artifact_collaboration_events",
     "platform_artifact_command_receipts",
@@ -138,7 +139,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -155,6 +156,7 @@ MIGRATIONS = [
     {"version": 13, "name": "hashed_service_account_tokens", "status": "applied"},
     {"version": 14, "name": "integrity_protected_transactional_recovery", "status": "applied"},
     {"version": 15, "name": "durable_artifact_command_receipts", "status": "applied"},
+    {"version": 16, "name": "durable_job_idempotency_receipts", "status": "applied"},
 ]
 
 
@@ -548,6 +550,10 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "job_id", "event_type", "status", "payload", "created_at"])
             for row in db.query(platform_runtime.PlatformJobEvent).all()
         ],
+        "platform_job_idempotency_receipts": [
+            _row_dict(row, ["id", "scope_hash", "job_id", "project_id", "actor", "job_type", "subject_type", "subject_id", "idempotency_key", "request_hash", "created_at"])
+            for row in db.query(platform_runtime.PlatformJobIdempotencyReceipt).all()
+        ],
         "platform_artifact_collaboration_events": [
             _row_dict(row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"])
             for row in db.query(platform_runtime.ArtifactCollaborationEvent).all()
@@ -686,6 +692,45 @@ def _upsert_artifact_command_receipt(db: Session, data: Dict[str, Any]) -> str:
     return _upsert_model(db, platform_runtime.ArtifactCommandReceipt, data, fields)
 
 
+def _upsert_job_idempotency_receipt(db: Session, data: Dict[str, Any]) -> str:
+    required = ("id", "scope_hash", "job_id", "project_id", "actor", "job_type", "idempotency_key")
+    if any(not data.get(field) for field in required):
+        return "skipped"
+    existing = db.query(platform_runtime.PlatformJobIdempotencyReceipt).filter(
+        platform_runtime.PlatformJobIdempotencyReceipt.scope_hash == data["scope_hash"],
+    ).first()
+    incoming_hash = data.get("request_hash")
+    if existing:
+        if existing.job_id != data["job_id"]:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Snapshot contains job idempotency evidence that conflicts with the local job",
+                    "scope_hash": data["scope_hash"],
+                    "local_job_id": existing.job_id,
+                    "incoming_job_id": data["job_id"],
+                },
+            )
+        if existing.request_hash and incoming_hash and existing.request_hash != incoming_hash:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Snapshot contains a job receipt with a contradictory request hash",
+                    "scope_hash": data["scope_hash"],
+                    "job_id": existing.job_id,
+                },
+            )
+        if not existing.request_hash and incoming_hash:
+            existing.request_hash = incoming_hash
+            return "updated"
+        return "skipped"
+    fields = [
+        "id", "scope_hash", "job_id", "project_id", "actor", "job_type", "subject_type",
+        "subject_id", "idempotency_key", "request_hash", "created_at",
+    ]
+    return _upsert_model(db, platform_runtime.PlatformJobIdempotencyReceipt, data, fields)
+
+
 def _docs_matrix_summary() -> Dict[str, Any]:
     root = Path(__file__).resolve().parents[2]
     matrix_path = root / "foundry-docs" / "VALIDATION_MATRIX.md"
@@ -761,6 +806,7 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "platform_artifact_revisions",
         "platform_jobs",
         "platform_job_events",
+        "platform_job_idempotency_receipts",
         "platform_artifact_collaboration_events",
         "platform_artifact_command_receipts",
         "organizations",
@@ -1346,6 +1392,10 @@ def import_project(
     for row in snapshot.get("platform_job_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, platform_runtime.PlatformJobEvent, row, ["id", "job_id", "event_type", "status", "payload", "created_at"]))
+    for row in snapshot.get("platform_job_idempotency_receipts") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_job_idempotency_receipt(db, row))
     for row in snapshot.get("platform_artifact_collaboration_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, platform_runtime.ArtifactCollaborationEvent, row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"]))
