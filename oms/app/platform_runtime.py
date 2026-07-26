@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 import uuid
@@ -105,6 +106,26 @@ class ArtifactCollaborationEvent(Base):
     lock_version: Mapped[int] = mapped_column(Integer)
     revision: Mapped[int] = mapped_column(Integer)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
+class ArtifactCommandReceipt(Base):
+    __tablename__ = "platform_artifact_command_receipts"
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "command_scope", "idempotency_key", name="uq_artifact_command_receipt"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    artifact_id: Mapped[str] = mapped_column(String, index=True)
+    project_id: Mapped[str] = mapped_column(String, index=True)
+    command_scope: Mapped[str] = mapped_column(String, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String)
+    request_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    lock_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    participant_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    command_ids: Mapped[list] = mapped_column(JSON, default=list)
+    rebased_from_lock_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer, index=True)
 
 
@@ -1029,6 +1050,84 @@ def copy_json(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
+def _command_request_hash(commands: List[BuilderCommand]) -> str:
+    canonical = [
+        {"command": command.command, "payload": command.payload}
+        for command in commands
+    ]
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _command_receipt_dict(row: ArtifactCommandReceipt) -> Dict[str, Any]:
+    return {
+        "id": row.id,
+        "artifact_id": row.artifact_id,
+        "project_id": row.project_id,
+        "command_scope": row.command_scope,
+        "idempotency_key": row.idempotency_key,
+        "request_hash": row.request_hash,
+        "revision": row.revision,
+        "lock_version": row.lock_version,
+        "participant_id": row.participant_id,
+        "command_ids": row.command_ids or [],
+        "rebased_from_lock_version": row.rebased_from_lock_version,
+        "created_at": row.created_at,
+    }
+
+
+def _find_command_receipt(
+    db: Session,
+    artifact: PlatformArtifact,
+    command_scope: str,
+    idempotency_key: str,
+    request_hash: str,
+) -> Optional[ArtifactCommandReceipt]:
+    row = db.query(ArtifactCommandReceipt).filter(
+        ArtifactCommandReceipt.artifact_id == artifact.id,
+        ArtifactCommandReceipt.command_scope == command_scope,
+        ArtifactCommandReceipt.idempotency_key == idempotency_key,
+    ).first()
+    if row is None:
+        legacy_key = "collaboration_receipts" if command_scope == "collaboration" else "command_receipts"
+        legacy = next(
+            (
+                receipt
+                for receipt in ((artifact.metadata_ or {}).get(legacy_key) or [])
+                if receipt.get("idempotency_key") == idempotency_key
+            ),
+            None,
+        )
+        if legacy:
+            row = ArtifactCommandReceipt(
+                id=_id("receipt"),
+                artifact_id=artifact.id,
+                project_id=artifact.project_id,
+                command_scope=command_scope,
+                idempotency_key=idempotency_key,
+                request_hash=None,
+                revision=int(legacy.get("revision") or artifact.current_revision),
+                lock_version=legacy.get("lock_version"),
+                participant_id=legacy.get("participant_id"),
+                command_ids=list(legacy.get("command_ids") or []),
+                rebased_from_lock_version=legacy.get("rebased_from_lock_version"),
+                created_at=int(legacy.get("created_at") or artifact.updated_at),
+            )
+            db.add(row)
+            db.flush()
+    if row is not None and row.request_hash and row.request_hash != request_hash:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Idempotency key was already used for a different command batch",
+                "idempotency_key": idempotency_key,
+                "command_scope": command_scope,
+                "receipt_id": row.id,
+            },
+        )
+    return row
+
+
 @router.get("/artifacts")
 def list_artifacts(project_id: Optional[str] = None, artifact_type: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     query = db.query(PlatformArtifact)
@@ -1082,13 +1181,16 @@ def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal 
 
 @router.post("/artifacts/{artifact_id}/commands")
 def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
-    row = _artifact_for(db, artifact_id, principal, "edit")
-    metadata = copy_json(row.metadata_ or {})
-    receipts = list(metadata.get("command_receipts") or [])
-    prior = next((receipt for receipt in receipts if receipt.get("idempotency_key") == body.idempotency_key), None)
+    _artifact_for(db, artifact_id, principal, "edit")
+    row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
+    request_hash = _command_request_hash(body.commands)
+    prior = _find_command_receipt(db, row, "builder", body.idempotency_key, request_hash)
     if prior:
+        db.commit()
         result = _artifact_dict(db, row, principal)
-        result["command_receipt"] = prior
+        result["command_receipt"] = _command_receipt_dict(prior)
         result["idempotent_replay"] = True
         return result
     if body.expected_lock_version != row.lock_version:
@@ -1101,14 +1203,21 @@ def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, princip
     row.lock_version += 1
     row.updated_at = _now()
     row.status = "DRAFT"
-    receipt = {
-        "idempotency_key": body.idempotency_key,
-        "revision": row.current_revision,
-        "command_ids": [item.command_id for item in body.commands],
-        "created_at": row.updated_at,
-    }
-    metadata["command_receipts"] = (receipts + [receipt])[-50:]
-    row.metadata_ = metadata
+    receipt = ArtifactCommandReceipt(
+        id=_id("receipt"),
+        artifact_id=row.id,
+        project_id=row.project_id,
+        command_scope="builder",
+        idempotency_key=body.idempotency_key,
+        request_hash=request_hash,
+        revision=row.current_revision,
+        lock_version=row.lock_version,
+        participant_id=None,
+        command_ids=[item.command_id for item in body.commands],
+        rebased_from_lock_version=None,
+        created_at=row.updated_at,
+    )
+    db.add(receipt)
     db.add(ArtifactRevision(
         id=_id("revision"), artifact_id=row.id, revision=row.current_revision, state=state,
         layout=layout, validation=validation, author=principal.id, message=body.message,
@@ -1127,7 +1236,7 @@ def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, princip
     })
     db.commit()
     result = _artifact_dict(db, row, principal)
-    result["command_receipt"] = receipt
+    result["command_receipt"] = _command_receipt_dict(receipt)
     result["idempotent_replay"] = False
     return result
 
@@ -1436,12 +1545,12 @@ def apply_collaborative_commands(
     row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
     if not row:
         raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
-    metadata = copy_json(row.metadata_ or {})
-    receipts = list(metadata.get("collaboration_receipts") or [])
-    prior = next((receipt for receipt in receipts if receipt.get("idempotency_key") == body.idempotency_key), None)
+    request_hash = _command_request_hash(body.commands)
+    prior = _find_command_receipt(db, row, "collaboration", body.idempotency_key, request_hash)
     if prior:
+        db.commit()
         result = _artifact_dict(db, row, principal)
-        result["collaboration_receipt"] = prior
+        result["collaboration_receipt"] = _command_receipt_dict(prior)
         result["idempotent_replay"] = True
         return result
     if body.expected_lock_version > row.lock_version:
@@ -1486,17 +1595,21 @@ def apply_collaborative_commands(
     row.lock_version += 1
     row.updated_at = _now()
     row.status = "DRAFT"
-    receipt = {
-        "idempotency_key": body.idempotency_key,
-        "revision": row.current_revision,
-        "lock_version": row.lock_version,
-        "participant_id": participant.id,
-        "command_ids": [command.command_id for command in body.commands],
-        "rebased_from_lock_version": rebased_from,
-        "created_at": row.updated_at,
-    }
-    metadata["collaboration_receipts"] = (receipts + [receipt])[-100:]
-    row.metadata_ = metadata
+    receipt = ArtifactCommandReceipt(
+        id=_id("receipt"),
+        artifact_id=row.id,
+        project_id=row.project_id,
+        command_scope="collaboration",
+        idempotency_key=body.idempotency_key,
+        request_hash=request_hash,
+        revision=row.current_revision,
+        lock_version=row.lock_version,
+        participant_id=participant.id,
+        command_ids=[command.command_id for command in body.commands],
+        rebased_from_lock_version=rebased_from,
+        created_at=row.updated_at,
+    )
+    db.add(receipt)
     participant.heartbeat_at = row.updated_at
     participant.expires_at = max(participant.expires_at, row.updated_at + 60)
     db.add(ArtifactRevision(
@@ -1533,7 +1646,7 @@ def apply_collaborative_commands(
     )
     db.commit()
     result = _artifact_dict(db, row, principal)
-    result["collaboration_receipt"] = receipt
+    result["collaboration_receipt"] = _command_receipt_dict(receipt)
     result["idempotent_replay"] = False
     return result
 

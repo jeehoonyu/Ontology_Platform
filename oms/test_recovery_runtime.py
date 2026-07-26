@@ -11,7 +11,7 @@ os.environ["APP_ENV"] = "test"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import connectivity, models, system_hardening, webhooks_ops  # noqa: E402
+from app import connectivity, models, platform_runtime, system_hardening, webhooks_ops  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -42,6 +42,22 @@ with SessionLocal() as db:
     ))
     db.commit()
 
+ok(client.post("/artifacts", json={
+    "id": "recovery-builder",
+    "artifact_type": "pipeline",
+    "display_name": "Recovery builder",
+    "state": {"nodes": [], "edges": []},
+}), "create recovery artifact", 201)
+ok(client.post("/artifacts/recovery-builder/commands", json={
+    "expected_lock_version": 1,
+    "idempotency_key": "recovery-builder-command-v1",
+    "commands": [{
+        "command_id": "add-source",
+        "command": "add_node",
+        "payload": {"node": {"id": "source", "position": {"x": 40, "y": 80}, "data": {"label": "Source", "nodeType": "dataset_input"}}},
+    }],
+}), "create durable command receipt")
+
 snapshot = ok(client.get("/project/export"), "export portable snapshot")
 assert snapshot["snapshot_version"] == 2
 assert snapshot["snapshot_format"] == "ontology-platform-portable"
@@ -54,7 +70,12 @@ assert any(row["resource_id"] == "recovery-listener" for row in snapshot["rebind
 source_snapshot = next(row for row in snapshot["connection_sources"] if row["id"] == "recovery-source")
 assert source_snapshot["config"]["password"] == "[REDACTED]" and source_snapshot["config"]["nested"]["token"] == "[REDACTED]"
 assert any(row["resource_id"] == "recovery-source" for row in snapshot["rebind_required"])
-passed += 8
+assert len(snapshot["platform_artifact_command_receipts"]) == 1
+assert snapshot["platform_artifact_command_receipts"][0]["request_hash"]
+with SessionLocal() as db:
+    db.query(platform_runtime.ArtifactCommandReceipt).delete()
+    db.commit()
+passed += 10
 
 validation = ok(client.post("/project/import/validate", json={"snapshot": snapshot}), "validate clean snapshot")
 assert validation["status"] == "VALID" and validation["resource_count"] > 0
@@ -99,6 +120,27 @@ assert merged["status"] == "IMPORTED"
 with SessionLocal() as db:
     listener = db.get(webhooks_ops.WhListener, "recovery-listener")
     assert listener and listener.auth_secret == secret
+    receipt = db.query(platform_runtime.ArtifactCommandReceipt).filter(
+        platform_runtime.ArtifactCommandReceipt.artifact_id == "recovery-builder"
+    ).one()
+    assert receipt.idempotency_key == "recovery-builder-command-v1" and receipt.request_hash
+    passed += 1
+
+same_logical_receipt = copy.deepcopy(snapshot)
+same_logical_receipt["platform_artifact_command_receipts"][0]["id"] = "alternate-generated-receipt-id"
+same_logical_receipt = system_hardening._finalize_snapshot(same_logical_receipt)
+reconciled = ok(client.post("/project/import", json={"snapshot": same_logical_receipt}), "reconcile receipt by natural key")
+assert reconciled["counts"]["skipped"] >= 1
+with SessionLocal() as db:
+    assert db.query(platform_runtime.ArtifactCommandReceipt).count() == 1
+    passed += 1
+
+conflicting_receipt = copy.deepcopy(same_logical_receipt)
+conflicting_receipt["platform_artifact_command_receipts"][0]["request_hash"] = "f" * 64
+conflicting_receipt = system_hardening._finalize_snapshot(conflicting_receipt)
+ok(client.post("/project/import", json={"snapshot": conflicting_receipt}), "reject contradictory receipt evidence", 409)
+with SessionLocal() as db:
+    assert db.query(platform_runtime.ArtifactCommandReceipt).one().request_hash != "f" * 64
     passed += 1
 
 # Portable recovery is an installation-level operation until every legacy resource has project ownership.

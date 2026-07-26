@@ -97,6 +97,7 @@ CORE_TABLES = [
     "platform_job_leases",
     "platform_artifact_collaborators",
     "platform_artifact_collaboration_events",
+    "platform_artifact_command_receipts",
     "platform_organizations",
     "platform_projects",
     "platform_project_memberships",
@@ -137,7 +138,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -153,6 +154,7 @@ MIGRATIONS = [
     {"version": 12, "name": "encrypted_live_connector_adapter_runtime", "status": "applied"},
     {"version": 13, "name": "hashed_service_account_tokens", "status": "applied"},
     {"version": 14, "name": "integrity_protected_transactional_recovery", "status": "applied"},
+    {"version": 15, "name": "durable_artifact_command_receipts", "status": "applied"},
 ]
 
 
@@ -550,6 +552,10 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"])
             for row in db.query(platform_runtime.ArtifactCollaborationEvent).all()
         ],
+        "platform_artifact_command_receipts": [
+            _row_dict(row, ["id", "artifact_id", "project_id", "command_scope", "idempotency_key", "request_hash", "revision", "lock_version", "participant_id", "command_ids", "rebased_from_lock_version", "created_at"])
+            for row in db.query(platform_runtime.ArtifactCommandReceipt).all()
+        ],
         "organizations": [
             _row_dict(row, ["id", "display_name", "status", "created_at", "updated_at"])
             for row in db.query(tenancy.PlatformOrganization).all()
@@ -648,6 +654,38 @@ def _upsert_model_by_key(db: Session, model_cls: Any, data: Dict[str, Any], key_
     return "created"
 
 
+def _upsert_artifact_command_receipt(db: Session, data: Dict[str, Any]) -> str:
+    required = ("artifact_id", "command_scope", "idempotency_key")
+    if not data.get("id") or any(not data.get(field) for field in required):
+        return "skipped"
+    existing = db.query(platform_runtime.ArtifactCommandReceipt).filter(
+        platform_runtime.ArtifactCommandReceipt.artifact_id == data["artifact_id"],
+        platform_runtime.ArtifactCommandReceipt.command_scope == data["command_scope"],
+        platform_runtime.ArtifactCommandReceipt.idempotency_key == data["idempotency_key"],
+    ).first()
+    incoming_hash = data.get("request_hash")
+    if existing:
+        if existing.request_hash and incoming_hash and existing.request_hash != incoming_hash:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Snapshot contains a command receipt that conflicts with local idempotency evidence",
+                    "artifact_id": data["artifact_id"],
+                    "command_scope": data["command_scope"],
+                    "idempotency_key": data["idempotency_key"],
+                },
+            )
+        if not existing.request_hash and incoming_hash:
+            existing.request_hash = incoming_hash
+            return "updated"
+        return "skipped"
+    fields = [
+        "id", "artifact_id", "project_id", "command_scope", "idempotency_key", "request_hash",
+        "revision", "lock_version", "participant_id", "command_ids", "rebased_from_lock_version", "created_at",
+    ]
+    return _upsert_model(db, platform_runtime.ArtifactCommandReceipt, data, fields)
+
+
 def _docs_matrix_summary() -> Dict[str, Any]:
     root = Path(__file__).resolve().parents[2]
     matrix_path = root / "foundry-docs" / "VALIDATION_MATRIX.md"
@@ -724,6 +762,7 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "platform_jobs",
         "platform_job_events",
         "platform_artifact_collaboration_events",
+        "platform_artifact_command_receipts",
         "organizations",
         "projects",
         "project_memberships",
@@ -1310,6 +1349,10 @@ def import_project(
     for row in snapshot.get("platform_artifact_collaboration_events") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, platform_runtime.ArtifactCollaborationEvent, row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"]))
+    for row in snapshot.get("platform_artifact_command_receipts") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_artifact_command_receipt(db, row))
 
     _audit(db, principal.id, "project.snapshot.imported", "project", "local", counts)
     ops_control.record_ops_event(

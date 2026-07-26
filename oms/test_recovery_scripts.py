@@ -8,11 +8,15 @@ import uuid
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
+rehearsal_source = (root / "scripts" / "rehearse-recovery.ps1").read_text(encoding="utf-8")
 work = Path(tempfile.mkdtemp(prefix="ontology-recovery-scripts-"))
 output_name = f".recovery-test-{uuid.uuid4().hex}"
 output_dir = root / output_name
 log_path = work / "docker-calls.jsonl"
 passed = 0
+
+assert "varchar(32)" in rehearsal_source and "0012_artifact_receipts" in rehearsal_source
+passed += 1
 
 fake = work / "fake_docker.py"
 fake.write_text(

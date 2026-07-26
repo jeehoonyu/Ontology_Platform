@@ -7,7 +7,7 @@ The platform has two recovery mechanisms with different purposes.
 Use **Control Panel -> Recovery** or `GET /project/export` to transfer governed platform resources between compatible installations. Version 2 snapshots include:
 
 - a deterministic SHA-256 checksum and resource-count manifest;
-- ontology, data, artifacts, revisions, collaboration events, jobs, ingestion evidence, monitors, incidents, investigations, packages, workers, and queue policies;
+- ontology, data, artifacts, revisions, durable command receipts, collaboration events, jobs, ingestion evidence, monitors, incidents, investigations, packages, workers, and queue policies;
 - explicit credential-rebind records.
 
 Portable snapshots never contain connector credentials, service tokens, login sessions, or webhook listener secrets. Source configuration keys that can contain credentials are redacted. Only installation administrators can export, validate, or import a snapshot because several legacy resources do not yet carry project ownership.
