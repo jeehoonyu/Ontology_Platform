@@ -40,6 +40,7 @@ function Wait-ForUrl([string]$Url, [int]$Attempts = 80) {
 
 Wait-ForUrl "http://127.0.0.1:18080/realms/ontology/.well-known/openid-configuration"
 Wait-ForUrl "http://127.0.0.1:18000/health/ready"
+Wait-ForUrl "http://127.0.0.1:18001/health/ready"
 
 $kcadm = "/opt/keycloak/bin/kcadm.sh"
 & docker @compose exec -T keycloak $kcadm config credentials --server http://localhost:8080 --realm master --user rehearsal-admin --password $KeycloakAdminPassword | Out-Null
@@ -80,5 +81,6 @@ Ensure-RealmUser "pilot-viewer" $PilotViewerPassword "viewer"
 
 Write-Output "Production rehearsal is ready."
 Write-Output "Application: http://localhost:18000/workspace/command-center"
+Write-Output "Peer API: http://localhost:18001"
 Write-Output "Identity provider: http://idp.localhost:18080"
 Write-Output "Users: pilot-admin (administrator), pilot-viewer (viewer)"

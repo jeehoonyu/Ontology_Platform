@@ -120,6 +120,18 @@ assert "presence.joined" in event_types and "artifact.commands" in event_types a
 sse = client.get("/artifacts/collaborative_pipeline/collaboration/stream?after=0&once=true")
 assert sse.status_code == 200 and "event: artifact.commands" in sse.text and "event: artifact.conflict" in sse.text, sse.text
 passed += 1
+latest_event_id = events["next_cursor"]
+resumed = client.get(
+    "/artifacts/collaborative_pipeline/collaboration/stream?after=0&once=true",
+    headers={"Last-Event-ID": str(latest_event_id)},
+)
+assert resumed.status_code == 200 and resumed.text == "", resumed.text
+invalid_resume = client.get(
+    "/artifacts/collaborative_pipeline/collaboration/stream?once=true",
+    headers={"Last-Event-ID": "not-an-event-id"},
+)
+assert invalid_resume.status_code == 400, invalid_resume.text
+passed += 1
 
 ok(client.post("/artifacts/collaborative_pipeline/collaboration/leave", json={
     "participant_token": token_a,

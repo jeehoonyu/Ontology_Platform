@@ -68,5 +68,37 @@ services:
       retries: 30
       start_period: 20s
 
+  oms-api-peer:
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    environment:
+      APP_ENV: production
+      AUTH_MODE: oidc
+      DATABASE_URL: postgresql+psycopg2://ontology:${REHEARSAL_POSTGRES_PASSWORD}@postgres:5432/ontology
+      OIDC_ISSUER: http://idp.localhost:18080/realms/ontology
+      OIDC_CLIENT_ID: ontology-platform
+      OIDC_REDIRECT_URI: http://localhost:18000/auth/callback
+      SESSION_TTL_SECONDS: "3600"
+      FORWARDED_ALLOW_IPS: "*"
+      CONNECTOR_SECRET_KEY: ${REHEARSAL_CONNECTOR_SECRET_KEY:?set REHEARSAL_CONNECTOR_SECRET_KEY}
+      CONNECTOR_SECRET_KEY_ID: rehearsal-v1
+      CONNECTOR_ALLOW_PRIVATE_NETWORKS: "false"
+    extra_hosts:
+      - "idp.localhost:host-gateway"
+    ports:
+      - "127.0.0.1:18001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
 volumes:
   rehearsal_pgdata:

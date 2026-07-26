@@ -8,7 +8,7 @@ The artifact runtime supports shared editing sessions for Pipeline, Ontology, Wo
 2. Keep the returned `participant_token` private. It is scoped to the authenticated principal, browser client, and artifact.
 3. Send selection and cursor state to `POST /artifacts/{id}/collaboration/heartbeat`.
 4. Read active participants from `GET /artifacts/{id}/collaboration`.
-5. Subscribe to `GET /artifacts/{id}/collaboration/stream` for ordered server-sent events.
+5. Subscribe to `GET /artifacts/{id}/collaboration/stream` for ordered server-sent events. Reconnects resume from the greater of the `after` query cursor and the standard `Last-Event-ID` header, so a native `EventSource` does not replay already-observed events.
 6. Leave explicitly or allow the session to expire. Expired participants are pruned and recorded as presence events.
 
 The React builders use a 90-second session and heartbeat every 20 seconds. When live collaboration is unavailable, the editor falls back to the existing exclusive editing lease and clearly labels that state.
@@ -43,11 +43,13 @@ Presence events do not create artifact revisions. Publish, restore, and whole-ar
 
 Viewing room state and events requires `view`. Joining, heartbeats, leaving, and command submission require `edit`. The participant token is additionally bound to the authenticated principal. OIDC/RBAC therefore remains the authorization boundary; collaboration tokens do not grant permissions.
 
-Migration `0005_artifact_collaboration` creates the participant and event tables. Both are included in startup schema health checks. Production deployments should preserve event rows with artifact revision and audit history during backup and restore.
+Migration `0005_artifact_collaboration` creates the participant and event tables. Both are included in startup schema health checks. Production deployments should preserve event rows with artifact revision and audit history during backup and restore. PostgreSQL API replicas serialize Alembic startup with a transaction-scoped advisory lock so simultaneous container starts cannot race schema DDL.
 
 ## Current Scope
 
 - Ordered events use server-sent events, which works across API replicas when all replicas share the same Postgres database.
+- The production acceptance rehearsal starts two API replicas, submits a builder command to the peer, and requires the primary replica's SSE stream and artifact read to observe the same committed revision.
 - Presence is ephemeral and expires automatically.
 - Command application is atomic and uses row locking on databases that support it.
 - The current conflict model is target-based, not a free-form CRDT. This is intentional: governed visual artifacts retain deterministic revisions and explicit recovery semantics.
+- SQLite remains suitable for single-process development. Shared PostgreSQL is required for multi-replica collaboration and production rehearsal.

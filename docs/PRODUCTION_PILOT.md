@@ -23,7 +23,7 @@ docker compose --env-file .env.production -f docker-compose.yml -f docker-compos
 docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml ps
 ```
 
-Verify `https://${PUBLIC_HOST}/health/live`, `/health/ready`, and then `/workspace/command-center`. The first API container start applies the Alembic schema baseline before accepting traffic.
+Verify `https://${PUBLIC_HOST}/health/live`, `/health/ready`, and then `/workspace/command-center`. API containers apply the Alembic schema baseline before accepting traffic. PostgreSQL deployments serialize concurrent migration startup with an advisory transaction lock, allowing multiple replicas to start against a fresh database without racing schema DDL.
 
 For an isolated OIDC demonstration, start the optional Keycloak service with `--profile demo-idp`, update `OIDC_ISSUER` to the reachable realm URL, and create at least one user with a supported realm role. Do not use the included development realm configuration as an internet-facing identity service.
 
@@ -58,7 +58,7 @@ For the complete release gate, run the self-cleaning acceptance rehearsal instea
 ./scripts/rehearse-production-acceptance.ps1
 ```
 
-It generates temporary secrets, starts digest-pinned Keycloak and Postgres services, registers the declared `organization_id` and `project_ids` user-profile attributes, and runs the production browser workflow. The workflow verifies PKCE-backed OIDC sessions, administrator/viewer RBAC, organization boundary enforcement, 50 concurrent authenticated reads, the Asset Reliability approval/action/report path, and visual workspaces. The gate then restarts the API, reruns the browser acceptance against the preserved Postgres state, executes the isolated fresh-volume backup/restore rehearsal, and removes all temporary containers and volumes. Use `-KeepStack` only for troubleshooting and `-SkipRecovery` only when the separate recovery gate has already passed for the same build.
+It generates temporary secrets; starts digest-pinned Keycloak, Postgres, and two API replicas; registers the declared `organization_id` and `project_ids` user-profile attributes; and runs the production browser workflow. The workflow verifies PKCE-backed OIDC sessions, administrator/viewer RBAC, organization boundary enforcement, 50 concurrent authenticated reads, the Asset Reliability approval/action/report path, and visual workspaces. It also submits a collaborative artifact command through the peer API and requires the primary API's SSE stream and artifact read to observe the same committed revision. Starting both replicas against the same fresh database exercises serialized Alembic startup. The gate then restarts the primary API, reruns browser acceptance against preserved Postgres state, executes the isolated fresh-volume backup/restore rehearsal, and removes all temporary containers and volumes. Use `-KeepStack` only for troubleshooting and `-SkipRecovery` only when the separate recovery gate has already passed for the same build.
 
 The same gate is available as the manually dispatched `Production acceptance` GitHub Actions workflow. Enable a protected pull-request trigger when the repository has Linux Actions capacity; until then, the locally executed gate above is the authoritative release evidence and avoids treating account billing failures as product failures.
 
