@@ -229,6 +229,106 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   }, durableJobRequest);
   expect(changedJobRequest.status).toBe(409);
   expect(changedJobRequest.body.detail.message).toContain("different job request");
+
+  const chaosJob = await page.evaluate(async (artifactId) => {
+    const response = await fetch("/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        project_id: "default",
+        job_type: "chaos.recovery",
+        subject_type: "artifact",
+        subject_id: artifactId,
+        payload: { rehearsal: "abandoned-worker-lease" },
+        max_attempts: 2,
+        timeout_seconds: 300,
+        idempotency_key: `chaos-recovery-${artifactId}`
+      })
+    });
+    return { status: response.status, body: await response.json() };
+  }, sharedArtifact.id);
+  expect(chaosJob.status).toBe(201);
+
+  const abandonedClaim = await peer.evaluate(async (jobId) => {
+    const response = await fetch("/jobs/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        worker_id: "production-abandoned-worker",
+        project_id: "default",
+        supported_job_types: ["chaos.recovery"],
+        job_id: jobId,
+        lease_seconds: 10
+      })
+    });
+    return { status: response.status, body: await response.json() };
+  }, chaosJob.body.id);
+  expect(abandonedClaim.status).toBe(200);
+  expect(abandonedClaim.body.job.status).toBe("RUNNING");
+  const abandonedToken = abandonedClaim.body.job.lease_token as string;
+
+  await page.waitForTimeout(10_500);
+  const [primaryRecoverySummary, peerRecoverySummary] = await Promise.all([
+    page.evaluate(async () => (await fetch("/jobs/summary")).json()),
+    peer.evaluate(async () => (await fetch("/jobs/summary")).json())
+  ]);
+  expect(primaryRecoverySummary.reaped_stale_jobs + peerRecoverySummary.reaped_stale_jobs).toBe(1);
+  const requeuedJob = await page.evaluate(async (jobId) => (await fetch(`/jobs/${jobId}`)).json(), chaosJob.body.id);
+  expect(requeuedJob.status).toBe("QUEUED");
+  expect(requeuedJob.attempt).toBe(2);
+  expect(requeuedJob.events.filter((event: { event_type: string }) => event.event_type === "job.requeued")).toHaveLength(1);
+
+  const replacementClaim = await page.evaluate(async (jobId) => {
+    const response = await fetch("/jobs/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        worker_id: "production-replacement-worker",
+        project_id: "default",
+        supported_job_types: ["chaos.recovery"],
+        job_id: jobId,
+        lease_seconds: 30
+      })
+    });
+    return { status: response.status, body: await response.json() };
+  }, chaosJob.body.id);
+  expect(replacementClaim.status).toBe(200);
+  expect(replacementClaim.body.job.attempt).toBe(2);
+
+  const staleCompletion = await peer.evaluate(async ({ jobId, leaseToken }) => {
+    const response = await fetch(`/jobs/${jobId}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lease_token: leaseToken, result: { invalid: true } })
+    });
+    return { status: response.status, body: await response.json() };
+  }, { jobId: chaosJob.body.id, leaseToken: abandonedToken });
+  expect(staleCompletion.status).toBe(409);
+
+  const recoveredCompletion = await page.evaluate(async ({ jobId, leaseToken }) => {
+    const response = await fetch(`/jobs/${jobId}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lease_token: leaseToken, result: { recovered: true } })
+    });
+    return { status: response.status, body: await response.json() };
+  }, { jobId: chaosJob.body.id, leaseToken: replacementClaim.body.job.lease_token as string });
+  expect(recoveredCompletion.status).toBe(200);
+  expect(recoveredCompletion.body.status).toBe("SUCCEEDED");
+  expect(recoveredCompletion.body.result.recovered).toBe(true);
+
+  const recoveryEvidence = await page.evaluate(async (jobId) => {
+    const [job, observation, events] = await Promise.all([
+      fetch(`/jobs/${jobId}`).then((response) => response.json()),
+      fetch(`/runtime/observability/jobs/${jobId}`).then((response) => response.json()),
+      fetch("/ops/events?source=runtime").then((response) => response.json())
+    ]);
+    return { job, observation, events };
+  }, chaosJob.body.id);
+  expect(recoveryEvidence.job.events.filter((event: { event_type: string }) => event.event_type === "job.claimed")).toHaveLength(2);
+  expect(recoveryEvidence.job.events.filter((event: { event_type: string }) => event.event_type === "job.succeeded")).toHaveLength(1);
+  expect(recoveryEvidence.observation.spans.some((span: { name: string }) => span.name === "recovery")).toBe(true);
+  expect(recoveryEvidence.events.some((event: { event_type: string; subject_id: string }) => event.event_type === "job.requeued" && event.subject_id === chaosJob.body.id)).toBe(true);
   await peer.close();
 
   const workflow = await page.evaluate(async () => {
