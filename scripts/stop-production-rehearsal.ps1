@@ -10,6 +10,7 @@ $composeFile = Join-Path $projectRoot "docker-compose.rehearsal.yml"
 # because shutdown never creates or reconfigures a service.
 if (-not $env:REHEARSAL_POSTGRES_PASSWORD) { $env:REHEARSAL_POSTGRES_PASSWORD = "shutdown-only" }
 if (-not $env:REHEARSAL_KEYCLOAK_ADMIN_PASSWORD) { $env:REHEARSAL_KEYCLOAK_ADMIN_PASSWORD = "shutdown-only" }
+if (-not $env:REHEARSAL_CONNECTOR_SECRET_KEY) { $env:REHEARSAL_CONNECTOR_SECRET_KEY = "shutdown-only" }
 $arguments = @("compose", "-p", $ProjectName, "-f", $composeFile, "down", "--remove-orphans")
 if ($DeleteData) { $arguments += "--volumes" }
 & docker @arguments

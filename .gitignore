@@ -46,6 +46,7 @@ pgdata/
 chdata/
 backups/
 frontend/playwright-report/
+frontend/playwright-production-report/
 frontend/playwright.db
 frontend/test-results/
 

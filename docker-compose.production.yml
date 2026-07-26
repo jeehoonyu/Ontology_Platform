@@ -94,7 +94,7 @@ services:
         condition: service_healthy
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858
     profiles: ["demo-idp"]
     command: ["start-dev", "--import-realm"]
     environment:
@@ -102,6 +102,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
     volumes:
       - ./deploy/keycloak-realm.json:/opt/keycloak/data/import/ontology-realm.json:ro
+      - ./deploy/keycloak-user-profile.json:/opt/keycloak/conf/ontology-user-profile.json:ro
     ports:
       - "8080:8080"
 

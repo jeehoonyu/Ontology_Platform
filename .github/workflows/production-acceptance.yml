@@ -1,0 +1,45 @@
+name: Production acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - "docker-compose*.yml"
+      - "frontend/**"
+      - "oms/app/**"
+      - "oms/alembic/**"
+      - "scripts/**"
+      - ".github/workflows/production-acceptance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  oidc-load-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend and Chrome
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chrome
+      - name: Rehearse production OIDC, load, restart, and recovery
+        shell: pwsh
+        run: ./scripts/rehearse-production-acceptance.ps1
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-acceptance-browser-evidence
+          path: |
+            frontend/test-results
+            frontend/playwright-production-report
+          if-no-files-found: ignore
