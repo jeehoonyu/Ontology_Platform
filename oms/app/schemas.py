@@ -314,6 +314,7 @@ class PipelineRun(BaseModel):
 
 # --- MODEL ENDPOINTS ---
 class ModelEndpointCreate(ResourceBase):
+    project_id: str = "default"
     provider: str
     model_name: str
     purpose: str = "general"
@@ -612,6 +613,7 @@ class AutomationRun(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class EvalSuiteCreate(ResourceBase):
+    project_id: str = "default"
     target_agent_id: str
     cases: List[Dict[str, Any]] = Field(default_factory=list)
     criteria: Dict[str, Any] = Field(default_factory=dict)
@@ -624,6 +626,7 @@ class EvalSuite(EvalSuiteCreate):
 
 class EvalRun(BaseModel):
     id: str
+    project_id: str
     suite_id: str
     status: str
     score: int

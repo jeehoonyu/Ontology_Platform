@@ -303,6 +303,12 @@ def _agent_for(db: Session, agent_id: str, principal: production_auth.Principal,
     if not agent:
         _not_found("AgentDefinition", agent_id)
     tenancy.assert_project_permission(db, principal, agent.project_id, permission)
+    if agent.model_endpoint_id:
+        endpoint = db.get(models.ModelEndpoint, agent.model_endpoint_id)
+        if not endpoint:
+            _not_found("ModelEndpoint", agent.model_endpoint_id)
+        if endpoint.project_id != agent.project_id:
+            raise HTTPException(status_code=409, detail="Agent model endpoint belongs to another project")
     return agent
 
 
@@ -312,6 +318,22 @@ def _logic_for(db: Session, logic_id: str, principal: production_auth.Principal,
         _not_found("LogicFunction", logic_id)
     tenancy.assert_project_permission(db, principal, logic.project_id, permission)
     return logic
+
+
+def _model_endpoint_for(db: Session, endpoint_id: str, principal: production_auth.Principal, permission: str) -> models.ModelEndpoint:
+    endpoint = db.get(models.ModelEndpoint, endpoint_id)
+    if not endpoint:
+        _not_found("ModelEndpoint", endpoint_id)
+    tenancy.assert_project_permission(db, principal, endpoint.project_id, permission)
+    return endpoint
+
+
+def _eval_suite_for(db: Session, suite_id: str, principal: production_auth.Principal, permission: str) -> models.EvalSuite:
+    suite = db.get(models.EvalSuite, suite_id)
+    if not suite:
+        _not_found("EvalSuite", suite_id)
+    tenancy.assert_project_permission(db, principal, suite.project_id, permission)
+    return suite
 
 
 def _workspace_shell(legacy: bool = False):
@@ -1198,7 +1220,14 @@ def list_pipeline_runs(pipeline_id: Optional[str] = None, db: Session = Depends(
 # --- Model Endpoint Registry ---
 
 @app.post("/model-endpoints", response_model=schemas.ModelEndpoint)
-def create_model_endpoint(model_endpoint: schemas.ModelEndpointCreate, db: Session = Depends(get_db)):
+def create_model_endpoint(
+    model_endpoint: schemas.ModelEndpointCreate,
+    db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("edit")),
+):
+    if not isinstance(principal, production_auth.Principal):
+        principal = production_auth._local_principal()
+    tenancy.assert_project_permission(db, principal, model_endpoint.project_id, "edit")
     existing = db.query(models.ModelEndpoint).filter(models.ModelEndpoint.id == model_endpoint.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="ModelEndpoint already exists")
@@ -1207,11 +1236,11 @@ def create_model_endpoint(model_endpoint: schemas.ModelEndpointCreate, db: Sessi
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=principal.id,
         event_type="model.endpoint.created",
         subject_type="model_endpoint",
         subject_id=model_endpoint.id,
-        payload={"provider": model_endpoint.provider, "model_name": model_endpoint.model_name},
+        payload={"project_id": model_endpoint.project_id, "provider": model_endpoint.provider, "model_name": model_endpoint.model_name},
     )
     db.commit()
     db.refresh(db_model)
@@ -1219,8 +1248,16 @@ def create_model_endpoint(model_endpoint: schemas.ModelEndpointCreate, db: Sessi
 
 
 @app.get("/model-endpoints", response_model=List[schemas.ModelEndpoint])
-def list_model_endpoints(db: Session = Depends(get_db)):
-    return db.query(models.ModelEndpoint).all()
+def list_model_endpoints(project_id: Optional[str] = None, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(models.ModelEndpoint)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(models.ModelEndpoint.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(models.ModelEndpoint.project_id.in_(accessible)) if accessible else query.filter(models.ModelEndpoint.id == "__none__")
+    return query.all()
 
 # --- Action Execution Engine ---
 
@@ -1457,11 +1494,11 @@ def create_agent(
     if existing:
         raise HTTPException(status_code=400, detail="AgentDefinition already exists")
     if agent.model_endpoint_id:
-        model_endpoint = db.query(models.ModelEndpoint).filter(
-            models.ModelEndpoint.id == agent.model_endpoint_id
-        ).first()
+        model_endpoint = db.get(models.ModelEndpoint, agent.model_endpoint_id)
         if not model_endpoint:
             _not_found("ModelEndpoint", agent.model_endpoint_id)
+        if model_endpoint.project_id != agent.project_id:
+            raise HTTPException(status_code=403, detail="Agent model endpoint belongs to another project")
 
     for object_type_id in agent.allowed_object_types:
         if _object_type_project_id(db, object_type_id) != agent.project_id:
@@ -2139,24 +2176,33 @@ def run_automation(automation_id: str, actor: str = "automation", db: Session = 
 
 
 @app.post("/eval-suites", response_model=schemas.EvalSuite)
-def create_eval_suite(suite: schemas.EvalSuiteCreate, db: Session = Depends(get_db)):
+def create_eval_suite(
+    suite: schemas.EvalSuiteCreate,
+    db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("edit")),
+):
+    if not isinstance(principal, production_auth.Principal):
+        principal = production_auth._local_principal()
+    tenancy.assert_project_permission(db, principal, suite.project_id, "edit")
     existing = db.query(models.EvalSuite).filter(models.EvalSuite.id == suite.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="EvalSuite already exists")
     target_agent = db.query(models.AgentDefinition).filter(models.AgentDefinition.id == suite.target_agent_id).first()
     if not target_agent:
         _not_found("AgentDefinition", suite.target_agent_id)
+    if target_agent.project_id != suite.project_id:
+        raise HTTPException(status_code=403, detail="Eval suite target agent belongs to another project")
 
     now = now_ts()
     db_model = models.EvalSuite(**suite.model_dump(), created_at=now, updated_at=now)
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=principal.id,
         event_type="eval.suite.created",
         subject_type="eval_suite",
         subject_id=suite.id,
-        payload={"target_agent_id": suite.target_agent_id, "case_count": len(suite.cases)},
+        payload={"project_id": suite.project_id, "target_agent_id": suite.target_agent_id, "case_count": len(suite.cases)},
     )
     db.commit()
     db.refresh(db_model)
@@ -2164,18 +2210,32 @@ def create_eval_suite(suite: schemas.EvalSuiteCreate, db: Session = Depends(get_
 
 
 @app.get("/eval-suites", response_model=List[schemas.EvalSuite])
-def list_eval_suites(db: Session = Depends(get_db)):
-    return db.query(models.EvalSuite).all()
+def list_eval_suites(project_id: Optional[str] = None, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(models.EvalSuite)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(models.EvalSuite.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(models.EvalSuite.project_id.in_(accessible)) if accessible else query.filter(models.EvalSuite.id == "__none__")
+    return query.all()
 
 
 @app.post("/eval-suites/{suite_id}/run", response_model=schemas.EvalRun)
-def run_eval_suite(suite_id: str, db: Session = Depends(get_db)):
-    suite = db.query(models.EvalSuite).filter(models.EvalSuite.id == suite_id).first()
-    if not suite:
-        _not_found("EvalSuite", suite_id)
+def run_eval_suite(
+    suite_id: str,
+    db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("execute")),
+):
+    if not isinstance(principal, production_auth.Principal):
+        principal = production_auth._local_principal()
+    suite = _eval_suite_for(db, suite_id, principal, "execute")
     agent = db.query(models.AgentDefinition).filter(models.AgentDefinition.id == suite.target_agent_id).first()
     if not agent:
         _not_found("AgentDefinition", suite.target_agent_id)
+    if agent.project_id != suite.project_id:
+        raise HTTPException(status_code=409, detail="Eval suite target agent no longer belongs to the suite project")
 
     run_id = str(uuid.uuid4())
     results = []
@@ -2207,6 +2267,7 @@ def run_eval_suite(suite_id: str, db: Session = Depends(get_db)):
     score = int(sum(scores) / len(scores)) if scores else 0
     db_model = models.EvalRun(
         id=run_id,
+        project_id=suite.project_id,
         suite_id=suite.id,
         status="SUCCESS",
         score=score,
@@ -2217,11 +2278,11 @@ def run_eval_suite(suite_id: str, db: Session = Depends(get_db)):
     db.add(db_model)
     create_audit_log(
         db,
-        actor="system",
+        actor=principal.id,
         event_type="eval.run.completed",
         subject_type="eval_run",
         subject_id=run_id,
-        payload={"suite_id": suite.id, "score": score},
+        payload={"project_id": suite.project_id, "suite_id": suite.id, "score": score},
     )
     db.commit()
     db.refresh(db_model)
@@ -2229,10 +2290,19 @@ def run_eval_suite(suite_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/eval-runs", response_model=List[schemas.EvalRun])
-def list_eval_runs(suite_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_eval_runs(suite_id: Optional[str] = None, project_id: Optional[str] = None, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
     query = db.query(models.EvalRun)
     if suite_id:
+        suite = _eval_suite_for(db, suite_id, principal, "view")
         query = query.filter(models.EvalRun.suite_id == suite_id)
+        project_id = suite.project_id
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(models.EvalRun.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(models.EvalRun.project_id.in_(accessible)) if accessible else query.filter(models.EvalRun.id == "__none__")
     return query.order_by(models.EvalRun.created_at.desc()).all()
 
 

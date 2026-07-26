@@ -157,6 +157,8 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
     const actionId = `pilot-action-${suffix}`;
     const logicId = `pilot-logic-${suffix}`;
     const agentId = `pilot-agent-${suffix}`;
+    const modelEndpointId = `pilot-model-${suffix}`;
+    const evalSuiteId = `pilot-eval-${suffix}`;
     const action = await request("/action-types", "POST", {
       id: actionId, project_id: "default", display_name: "Pilot governed action", description: null,
       parameters: {}, rules: { requires_approval: true, object_mutations: [] }
@@ -166,15 +168,27 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       blocks: [{ type: "propose_action", action_type_id: actionId, parameters: {} }]
     });
     const logicRun = await request(`/logic-functions/${logicId}/run`, "POST", { inputs: {}, actor: "spoofed" });
+    const modelEndpoint = await request("/model-endpoints", "POST", {
+      id: modelEndpointId, project_id: "default", display_name: "Pilot model", description: null,
+      provider: "local", model_name: "deterministic-pilot"
+    });
     const agent = await request("/agents", "POST", {
       id: agentId, project_id: "default", display_name: "Pilot governed agent", description: null,
-      allowed_object_types: [], allowed_actions: [actionId], approval_required: true
+      allowed_object_types: [], allowed_actions: [actionId], model_endpoint_id: modelEndpointId, approval_required: true
     });
     const tools = await request(`/aip/agents/${agentId}/tools`, "PUT", {
       retrieval: {}, tools: [{ name: "propose", type: "action", action_type_id: actionId, always: true }]
     });
     const job = await request(`/aip/agents/${agentId}/invoke/async`, "POST", {
       prompt: "propose", parameters: {}, idempotency_key: `pilot-agent-job-${suffix}`
+    });
+    const evalSuite = await request("/eval-suites", "POST", {
+      id: evalSuiteId, project_id: "default", display_name: "Pilot eval", description: null,
+      target_agent_id: agentId, cases: [{ prompt: "propose" }], criteria: {}
+    });
+    const evalRun = await request(`/eval-suites/${evalSuiteId}/run`, "POST");
+    const aipGrade = await request("/aip/evals/grade-one", "POST", {
+      project_id: "default", grader: "exact_match", expected: "ready", actual: "ready"
     });
     const outsideAction = await request("/action-types", "POST", {
       id: `outside-action-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null,
@@ -187,19 +201,34 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
     const outsideAgent = await request("/agents", "POST", {
       id: `outside-agent-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null
     });
-    return { actionId, logicId, agentId, action, logic, logicRun, agent, tools, job, outsideAction, outsideLogic, outsideAgent };
+    const outsideModel = await request("/model-endpoints", "POST", {
+      id: `outside-model-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null,
+      provider: "local", model_name: "forbidden"
+    });
+    const outsideEval = await request("/eval-suites", "POST", {
+      id: `outside-eval-${suffix}`, project_id: "outside-project", display_name: "Forbidden", description: null,
+      target_agent_id: agentId
+    });
+    return { actionId, logicId, agentId, modelEndpointId, evalSuiteId, action, logic, logicRun, modelEndpoint, agent, tools, job, evalSuite, evalRun, aipGrade, outsideAction, outsideLogic, outsideAgent, outsideModel, outsideEval };
   }, adminMutation.body.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12));
   expect(automationBoundary.action.status).toBe(200);
   expect(automationBoundary.action.body.project_id).toBe("default");
   expect(automationBoundary.logic.status).toBe(200);
   expect(automationBoundary.logicRun.body.status).toBe("ACTION_PROPOSED");
+  expect(automationBoundary.modelEndpoint.status).toBe(200);
+  expect(automationBoundary.modelEndpoint.body.project_id).toBe("default");
   expect(automationBoundary.agent.status).toBe(200);
   expect(automationBoundary.tools.status).toBe(200);
   expect(automationBoundary.job.status).toBe(202);
   expect(automationBoundary.job.body.project_id).toBe("default");
+  expect(automationBoundary.evalSuite.status).toBe(200);
+  expect(automationBoundary.evalRun.body.project_id).toBe("default");
+  expect(automationBoundary.aipGrade.status).toBe(200);
   expect(automationBoundary.outsideAction.status).toBe(403);
   expect(automationBoundary.outsideLogic.status).toBe(403);
   expect(automationBoundary.outsideAgent.status).toBe(403);
+  expect(automationBoundary.outsideModel.status).toBe(403);
+  expect(automationBoundary.outsideEval.status).toBe(403);
 
   const tenantBoundary = await page.evaluate(async () => {
     const response = await fetch("/tenancy/organizations", {
@@ -531,7 +560,7 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerSession.permissions).toEqual(["view"]);
   expect(viewerSession.project_ids).toContain("default");
 
-  const viewerAccess = await page.evaluate(async ({ graphId, workshopId, actionId, logicId, agentId }) => {
+  const viewerAccess = await page.evaluate(async ({ graphId, workshopId, actionId, logicId, agentId, evalSuiteId }) => {
     const read = await fetch("/artifacts");
     const edit = await fetch("/artifacts", {
       method: "POST",
@@ -571,6 +600,13 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
     const agentInvoke = await fetch(`/aip/agents/${agentId}/invoke`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "run", parameters: {} })
     });
+    const modelList = await fetch("/model-endpoints");
+    const evalList = await fetch("/eval-suites");
+    const evalRun = await fetch(`/eval-suites/${evalSuiteId}/run`, { method: "POST" });
+    const aipGrade = await fetch("/aip/evals/grade-one", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project_id: "default", grader: "not_null", actual: "value" })
+    });
     return {
       read: read.status,
       edit: edit.status,
@@ -584,14 +620,19 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       actionListStatus: actionList.status,
       actionExecuteStatus: actionExecute.status,
       logicRunStatus: logicRun.status,
-      agentInvokeStatus: agentInvoke.status
+      agentInvokeStatus: agentInvoke.status,
+      modelListStatus: modelList.status,
+      evalListStatus: evalList.status,
+      evalRunStatus: evalRun.status,
+      aipGradeStatus: aipGrade.status
     };
   }, {
     graphId: onboarding.applied.body.pipeline_graph_id,
     workshopId: workshopBoundary.workshopId,
     actionId: automationBoundary.actionId,
     logicId: automationBoundary.logicId,
-    agentId: automationBoundary.agentId
+    agentId: automationBoundary.agentId,
+    evalSuiteId: automationBoundary.evalSuiteId
   });
   expect(viewerAccess.read).toBe(200);
   expect(viewerAccess.edit).toBe(403);
@@ -605,5 +646,9 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerAccess.actionExecuteStatus).toBe(403);
   expect(viewerAccess.logicRunStatus).toBe(403);
   expect(viewerAccess.agentInvokeStatus).toBe(403);
+  expect(viewerAccess.modelListStatus).toBe(200);
+  expect(viewerAccess.evalListStatus).toBe(200);
+  expect(viewerAccess.evalRunStatus).toBe(403);
+  expect(viewerAccess.aipGradeStatus).toBe(403);
   expect(viewerAccess.detail.detail).toContain("Permission 'edit' is required");
 });

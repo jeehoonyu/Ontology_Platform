@@ -34,6 +34,12 @@ def _agent_for(db: Session, agent_id: str, principal: Principal, permission: str
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
     tenancy.assert_project_permission(db, principal, agent.project_id, permission)
+    if agent.model_endpoint_id:
+        endpoint = db.get(models.ModelEndpoint, agent.model_endpoint_id)
+        if not endpoint:
+            raise HTTPException(status_code=404, detail=f"Model endpoint '{agent.model_endpoint_id}' not found")
+        if endpoint.project_id != agent.project_id:
+            raise HTTPException(status_code=409, detail="Agent model endpoint belongs to another project")
     return agent
 
 

@@ -17,7 +17,8 @@ from sqlalchemy import String, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column, Session
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, tenancy
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["aip-extras"])
 
@@ -53,6 +54,7 @@ class CatalogEntry(BaseModel):
 
 class ByomCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     provider: str
     endpoint_url: str
@@ -283,8 +285,9 @@ def list_model_catalog() -> List[CatalogEntry]:
 
 
 @router.post("/aip/model-catalog/byom", response_model=ByomRead)
-def register_byom(body: ByomCreate, db: Session = Depends(get_db)) -> ByomRead:
+def register_byom(body: ByomCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)) -> ByomRead:
     """Register a Bring-Your-Own-Model endpoint in the ModelEndpoint table."""
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     endpoint_id = body.id or uuid.uuid4().hex
     existing = db.query(models.ModelEndpoint).filter(models.ModelEndpoint.id == endpoint_id).first()
     if existing:
@@ -293,6 +296,7 @@ def register_byom(body: ByomCreate, db: Session = Depends(get_db)) -> ByomRead:
     now = _now()
     row = models.ModelEndpoint(
         id=endpoint_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         provider=body.provider,
         model_name=body.model_name,
@@ -303,8 +307,8 @@ def register_byom(body: ByomCreate, db: Session = Depends(get_db)) -> ByomRead:
         updated_at=now,
     )
     db.add(row)
-    _audit(db, "system", "aip.byom.registered", "model_endpoint", endpoint_id,
-           {"provider": body.provider, "model_name": body.model_name})
+    _audit(db, principal.id, "aip.byom.registered", "model_endpoint", endpoint_id,
+           {"project_id": body.project_id, "provider": body.provider, "model_name": body.model_name})
     db.commit()
     return ByomRead(id=endpoint_id, status="ACTIVE")
 

@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import (
+    aip_evals,
     apps,
     connectivity,
     connectivity_ops,
@@ -82,8 +83,12 @@ CORE_TABLES = [
     "link_types",
     "link_instances",
     "action_types",
+    "model_endpoints",
     "agent_definitions",
     "logic_functions",
+    "eval_suites",
+    "eval_runs",
+    "aip_eval_runs",
     "data_assets",
     "pipeline_definitions",
     "pipeline_runs",
@@ -144,7 +149,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -166,6 +171,7 @@ MIGRATIONS = [
     {"version": 18, "name": "project_scoped_pipeline_graphs", "status": "applied"},
     {"version": 19, "name": "project_scoped_workshop_modules", "status": "applied"},
     {"version": 20, "name": "project_scoped_governed_automation", "status": "applied"},
+    {"version": 21, "name": "project_scoped_ai_evaluations", "status": "applied"},
 ]
 
 
@@ -440,7 +446,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(models_action.IdempotencyKey).all()
         ],
         "model_endpoints": [
-            _row_dict(row, ["id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"])
             for row in db.query(models.ModelEndpoint).all()
         ],
         "agent_definitions": [
@@ -458,6 +464,18 @@ def _snapshot(db: Session) -> Dict[str, Any]:
         "logic_runs": [
             _row_dict(row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"])
             for row in db.query(models.LogicRun).all()
+        ],
+        "eval_suites": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "target_agent_id", "cases", "criteria", "created_at", "updated_at"])
+            for row in db.query(models.EvalSuite).all()
+        ],
+        "eval_runs": [
+            _row_dict(row, ["id", "project_id", "suite_id", "status", "score", "results", "created_at", "completed_at"])
+            for row in db.query(models.EvalRun).all()
+        ],
+        "aip_eval_runs": [
+            _row_dict(row, ["id", "project_id", "target", "total", "passed", "pass_rate", "results", "created_at"])
+            for row in db.query(aip_evals.AipEvalRun).all()
         ],
         "object_instances": [
             _row_dict(row, ["id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
@@ -838,6 +856,9 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "agent_sessions",
         "logic_functions",
         "logic_runs",
+        "eval_suites",
+        "eval_runs",
+        "aip_eval_runs",
         "data_assets",
         "pipeline_definitions",
         "pipeline_builder_graphs",
@@ -1284,9 +1305,10 @@ def import_project(
         row.setdefault("project_id", "default")
         track(_upsert_model(db, models_action.IdempotencyKey, row, ["key", "project_id", "action_type_id", "response_payload", "created_at"]))
     for row in snapshot.get("model_endpoints") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, models.ModelEndpoint, row, ["id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"]))
+        track(_upsert_model(db, models.ModelEndpoint, row, ["id", "project_id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"]))
     for row in snapshot.get("agent_definitions") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
@@ -1303,6 +1325,19 @@ def import_project(
     for row in snapshot.get("logic_runs") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, models.LogicRun, row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"]))
+    for row in snapshot.get("eval_suites") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, models.EvalSuite, row, ["id", "project_id", "display_name", "description", "target_agent_id", "cases", "criteria", "created_at", "updated_at"]))
+    for row in snapshot.get("eval_runs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, models.EvalRun, row, ["id", "project_id", "suite_id", "status", "score", "results", "created_at", "completed_at"]))
+    for row in snapshot.get("aip_eval_runs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, aip_evals.AipEvalRun, row, ["id", "project_id", "target", "total", "passed", "pass_rate", "results", "created_at"]))
     for row in snapshot.get("link_types") or []:
         track(_upsert_model(db, models.LinkType, row, ["id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"]))
     for row in snapshot.get("object_instances") or []:
