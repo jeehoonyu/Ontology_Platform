@@ -32,7 +32,7 @@ try {
     }
     if (-not $ready) { throw "Rehearsal Postgres did not become ready." }
 
-    $seedSql = "CREATE TABLE alembic_version(version_num varchar(32) primary key); INSERT INTO alembic_version VALUES ('0017_governed_automation_scope'); CREATE TABLE recovery_probe(id integer primary key, value text); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
+    $seedSql = "CREATE TABLE alembic_version(version_num varchar(32) primary key); INSERT INTO alembic_version VALUES ('0018_project_scoped_ai_evals'); CREATE TABLE recovery_probe(id integer primary key, value text); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
     Invoke-RehearsalCompose @("exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1", "-U", "ontology", "-d", "ontology", "-c", $seedSql) "Could not seed recovery probe."
 
     $backupPath = & (Join-Path $PSScriptRoot "backup.ps1") `
