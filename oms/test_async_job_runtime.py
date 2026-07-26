@@ -11,7 +11,7 @@ os.environ["APP_ENV"] = "test"
 from fastapi.testclient import TestClient  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
-from app.platform_runtime import PlatformJobLease  # noqa: E402
+from app.platform_runtime import PlatformJob, PlatformJobIdempotencyReceipt, PlatformJobLease  # noqa: E402
 
 client = TestClient(app)
 passed = 0
@@ -89,6 +89,47 @@ second_idempotent = ok(client.post("/jobs", json={
     "idempotency_key": "incident-42-report-v1",
 }), "reuse idempotent job", 201)
 assert first_idempotent["id"] == second_idempotent["id"], (first_idempotent, second_idempotent)
+assert first_idempotent["idempotent_replay"] is False and second_idempotent["idempotent_replay"] is True
+assert first_idempotent["idempotency_receipt_id"] == second_idempotent["idempotency_receipt_id"]
+passed += 1
+
+ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "idempotency_key": "incident-42-report-v1",
+    "payload": {"format": "changed"},
+}), "reject changed request behind reused idempotency key", 409)
+
+scoped_idempotent = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "subject_type": "incident",
+    "subject_id": "incident-43",
+    "idempotency_key": "incident-42-report-v1",
+}), "scope an idempotency key to its subject", 201)
+assert scoped_idempotent["id"] != first_idempotent["id"], scoped_idempotent
+passed += 1
+
+with SessionLocal() as db:
+    now = int(time.time())
+    for index in range(251):
+        db.add(PlatformJob(
+            id=f"filler-job-{index}", project_id="default", job_type="report.generate",
+            status="SUCCEEDED", actor=first_idempotent["actor"], subject_type=None, subject_id=None,
+            payload={"__execution": {"idempotency_key": f"filler-{index}"}}, result={},
+            attempt=1, progress=100, created_at=now + index + 1, updated_at=now + index + 1,
+            started_at=now + index + 1, completed_at=now + index + 1,
+        ))
+    db.commit()
+
+old_replay = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "idempotency_key": "incident-42-report-v1",
+}), "replay receipt beyond the former 250-job scan window", 201)
+assert old_replay["id"] == first_idempotent["id"] and old_replay["idempotent_replay"] is True, old_replay
+with SessionLocal() as db:
+    assert db.query(PlatformJobIdempotencyReceipt).filter(
+        PlatformJobIdempotencyReceipt.job_id == first_idempotent["id"],
+    ).count() == 1
+passed += 2
 
 stale = ok(client.post("/jobs", json={
     "job_type": "model.monitor",

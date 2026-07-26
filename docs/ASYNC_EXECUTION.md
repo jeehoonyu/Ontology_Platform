@@ -13,7 +13,7 @@ Create a job with `POST /jobs`. The request supports:
 - `idempotency_key` to prevent duplicate work for the same actor and job type
 - a typed or domain-specific `payload`
 
-The API returns the existing job when the same idempotency key is submitted again. Job state can be inspected through `GET /jobs/{job_id}`, filtered through `GET /jobs`, or observed as server-sent events through `GET /events/stream`.
+The API persists an append-only receipt that scopes the key to project, actor, job type, and subject. It returns the existing job when the same request is submitted again, even after an unbounded number of later jobs or through another API replica. Reusing the key with a different payload or execution configuration returns `409`. Receipt insertion is database-unique, so concurrent producers reconcile to one job instead of enqueueing duplicate work. Job state can be inspected through `GET /jobs/{job_id}`, filtered through `GET /jobs`, or observed as server-sent events through `GET /events/stream`.
 
 ## Worker Flow
 
@@ -34,6 +34,8 @@ Only the current lease owner can report progress or terminate an execution. A st
 - Every transition writes a `PlatformJobEvent` for SSE, audit, UI evidence, and incident correlation.
 
 Workers should make side effects idempotent because a process can fail after performing work but before acknowledging completion. Use the platform job ID as the downstream idempotency key when writing datasets, invoking actions, or publishing reports.
+
+Migration `0013_job_idempotency` backfills retained legacy job keys into `platform_job_idempotency_receipts`. Legacy duplicates are preserved as job evidence, while the earliest job becomes the replay target for that scope. Receipts are included in portable snapshots and authoritative database backups.
 
 ## Operations
 

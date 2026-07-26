@@ -46,6 +46,8 @@ assert 'fetch("/tenancy/organizations"' in browser
 assert "APPROVAL_REQUIRED" in browser and 'toBe("SUCCESS")' in browser
 assert "crossReplicaEvent" in browser and "http://localhost:18001" in browser
 assert "crossReplicaReplay" in browser and "idempotent_replay" in browser
+assert "durableJobRequest" in browser and "changedJobRequest" in browser
+assert "cross-replica collaboration and job idempotency" in acceptance
 assert "rehearse-production-acceptance.ps1" in workflow
 assert "playwright install --with-deps chrome" in workflow
 assert "pg_advisory_xact_lock" in migration_env
