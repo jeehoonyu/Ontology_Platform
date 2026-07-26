@@ -35,7 +35,7 @@ The local cost estimate is deterministic and intended for governance testing. Pr
 
 ## Connector Adapters
 
-`GET /connectors/adapters` is the executable adapter catalog. REST, JDBC, S3-compatible, and SFTP adapters fetch live records inside the durable ingestion boundary. Kafka appears as unavailable until a deployment registers a plugin through `CONNECTOR_PLUGIN_MODULES`; the API does not advertise integrations as implemented when no adapter is installed.
+`GET /connectors/adapters` is the executable adapter catalog. REST, JDBC, S3-compatible, SFTP, and Kafka adapters fetch live records inside the durable ingestion boundary. Optional deployment-specific adapters can still be registered through `CONNECTOR_PLUGIN_MODULES`; the API never advertises an adapter that is not installed.
 
 The S3 adapter signs requests with AWS Signature Version 4 and supports AWS S3 or path-style S3-compatible HTTPS endpoints. Store the secret access key as an `aws` runtime credential and set `access_key_id` (plus optional `session_token`) in credential metadata. Source configuration contains only non-secret fields: `bucket`, `region`, optional `endpoint_url`, `prefix`, `format`, and bounded object/record/byte limits. CSV, JSON arrays/objects, and JSONL are supported. For incremental syncs, use `_source_object_key` as the cursor field; successful object keys become the durable high-water mark.
 
@@ -52,13 +52,26 @@ Use host `127.0.0.1`, port `2222`, username `demo`, remote path `/upload`, the p
 
 Set those values as `SFTP_REHEARSAL_*` environment variables and run `python oms/rehearse_sftp_connector.py` to verify the full external-service preview and durable worker path.
 
+The Kafka adapter consumes bounded JSON or JSONL batches with manual partition assignment and no broker-side auto commit. Its durable cursor stores the next offset independently for every partition, including offsets for compacted-topic tombstones, and commits that cursor in the same database transaction as target records and ingestion evidence. Configure `bootstrap_servers`, `topic`, `security_protocol`, optional `sasl_mechanism`, and bounded polling limits. SASL passwords are stored as `kafka_sasl_plain` write-only credentials with the username in non-secret credential metadata. TLS and SASL/TLS are supported. Plaintext Kafka transport is denied in the production profile unless `CONNECTOR_KAFKA_ALLOW_PLAINTEXT=true` is deliberately set for an isolated network.
+
+The digest-pinned local broker profile provides an external-service rehearsal:
+
+```powershell
+docker compose --profile cdc up -d zookeeper kafka
+$env:KAFKA_REHEARSAL_BOOTSTRAP_SERVERS="127.0.0.1:9092"
+python oms/rehearse_kafka_connector.py
+docker compose --profile cdc rm -sf kafka zookeeper
+```
+
+The rehearsal creates a temporary topic, runs two durable ingestion jobs, and proves that the second run resumes from the persisted partition offset without duplicate target records.
+
 Live REST sources enforce response limits, timeouts, redirect validation, and SSRF controls. Live JDBC sources accept PostgreSQL or local-development SQLite, reject mutating SQL, and require parameterized limits and cursors for custom queries. SQLite sources are disabled in the production profile unless explicitly enabled.
 
 Credentials are stored separately from source configuration using Fernet encryption. Set `CONNECTOR_SECRET_KEY` and rotate `CONNECTOR_SECRET_KEY_ID` through deployment operations. Credential read APIs return metadata only; secrets are write-only. Portable project JSON exports intentionally omit credentials, while database backup and restore preserve encrypted credential rows. Rebind credentials after importing a portable project snapshot.
 
 Use these operational APIs:
 
-- `POST /connections/sources/{id}/runtime-credentials` rotates a bearer token, API key, or basic-auth password.
+- `POST /connections/sources/{id}/runtime-credentials` rotates bearer, API-key, basic, AWS, SFTP, or Kafka SASL credentials.
 - `POST /connections/sources/{id}/live-preview` verifies a live source and persists fetch evidence.
 - `GET /connections/sources/{id}/fetch-attempts` returns durable success/failure evidence without exposing secrets.
 - `/ingestion/syncs/{id}/enqueue` and `/ingestion/workers/run-next` execute live fetches through leases, retries, cursor commits, budgets, dead letters, and idempotent dataset writes.

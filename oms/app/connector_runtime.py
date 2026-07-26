@@ -32,6 +32,8 @@ from sqlalchemy import Integer, JSON, String, Text, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Mapped, Session, mapped_column
 import paramiko
+from kafka import KafkaConsumer, TopicPartition
+from kafka.errors import KafkaError
 
 from . import connectivity, models_action, ops_control, tenancy
 from .database import Base, SessionLocal, get_db
@@ -83,7 +85,7 @@ class ConnectorFetchAttempt(Base):
 
 
 class CredentialCreate(BaseModel):
-    credential_type: str = Field(pattern="^(bearer|api_key|basic|aws|sftp_password|sftp_private_key)$")
+    credential_type: str = Field(pattern="^(bearer|api_key|basic|aws|sftp_password|sftp_private_key|kafka_sasl_plain)$")
     secret: str = Field(min_length=1, max_length=16000)
     metadata: Dict[str, str] = Field(default_factory=dict)
     expires_at: Optional[int] = None
@@ -814,10 +816,142 @@ class SftpPullAdapter:
         )
 
 
+def _kafka_brokers(value: Any) -> List[str]:
+    candidates = value if isinstance(value, list) else str(value or "").split(",")
+    brokers = [str(item).strip() for item in candidates if str(item).strip()]
+    if not brokers:
+        raise HTTPException(status_code=422, detail="Kafka connector requires bootstrap_servers")
+    for broker in brokers:
+        parsed = urllib.parse.urlsplit(f"//{broker}")
+        if not parsed.hostname or parsed.username or parsed.password:
+            raise HTTPException(status_code=422, detail="Kafka bootstrap server must be host:port without credentials")
+        _validate_remote_host(parsed.hostname, parsed.port or 9092)
+    return brokers
+
+
+class KafkaPullAdapter:
+    """Bounded Kafka consumer with durable per-partition next-offset cursors."""
+
+    id = "kafka"
+    source_types = ["kafka"]
+    modes = ["incremental"]
+
+    def config_schema(self) -> Dict[str, Any]:
+        return {
+            "required": ["bootstrap_servers", "topic"],
+            "properties": {
+                "bootstrap_servers": {"type": "string"}, "topic": {"type": "string"},
+                "security_protocol": {"type": "string", "enum": ["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"]},
+                "sasl_mechanism": {"type": "string", "enum": ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"]},
+                "ssl_cafile": {"type": "string"}, "auto_offset_reset": {"type": "string", "enum": ["earliest", "latest"]},
+                "poll_timeout_ms": {"type": "integer", "default": 1000},
+                "max_records": {"type": "integer", "default": 1000},
+                "format": {"type": "string", "enum": ["json", "jsonl"]},
+            },
+            "credential": {"type": "kafka_sasl_plain", "metadata": ["username"]},
+            "incremental_cursor": "partition_next_offsets",
+        }
+
+    def fetch(self, context: AdapterContext) -> AdapterResult:
+        config = context.config
+        brokers = _kafka_brokers(config.get("bootstrap_servers"))
+        topic = str(config.get("topic") or "").strip()
+        if not topic or not re.fullmatch(r"[A-Za-z0-9._-]{1,249}", topic):
+            raise HTTPException(status_code=422, detail="Kafka connector requires a valid topic")
+        security_protocol = str(config.get("security_protocol") or "PLAINTEXT").upper()
+        if security_protocol not in {"PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"}:
+            raise HTTPException(status_code=422, detail="Unsupported Kafka security_protocol")
+        insecure = security_protocol in {"PLAINTEXT", "SASL_PLAINTEXT"}
+        if os.getenv("APP_ENV", "development").lower() == "production" and insecure and os.getenv("CONNECTOR_KAFKA_ALLOW_PLAINTEXT", "false").lower() not in {"1", "true", "yes"}:
+            raise HTTPException(status_code=422, detail="Plaintext Kafka transport is disabled in production")
+        consumer_options: Dict[str, Any] = {
+            "bootstrap_servers": brokers,
+            "client_id": str(config.get("client_id") or "ontology-platform-connector"),
+            "group_id": None,
+            "enable_auto_commit": False,
+            "security_protocol": security_protocol,
+            "request_timeout_ms": max(1000, min(120000, int(config.get("request_timeout_ms", 30000)))),
+            "api_version_auto_timeout_ms": max(1000, min(60000, int(config.get("api_version_timeout_ms", 10000)))),
+        }
+        if security_protocol in {"SSL", "SASL_SSL"} and config.get("ssl_cafile"):
+            consumer_options["ssl_cafile"] = str(config["ssl_cafile"])
+        if security_protocol.startswith("SASL"):
+            if context.credential_type != "kafka_sasl_plain" or not context.credential_secret:
+                raise HTTPException(status_code=422, detail="SASL Kafka connector requires an active runtime credential")
+            username = str(context.credential_metadata.get("username") or "").strip()
+            if not username:
+                raise HTTPException(status_code=422, detail="Kafka credential metadata requires username")
+            consumer_options.update({
+                "sasl_mechanism": str(config.get("sasl_mechanism") or "PLAIN"),
+                "sasl_plain_username": username,
+                "sasl_plain_password": context.credential_secret,
+            })
+        max_messages = max(1, min(10000, int(config.get("max_records", context.limit)), context.limit))
+        poll_timeout = max(100, min(30000, int(config.get("poll_timeout_ms", 1000))))
+        cursor = {str(key): int(value) for key, value in dict(context.cursor or {}).items()} if isinstance(context.cursor, dict) else {}
+        consumer: Optional[KafkaConsumer] = None
+        try:
+            consumer = KafkaConsumer(**consumer_options)
+            partition_ids = consumer.partitions_for_topic(topic)
+            if partition_ids is None:
+                raise HTTPException(status_code=404, detail=f"Kafka topic '{topic}' was not found")
+            partitions = [TopicPartition(topic, partition_id) for partition_id in sorted(partition_ids)]
+            consumer.assign(partitions)
+            reset = str(config.get("auto_offset_reset") or "earliest").lower()
+            for partition in partitions:
+                stored_offset = cursor.get(str(partition.partition))
+                if stored_offset is not None:
+                    consumer.seek(partition, stored_offset)
+                elif reset == "latest":
+                    consumer.seek_to_end(partition)
+                else:
+                    consumer.seek_to_beginning(partition)
+            batches = consumer.poll(timeout_ms=poll_timeout, max_records=max_messages)
+            messages = sorted(
+                [message for partition_messages in batches.values() for message in partition_messages],
+                key=lambda message: (message.timestamp or 0, message.partition, message.offset),
+            )[:max_messages]
+            records: List[Dict[str, Any]] = []
+            bytes_read = 0
+            next_cursor = dict(cursor)
+            tombstones = 0
+            configured_format = str(config.get("format") or "json")
+            for message in messages:
+                next_cursor[str(message.partition)] = message.offset + 1
+                if message.value is None:
+                    tombstones += 1
+                    continue
+                decoded = _decode_tabular_records(bytes(message.value), f"message.{configured_format}", configured_format)
+                if len(records) + len(decoded) > max_messages:
+                    raise HTTPException(status_code=413, detail="Kafka message batch expanded beyond max_records")
+                for row in decoded:
+                    row.setdefault("_source_kafka_topic", topic)
+                    row.setdefault("_source_kafka_partition", message.partition)
+                    row.setdefault("_source_kafka_offset", message.offset)
+                    row.setdefault("_source_kafka_timestamp", message.timestamp)
+                records.extend(decoded)
+                bytes_read += len(message.value or b"")
+            return AdapterResult(
+                records=records, next_cursor=next_cursor, bytes_read=bytes_read,
+                metadata={"topic": topic, "partitions": len(partitions), "messages_read": len(messages), "tombstones": tombstones, "security_protocol": security_protocol},
+            )
+        except HTTPException:
+            raise
+        except KafkaError as exc:
+            raise HTTPException(status_code=502, detail=f"Kafka consumer failed: {type(exc).__name__}") from exc
+        finally:
+            if consumer is not None:
+                try:
+                    consumer.close(autocommit=False)
+                except KafkaError:
+                    pass
+
+
 register_adapter(RestPullAdapter())
 register_adapter(SqlPullAdapter())
 register_adapter(S3PullAdapter())
 register_adapter(SftpPullAdapter())
+register_adapter(KafkaPullAdapter())
 _loaded_plugins = _load_plugins()
 
 
@@ -852,6 +986,8 @@ def create_runtime_credential(source_id: str, body: CredentialCreate, principal:
             raise HTTPException(status_code=422, detail="AWS credential metadata requires access_key_id")
         session_token = credential_metadata.pop("session_token", None)
         secret_value = json.dumps({"secret_access_key": body.secret, "session_token": session_token}, separators=(",", ":"))
+    elif body.credential_type == "kafka_sasl_plain" and not str(credential_metadata.get("username") or "").strip():
+        raise HTTPException(status_code=422, detail="Kafka SASL credential metadata requires username")
     row = ConnectorCredential(
         id=f"credential_{uuid.uuid4().hex}", project_id=source.project_id, source_id=source.id,
         credential_type=body.credential_type, encrypted_secret=_encrypt_secret(secret_value),

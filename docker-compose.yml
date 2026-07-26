@@ -56,7 +56,7 @@ services:
       - postgres
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.3.0
+    image: confluentinc/cp-zookeeper@sha256:3ace7c3475a58afa128d0ee05bb9a06474b99b48c9d536c33144133637786f7f
     container_name: ontology_zookeeper
     profiles: ["cdc"]
     environment:
@@ -64,7 +64,7 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
 
   kafka:
-    image: confluentinc/cp-kafka:7.3.0
+    image: confluentinc/cp-kafka@sha256:06e5d17d6c5163f3084ffb3c0a5f7f87ba87f35cc4739b598500b3db45dce35b
     container_name: ontology_kafka
     profiles: ["cdc"]
     depends_on:
