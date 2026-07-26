@@ -73,8 +73,9 @@ test("data onboarding previews a live connector with write-only credentials and 
     await expect(page.getByText("Live Browser Pump", { exact: true })).toBeVisible();
     await expect(page.getByText("SUCCEEDED", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Secret (write only)")).toHaveValue("");
-    await expect(page.getByRole("cell", { name: "s3" })).toBeVisible();
-    await expect(page.getByText("PLUGIN_REQUIRED", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("row", { name: /s3 AVAILABLE/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /sftp AVAILABLE/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /kafka AVAILABLE/ })).toBeVisible();
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -110,6 +111,22 @@ test("data onboarding exposes pinned-host SFTP configuration", async ({ page }, 
   await page.getByLabel("Authentication").selectOption("sftp_private_key");
   await expect(page.getByLabel("Private key (write only)")).toBeVisible();
   await expect(page.getByRole("row", { name: /sftp AVAILABLE/ })).toBeVisible();
+});
+
+test("data onboarding exposes durable Kafka partition ingestion configuration", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the structured connector workflow once on desktop.");
+  await page.goto("/workspace/imports");
+  await page.getByLabel("Adapter").selectOption("kafka");
+  await expect(page.getByLabel("Bootstrap servers")).toBeVisible();
+  await expect(page.getByLabel("Topic")).toBeVisible();
+  await expect(page.getByLabel("Security protocol")).toHaveValue("PLAINTEXT");
+  await expect(page.getByLabel("Authentication")).toHaveValue("none");
+  await page.getByLabel("Security protocol").selectOption("SASL_SSL");
+  await expect(page.getByLabel("SASL mechanism")).toBeVisible();
+  await expect(page.getByLabel("Authentication")).toHaveValue("kafka_sasl_plain");
+  await expect(page.getByLabel("Username")).toBeVisible();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "password");
+  await expect(page.getByRole("row", { name: /kafka AVAILABLE/ })).toBeVisible();
 });
 
 test("runtime operations shows durable telemetry, budgets, and SLO controls", async ({ page }, testInfo) => {

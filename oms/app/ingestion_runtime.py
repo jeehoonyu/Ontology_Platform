@@ -236,9 +236,10 @@ def _execute_sync(db: Session, run: IngestionRun, payload: Dict[str, Any]) -> Di
         source_records: List[Any] = adapter_result.records
     else:
         source_records = supplied_records if supplied_records is not None else list(sync.sample_records or [])
-    if sync.mode == "incremental":
+    adapter_managed_cursor = bool(live and adapter_result and adapter_result.next_cursor is not None)
+    if sync.mode == "incremental" and not live:
         if not sync.cursor_field:
-            raise HTTPException(status_code=422, detail="Incremental sync requires a cursor_field")
+            raise HTTPException(status_code=422, detail="Incremental sample sync requires a cursor_field")
 
         def newer(value: Any) -> bool:
             if previous_cursor is None:
@@ -249,23 +250,26 @@ def _execute_sync(db: Session, run: IngestionRun, payload: Dict[str, Any]) -> Di
                 return str(value) > str(previous_cursor)
 
         source_records = [row for row in source_records if isinstance(row, dict) and row.get(sync.cursor_field) is not None and newer(row.get(sync.cursor_field))]
+    elif sync.mode == "incremental" and not adapter_managed_cursor and not sync.cursor_field:
+        raise HTTPException(status_code=422, detail="Live incremental connector did not provide a cursor")
     records, rejected = _valid_records(db, run, source_records)
     payload_bytes = _payload_size(records)
     budget_checks = _budget_check(db, run.project_id, len(records), payload_bytes)
     asset.records = list(asset.records or []) + records
     asset.asset_schema = {**dict(asset.asset_schema or {}), "project_id": run.project_id, "last_ingestion_run_id": run.id, "source_adapter_id": connector_runtime.adapter_id_for_source(source) if live else "sample"}
     asset.updated_at = _now()
-    next_cursor = previous_cursor
-    if sync.mode == "incremental" and sync.cursor_field:
+    next_cursor = adapter_result.next_cursor if adapter_managed_cursor else previous_cursor
+    if sync.mode == "incremental" and not adapter_managed_cursor and sync.cursor_field:
         cursor_values = [row.get(sync.cursor_field) for row in records if row.get(sync.cursor_field) is not None]
         next_cursor = max(cursor_values) if cursor_values else previous_cursor
+    if sync.mode == "incremental":
         if state:
             state.last_value = {"value": next_cursor}
-            state.cursor_field = sync.cursor_field
+            state.cursor_field = sync.cursor_field or "__connector_cursor"
             state.runs += 1
             state.updated_at = _now()
         else:
-            db.add(connectivity_ops.SyncCursorState(sync_id=sync.id, cursor_field=sync.cursor_field, last_value={"value": next_cursor}, runs=1, updated_at=_now()))
+            db.add(connectivity_ops.SyncCursorState(sync_id=sync.id, cursor_field=sync.cursor_field or "__connector_cursor", last_value={"value": next_cursor}, runs=1, updated_at=_now()))
     sync_run = connectivity.SyncRun(
         id=f"sync_{run.id}", sync_id=sync.id, status="completed" if not rejected else "completed_with_errors",
         records_in=len(records) + rejected, records_out=len(records), created_at=run.started_at or _now(), completed_at=_now(),

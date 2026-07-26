@@ -146,7 +146,7 @@ with SessionLocal() as db:
 
 catalog = ok(client.get("/connectors/adapters"), "connector catalog")
 adapters = {row["id"]: row for row in catalog["adapters"]}
-assert adapters["sftp"]["available"] is True and adapters["kafka"]["available"] is False
+assert adapters["sftp"]["available"] is True and adapters["kafka"]["available"] is True
 assert adapters["sftp"]["config_schema"]["incremental_cursor_field"] == "_source_file_path"
 
 fingerprint = connector_runtime._host_key_fingerprint(SERVER_KEY)

@@ -9,4 +9,5 @@ python-multipart>=0.0.9   # required by FastAPI for multipart file uploads
 authlib>=1.3.2            # OIDC ID-token validation and JOSE support
 cryptography>=42.0.0      # encrypted connector credentials and OIDC crypto primitives
 paramiko>=3.4,<4          # pinned-host SFTP connector transport
+kafka-python>=2.0.2,<3    # Kafka partition-offset ingestion
 # pyarrow>=15.0.0         # optional — enables Parquet dataset uploads (guarded import)
