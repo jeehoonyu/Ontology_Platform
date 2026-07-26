@@ -24,16 +24,30 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import models, runtime, apps
+from . import models, models_action, runtime, apps, ops_control
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["workshop_runtime"])
 
 
-def _get_module(db: Session, module_id: str):
-    mod = db.get(apps.WorkshopModule, module_id)
-    if not mod:
-        raise HTTPException(status_code=404, detail=f"Workshop module '{module_id}' not found")
-    return mod
+def _get_module(db: Session, module_id: str, principal: Principal, permission: str = "view"):
+    return apps._get_workshop_module_or_404(db, module_id, principal, permission)
+
+
+def _object_type_project_id(db: Session, object_type_id: str) -> str:
+    object_type = db.get(models.ObjectType, object_type_id)
+    if not object_type:
+        raise HTTPException(status_code=422, detail=f"Object type '{object_type_id}' not found")
+    return str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+
+
+def _assert_object_type_project(db: Session, object_type_id: Optional[str], project_id: str) -> None:
+    if object_type_id and _object_type_project_id(db, object_type_id) != project_id:
+        raise HTTPException(status_code=403, detail={
+            "message": "Workshop cannot access an object type owned by another project",
+            "project_id": project_id,
+            "object_type_id": object_type_id,
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -98,17 +112,19 @@ def _transform(spec: Dict[str, Any], resolved: Dict[str, Any], state: Dict[str, 
     return vals
 
 
-def _resolve_one(db: Session, spec: Dict[str, Any], state: Dict[str, Any], resolved: Dict[str, Any]) -> Any:
+def _resolve_one(db: Session, spec: Dict[str, Any], state: Dict[str, Any], resolved: Dict[str, Any], project_id: str) -> Any:
     dt = spec.get("definition_type", "static")
     if dt == "static":
         return spec.get("value")
     if dt == "state":
         return state.get(spec.get("key"), spec.get("default"))
     if dt == "object_set":
+        _assert_object_type_project(db, spec.get("object_type_id"), project_id)
         rows, count = runtime._logic_object_rows(db, spec.get("object_type_id"), spec.get("filters", {}), int(spec.get("limit", 1000)))
         return {"object_type_id": spec.get("object_type_id"), "count": count,
                 "objects": [{"id": r.id, "properties": r.properties} for r in rows]}
     if dt == "object_set_aggregation":
+        _assert_object_type_project(db, spec.get("object_type_id"), project_id)
         rows, _ = runtime._logic_object_rows(db, spec.get("object_type_id"), spec.get("filters", {}), limit=10 ** 9)
         return _aggregate(rows, spec.get("op", "count"), spec.get("field"))
     if dt == "object_property":
@@ -117,12 +133,15 @@ def _resolve_one(db: Session, spec: Dict[str, Any], state: Dict[str, Any], resol
             oid = _val(spec["object_id_var"], resolved, state)
         oid = oid or spec.get("object_id")
         obj = db.get(models.ObjectInstance, oid) if oid else None
+        if obj:
+            _assert_object_type_project(db, obj.object_type_id, project_id)
         return (obj.properties or {}).get(spec.get("property")) if obj else None
     if dt == "function":
         from . import ontology_functions as _of
         fn = db.get(_of.OntologyFunction, spec.get("function_id"))
         if not fn:
             return None
+        _assert_object_type_project(db, fn.object_type_id, project_id)
         insts = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == fn.object_type_id).all() if fn.object_type_id else []
         expr = fn.expression or {}
         return _aggregate(insts, expr.get("op", "count"), expr.get("field"))
@@ -131,7 +150,7 @@ def _resolve_one(db: Session, spec: Dict[str, Any], state: Dict[str, Any], resol
     return spec.get("value")
 
 
-def _resolve_variables(db: Session, variables: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_variables(db: Session, variables: Dict[str, Any], state: Dict[str, Any], project_id: str = "default") -> Dict[str, Any]:
     resolved: Dict[str, Any] = {}
     pending = {k: v for k, v in (variables or {}).items() if isinstance(v, dict)}
     # plain (non-dict) variables are treated as static literals
@@ -146,7 +165,7 @@ def _resolve_variables(db: Session, variables: Dict[str, Any], state: Dict[str, 
             deps = _deps(spec)
             if any(d not in resolved and d not in state for d in deps):
                 continue
-            resolved[name] = _resolve_one(db, spec, state, resolved)
+            resolved[name] = _resolve_one(db, spec, state, resolved, project_id)
             del pending[name]
             progressed = True
         if not progressed:
@@ -159,7 +178,7 @@ def _resolve_variables(db: Session, variables: Dict[str, Any], state: Dict[str, 
 # ---------------------------------------------------------------------------
 # Widget rendering
 # ---------------------------------------------------------------------------
-def _render_widget(db: Session, widget: Dict[str, Any], resolved: Dict[str, Any]) -> Dict[str, Any]:
+def _render_widget(db: Session, widget: Dict[str, Any], resolved: Dict[str, Any], project_id: str) -> Dict[str, Any]:
     wtype = widget.get("type")
     out: Dict[str, Any] = {"type": wtype, "title": widget.get("title")}
     var = widget.get("variable") or (widget.get("config") or {}).get("variable")
@@ -169,6 +188,7 @@ def _render_widget(db: Session, widget: Dict[str, Any], resolved: Dict[str, Any]
             out["row_count"] = bound.get("count", len(bound["objects"]))
             out["sample_ids"] = [o["id"] for o in bound["objects"][:5]]
         elif widget.get("object_type_id"):
+            _assert_object_type_project(db, widget["object_type_id"], project_id)
             rows, count = runtime._logic_object_rows(db, widget["object_type_id"], widget.get("filters", {}), 5)
             out["row_count"] = count
             out["sample_ids"] = [r.id for r in rows]
@@ -187,7 +207,7 @@ def _render_widget(db: Session, widget: Dict[str, Any], resolved: Dict[str, Any]
 # ---------------------------------------------------------------------------
 # Event engine
 # ---------------------------------------------------------------------------
-def _apply_event(db: Session, event: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+def _apply_event(db: Session, event: Dict[str, Any], state: Dict[str, Any], principal: Principal, project_id: str) -> Dict[str, Any]:
     etype = event.get("type")
     effect: Dict[str, Any] = {"type": etype, "status": "applied"}
     if etype == "set_variable":
@@ -211,8 +231,48 @@ def _apply_event(db: Session, event: Dict[str, Any], state: Dict[str, Any]) -> D
                 k: (state.get(v[1:]) if isinstance(v, str) and v.startswith("$") else v)
                 for k, v in (event.get("parameters") or {}).items()
             }
-            mutated = runtime.apply_action_mutations(db, action_type=action, parameters=params, actor="workshop")
-            effect = {"type": etype, "status": "applied", "action_type_id": action.id, "mutated_object_ids": mutated}
+            rules = action.rules or {}
+            requires_approval = bool(
+                rules.get("requires_approval")
+                or rules.get("approval_required")
+                or str(rules.get("risk_level", "")).lower() in {"high", "critical"}
+            )
+            if requires_approval:
+                approval_id = str(uuid.uuid4())
+                db.add(models_action.ApprovalRequest(
+                    id=approval_id,
+                    action_type_id=action.id,
+                    requester=principal.id,
+                    parameters=params,
+                    status=models_action.ApprovalStatus.PENDING.value,
+                ))
+                apps._append_audit(
+                    db,
+                    actor=principal.id,
+                    event_type="apps.workshop.action_approval_requested",
+                    subject_type="approval_request",
+                    subject_id=approval_id,
+                    payload={"project_id": project_id, "action_type_id": action.id},
+                )
+                ops_control.record_ops_event(
+                    db,
+                    source="workshop",
+                    event_type="workshop.action.approval_requested",
+                    severity="high",
+                    title=f"Workshop action approval requested for {action.id}",
+                    subject_type="approval_request",
+                    subject_id=approval_id,
+                    payload={"project_id": project_id, "action_type_id": action.id, "workshop_event": event.get("id")},
+                )
+                effect = {
+                    "type": etype,
+                    "status": "approval_required",
+                    "action_type_id": action.id,
+                    "approval_request_id": approval_id,
+                }
+            else:
+                mutated = runtime.apply_action_mutations(db, action_type=action, parameters=params, actor=principal.id)
+                effect = {"type": etype, "status": "applied", "action_type_id": action.id, "mutated_object_ids": mutated}
     else:
         effect = {"type": etype, "status": "ignored"}
     return effect
@@ -293,41 +353,41 @@ def build_dependency_graph(variables: Dict[str, Any], widgets: List[Dict[str, An
 
 
 @router.get("/apps/workshop/{module_id}/dependencies")
-def workshop_dependencies(module_id: str, db: Session = Depends(get_db)):
-    mod = _get_module(db, module_id)
+def workshop_dependencies(module_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    mod = _get_module(db, module_id, principal, "view")
     graph = build_dependency_graph(mod.variables or {}, list(mod.widgets or []))
     return {"module_id": module_id, **graph}
 
 
 @router.post("/apps/workshop/{module_id}/resolve")
-def resolve_variables(module_id: str, body: StateRequest, db: Session = Depends(get_db)):
-    mod = _get_module(db, module_id)
-    resolved = _resolve_variables(db, mod.variables or {}, body.state)
+def resolve_variables(module_id: str, body: StateRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    mod = _get_module(db, module_id, principal, "view")
+    resolved = _resolve_variables(db, mod.variables or {}, body.state, mod.project_id)
     return {"module_id": module_id, "state": body.state, "variables": resolved}
 
 
 @router.post("/apps/workshop/{module_id}/render-live")
-def render_live(module_id: str, body: StateRequest, db: Session = Depends(get_db)):
-    mod = _get_module(db, module_id)
-    resolved = _resolve_variables(db, mod.variables or {}, body.state)
-    widgets = [_render_widget(db, w, resolved) for w in (mod.widgets or [])]
+def render_live(module_id: str, body: StateRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    mod = _get_module(db, module_id, principal, "view")
+    resolved = _resolve_variables(db, mod.variables or {}, body.state, mod.project_id)
+    widgets = [_render_widget(db, w, resolved, mod.project_id) for w in (mod.widgets or [])]
     return {"module_id": module_id, "page": body.state.get("_page"),
             "variables": resolved, "widgets": widgets}
 
 
 @router.post("/apps/workshop/{module_id}/event")
-def fire_events(module_id: str, body: EventRequest, db: Session = Depends(get_db)):
-    mod = _get_module(db, module_id)
+def fire_events(module_id: str, body: EventRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    mod = _get_module(db, module_id, principal, "execute")
     state = dict(body.state)
     effects: List[Dict[str, Any]] = []
     proposed_actions: List[Dict[str, Any]] = []
     for event in body.events:  # events execute sequentially
-        effect = _apply_event(db, event, state)
+        effect = _apply_event(db, event, state, principal, mod.project_id)
         effects.append(effect)
         if effect.get("type") == "apply_action" and effect.get("status") == "applied":
             proposed_actions.append({"action_type_id": effect["action_type_id"],
                                      "mutated_object_ids": effect["mutated_object_ids"]})
     db.commit()
-    resolved = _resolve_variables(db, mod.variables or {}, state)
+    resolved = _resolve_variables(db, mod.variables or {}, state, mod.project_id)
     return {"module_id": module_id, "state": state, "effects": effects,
             "applied_actions": proposed_actions, "variables": resolved}
