@@ -14,7 +14,8 @@ from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, tenancy
+from .production_auth import Principal, require_permission
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy ORM models
@@ -25,6 +26,7 @@ class ModelingObjective(Base):
     __tablename__ = "modeling_objectives"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     problem_type: Mapped[str] = mapped_column(String)  # classification | regression
@@ -40,6 +42,7 @@ class ModelSubmission(Base):
     __tablename__ = "model_submissions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     algorithm: Mapped[str] = mapped_column(String)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -62,6 +65,7 @@ class ModelDeployment(Base):
     __tablename__ = "model_deployments"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     mode: Mapped[str] = mapped_column(String, default="live")  # live | batch
@@ -78,6 +82,7 @@ class ModelDeployment(Base):
 
 class ModelingObjectiveCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     problem_type: str = Field(..., pattern="^(classification|regression)$")
@@ -90,6 +95,7 @@ class ModelingObjectiveRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     description: Optional[str]
     problem_type: str
@@ -104,6 +110,7 @@ class ModelSubmissionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     objective_id: str
     algorithm: str
     metrics: Dict[str, Any]
@@ -150,6 +157,7 @@ class ModelDeploymentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     objective_id: str
     submission_id: str
     mode: str
@@ -254,10 +262,61 @@ def _audit(
     )
 
 
+def _asset_project_id(db: Session, asset_id: str) -> str:
+    asset = db.get(models.DataAsset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"DataAsset '{asset_id}' not found")
+    return str((asset.asset_schema or {}).get("project_id") or "default")
+
+
+def _assert_asset_project(db: Session, asset_id: Optional[str], project_id: str) -> None:
+    if not asset_id:
+        return
+    asset = db.get(models.DataAsset, asset_id)
+    # Modeling accepts external dataset references; enforce ownership whenever
+    # the identifier resolves to a locally governed DataAsset.
+    if asset and str((asset.asset_schema or {}).get("project_id") or "default") != project_id:
+        raise HTTPException(status_code=403, detail="Modeling dataset belongs to another project")
+
+
+def _objective_for(db: Session, objective_id: str, principal: Principal, permission: str) -> ModelingObjective:
+    objective = db.get(ModelingObjective, objective_id)
+    if not objective:
+        raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
+    tenancy.assert_project_permission(db, principal, objective.project_id, permission)
+    _assert_asset_project(db, objective.input_asset_id, objective.project_id)
+    return objective
+
+
+def _submission_for(db: Session, submission_id: str, principal: Principal, permission: str) -> ModelSubmission:
+    submission = db.get(ModelSubmission, submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail=f"ModelSubmission '{submission_id}' not found")
+    tenancy.assert_project_permission(db, principal, submission.project_id, permission)
+    objective = db.get(ModelingObjective, submission.objective_id)
+    if not objective or objective.project_id != submission.project_id:
+        raise HTTPException(status_code=409, detail="Model submission has an invalid project or objective reference")
+    return submission
+
+
+def _deployment_for(db: Session, deployment_id: str, principal: Principal, permission: str) -> ModelDeployment:
+    deployment = db.get(ModelDeployment, deployment_id)
+    if not deployment:
+        raise HTTPException(status_code=404, detail=f"ModelDeployment '{deployment_id}' not found")
+    tenancy.assert_project_permission(db, principal, deployment.project_id, permission)
+    objective = db.get(ModelingObjective, deployment.objective_id)
+    submission = db.get(ModelSubmission, deployment.submission_id)
+    if not objective or not submission or objective.project_id != deployment.project_id or submission.project_id != deployment.project_id:
+        raise HTTPException(status_code=409, detail="Model deployment has an invalid cross-project reference")
+    return deployment
+
+
 # --- Modeling Objectives ---
 
 @router.post("/modeling/objectives", response_model=ModelingObjectiveRead)
-def create_objective(body: ModelingObjectiveCreate, db: Session = Depends(get_db)):
+def create_objective(body: ModelingObjectiveCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
+    _assert_asset_project(db, body.input_asset_id, body.project_id)
     obj_id = body.id or uuid.uuid4().hex
     existing = db.query(ModelingObjective).filter(ModelingObjective.id == obj_id).first()
     if existing:
@@ -265,6 +324,7 @@ def create_objective(body: ModelingObjectiveCreate, db: Session = Depends(get_db
     now = _now()
     row = ModelingObjective(
         id=obj_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         description=body.description,
         problem_type=body.problem_type,
@@ -275,32 +335,36 @@ def create_objective(body: ModelingObjectiveCreate, db: Session = Depends(get_db
         updated_at=now,
     )
     db.add(row)
-    _audit(db, "modeling.objective.created", "modeling_objective", obj_id, body.model_dump())
+    _audit(db, "modeling.objective.created", "modeling_objective", obj_id, body.model_dump(), actor=principal.id)
     db.commit()
     db.refresh(row)
     return row
 
 
 @router.get("/modeling/objectives", response_model=List[ModelingObjectiveRead])
-def list_objectives(db: Session = Depends(get_db)):
-    return db.query(ModelingObjective).order_by(ModelingObjective.created_at.desc()).all()
+def list_objectives(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(ModelingObjective)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ModelingObjective.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(ModelingObjective.project_id.in_(accessible)) if accessible else query.filter(ModelingObjective.id == "__none__")
+    return query.order_by(ModelingObjective.created_at.desc()).all()
 
 
 @router.get("/modeling/objectives/{objective_id}", response_model=ModelingObjectiveRead)
-def get_objective(objective_id: str, db: Session = Depends(get_db)):
-    row = db.query(ModelingObjective).filter(ModelingObjective.id == objective_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
-    return row
+def get_objective(objective_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    return _objective_for(db, objective_id, principal, "view")
 
 
 # --- Training ---
 
 @router.post("/modeling/objectives/{objective_id}/train", response_model=ModelSubmissionRead)
-def train_model(objective_id: str, body: TrainRequest, db: Session = Depends(get_db)):
-    objective = db.query(ModelingObjective).filter(ModelingObjective.id == objective_id).first()
-    if not objective:
-        raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
+def train_model(objective_id: str, body: TrainRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    objective = _objective_for(db, objective_id, principal, "execute")
+    _assert_asset_project(db, body.training_dataset_id, objective.project_id)
 
     # Validate the optional AutoML trainer family.
     trainer_type = body.trainer_type
@@ -325,6 +389,7 @@ def train_model(objective_id: str, body: TrainRequest, db: Session = Depends(get
     submission_id = uuid.uuid4().hex
     row = ModelSubmission(
         id=submission_id,
+        project_id=objective.project_id,
         objective_id=objective_id,
         algorithm=algorithm,
         metrics=metrics,
@@ -346,6 +411,7 @@ def train_model(objective_id: str, body: TrainRequest, db: Session = Depends(get
         "model_submission",
         submission_id,
         {
+            "project_id": objective.project_id,
             "objective_id": objective_id,
             "algorithm": algorithm,
             "trainer_type": trainer_type,
@@ -355,7 +421,7 @@ def train_model(objective_id: str, body: TrainRequest, db: Session = Depends(get
             "quality_preset": body.quality_preset,
             "status": "success",
             "metrics": metrics,
-        },
+        }, actor=principal.id,
     )
     db.commit()
     db.refresh(row)
@@ -363,30 +429,24 @@ def train_model(objective_id: str, body: TrainRequest, db: Session = Depends(get
 
 
 @router.get("/modeling/objectives/{objective_id}/submissions", response_model=List[ModelSubmissionRead])
-def list_objective_submissions(objective_id: str, db: Session = Depends(get_db)):
-    objective = db.query(ModelingObjective).filter(ModelingObjective.id == objective_id).first()
-    if not objective:
-        raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
+def list_objective_submissions(objective_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    objective = _objective_for(db, objective_id, principal, "view")
     return db.query(ModelSubmission).filter(
-        ModelSubmission.objective_id == objective_id
+        ModelSubmission.objective_id == objective_id,
+        ModelSubmission.project_id == objective.project_id,
     ).order_by(ModelSubmission.created_at.desc()).all()
 
 
 @router.get("/modeling/submissions/{submission_id}", response_model=ModelSubmissionRead)
-def get_model_submission(submission_id: str, db: Session = Depends(get_db)):
-    row = db.query(ModelSubmission).filter(ModelSubmission.id == submission_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"ModelSubmission '{submission_id}' not found")
-    return row
+def get_model_submission(submission_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    return _submission_for(db, submission_id, principal, "view")
 
 
 # --- Release ---
 
 @router.post("/modeling/objectives/{objective_id}/release", response_model=ModelSubmissionRead)
-def release_model(objective_id: str, body: ReleaseRequest, db: Session = Depends(get_db)):
-    objective = db.query(ModelingObjective).filter(ModelingObjective.id == objective_id).first()
-    if not objective:
-        raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
+def release_model(objective_id: str, body: ReleaseRequest, principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
+    objective = _objective_for(db, objective_id, principal, "publish")
 
     target = db.query(ModelSubmission).filter(
         ModelSubmission.id == body.submission_id,
@@ -394,10 +454,13 @@ def release_model(objective_id: str, body: ReleaseRequest, db: Session = Depends
     ).first()
     if not target:
         raise HTTPException(status_code=404, detail=f"ModelSubmission '{body.submission_id}' not found for objective")
+    if target.project_id != objective.project_id:
+        raise HTTPException(status_code=409, detail="Model submission belongs to another project")
 
     # Mark all others as not released, then mark target
     db.query(ModelSubmission).filter(
         ModelSubmission.objective_id == objective_id,
+        ModelSubmission.project_id == objective.project_id,
         ModelSubmission.released == True,  # noqa: E712
     ).update({"released": False})
     target.released = True
@@ -407,7 +470,7 @@ def release_model(objective_id: str, body: ReleaseRequest, db: Session = Depends
         "modeling.submission.released",
         "model_submission",
         body.submission_id,
-        {"objective_id": objective_id},
+        {"project_id": objective.project_id, "objective_id": objective_id}, actor=principal.id,
     )
     db.commit()
     db.refresh(target)
@@ -417,12 +480,10 @@ def release_model(objective_id: str, body: ReleaseRequest, db: Session = Depends
 # --- Deployments ---
 
 @router.post("/modeling/deployments", response_model=ModelDeploymentRead)
-def create_deployment(body: ModelDeploymentCreate, db: Session = Depends(get_db)):
+def create_deployment(body: ModelDeploymentCreate, principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
     dep_id = body.id or uuid.uuid4().hex
 
-    objective = db.query(ModelingObjective).filter(ModelingObjective.id == body.objective_id).first()
-    if not objective:
-        raise HTTPException(status_code=404, detail=f"ModelingObjective '{body.objective_id}' not found")
+    objective = _objective_for(db, body.objective_id, principal, "deploy")
 
     submission = db.query(ModelSubmission).filter(
         ModelSubmission.id == body.submission_id,
@@ -430,11 +491,14 @@ def create_deployment(body: ModelDeploymentCreate, db: Session = Depends(get_db)
     ).first()
     if not submission:
         raise HTTPException(status_code=404, detail=f"ModelSubmission '{body.submission_id}' not found")
+    if submission.project_id != objective.project_id:
+        raise HTTPException(status_code=409, detail="Model submission belongs to another project")
     if not submission.released:
         raise HTTPException(status_code=400, detail="ModelSubmission is not released; release it before deploying")
 
     row = ModelDeployment(
         id=dep_id,
+        project_id=objective.project_id,
         objective_id=body.objective_id,
         submission_id=body.submission_id,
         mode=body.mode,
@@ -447,7 +511,7 @@ def create_deployment(body: ModelDeploymentCreate, db: Session = Depends(get_db)
         "modeling.deployment.created",
         "model_deployment",
         dep_id,
-        {"objective_id": body.objective_id, "submission_id": body.submission_id, "mode": body.mode},
+        {"project_id": objective.project_id, "objective_id": body.objective_id, "submission_id": body.submission_id, "mode": body.mode}, actor=principal.id,
     )
     db.commit()
     db.refresh(row)
@@ -455,8 +519,16 @@ def create_deployment(body: ModelDeploymentCreate, db: Session = Depends(get_db)
 
 
 @router.get("/modeling/deployments", response_model=List[ModelDeploymentRead])
-def list_deployments(db: Session = Depends(get_db)):
-    return db.query(ModelDeployment).order_by(ModelDeployment.created_at.desc()).all()
+def list_deployments(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(ModelDeployment)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ModelDeployment.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(ModelDeployment.project_id.in_(accessible)) if accessible else query.filter(ModelDeployment.id == "__none__")
+    return query.order_by(ModelDeployment.created_at.desc()).all()
 
 
 # --- Inference ---
@@ -504,6 +576,7 @@ def _record_modelops_prediction_log(
 def infer(
     deployment_id: str,
     body: Dict[str, Any] = Body(...),
+    principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Query a live deployment.
@@ -518,9 +591,7 @@ def infer(
     * **Legacy shape** — ``{"records": [{...}, ...]}`` returns the original
       ``{"predictions": [...]}`` response for backward compatibility.
     """
-    deployment = db.query(ModelDeployment).filter(ModelDeployment.id == deployment_id).first()
-    if not deployment:
-        raise HTTPException(status_code=404, detail=f"ModelDeployment '{deployment_id}' not found")
+    deployment = _deployment_for(db, deployment_id, principal, "execute")
     if deployment.status != "running":
         raise HTTPException(status_code=400, detail="ModelDeployment is not in running status")
 
