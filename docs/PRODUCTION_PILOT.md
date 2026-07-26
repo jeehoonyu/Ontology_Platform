@@ -60,7 +60,7 @@ For the complete release gate, run the self-cleaning acceptance rehearsal instea
 
 It generates temporary secrets, starts digest-pinned Keycloak and Postgres services, registers the declared `organization_id` and `project_ids` user-profile attributes, and runs the production browser workflow. The workflow verifies PKCE-backed OIDC sessions, administrator/viewer RBAC, organization boundary enforcement, 50 concurrent authenticated reads, the Asset Reliability approval/action/report path, and visual workspaces. The gate then restarts the API, reruns the browser acceptance against the preserved Postgres state, executes the isolated fresh-volume backup/restore rehearsal, and removes all temporary containers and volumes. Use `-KeepStack` only for troubleshooting and `-SkipRecovery` only when the separate recovery gate has already passed for the same build.
 
-The same gate is available as the `Production acceptance` GitHub Actions workflow. Pull requests that change runtime, deployment, frontend, migration, or recovery files trigger it automatically; `workflow_dispatch` supports release-candidate rehearsals.
+The same gate is available as the manually dispatched `Production acceptance` GitHub Actions workflow. Enable a protected pull-request trigger when the repository has Linux Actions capacity; until then, the locally executed gate above is the authoritative release evidence and avoids treating account billing failures as product failures.
 
 The bundled Keycloak realm and user-profile files are demonstration fixtures. They are not an internet-facing identity service. A production identity provider must emit equivalent tenant claims and restrict their administration to trusted identity operators.
 
