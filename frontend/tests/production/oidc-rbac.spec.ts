@@ -49,6 +49,61 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   });
   expect(adminMutation.status).toBe(201);
 
+  const onboarding = await page.evaluate(async (suffix) => {
+    const request = async (path: string, method = "GET", body?: unknown) => {
+      const response = await fetch(path, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      });
+      const payload = await response.json();
+      return { status: response.status, body: payload };
+    };
+    const jobId = `pilot-import-${suffix}`;
+    const datasetId = `pilot-assets-${suffix}`;
+    const draftId = `pilot-assets-draft-${suffix}`;
+    const objectTypeId = `pilot_asset_${suffix}`;
+    const created = await request("/imports/csv", "POST", {
+      id: jobId,
+      project_id: "default",
+      filename: "organization-assets.csv",
+      display_name: "Organization Assets",
+      content: `asset_id,name,status,latitude,longitude\norg-asset-1-${suffix},Main Pump,DEGRADED,37.79,-122.40\norg-asset-2-${suffix},Backup Pump,RUNNING,37.78,-122.41\n`
+    });
+    const validated = await request(`/imports/jobs/${jobId}/validate`, "POST", { template: "asset" });
+    const generated = await request(`/imports/jobs/${jobId}/generate-ontology-draft`, "POST", {
+      draft_id: draftId,
+      object_type_id: objectTypeId,
+      promote_dataset_id: datasetId,
+      include_actions: true,
+      create_pipeline_graph: true
+    });
+    const draftValidation = await request(`/ontology-generator/drafts/${draftId}/validate`, "POST");
+    const applied = await request(`/ontology-generator/drafts/${draftId}/apply`, "POST", {});
+    const delivered = applied.status === 200
+      ? await request(`/pipeline-builder/graphs/${applied.body.pipeline_graph_id}/deliver`, "POST", {})
+      : { status: 0, body: {} };
+    const objects = await request(`/objects/${objectTypeId}`);
+    const detail = await request(`/imports/jobs/${jobId}`);
+    const outsideProject = await request("/imports/csv", "POST", {
+      project_id: "outside-project",
+      content: "asset_id,name\nforbidden,Forbidden Asset\n"
+    });
+    return { created, validated, generated, draftValidation, applied, delivered, objects, detail, outsideProject };
+  }, adminMutation.body.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12));
+  expect(onboarding.created.status).toBe(201);
+  expect(onboarding.created.body.project_id).toBe("default");
+  expect(onboarding.validated.body.validation.status).toBe("READY");
+  expect(onboarding.generated.status).toBe(200);
+  expect(onboarding.generated.body.draft.draft.__project_id).toBe("default");
+  expect(["PASS", "WARN"]).toContain(onboarding.draftValidation.body.status);
+  expect(onboarding.applied.status).toBe(200);
+  expect(onboarding.delivered.status).toBe(200);
+  expect(onboarding.objects.body).toHaveLength(2);
+  expect(onboarding.detail.body.project_id).toBe("default");
+  expect(onboarding.outsideProject.status).toBe(403);
+  expect(onboarding.outsideProject.body.detail.project_id).toBe("outside-project");
+
   const tenantBoundary = await page.evaluate(async () => {
     const response = await fetch("/tenancy/organizations", {
       method: "POST",
@@ -386,9 +441,15 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ artifact_type: "workshop", display_name: "Forbidden", state: { widgets: [] } })
     });
-    return { read: read.status, edit: edit.status, detail: await edit.json() };
+    const importAttempt = await fetch("/imports/csv", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project_id: "default", content: "asset_id,name\nforbidden,Forbidden\n" })
+    });
+    return { read: read.status, edit: edit.status, detail: await edit.json(), importStatus: importAttempt.status };
   });
   expect(viewerAccess.read).toBe(200);
   expect(viewerAccess.edit).toBe(403);
+  expect(viewerAccess.importStatus).toBe(403);
   expect(viewerAccess.detail.detail).toContain("Permission 'edit' is required");
 });

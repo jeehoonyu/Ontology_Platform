@@ -22,8 +22,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, ontology_generator, ops_control
+from . import models, models_action, ontology_generator, ops_control, tenancy
 from .database import Base, get_db
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["imports"])
 
@@ -32,6 +33,7 @@ class ImportJob(Base):
     __tablename__ = "import_jobs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source_type: Mapped[str] = mapped_column(String, index=True)
     filename: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -47,6 +49,7 @@ class ImportJob(Base):
 
 
 class CsvImportRequest(BaseModel):
+    project_id: str = "default"
     id: Optional[str] = None
     filename: Optional[str] = None
     display_name: Optional[str] = None
@@ -56,6 +59,7 @@ class CsvImportRequest(BaseModel):
 
 
 class JsonImportRequest(BaseModel):
+    project_id: str = "default"
     id: Optional[str] = None
     filename: Optional[str] = None
     display_name: Optional[str] = None
@@ -201,6 +205,23 @@ def _new_id(prefix: str) -> str:
 def _ensure_tables(db: Session) -> None:
     ImportJob.__table__.create(bind=db.get_bind(), checkfirst=True)
     ops_control._ensure_tables(db)
+
+
+def _job_for(db: Session, job_id: str, principal: Principal, permission: str) -> ImportJob:
+    _ensure_tables(db)
+    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+    tenancy.assert_project_permission(db, principal, job.project_id, permission)
+    return job
+
+
+def _accessible_jobs(db: Session, principal: Principal, permission: str = "view"):
+    query = db.query(ImportJob)
+    project_ids = tenancy.accessible_project_ids(db, principal, permission)
+    if project_ids is not None:
+        query = query.filter(ImportJob.project_id.in_(project_ids)) if project_ids else query.filter(ImportJob.id == "__none__")
+    return query
 
 
 def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any]) -> None:
@@ -721,6 +742,7 @@ def _job_dict(row: ImportJob, include_records: bool = False) -> Dict[str, Any]:
     schema = row.inferred_schema or {}
     payload = {
         "id": row.id,
+        "project_id": row.project_id,
         "source_type": row.source_type,
         "filename": row.filename,
         "display_name": row.display_name,
@@ -746,6 +768,7 @@ def _job_dict(row: ImportJob, include_records: bool = False) -> Dict[str, Any]:
 def _create_job(
     db: Session,
     *,
+    project_id: str,
     source_type: str,
     filename: Optional[str],
     display_name: Optional[str],
@@ -764,6 +787,7 @@ def _create_job(
     now = _now()
     job = ImportJob(
         id=job_id,
+        project_id=project_id,
         source_type=source_type,
         filename=filename,
         display_name=base_name,
@@ -778,6 +802,7 @@ def _create_job(
     )
     db.add(job)
     _audit(db, actor, "import.job.created", "import_job", job.id, {
+        "project_id": project_id,
         "source_type": source_type,
         "filename": filename,
         "status": job.status,
@@ -792,7 +817,7 @@ def _create_job(
         title=f"Import job {job.status}: {base_name}",
         subject_type="import_job",
         subject_id=job.id,
-        payload={"source_type": source_type, "record_count": len(records), "errors": errors},
+        payload={"project_id": project_id, "source_type": source_type, "record_count": len(records), "errors": errors},
     )
     db.commit()
     db.refresh(job)
@@ -800,10 +825,12 @@ def _create_job(
 
 
 @router.post("/imports/csv", status_code=201)
-def import_csv(body: CsvImportRequest, db: Session = Depends(get_db)):
+def import_csv(body: CsvImportRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     records, errors = _parse_csv(body.content, body.delimiter)
     job = _create_job(
         db,
+        project_id=body.project_id,
         source_type="csv",
         filename=body.filename,
         display_name=body.display_name,
@@ -811,15 +838,18 @@ def import_csv(body: CsvImportRequest, db: Session = Depends(get_db)):
         records=records,
         errors=errors,
         requested_id=body.id,
+        actor=principal.id,
     )
     return _job_dict(job)
 
 
 @router.post("/imports/json", status_code=201)
-def import_json(body: JsonImportRequest, db: Session = Depends(get_db)):
+def import_json(body: JsonImportRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     records, errors = _parse_json(body)
     job = _create_job(
         db,
+        project_id=body.project_id,
         source_type="json",
         filename=body.filename,
         display_name=body.display_name,
@@ -827,6 +857,7 @@ def import_json(body: JsonImportRequest, db: Session = Depends(get_db)):
         records=records,
         errors=errors,
         requested_id=body.id,
+        actor=principal.id,
     )
     return _job_dict(job)
 
@@ -838,8 +869,10 @@ async def import_file(
     filename: Optional[str] = None,
     display_name: Optional[str] = None,
     target_dataset_id: Optional[str] = None,
+    project_id: str = "default",
     source_type: Optional[str] = None,
     template: Optional[str] = None,
+    principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
     content_type = request.headers.get("content-type", "")
@@ -853,6 +886,8 @@ async def import_file(
         content = parsed.get("file_content") or ""
         upload_filename = upload_filename or parsed.get("filename")
     requested_id = id or fields.get("id") or None
+    selected_project_id = str(fields.get("project_id") or project_id)
+    tenancy.assert_project_permission(db, principal, selected_project_id, "edit")
     display = display_name or fields.get("display_name") or upload_filename
     dataset_id = target_dataset_id or fields.get("target_dataset_id") or None
     kind = (source_type or fields.get("source_type") or _source_type_from_filename(upload_filename, content_type)).lower()
@@ -864,6 +899,7 @@ async def import_file(
         raise HTTPException(status_code=400, detail="source_type must be csv or json")
     job = _create_job(
         db,
+        project_id=selected_project_id,
         source_type=kind,
         filename=upload_filename,
         display_name=display,
@@ -871,19 +907,20 @@ async def import_file(
         records=records,
         errors=errors,
         requested_id=requested_id,
+        actor=principal.id,
     )
     selected_template = template or fields.get("template")
     if selected_template:
         validation = _validate_job_template(job, selected_template)
         _apply_validation(job, validation)
-        _audit(db, "workspace", "import.job.validated", "import_job", job.id, validation)
+        _audit(db, principal.id, "import.job.validated", "import_job", job.id, validation)
         db.commit()
         db.refresh(job)
     return _job_dict(job)
 
 
 @router.get("/imports/templates")
-def list_import_templates():
+def list_import_templates(_principal: Principal = Depends(require_permission("view"))):
     return {
         "templates": [
             {
@@ -899,7 +936,7 @@ def list_import_templates():
 
 
 @router.get("/imports/templates/{template_id}/sample")
-def import_template_sample(template_id: str, format: str = Query("csv", pattern="^(csv|json)$")):
+def import_template_sample(template_id: str, format: str = Query("csv", pattern="^(csv|json)$"), _principal: Principal = Depends(require_permission("view"))):
     template = _template_or_404(template_id)
     rows = template["sample"]
     if format == "json":
@@ -915,11 +952,16 @@ def import_template_sample(template_id: str, format: str = Query("csv", pattern=
 @router.get("/imports/jobs")
 def list_import_jobs(
     status: Optional[str] = None,
+    project_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=500),
+    principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ):
     _ensure_tables(db)
-    query = db.query(ImportJob)
+    query = _accessible_jobs(db, principal)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ImportJob.project_id == project_id)
     if status:
         query = query.filter(ImportJob.status == status.upper())
     rows = query.order_by(ImportJob.created_at.desc()).limit(limit).all()
@@ -927,9 +969,13 @@ def list_import_jobs(
 
 
 @router.get("/ui-state/imports")
-def imports_ui_state(db: Session = Depends(get_db)):
+def imports_ui_state(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     _ensure_tables(db)
-    jobs = db.query(ImportJob).order_by(ImportJob.updated_at.desc()).limit(50).all()
+    query = _accessible_jobs(db, principal)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ImportJob.project_id == project_id)
+    jobs = query.order_by(ImportJob.updated_at.desc()).limit(50).all()
     job_payloads = [_job_dict(row) for row in jobs]
     status_counts: Dict[str, int] = {}
     for row in jobs:
@@ -994,7 +1040,7 @@ def imports_ui_state(db: Session = Depends(get_db)):
             "title": "Promote to dataset",
             "status": "complete" if promoted_jobs else ("available" if jobs else "blocked"),
             "description": "Create a local DataAsset that can feed ontology generation and pipelines.",
-            "metrics": {"promoted": len(promoted_jobs), "dataset_count": db.query(models.DataAsset).count()},
+            "metrics": {"promoted": len(promoted_jobs), "dataset_count": len({job.target_dataset_id for job in promoted_jobs if job.target_dataset_id})},
             "rows": [{"job_id": job.id, "dataset_id": job.target_dataset_id, "status": job.status} for job in promoted_jobs[:8]],
             "href": "/workspace/ontology",
         },
@@ -1028,20 +1074,14 @@ def imports_ui_state(db: Session = Depends(get_db)):
 
 
 @router.get("/imports/jobs/{job_id}")
-def get_import_job(job_id: str, include_records: bool = False, db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def get_import_job(job_id: str, include_records: bool = False, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "view")
     return _job_dict(job, include_records=include_records)
 
 
 @router.get("/imports/jobs/{job_id}/mapping-suggestions")
-def import_mapping_suggestions(job_id: str, template: str = Query("asset"), db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def import_mapping_suggestions(job_id: str, template: str = Query("asset"), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "view")
     template_spec = _template_or_404(template)
     fields = _field_order(job.records or [])
     mapping = _suggest_mapping(fields, template)
@@ -1076,11 +1116,8 @@ def import_mapping_suggestions(job_id: str, template: str = Query("asset"), db: 
 
 
 @router.patch("/imports/jobs/{job_id}")
-def patch_import_job(job_id: str, body: ImportJobPatchRequest, db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def patch_import_job(job_id: str, body: ImportJobPatchRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "edit")
     if body.display_name is not None:
         job.display_name = body.display_name
     if body.target_dataset_id is not None:
@@ -1094,7 +1131,7 @@ def patch_import_job(job_id: str, body: ImportJobPatchRequest, db: Session = Dep
         validation = _validate_job_template(job, template, body.mapping)
         _apply_validation(job, validation)
     job.updated_at = _now()
-    _audit(db, "workspace", "import.job.updated", "import_job", job.id, {
+    _audit(db, principal.id, "import.job.updated", "import_job", job.id, {
         "display_name": job.display_name,
         "target_dataset_id": job.target_dataset_id,
         "template": (job.inferred_schema or {}).get("template"),
@@ -1105,15 +1142,12 @@ def patch_import_job(job_id: str, body: ImportJobPatchRequest, db: Session = Dep
 
 
 @router.post("/imports/jobs/{job_id}/validate")
-def validate_import_job(job_id: str, body: ImportValidateRequest, db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def validate_import_job(job_id: str, body: ImportValidateRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "edit")
     mapping = body.mapping or _suggest_mapping(_field_order(job.records or []), body.template)
     validation = _validate_job_template(job, body.template, mapping)
     _apply_validation(job, validation)
-    _audit(db, "workspace", "import.job.validated", "import_job", job.id, validation)
+    _audit(db, principal.id, "import.job.validated", "import_job", job.id, validation)
     ops_control.record_ops_event(
         db,
         source="imports",
@@ -1130,11 +1164,8 @@ def validate_import_job(job_id: str, body: ImportValidateRequest, db: Session = 
 
 
 @router.post("/imports/jobs/{job_id}/apply-transforms")
-def apply_import_transforms(job_id: str, body: ImportTransformRequest, db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def apply_import_transforms(job_id: str, body: ImportTransformRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "edit")
     if job.status == "PROMOTED" and not body.preview_only:
         raise HTTPException(status_code=409, detail="Promoted import jobs are immutable. Use preview_only or create a new import.")
     transformed = _apply_transform_steps(job.records or [], body.steps)
@@ -1174,7 +1205,7 @@ def apply_import_transforms(job_id: str, body: ImportTransformRequest, db: Sessi
         schema["duplicate_rows"] = transformed["duplicate_rows"]
         job.inferred_schema = schema
     job.updated_at = _now()
-    _audit(db, body.actor, "import.job.transforms_applied", "import_job", job.id, {
+    _audit(db, principal.id, "import.job.transforms_applied", "import_job", job.id, {
         "summary": transformed["summary"],
         "warnings": transformed["warnings"],
     })
@@ -1202,11 +1233,8 @@ def apply_import_transforms(job_id: str, body: ImportTransformRequest, db: Sessi
 
 
 @router.post("/imports/jobs/{job_id}/promote-to-dataset")
-def promote_import_job(job_id: str, body: PromoteImportRequest, db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def promote_import_job(job_id: str, body: PromoteImportRequest, principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "deploy")
     if job.status == "INVALID":
         raise HTTPException(status_code=400, detail="Cannot promote an invalid import job")
     dataset_id = body.dataset_id or job.target_dataset_id or _slug(job.display_name or job.filename or job.id)
@@ -1214,11 +1242,14 @@ def promote_import_job(job_id: str, body: PromoteImportRequest, db: Session = De
     asset = db.query(models.DataAsset).filter(models.DataAsset.id == dataset_id).first()
     dataset_records = _records_for_dataset(job)
     schema = dict(job.inferred_schema or {})
+    schema["project_id"] = job.project_id
     schema["source_import_job_id"] = job.id
     schema["source_type"] = job.source_type
     schema["record_count"] = len(dataset_records)
     schema["fields"] = _infer_schema(dataset_records).get("fields", schema.get("fields", []))
     schema["field_count"] = len(schema.get("fields", []))
+    if asset and str((asset.asset_schema or {}).get("project_id") or "default") != job.project_id:
+        raise HTTPException(status_code=409, detail="DataAsset ID is owned by another project")
     if asset and not body.replace:
         raise HTTPException(status_code=409, detail="DataAsset already exists")
     if not asset:
@@ -1243,12 +1274,14 @@ def promote_import_job(job_id: str, body: PromoteImportRequest, db: Session = De
     job.target_dataset_id = asset.id
     job.promoted_at = now
     job.updated_at = now
-    _audit(db, body.actor, "import.job.promoted", "import_job", job.id, {
+    _audit(db, principal.id, "import.job.promoted", "import_job", job.id, {
+        "project_id": job.project_id,
         "dataset_id": asset.id,
         "record_count": len(asset.records or []),
         "field_count": schema.get("field_count", 0),
     })
-    _audit(db, body.actor, "data.asset.promoted_from_import", "data_asset", asset.id, {
+    _audit(db, principal.id, "data.asset.promoted_from_import", "data_asset", asset.id, {
+        "project_id": job.project_id,
         "import_job_id": job.id,
         "source_type": job.source_type,
     })
@@ -1260,7 +1293,7 @@ def promote_import_job(job_id: str, body: PromoteImportRequest, db: Session = De
         title=f"Import promoted to dataset {asset.id}",
         subject_type="data_asset",
         subject_id=asset.id,
-        payload={"import_job_id": job.id, "record_count": len(asset.records or [])},
+        payload={"project_id": job.project_id, "import_job_id": job.id, "record_count": len(asset.records or [])},
     )
     db.commit()
     db.refresh(job)
@@ -1282,20 +1315,17 @@ def promote_import_job(job_id: str, body: PromoteImportRequest, db: Session = De
 
 
 @router.post("/imports/jobs/{job_id}/generate-ontology-draft")
-def generate_import_ontology_draft(job_id: str, body: ImportGenerateDraftRequest = ImportGenerateDraftRequest(), db: Session = Depends(get_db)):
-    _ensure_tables(db)
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Import job '{job_id}' not found")
+def generate_import_ontology_draft(job_id: str, body: ImportGenerateDraftRequest = ImportGenerateDraftRequest(), principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
+    job = _job_for(db, job_id, principal, "deploy")
     if job.status == "INVALID":
         raise HTTPException(status_code=400, detail="Validate and fix the import job before generating an ontology draft")
     dataset_id = body.promote_dataset_id or job.target_dataset_id or _slug(job.display_name or job.id)
     promoted = promote_import_job(job_id, PromoteImportRequest(
         dataset_id=dataset_id,
         display_name=job.display_name,
-        actor=body.actor,
+        actor=principal.id,
         replace=True,
-    ), db)
+    ), principal, db)
     schema = job.inferred_schema or {}
     template_id = schema.get("template")
     template = IMPORT_TEMPLATES.get(template_id or "", {})
@@ -1304,22 +1334,31 @@ def generate_import_ontology_draft(job_id: str, body: ImportGenerateDraftRequest
     draft_id = body.draft_id or f"{object_type_id}_from_{job.id}_draft"
     existing = db.get(ontology_generator.OntologyGeneratorDraft, draft_id)
     if existing:
+        existing_project = str((existing.draft or {}).get("__project_id") or "default")
+        if existing_project != job.project_id:
+            raise HTTPException(status_code=409, detail="Ontology draft ID is owned by another project")
         return {
             "status": "DRAFT_EXISTS",
             "job": _job_dict(job),
             "dataset": promoted["dataset"],
             "draft": ontology_generator._read(existing).model_dump(),
         }
-    draft = ontology_generator.create_draft(ontology_generator.DraftCreate(
+    draft = ontology_generator._create_draft_record(db, ontology_generator.DraftCreate(
         id=draft_id,
+        project_id=job.project_id,
         asset_id=promoted["dataset"]["id"],
         object_type_id=object_type_id,
         display_name=display_name,
         include_actions=body.include_actions,
         create_pipeline_graph=body.create_pipeline_graph,
-    ), db=db)
+    ))
+    generated_draft = dict(draft.draft or {})
+    generated_draft["__project_id"] = job.project_id
+    draft.draft = generated_draft
+    db.flush()
     draft_payload = ontology_generator._read(draft).model_dump()
-    _audit(db, body.actor, "import.job.generated_ontology_draft", "import_job", job.id, {
+    _audit(db, principal.id, "import.job.generated_ontology_draft", "import_job", job.id, {
+        "project_id": job.project_id,
         "draft_id": draft_payload["id"],
         "object_type_id": draft_payload["object_type_id"],
         "dataset_id": promoted["dataset"]["id"],
@@ -1332,7 +1371,7 @@ def generate_import_ontology_draft(job_id: str, body: ImportGenerateDraftRequest
         title=f"Import generated ontology draft {draft_payload['id']}",
         subject_type="import_job",
         subject_id=job.id,
-        payload={"draft_id": draft_payload["id"], "dataset_id": promoted["dataset"]["id"]},
+        payload={"project_id": job.project_id, "draft_id": draft_payload["id"], "dataset_id": promoted["dataset"]["id"]},
     )
     db.commit()
     return {
@@ -1344,11 +1383,15 @@ def generate_import_ontology_draft(job_id: str, body: ImportGenerateDraftRequest
 
 
 @router.get("/imports/summary")
-def imports_summary(db: Session = Depends(get_db)):
+def imports_summary(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     _ensure_tables(db)
-    rows = db.query(ImportJob).order_by(ImportJob.created_at.desc()).limit(25).all()
+    query = _accessible_jobs(db, principal)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ImportJob.project_id == project_id)
+    rows = query.order_by(ImportJob.created_at.desc()).limit(25).all()
     counts: Dict[str, int] = {}
-    for row in db.query(ImportJob).all():
+    for row in query.all():
         counts[row.status] = counts.get(row.status, 0) + 1
     return {
         "counts": counts,

@@ -139,7 +139,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -157,6 +157,7 @@ MIGRATIONS = [
     {"version": 14, "name": "integrity_protected_transactional_recovery", "status": "applied"},
     {"version": 15, "name": "durable_artifact_command_receipts", "status": "applied"},
     {"version": 16, "name": "durable_job_idempotency_receipts", "status": "applied"},
+    {"version": 17, "name": "project_scoped_import_jobs", "status": "applied"},
 ]
 
 
@@ -1226,6 +1227,16 @@ def import_project(
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
         track(_upsert_model(db, models.PipelineDefinition, row, ["id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"]))
+    for row in snapshot.get("import_jobs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row["inferred_schema"] = row.get("inferred_schema") or row.get("schema") or {}
+        track(_upsert_model(db, imports_ops.ImportJob, row, [
+            "id", "project_id", "source_type", "filename", "display_name", "target_dataset_id",
+            "status", "inferred_schema", "preview_rows", "validation_errors", "records",
+            "created_at", "updated_at", "promoted_at",
+        ]))
     for row in snapshot.get("workshop_modules") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
