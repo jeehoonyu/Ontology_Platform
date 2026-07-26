@@ -16,6 +16,7 @@ Current result:
 - Trust dashboard: `/workspace/validation` and `/project/validate` surface matrix status, priority gaps, runtime schema health, persisted migration records, event consistency, route health, and extended project snapshot evidence.
 - Readiness: `/project/readiness`, `/ui-state/imports`, and `/ui-state/validation` expose human-facing checks and sections for technical evaluators.
 - Runtime operations: durable jobs now emit project-scoped correlated observations for queue, claim, heartbeat, retry, recovery, success, failure, and cancellation. Rolling budgets gate admission, SLO evaluations emit breach events, and the Control Panel exposes human-readable latency, availability, usage, and cost evidence. Independently deployable worker daemons use hashed, project-scoped service tokens and add capability scope, concurrent polling, health endpoints, graceful drain, fair project queues, atomic lease contention handling, and stale-worker fencing.
+- Production acceptance: `scripts/rehearse-production-acceptance.ps1` deploys digest-pinned Keycloak/Postgres fixtures, validates real OIDC tenant claims and backend RBAC, exercises 50 concurrent authenticated readers, restarts the API and reruns acceptance, then performs a fresh-volume staged Postgres backup/restore rehearsal with deterministic cleanup.
 - Fidelity: high for local behavioral workflows; intentionally different for hosted infrastructure, proprietary UI internals, and LLM/model routing.
 - Evidence: `foundry-docs/VALIDATION_MATRIX.md`, `oms/test_docs_conformance.py`, and existing focused tests.
 
@@ -38,7 +39,7 @@ Current result:
 | Runtime observability and worker control | High local analog | Correlated durable-job spans, p95 latency/queue summaries, project budgets, SLO evaluation, registered worker fleets, fair queues, drain/resume, concurrent claim safety, stale-token fencing, and snapshot recovery |
 | Frontend product foundation | Medium-high | Typed React/Vite core evaluator shell, persistent flow indicator, split workspaces/components, clean state primitives, close-analog pipeline workbench, ontology manager, and legacy fallback |
 | Decision/Ops/Investigations | Local extension | Built on ontology, actions, audit, timelines, alerts, incidents, evidence, reports |
-| Security/governance | Medium-high | OIDC roles, organization/project isolation, persisted memberships, package integrity, markings, restricted views, scanners, retention, and audit |
+| Security/governance | High local analog | Real Keycloak OIDC rehearsal, organization/project isolation, persisted memberships, cross-tenant administration denial, package integrity, markings, restricted views, scanners, retention, and audit |
 
 ## Known Limitations
 

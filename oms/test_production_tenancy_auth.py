@@ -7,7 +7,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'tenancy_aut
 os.environ["AUTH_MODE"] = "local"
 os.environ["APP_ENV"] = "test"
 
-from app import admin_auth, production_auth  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+from app import admin_auth, production_auth, tenancy  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402,F401
 
@@ -44,6 +45,21 @@ with SessionLocal() as db:
     check(token_principal.organization_id == "acme", "service account organization resolves")
     check(token_principal.project_ids == ["operations"], "project-scoped token resolves")
     check(token_principal.allows("execute") and token_principal.allows("edit") and token_principal.allows("view"), "token permissions resolve")
+
+    scoped_admin = production_auth.Principal(
+        "org-admin", "Organization Admin", None, ["administrator"], ["*"],
+        organization_id="acme", project_ids=["operations"],
+    )
+    try:
+        tenancy.create_organization(tenancy.OrganizationCreate(id="outside", display_name="Outside"), scoped_admin, db)
+        raise AssertionError("Organization-scoped administrator crossed tenant boundary")
+    except HTTPException as exc:
+        check(exc.status_code == 403, "organization creation enforces tenant boundary")
+    try:
+        tenancy.create_project(tenancy.ProjectCreate(id="outside-project", organization_id="outside", display_name="Outside"), scoped_admin, db)
+        raise AssertionError("Organization-scoped administrator created a cross-tenant project")
+    except HTTPException as exc:
+        check(exc.status_code == 403, "project creation enforces tenant boundary before resource lookup")
 
 local = production_auth._local_principal()
 check(local.project_ids == ["*"] and local.allows("anything"), "local development bypass is explicit")

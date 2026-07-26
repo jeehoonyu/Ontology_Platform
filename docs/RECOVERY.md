@@ -83,4 +83,6 @@ Run the isolated fresh-volume rehearsal before a production pilot or upgrade:
 ./scripts/rehearse-recovery.ps1
 ```
 
+`scripts/rehearse-production-acceptance.ps1` composes this restore rehearsal with real OIDC/RBAC, a 50-reader production-stack load probe, and an API restart/recovery check. Use that combined command as the final pilot release gate.
+
 It starts only the rehearsal Postgres service, waits for stable readiness, creates a probe and migration record, backs up the database, corrupts the live probe, runs the staged restore, verifies the original value, and removes the isolated Compose project and volume. Use `-KeepArtifacts` to retain the generated archive and manifests for inspection.

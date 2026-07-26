@@ -146,6 +146,8 @@ def _project_dict(db: Session, row: PlatformProject, principal: Principal) -> di
 
 @router.post("/tenancy/organizations", status_code=201)
 def create_organization(body: OrganizationCreate, principal: Principal = Depends(require_permission("administer")), db: Session = Depends(get_db)):
+    if principal.organization_id and principal.organization_id != body.id:
+        raise HTTPException(status_code=403, detail="Cannot administer another organization")
     if db.get(PlatformOrganization, body.id):
         raise HTTPException(status_code=409, detail="Organization already exists")
     now = _now()
@@ -178,13 +180,13 @@ def bootstrap_tenancy(body: TenancyBootstrapRequest, principal: Principal = Depe
 
 @router.post("/tenancy/projects", status_code=201)
 def create_project(body: ProjectCreate, principal: Principal = Depends(require_permission("administer")), db: Session = Depends(get_db)):
+    if principal.organization_id and principal.organization_id != body.organization_id:
+        raise HTTPException(status_code=403, detail="Cannot create a project in another organization")
     if db.get(PlatformProject, body.id):
         raise HTTPException(status_code=409, detail="Project already exists")
     organization = db.get(PlatformOrganization, body.organization_id)
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
-    if principal.organization_id and principal.organization_id != body.organization_id:
-        raise HTTPException(status_code=403, detail="Cannot create a project in another organization")
     now = _now()
     row = PlatformProject(id=body.id, organization_id=body.organization_id, display_name=body.display_name, description=body.description, status="ACTIVE", created_at=now, updated_at=now)
     db.add(row)
