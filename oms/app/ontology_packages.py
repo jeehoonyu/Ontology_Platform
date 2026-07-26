@@ -457,8 +457,8 @@ def install_package_version(package_id: str, version: str, body: PackageInstallR
         resource_id = _resource_id(body.namespace, item["id"])
         existing = db.get(models.ActionType, resource_id)
         ownership = assert_ownership("action_type", resource_id, existing)
-        prior_state.append({"resource_type": "action_type", "resource_id": resource_id, "state": {"display_name": existing.display_name, "description": existing.description, "parameters": existing.parameters, "rules": existing.rules} if existing else None})
-        values = {"display_name": item["display_name"], "description": item.get("description"), "parameters": item.get("parameters") or {}, "rules": {**(item.get("rules") or {}), "__package": {"package_id": package_id, "version": version, "target_project_id": body.target_project_id}}}
+        prior_state.append({"resource_type": "action_type", "resource_id": resource_id, "state": {"project_id": existing.project_id, "display_name": existing.display_name, "description": existing.description, "parameters": existing.parameters, "rules": existing.rules} if existing else None})
+        values = {"project_id": body.target_project_id, "display_name": item["display_name"], "description": item.get("description"), "parameters": item.get("parameters") or {}, "rules": {**(item.get("rules") or {}), "__package": {"package_id": package_id, "version": version, "target_project_id": body.target_project_id}}}
         if existing:
             for key, value in values.items(): setattr(existing, key, value)
         else:

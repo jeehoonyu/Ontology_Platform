@@ -43,6 +43,7 @@ class ActionType(Base):
     __tablename__ = "action_types"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     parameters: Mapped[dict] = mapped_column(JSON) # Expected input schema
@@ -180,6 +181,7 @@ class AgentDefinition(Base):
     __tablename__ = "agent_definitions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     system_prompt: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -280,6 +282,7 @@ class LogicFunction(Base):
     __tablename__ = "logic_functions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     blocks: Mapped[list] = mapped_column(JSON, default=list)

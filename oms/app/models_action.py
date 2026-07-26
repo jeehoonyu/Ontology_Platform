@@ -20,6 +20,7 @@ class OutboxEvent(Base):
     __tablename__ = "action_outbox"
 
     id = Column(String, primary_key=True, index=True) # UUID
+    project_id = Column(String, default="default", index=True, nullable=False)
     action_type_id = Column(String, index=True)
     payload = Column(JSON) # The parameters of the action
     status = Column(String, default=ActionStatus.PENDING.value)
@@ -32,6 +33,7 @@ class IdempotencyKey(Base):
     __tablename__ = "idempotency_keys"
 
     key = Column(String, primary_key=True, index=True)
+    project_id = Column(String, default="default", index=True, nullable=False)
     action_type_id = Column(String, nullable=False)
     response_payload = Column(JSON, nullable=True) # Cached success response
     created_at = Column(Integer, default=lambda: int(time.time()))
@@ -43,6 +45,7 @@ class ApprovalRequest(Base):
     __tablename__ = "approval_requests"
 
     id = Column(String, primary_key=True, index=True)
+    project_id = Column(String, default="default", index=True, nullable=False)
     action_type_id = Column(String, ForeignKey("action_types.id"), index=True, nullable=False)
     requester = Column(String, nullable=False, default="system")
     parameters = Column(JSON, nullable=False)

@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
 from . import models, models_action
-from . import runtime
+from . import production_auth, runtime, tenancy
 
 router = APIRouter(tags=["ontology_core"])
 
@@ -1353,12 +1353,35 @@ def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
 
 
 @router.post("/ontology/action-types/{action_type_id}/execute")
-def execute_action_faithful(action_type_id: str, body: ActionExecuteRequest, db: Session = Depends(get_db)):
+def execute_action_faithful(
+    action_type_id: str,
+    body: ActionExecuteRequest,
+    principal: production_auth.Principal = Depends(production_auth.require_permission("execute")),
+    db: Session = Depends(get_db),
+):
     action = db.get(models.ActionType, action_type_id)
     if not action:
         raise HTTPException(status_code=404, detail=f"ActionType '{action_type_id}' not found")
+    project_id = action.project_id or "default"
+    tenancy.assert_project_permission(db, principal, project_id, "execute")
     rules = action.rules or {}
+    risk_level = rules.get("risk_level", rules.get("risk", ""))
+    if rules.get("requires_approval") or rules.get("approval_required") or str(risk_level).lower() in {"high", "critical"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Approval-gated actions must be executed through POST /actions/execute",
+        )
+    for mutation in rules.get("mutations") or rules.get("object_mutations") or []:
+        object_type_id = mutation.get("object_type_id")
+        if object_type_id:
+            object_type = db.get(models.ObjectType, object_type_id)
+            if not object_type:
+                raise HTTPException(status_code=422, detail=f"Unknown object type '{object_type_id}'")
+            object_project_id = ((object_type.properties or {}).get("__manager") or {}).get("project_id", "default")
+            if object_project_id != project_id:
+                raise HTTPException(status_code=409, detail="Action mutation crosses a project boundary")
     params = body.parameters
+    actor = principal.id if production_auth.auth_mode() == "oidc" else (body.actor or principal.id)
 
     # 1) typed parameter validation
     perrors = _validate_params(action, params, db)
@@ -1400,12 +1423,12 @@ def execute_action_faithful(action_type_id: str, body: ActionExecuteRequest, db:
     for eff in side_effects:
         etype = eff.get("type")
         if etype == "notification":
-            _audit(db, body.actor, "action.notification", "action_type", action_type_id,
+            _audit(db, actor, "action.notification", "action_type", action_type_id,
                    {"recipient": eff.get("recipient"), "message": _resolve(eff.get("message"), params)})
             fired.append("notification")
         elif etype == "webhook":
             db.add(models_action.OutboxEvent(
-                id=uuid.uuid4().hex, action_type_id=action_type_id,
+                id=uuid.uuid4().hex, project_id=project_id, action_type_id=action_type_id,
                 payload={"url": eff.get("url"), "payload": eff.get("payload", params)},
                 status="PENDING", created_at=now))
             fired.append("webhook")
@@ -1413,12 +1436,12 @@ def execute_action_faithful(action_type_id: str, body: ActionExecuteRequest, db:
     # 5) queryable action log (Act/act_) + control-plane audit
     log_id = uuid.uuid4().hex
     db.add(ActionLog(
-        id=log_id, action_type_id=action_type_id, actor=body.actor or "system",
+        id=log_id, action_type_id=action_type_id, actor=actor,
         parameters=params, mutated_object_ids=mutated_objects, reversal=reversal,
         function_id=function_id, undone=0, created_at=now))
-    _audit(db, body.actor, "ontology.action.executed", "action_type", action_type_id,
+    _audit(db, actor, "ontology.action.executed", "action_type", action_type_id,
            {"mutated_objects": mutated_objects, "links_changed": links_changed,
-            "side_effects": fired, "action_log_id": log_id})
+            "side_effects": fired, "action_log_id": log_id, "project_id": project_id})
     db.commit()
     return {
         "action_type_id": action_type_id, "status": "applied",

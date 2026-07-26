@@ -736,8 +736,12 @@ def execute_runbook_inline(
             elif step_type == "request_approval":
                 action_id = _resolve(step.get("action_type_id"), context)
                 parameters = _resolve(step.get("parameters") or {}, context)
+                action = db.get(models.ActionType, action_id)
+                if not action:
+                    raise HTTPException(status_code=404, detail=f"ActionType '{action_id}' not found")
                 approval = models_action.ApprovalRequest(
                     id=str(uuid.uuid4()),
+                    project_id=action.project_id,
                     action_type_id=action_id,
                     requester=actor,
                     parameters=parameters,

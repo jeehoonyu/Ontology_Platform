@@ -82,6 +82,8 @@ CORE_TABLES = [
     "link_types",
     "link_instances",
     "action_types",
+    "agent_definitions",
+    "logic_functions",
     "data_assets",
     "pipeline_definitions",
     "pipeline_runs",
@@ -142,7 +144,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -163,6 +165,7 @@ MIGRATIONS = [
     {"version": 17, "name": "project_scoped_import_jobs", "status": "applied"},
     {"version": 18, "name": "project_scoped_pipeline_graphs", "status": "applied"},
     {"version": 19, "name": "project_scoped_workshop_modules", "status": "applied"},
+    {"version": 20, "name": "project_scoped_governed_automation", "status": "applied"},
 ]
 
 
@@ -421,8 +424,40 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(models.LinkType).all()
         ],
         "action_types": [
-            _row_dict(row, ["id", "display_name", "description", "parameters", "rules"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "parameters", "rules"])
             for row in db.query(models.ActionType).all()
+        ],
+        "approval_requests": [
+            _row_dict(row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at"])
+            for row in db.query(models_action.ApprovalRequest).all()
+        ],
+        "action_outbox": [
+            _row_dict(row, ["id", "project_id", "action_type_id", "payload", "status", "created_at"])
+            for row in db.query(models_action.OutboxEvent).all()
+        ],
+        "action_idempotency_keys": [
+            _row_dict(row, ["key", "project_id", "action_type_id", "response_payload", "created_at"])
+            for row in db.query(models_action.IdempotencyKey).all()
+        ],
+        "model_endpoints": [
+            _row_dict(row, ["id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"])
+            for row in db.query(models.ModelEndpoint).all()
+        ],
+        "agent_definitions": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "system_prompt", "allowed_object_types", "allowed_actions", "model_endpoint_id", "approval_required", "created_at", "updated_at"])
+            for row in db.query(models.AgentDefinition).all()
+        ],
+        "agent_sessions": [
+            _row_dict(row, ["id", "agent_id", "user_prompt", "status", "context", "plan", "proposed_actions", "created_at", "completed_at"])
+            for row in db.query(models.AgentSession).all()
+        ],
+        "logic_functions": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "blocks", "input_schema", "output_schema", "approval_required", "created_at", "updated_at"])
+            for row in db.query(models.LogicFunction).all()
+        ],
+        "logic_runs": [
+            _row_dict(row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"])
+            for row in db.query(models.LogicRun).all()
         ],
         "object_instances": [
             _row_dict(row, ["id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
@@ -794,6 +829,15 @@ def _docs_matrix_rows() -> List[Dict[str, str]]:
 def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     expected = [
         "object_types",
+        "action_types",
+        "approval_requests",
+        "action_outbox",
+        "action_idempotency_keys",
+        "model_endpoints",
+        "agent_definitions",
+        "agent_sessions",
+        "logic_functions",
+        "logic_runs",
         "data_assets",
         "pipeline_definitions",
         "pipeline_builder_graphs",
@@ -1228,7 +1272,37 @@ def import_project(
         row.setdefault("updated_at", now)
         track(_upsert_model(db, models.DataAsset, row, ["id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"]))
     for row in snapshot.get("action_types") or []:
-        track(_upsert_model(db, models.ActionType, row, ["id", "display_name", "description", "parameters", "rules"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, models.ActionType, row, ["id", "project_id", "display_name", "description", "parameters", "rules"]))
+    for row in snapshot.get("approval_requests") or []:
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, models_action.ApprovalRequest, row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at"]))
+    for row in snapshot.get("action_outbox") or []:
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, models_action.OutboxEvent, row, ["id", "project_id", "action_type_id", "payload", "status", "created_at"]))
+    for row in snapshot.get("action_idempotency_keys") or []:
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, models_action.IdempotencyKey, row, ["key", "project_id", "action_type_id", "response_payload", "created_at"]))
+    for row in snapshot.get("model_endpoints") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, models.ModelEndpoint, row, ["id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"]))
+    for row in snapshot.get("agent_definitions") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, models.AgentDefinition, row, ["id", "project_id", "display_name", "description", "system_prompt", "allowed_object_types", "allowed_actions", "model_endpoint_id", "approval_required", "created_at", "updated_at"]))
+    for row in snapshot.get("agent_sessions") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, models.AgentSession, row, ["id", "agent_id", "user_prompt", "status", "context", "plan", "proposed_actions", "created_at", "completed_at"]))
+    for row in snapshot.get("logic_functions") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, models.LogicFunction, row, ["id", "project_id", "display_name", "description", "blocks", "input_schema", "output_schema", "approval_required", "created_at", "updated_at"]))
+    for row in snapshot.get("logic_runs") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, models.LogicRun, row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"]))
     for row in snapshot.get("link_types") or []:
         track(_upsert_model(db, models.LinkType, row, ["id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"]))
     for row in snapshot.get("object_instances") or []:

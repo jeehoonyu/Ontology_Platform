@@ -77,7 +77,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Fresh-volume backup and restore rehearsal failed." }
     }
 
-    Write-Output "PRODUCTION_ACCEPTANCE_PASSED: OIDC, RBAC, project-owned data onboarding, pipelines, and Workshop modules, cross-project denial, 50-reader load, cross-replica collaboration, job idempotency, abandoned-worker chaos recovery, serialized migration startup, API restart, and backup/restore recovery verified."
+    Write-Output "PRODUCTION_ACCEPTANCE_PASSED: OIDC, RBAC, project-owned onboarding, pipelines, Workshop, actions, AIP Logic, asynchronous agents, cross-project denial, 50-reader load, cross-replica collaboration, job idempotency, abandoned-worker chaos recovery, serialized migration startup, API restart, and backup/restore recovery verified."
 } finally {
     if (-not $KeepStack) {
         & (Join-Path $PSScriptRoot "stop-production-rehearsal.ps1") -ProjectName $ProjectName -DeleteData
