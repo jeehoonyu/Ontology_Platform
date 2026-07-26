@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .database import get_db
 from . import models, apps, workshop_runtime, slate_runtime
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["carbon_runtime"])
 
@@ -26,9 +27,10 @@ def _get_workspace(db: Session, workspace_id: str):
     return ws
 
 
-def _resolve_module(db: Session, module_id: str) -> Dict[str, Any]:
+def _resolve_module(db: Session, module_id: str, principal: Principal) -> Dict[str, Any]:
     wm = db.get(apps.WorkshopModule, module_id)
     if wm:
+        apps._get_workshop_module_or_404(db, module_id, principal, "view")
         return {"module_id": module_id, "kind": "workshop", "display_name": wm.display_name, "exists": True}
     sa = db.get(apps.SlateApp, module_id)
     if sa:
@@ -67,7 +69,7 @@ class NavigateRequest(BaseModel):
     state: Dict[str, Any] = Field(default_factory=dict)
 
 
-def _module_outputs(db: Session, module_id: str, state: Dict[str, Any]):
+def _module_outputs(db: Session, module_id: str, state: Dict[str, Any], principal: Principal):
     """
     Resolve a module's typed outputs by delegating to the owning runtime.
 
@@ -77,13 +79,14 @@ def _module_outputs(db: Session, module_id: str, state: Dict[str, Any]):
     """
     wm = db.get(apps.WorkshopModule, module_id)
     if wm:
-        outputs = workshop_runtime._resolve_variables(db, wm.variables or {}, state)
+        apps._get_workshop_module_or_404(db, module_id, principal, "view")
+        outputs = workshop_runtime._resolve_variables(db, wm.variables or {}, state, wm.project_id)
         return "workshop", outputs
     sa = db.get(apps.SlateApp, module_id)
     if sa:
         rq, rf = slate_runtime._resolve_all(db, sa, state)
         return "slate", {**rq, **rf}
-    return _resolve_module(db, module_id)["kind"], None
+    return _resolve_module(db, module_id, principal)["kind"], None
 
 
 def _value_type(value: Any) -> str:
@@ -105,37 +108,37 @@ def _value_type(value: Any) -> str:
 
 
 @router.get("/apps/carbon/{workspace_id}/resolve")
-def resolve_workspace(workspace_id: str, db: Session = Depends(get_db)):
+def resolve_workspace(workspace_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     ws = _get_workspace(db, workspace_id)
-    modules = [_resolve_module(db, mid) for mid in (ws.module_ids or [])]
+    modules = [_resolve_module(db, mid, principal) for mid in (ws.module_ids or [])]
     return {"workspace_id": workspace_id, "display_name": ws.display_name,
             "module_count": len(modules), "modules": modules,
             "missing": [m["module_id"] for m in modules if not m["exists"]]}
 
 
 @router.get("/apps/carbon/{workspace_id}/render")
-def render_workspace(workspace_id: str, db: Session = Depends(get_db)):
+def render_workspace(workspace_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     ws = _get_workspace(db, workspace_id)
     nav = _navigation(ws)
     sections = []
     for section in nav.get("sections", []):
-        items = [_resolve_module(db, mid) for mid in section.get("items", [])]
+        items = [_resolve_module(db, mid, principal) for mid in section.get("items", [])]
         sections.append({"title": section.get("title"), "items": items})
-    home = _resolve_module(db, nav.get("home")) if nav.get("home") else None
+    home = _resolve_module(db, nav.get("home"), principal) if nav.get("home") else None
     return {"workspace_id": workspace_id, "display_name": ws.display_name,
             "home": home, "sections": sections}
 
 
 @router.post("/apps/carbon/{workspace_id}/open/{module_id}")
-def open_module(workspace_id: str, module_id: str, body: StateRequest, db: Session = Depends(get_db)):
+def open_module(workspace_id: str, module_id: str, body: StateRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     ws = _get_workspace(db, workspace_id)
     if module_id not in (ws.module_ids or []):
         raise HTTPException(status_code=404, detail=f"Module '{module_id}' is not part of this workspace")
-    info = _resolve_module(db, module_id)
+    info = _resolve_module(db, module_id, principal)
     if info["kind"] == "workshop":
         mod = db.get(apps.WorkshopModule, module_id)
-        resolved = workshop_runtime._resolve_variables(db, mod.variables or {}, body.state)
-        widgets = [workshop_runtime._render_widget(db, w, resolved) for w in (mod.widgets or [])]
+        resolved = workshop_runtime._resolve_variables(db, mod.variables or {}, body.state, mod.project_id)
+        widgets = [workshop_runtime._render_widget(db, w, resolved, mod.project_id) for w in (mod.widgets or [])]
         return {**info, "rendered": {"variables": resolved, "widgets": widgets}}
     if info["kind"] == "slate":
         app_ = db.get(apps.SlateApp, module_id)
@@ -148,7 +151,7 @@ def open_module(workspace_id: str, module_id: str, body: StateRequest, db: Sessi
 
 
 @router.post("/apps/carbon/{workspace_id}/navigate")
-def navigate(workspace_id: str, body: NavigateRequest, db: Session = Depends(get_db)):
+def navigate(workspace_id: str, body: NavigateRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     """
     Typed navigation between two modules in a workspace.
 
@@ -170,14 +173,14 @@ def navigate(workspace_id: str, body: NavigateRequest, db: Session = Depends(get
             detail=f"Target module '{body.to_module_id}' is not part of this workspace",
         )
 
-    from_kind, outputs = _module_outputs(db, body.from_module_id, body.state)
+    from_kind, outputs = _module_outputs(db, body.from_module_id, body.state, principal)
     if outputs is None:
         raise HTTPException(
             status_code=400,
             detail=f"Source module '{body.from_module_id}' (kind={from_kind}) exposes no resolvable outputs",
         )
 
-    target_kind = _resolve_module(db, body.to_module_id)["kind"]
+    target_kind = _resolve_module(db, body.to_module_id, principal)["kind"]
 
     typed_inputs: Dict[str, Any] = {}
     bindings: List[Dict[str, Any]] = []

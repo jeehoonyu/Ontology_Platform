@@ -937,16 +937,18 @@ def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = D
     object_type = db.get(models.ObjectType, body.object_type_id)
     if not object_type:
         raise HTTPException(status_code=404, detail=f"Object type '{body.object_type_id}' not found")
+    project_id = str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+    tenancy.assert_project_permission(db, principal, project_id, "view")
     objects = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == body.object_type_id).count()
     links = db.query(models.LinkType).filter(
         (models.LinkType.source_object_type_id == body.object_type_id) | (models.LinkType.target_object_type_id == body.object_type_id)
     ).all()
     search_tokens = {body.object_type_id}
-    pipeline_rows = db.query(pipeline_builder_ops.PipelineBuilderGraph).all()
+    pipeline_rows = db.query(pipeline_builder_ops.PipelineBuilderGraph).filter(pipeline_builder_ops.PipelineBuilderGraph.project_id == project_id).all()
     pipelines = [row for row in pipeline_rows if any(token in str(row.nodes or []) or token in str(row.edges or []) for token in search_tokens)]
-    workshop_rows = db.query(apps.WorkshopModule).all()
+    workshop_rows = db.query(apps.WorkshopModule).filter(apps.WorkshopModule.project_id == project_id).all()
     workshops = [row for row in workshop_rows if body.object_type_id in str({"layout": row.layout, "widgets": row.widgets, "variables": row.variables})]
-    artifact_rows = db.query(PlatformArtifact).all()
+    artifact_rows = db.query(PlatformArtifact).filter(PlatformArtifact.project_id == project_id).all()
     dependent_artifacts = [row for row in artifact_rows if body.object_type_id in str(_revision(db, row.id, row.current_revision).state or {})]
     destructive = [change for change in body.changes if str(change.get("operation") or change.get("type") or "").lower() in {"delete", "remove", "archive", "change_type", "change_primary_key"}]
     affected_property_names = [str(change.get("property_name") or change.get("field") or "") for change in destructive]
@@ -962,7 +964,7 @@ def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = D
         warnings.append({"code": "PIPELINE_DEPENDENCY", "message": f"{len(pipelines)} pipeline graph(s) reference this object type."})
     report_count = db.query(investigations.InvestigationReport).count()
     return {
-        "object_type": {"id": object_type.id, "display_name": object_type.display_name},
+        "object_type": {"id": object_type.id, "display_name": object_type.display_name, "project_id": project_id},
         "severity": severity,
         "safe_to_publish": severity != "HIGH",
         "destructive_changes": destructive,

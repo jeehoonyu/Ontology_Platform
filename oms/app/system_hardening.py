@@ -142,7 +142,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -162,6 +162,7 @@ MIGRATIONS = [
     {"version": 16, "name": "durable_job_idempotency_receipts", "status": "applied"},
     {"version": 17, "name": "project_scoped_import_jobs", "status": "applied"},
     {"version": 18, "name": "project_scoped_pipeline_graphs", "status": "applied"},
+    {"version": 19, "name": "project_scoped_workshop_modules", "status": "applied"},
 ]
 
 
@@ -452,7 +453,7 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(imports_ops.ImportJob).all()
         ],
         "workshop_modules": [
-            _row_dict(row, ["id", "display_name", "description", "variables", "widgets", "layout", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "description", "variables", "widgets", "layout", "created_at", "updated_at"])
             for row in db.query(apps.WorkshopModule).all()
         ],
         "workshop_module_versions": [
@@ -1265,9 +1266,10 @@ def import_project(
             "created_at", "updated_at", "promoted_at",
         ]))
     for row in snapshot.get("workshop_modules") or []:
+        row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, apps.WorkshopModule, row, ["id", "display_name", "description", "variables", "widgets", "layout", "created_at", "updated_at"]))
+        track(_upsert_model(db, apps.WorkshopModule, row, ["id", "project_id", "display_name", "description", "variables", "widgets", "layout", "created_at", "updated_at"]))
     for row in snapshot.get("workshop_module_versions") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, apps.WorkshopModuleVersion, row, ["id", "module_id", "version_number", "snapshot", "note", "actor", "created_at"]))
