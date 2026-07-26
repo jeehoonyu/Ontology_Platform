@@ -485,7 +485,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         graph_id = graph.get("id") or f"{object_type_id}_ontology_graph"
         existing_graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, graph_id)
         if existing_graph:
-            existing_project = str((existing_graph.parameters or {}).get("project_id") or "default")
+            existing_project = existing_graph.project_id
             if existing_project != project_id:
                 raise HTTPException(status_code=409, detail="Pipeline graph ID is owned by another project")
             existing_graph.display_name = graph.get("display_name") or existing_graph.display_name
@@ -498,6 +498,7 @@ def _apply_draft(db: Session, row: OntologyGeneratorDraft, body: ApplyRequest) -
         else:
             db.add(pipeline_builder_ops.PipelineBuilderGraph(
                 id=graph_id,
+                project_id=project_id,
                 display_name=graph.get("display_name") or graph_id,
                 description=graph.get("description"),
                 nodes=graph.get("nodes") or [],

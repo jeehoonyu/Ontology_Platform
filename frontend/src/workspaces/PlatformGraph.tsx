@@ -136,7 +136,7 @@ export function PlatformGraphWorkspace() {
         <button onClick={saveView}><Save size={15} />Save view</button>
         <span>{visibleNodes.length} nodes / {visibleEdges.length} edges</span>
       </div>
-      <div className="platform-graph-kinds" aria-label="Resource type filters">
+      <div className="platform-graph-kinds" role="group" aria-label="Resource type filters">
         {Object.entries(graph.value?.summary || {}).map(([kind, count]) => (
           <button key={kind} className={visibleKinds.has(kind) ? "active" : ""} onClick={() => toggleKind(kind)}>
             <span style={{ background: KIND_COLORS[kind] || "#77838d" }} />{kind.replace(/_/g, " ")} <small>{count}</small>
