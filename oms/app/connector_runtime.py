@@ -12,8 +12,10 @@ import io
 import ipaddress
 import json
 import os
+import posixpath
 import re
 import socket
+import stat
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +31,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String, Text, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Mapped, Session, mapped_column
+import paramiko
 
 from . import connectivity, models_action, ops_control, tenancy
 from .database import Base, SessionLocal, get_db
@@ -80,7 +83,7 @@ class ConnectorFetchAttempt(Base):
 
 
 class CredentialCreate(BaseModel):
-    credential_type: str = Field(pattern="^(bearer|api_key|basic|aws)$")
+    credential_type: str = Field(pattern="^(bearer|api_key|basic|aws|sftp_password|sftp_private_key)$")
     secret: str = Field(min_length=1, max_length=16000)
     metadata: Dict[str, str] = Field(default_factory=dict)
     expires_at: Optional[int] = None
@@ -333,11 +336,15 @@ def _validate_remote_url(url: str) -> None:
         raise HTTPException(status_code=422, detail="REST connector URL must use http or https")
     if parsed.username or parsed.password:
         raise HTTPException(status_code=422, detail="Credentials must not be embedded in connector URLs")
-    if not _allowed_host(parsed.hostname):
+    _validate_remote_host(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+
+
+def _validate_remote_host(hostname: str, port: int) -> None:
+    if not hostname or not _allowed_host(hostname):
         raise HTTPException(status_code=403, detail="Connector host is not in CONNECTOR_ALLOWED_HOSTS")
     allow_private = os.getenv("CONNECTOR_ALLOW_PRIVATE_NETWORKS", "false").lower() in {"1", "true", "yes"}
     try:
-        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+        addresses = {item[4][0] for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)}
     except socket.gaierror as exc:
         raise HTTPException(status_code=502, detail="Connector host could not be resolved") from exc
     for address in addresses:
@@ -538,7 +545,7 @@ def _aws_query(params: Dict[str, Any]) -> str:
     return "&".join(f"{key}={value}" for key, value in sorted(pairs))
 
 
-def _s3_records(raw: bytes, object_key: str, configured_format: str) -> List[Dict[str, Any]]:
+def _decode_tabular_records(raw: bytes, object_key: str, configured_format: str) -> List[Dict[str, Any]]:
     data_format = configured_format.lower().strip() if configured_format else "auto"
     if data_format == "auto":
         suffix = object_key.rsplit(".", 1)[-1].lower() if "." in object_key else "json"
@@ -661,7 +668,7 @@ class S3PullAdapter:
             key = item["key"]
             object_url = f"{bucket_url}/{urllib.parse.quote(key, safe='/-_.~')}"
             raw, _ = self._request(context, "GET", object_url, {}, max_object_bytes)
-            object_records = _s3_records(raw, key, str(config.get("format") or "auto"))
+            object_records = _decode_tabular_records(raw, key, str(config.get("format") or "auto"))
             if len(records) + len(object_records) > max_records:
                 raise HTTPException(status_code=413, detail="S3 batch exceeded max_records; reduce max_objects or split source objects")
             for row in object_records:
@@ -678,9 +685,139 @@ class S3PullAdapter:
         )
 
 
+def _host_key_fingerprint(key: paramiko.PKey) -> str:
+    return "SHA256:" + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
+
+
+def _private_key(secret: str) -> paramiko.PKey:
+    for key_class in (paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.RSAKey):
+        try:
+            return key_class.from_private_key(io.StringIO(secret))
+        except (paramiko.SSHException, ValueError):
+            continue
+    raise HTTPException(status_code=422, detail="SFTP private key is not a supported unencrypted Ed25519, ECDSA, or RSA key")
+
+
+class SftpPullAdapter:
+    """Pinned-host SFTP reader for bounded CSV, JSON, and JSONL batches."""
+
+    id = "sftp"
+    source_types = ["sftp"]
+    modes = ["snapshot", "incremental"]
+
+    def config_schema(self) -> Dict[str, Any]:
+        return {
+            "required": ["host", "username", "remote_path", "host_key_sha256"],
+            "properties": {
+                "host": {"type": "string"}, "port": {"type": "integer", "default": 22},
+                "username": {"type": "string"}, "remote_path": {"type": "string"},
+                "host_key_sha256": {"type": "string"},
+                "format": {"type": "string", "enum": ["auto", "csv", "json", "jsonl"]},
+                "max_files": {"type": "integer", "default": 100},
+                "max_file_bytes": {"type": "integer", "default": 10000000},
+                "max_records": {"type": "integer", "default": 100000},
+            },
+            "credential": {"types": ["sftp_password", "sftp_private_key"]},
+            "incremental_cursor_field": "_source_file_path",
+        }
+
+    def _connect(self, context: AdapterContext) -> tuple[paramiko.Transport, paramiko.SFTPClient, str]:
+        config = context.config
+        host = str(config.get("host") or "").strip()
+        port = max(1, min(65535, int(config.get("port", 22))))
+        username = str(config.get("username") or "").strip()
+        expected_fingerprint = str(config.get("host_key_sha256") or "").strip()
+        if not host or not username or not expected_fingerprint.startswith("SHA256:"):
+            raise HTTPException(status_code=422, detail="SFTP connector requires host, username, and pinned host_key_sha256")
+        if context.credential_type not in {"sftp_password", "sftp_private_key"} or not context.credential_secret:
+            raise HTTPException(status_code=422, detail="SFTP connector requires an active password or private-key runtime credential")
+        _validate_remote_host(host, port)
+        timeout = max(1, min(120, int(config.get("timeout_seconds", 30))))
+        transport: Optional[paramiko.Transport] = None
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            transport = paramiko.Transport(sock)
+            transport.banner_timeout = timeout
+            transport.auth_timeout = timeout
+            transport.start_client(timeout=timeout)
+            actual_fingerprint = _host_key_fingerprint(transport.get_remote_server_key())
+            if not hmac.compare_digest(actual_fingerprint, expected_fingerprint):
+                raise HTTPException(status_code=403, detail="SFTP host key fingerprint does not match pinned host")
+            if context.credential_type == "sftp_password":
+                transport.auth_password(username, context.credential_secret)
+            else:
+                transport.auth_publickey(username, _private_key(context.credential_secret))
+            if not transport.is_authenticated():
+                raise HTTPException(status_code=401, detail="SFTP authentication failed")
+            return transport, paramiko.SFTPClient.from_transport(transport), actual_fingerprint
+        except HTTPException:
+            if transport:
+                transport.close()
+            raise
+        except paramiko.AuthenticationException as exc:
+            if transport:
+                transport.close()
+            raise HTTPException(status_code=401, detail="SFTP authentication failed") from exc
+        except (OSError, paramiko.SSHException) as exc:
+            if transport:
+                transport.close()
+            raise HTTPException(status_code=502, detail=f"SFTP connection failed: {type(exc).__name__}") from exc
+
+    def fetch(self, context: AdapterContext) -> AdapterResult:
+        config = context.config
+        remote_path = str(config.get("remote_path") or "").strip()
+        if not remote_path:
+            raise HTTPException(status_code=422, detail="SFTP connector requires remote_path")
+        max_files = max(1, min(1000, int(config.get("max_files", 100)), context.limit))
+        max_file_bytes = max(1024, min(100_000_000, int(config.get("max_file_bytes", 10_000_000))))
+        max_records = max(1, min(1_000_000, int(config.get("max_records", 100_000))))
+        transport, sftp, fingerprint = self._connect(context)
+        records: List[Dict[str, Any]] = []
+        bytes_read = 0
+        last_path = context.cursor
+        files: List[tuple[str, int]] = []
+        try:
+            attributes = sftp.stat(remote_path)
+            if stat.S_ISDIR(attributes.st_mode):
+                for entry in sftp.listdir_attr(remote_path):
+                    if stat.S_ISREG(entry.st_mode):
+                        files.append((posixpath.join(remote_path.rstrip("/"), entry.filename), int(entry.st_mtime or 0)))
+            else:
+                files.append((remote_path, int(attributes.st_mtime or 0)))
+            files = [item for item in sorted(files) if context.cursor is None or item[0] > str(context.cursor)][:max_files]
+            for path, modified_at in files:
+                with sftp.file(path, "rb") as handle:
+                    raw = handle.read(max_file_bytes + 1)
+                if len(raw) > max_file_bytes:
+                    raise HTTPException(status_code=413, detail=f"SFTP file '{path}' exceeded max_file_bytes")
+                file_records = _decode_tabular_records(raw, path, str(config.get("format") or "auto"))
+                if len(records) + len(file_records) > max_records:
+                    raise HTTPException(status_code=413, detail="SFTP batch exceeded max_records; reduce max_files or split source files")
+                for row in file_records:
+                    row.setdefault("_source_file_path", path)
+                    row.setdefault("_source_file_mtime", modified_at)
+                records.extend(file_records)
+                bytes_read += len(raw)
+                last_path = path
+        except HTTPException:
+            raise
+        except (OSError, paramiko.SSHException) as exc:
+            raise HTTPException(status_code=502, detail=f"SFTP read failed: {type(exc).__name__}") from exc
+        finally:
+            try:
+                sftp.close()
+            finally:
+                transport.close()
+        return AdapterResult(
+            records=records, next_cursor=last_path, bytes_read=bytes_read,
+            metadata={"host": str(config.get("host")), "remote_path": remote_path, "files_read": len(files), "host_key_sha256": fingerprint},
+        )
+
+
 register_adapter(RestPullAdapter())
 register_adapter(SqlPullAdapter())
 register_adapter(S3PullAdapter())
+register_adapter(SftpPullAdapter())
 _loaded_plugins = _load_plugins()
 
 
