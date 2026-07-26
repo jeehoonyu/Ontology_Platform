@@ -347,6 +347,21 @@ def _assert_workshop_object_type_references(
                 "project_id": project_id,
                 "object_type_id": object_type_id,
             })
+    action_ids = {
+        str(widget.get("action_type_id"))
+        for widget in (widgets or [])
+        if isinstance(widget, dict) and widget.get("action_type_id")
+    }
+    for action_type_id in sorted(action_ids):
+        action = db.get(models.ActionType, action_type_id)
+        if not action:
+            raise HTTPException(status_code=422, detail=f"Action type '{action_type_id}' not found")
+        if action.project_id != project_id:
+            raise HTTPException(status_code=403, detail={
+                "message": "Workshop cannot reference an action type owned by another project",
+                "project_id": project_id,
+                "action_type_id": action_type_id,
+            })
 
 
 def _get_slate_app_or_404(db: Session, app_id: str) -> SlateApp:

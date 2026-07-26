@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action, ops_control, platform_runtime, runtime
+from . import models, models_action, ops_control, platform_runtime, runtime, tenancy
 from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["aip_agents"])
@@ -27,6 +27,38 @@ router = APIRouter(tags=["aip_agents"])
 
 def _now() -> int:
     return int(time.time())
+
+
+def _agent_for(db: Session, agent_id: str, principal: Principal, permission: str):
+    agent = db.get(models.AgentDefinition, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    tenancy.assert_project_permission(db, principal, agent.project_id, permission)
+    return agent
+
+
+def _object_type_project_id(db: Session, object_type_id: str) -> str:
+    object_type = db.get(models.ObjectType, object_type_id)
+    if not object_type:
+        raise HTTPException(status_code=404, detail=f"Object type '{object_type_id}' not found")
+    return str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+
+
+def _assert_tool_resources(db: Session, project_id: str, tools: List[Dict[str, Any]], retrieval: Dict[str, Any]) -> None:
+    object_type_ids = {str(value) for value in (retrieval.get("ontology") or []) if value}
+    for tool in tools:
+        if tool.get("object_type_id"):
+            object_type_ids.add(str(tool["object_type_id"]))
+        action_type_id = tool.get("action_type_id")
+        if action_type_id:
+            action = db.get(models.ActionType, str(action_type_id))
+            if not action:
+                raise HTTPException(status_code=404, detail=f"Action type '{action_type_id}' not found")
+            if action.project_id != project_id:
+                raise HTTPException(status_code=403, detail="Agent tool action belongs to another project")
+    for object_type_id in sorted(object_type_ids):
+        if _object_type_project_id(db, object_type_id) != project_id:
+            raise HTTPException(status_code=403, detail="Agent tool object type belongs to another project")
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +142,11 @@ class AgentWorkerRunRequest(BaseModel):
 # Tool config endpoints
 # ---------------------------------------------------------------------------
 @router.put("/aip/agents/{agent_id}/tools", response_model=ToolConfigRead)
-def configure_agent_tools(agent_id: str, body: ToolConfigUpsert, db: Session = Depends(get_db)):
-    if not db.get(models.AgentDefinition, agent_id):
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+def configure_agent_tools(agent_id: str, body: ToolConfigUpsert, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    agent = _agent_for(db, agent_id, principal, "edit")
     now = _now()
     tools = [t.model_dump() for t in body.tools]
+    _assert_tool_resources(db, agent.project_id, tools, body.retrieval)
     cfg = db.get(AgentToolConfig, agent_id)
     if cfg:
         cfg.tools = tools
@@ -123,14 +155,15 @@ def configure_agent_tools(agent_id: str, body: ToolConfigUpsert, db: Session = D
     else:
         cfg = AgentToolConfig(agent_id=agent_id, tools=tools, retrieval=body.retrieval, created_at=now, updated_at=now)
         db.add(cfg)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="aip.agent.tools_configured",
-                                  subject_type="agent", subject_id=agent_id, payload={"tools": len(tools)}))
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="aip.agent.tools_configured",
+                                  subject_type="agent", subject_id=agent_id, payload={"project_id": agent.project_id, "tools": len(tools)}))
     db.commit(); db.refresh(cfg)
     return cfg
 
 
 @router.get("/aip/agents/{agent_id}/tools", response_model=ToolConfigRead)
-def get_agent_tools(agent_id: str, db: Session = Depends(get_db)):
+def get_agent_tools(agent_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    _agent_for(db, agent_id, principal, "view")
     cfg = db.get(AgentToolConfig, agent_id)
     if not cfg:
         raise HTTPException(status_code=404, detail="No tool config for this agent")
@@ -180,9 +213,14 @@ def _run_tool(db: Session, tool: Dict[str, Any], prompt: str, parameters: Dict[s
         # resolve params from request parameters by matching names
         resolved = {k: parameters.get(k) for k in (action.parameters or {}).keys()}
         validation_errors = runtime.validate_action_parameters(action, resolved)
+        rules = action.rules or {}
         return {"action_type_id": action.id, "display_name": action.display_name, "parameters": resolved,
                 "staged": not validation_errors, "validation_errors": validation_errors,
-                "requires_approval": bool((action.rules or {}).get("requires_approval"))}
+                "requires_approval": bool(
+                    rules.get("requires_approval")
+                    or rules.get("approval_required")
+                    or str(rules.get("risk_level", "")).lower() in {"high", "critical"}
+                )}
     if ttype == "command":
         return {"command": tool.get("command"), "response": tool.get("response", "ok")}
     return {"error": f"unknown tool type '{ttype}'"}
@@ -236,6 +274,7 @@ def _invoke_agent(
     actor: str = "system",
     execution_job_id: Optional[str] = None,
     execution_lease_token: Optional[str] = None,
+    expected_project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     if execution_job_id:
         prior = db.query(AgentToolRun).filter(AgentToolRun.execution_job_id == execution_job_id).first()
@@ -244,9 +283,12 @@ def _invoke_agent(
     agent = db.get(models.AgentDefinition, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    if expected_project_id is not None and agent.project_id != expected_project_id:
+        raise HTTPException(status_code=403, detail="Agent belongs to another project")
     cfg = db.get(AgentToolConfig, agent_id)
     tools = (cfg.tools if cfg else []) or []
     retrieval_cfg = (cfg.retrieval if cfg else {}) or {}
+    _assert_tool_resources(db, agent.project_id, tools, retrieval_cfg)
     prompt_lc = body.prompt.lower()
 
     # 1) retrieval context
@@ -281,6 +323,7 @@ def _invoke_agent(
                 approval_count += 1
                 db.add(models_action.ApprovalRequest(
                     id=approval_request_id,
+                    project_id=agent.project_id,
                     action_type_id=output["action_type_id"],
                     requester=actor,
                     parameters=output["parameters"],
@@ -294,7 +337,7 @@ def _invoke_agent(
                     event_type="aip.agent.approval_requested",
                     subject_type="approval_request",
                     subject_id=approval_request_id,
-                    payload={"agent_id": agent_id, "action_type_id": output["action_type_id"], "execution_job_id": execution_job_id},
+                    payload={"project_id": agent.project_id, "agent_id": agent_id, "action_type_id": output["action_type_id"], "execution_job_id": execution_job_id},
                 ))
                 ops_control.record_ops_event(
                     db,
@@ -304,7 +347,7 @@ def _invoke_agent(
                     title=f"Agent {agent.display_name} requested action approval",
                     subject_type="approval_request",
                     subject_id=approval_request_id,
-                    payload={"agent_id": agent_id, "action_type_id": output["action_type_id"], "execution_job_id": execution_job_id},
+                    payload={"project_id": agent.project_id, "agent_id": agent_id, "action_type_id": output["action_type_id"], "execution_job_id": execution_job_id},
                 )
             proposed_actions.append({
                 "action_type_id": output["action_type_id"],
@@ -354,7 +397,7 @@ def _invoke_agent(
     )
     db.add(run)
     db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=actor, event_type="aip.agent.invoked",
-                                  subject_type="agent", subject_id=agent_id, payload={"tools_used": len(tool_calls), "run_id": run.id, "execution_job_id": execution_job_id, "policy_summary": policy_summary}))
+                                  subject_type="agent", subject_id=agent_id, payload={"project_id": agent.project_id, "tools_used": len(tool_calls), "run_id": run.id, "execution_job_id": execution_job_id, "policy_summary": policy_summary}))
     if execution_job_id:
         db.flush()
         active_job = db.query(platform_runtime.PlatformJob).filter(platform_runtime.PlatformJob.id == execution_job_id).with_for_update().first()
@@ -367,8 +410,9 @@ def _invoke_agent(
 
 
 @router.post("/aip/agents/{agent_id}/invoke")
-def invoke_agent(agent_id: str, body: InvokeRequest, db: Session = Depends(get_db)):
-    return _invoke_agent(agent_id, body, db)
+def invoke_agent(agent_id: str, body: InvokeRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    agent = _agent_for(db, agent_id, principal, "execute")
+    return _invoke_agent(agent_id, body, db, actor=principal.id, expected_project_id=agent.project_id)
 
 
 @router.post("/aip/agents/{agent_id}/invoke/async", status_code=202)
@@ -378,9 +422,9 @@ def enqueue_agent_invocation(
     principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
-    if not db.get(models.AgentDefinition, agent_id):
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    agent = _agent_for(db, agent_id, principal, "execute")
     return platform_runtime.create_job(platform_runtime.JobCreate(
+        project_id=agent.project_id,
         job_type="aip.agent.invoke",
         subject_type="agent",
         subject_id=agent_id,
@@ -437,6 +481,7 @@ def run_next_agent_job(
             actor=principal.id,
             execution_job_id=job_id,
             execution_lease_token=lease_token,
+            expected_project_id=str(claimed.get("project_id") or "default"),
         )
         db.expire_all()
         current = db.get(platform_runtime.PlatformJob, job_id)
@@ -480,7 +525,6 @@ def list_agent_runs(
     principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ):
-    if not db.get(models.AgentDefinition, agent_id):
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    _agent_for(db, agent_id, principal, "view")
     rows = db.query(AgentToolRun).filter(AgentToolRun.agent_id == agent_id).order_by(AgentToolRun.created_at.desc()).limit(max(1, min(limit, 200))).all()
     return [_run_dict(row) for row in rows]

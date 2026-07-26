@@ -3329,8 +3329,12 @@ def evaluate_automation(
     if condition_result:
         if effect.get("type") == "request_approval":
             approval_id = str(uuid.uuid4())
+            action = db.get(models.ActionType, effect["action_type_id"])
+            if not action:
+                raise ValueError(f"ActionType '{effect['action_type_id']}' not found")
             approval = models_action.ApprovalRequest(
                 id=approval_id,
+                project_id=action.project_id,
                 action_type_id=effect["action_type_id"],
                 requester=actor,
                 parameters=effect.get("parameters", {}),

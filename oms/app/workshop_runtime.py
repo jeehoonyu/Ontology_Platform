@@ -226,6 +226,8 @@ def _apply_event(db: Session, event: Dict[str, Any], state: Dict[str, Any], prin
         action = db.get(models.ActionType, event.get("action_type_id"))
         if not action:
             effect = {"type": etype, "status": "error", "detail": "action not found"}
+        elif action.project_id != project_id:
+            raise HTTPException(status_code=403, detail="Workshop action belongs to another project")
         else:
             params = {
                 k: (state.get(v[1:]) if isinstance(v, str) and v.startswith("$") else v)
@@ -241,6 +243,7 @@ def _apply_event(db: Session, event: Dict[str, Any], state: Dict[str, Any], prin
                 approval_id = str(uuid.uuid4())
                 db.add(models_action.ApprovalRequest(
                     id=approval_id,
+                    project_id=project_id,
                     action_type_id=action.id,
                     requester=principal.id,
                     parameters=params,

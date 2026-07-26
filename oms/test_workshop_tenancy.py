@@ -47,7 +47,7 @@ with SessionLocal() as db:
             source_asset_id=None, lineage={}, created_at=1, updated_at=1,
         ),
         models.ActionType(
-            id="critical-ack", display_name="Critical acknowledge", description=None,
+            id="critical-ack", project_id="alpha-workshop", display_name="Critical acknowledge", description=None,
             parameters={"alert_id": {"type": "string", "required": True}},
             rules={
                 "risk_level": "critical",

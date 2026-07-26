@@ -1153,6 +1153,7 @@ def _stage_escalation_approval(db: Session, *, actor: str, work_order_id: str, r
             return _approval_dict(row)
     approval = models_action.ApprovalRequest(
         id=str(uuid.uuid4()),
+        project_id="default",
         action_type_id="escalate_work_order",
         requester=actor,
         parameters=parameters,
