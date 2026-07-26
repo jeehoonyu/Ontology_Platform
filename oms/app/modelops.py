@@ -17,9 +17,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, tenancy
 from .database import Base, get_db
 from .modeling import ModelDeployment, ModelingObjective, ModelSubmission, _predict_records
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["modelops"])
 
@@ -36,6 +37,7 @@ class ModelMonitor(Base):
     __tablename__ = "model_monitors"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     objective_id: Mapped[str] = mapped_column(String, index=True)
@@ -54,6 +56,7 @@ class ModelMonitorRun(Base):
     __tablename__ = "model_monitor_runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     monitor_id: Mapped[str] = mapped_column(String, index=True)
     objective_id: Mapped[str] = mapped_column(String, index=True)
     deployment_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
@@ -72,6 +75,7 @@ class ModelPredictionLog(Base):
     __tablename__ = "model_prediction_logs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     deployment_id: Mapped[str] = mapped_column(String, index=True)
     objective_id: Mapped[str] = mapped_column(String, index=True)
     submission_id: Mapped[str] = mapped_column(String, index=True)
@@ -84,6 +88,7 @@ class ModelPredictionLog(Base):
 
 class ModelMonitorCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     objective_id: str
@@ -113,10 +118,10 @@ class ModelMonitorRunRequest(BaseModel):
     actual_field: Optional[str] = None
 
 
-def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any]) -> None:
+def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any], actor: str = "modelops") -> None:
     db.add(models_action.AuditLog(
         id=uuid.uuid4().hex,
-        actor="modelops",
+        actor=actor,
         event_type=event_type,
         subject_type=subject_type,
         subject_id=subject_id,
@@ -127,6 +132,7 @@ def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, pay
 def _monitor_dict(row: ModelMonitor) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "display_name": row.display_name,
         "description": row.description,
         "objective_id": row.objective_id,
@@ -145,6 +151,7 @@ def _monitor_dict(row: ModelMonitor) -> Dict[str, Any]:
 def _run_dict(row: ModelMonitorRun) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "monitor_id": row.monitor_id,
         "objective_id": row.objective_id,
         "deployment_id": row.deployment_id,
@@ -163,6 +170,7 @@ def _run_dict(row: ModelMonitorRun) -> Dict[str, Any]:
 def _prediction_log_dict(row: ModelPredictionLog) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "deployment_id": row.deployment_id,
         "objective_id": row.objective_id,
         "submission_id": row.submission_id,
@@ -179,6 +187,24 @@ def _get_asset(db: Session, asset_id: str) -> models.DataAsset:
     if not asset:
         raise HTTPException(status_code=404, detail=f"DataAsset '{asset_id}' not found")
     return asset
+
+
+def _assert_asset_project(db: Session, asset_id: str, project_id: str) -> models.DataAsset:
+    asset = _get_asset(db, asset_id)
+    if str((asset.asset_schema or {}).get("project_id") or "default") != project_id:
+        raise HTTPException(status_code=403, detail="Model monitor dataset belongs to another project")
+    return asset
+
+
+def _monitor_for(db: Session, monitor_id: str, principal: Principal, permission: str) -> ModelMonitor:
+    monitor = db.get(ModelMonitor, monitor_id)
+    if not monitor:
+        raise HTTPException(status_code=404, detail=f"ModelMonitor '{monitor_id}' not found")
+    tenancy.assert_project_permission(db, principal, monitor.project_id, permission)
+    objective = db.get(ModelingObjective, monitor.objective_id)
+    if not objective or objective.project_id != monitor.project_id:
+        raise HTTPException(status_code=409, detail="Model monitor objective belongs to another project")
+    return monitor
 
 
 def _get_objective(db: Session, objective_id: str) -> ModelingObjective:
@@ -469,6 +495,7 @@ def record_prediction_log(
     predictions = _extract_predictions(response)
     log = ModelPredictionLog(
         id=_new_id("pred_log"),
+        project_id=deployment.project_id,
         deployment_id=deployment.id,
         objective_id=deployment.objective_id,
         submission_id=deployment.submission_id,
@@ -489,7 +516,7 @@ def record_prediction_log(
             title=f"Inference logged for deployment {deployment.id}",
             subject_type="model_deployment",
             subject_id=deployment.id,
-            payload={"prediction_log_id": log.id, "input_count": input_count, "output_count": len(predictions)},
+            payload={"project_id": deployment.project_id, "prediction_log_id": log.id, "input_count": input_count, "output_count": len(predictions)},
         )
     except Exception:
         pass
@@ -497,34 +524,48 @@ def record_prediction_log(
 
 
 @router.get("/modelops/summary")
-def modelops_summary(db: Session = Depends(get_db)):
-    latest_runs = db.query(ModelMonitorRun).order_by(ModelMonitorRun.created_at.desc()).limit(20).all()
+def modelops_summary(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    accessible = tenancy.accessible_project_ids(db, principal, "view")
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        project_ids = [project_id]
+    else:
+        project_ids = accessible
+    def scoped(query, column):
+        return query if project_ids is None else query.filter(column.in_(project_ids)) if project_ids else query.filter(column == "__none__")
+    latest_runs = scoped(db.query(ModelMonitorRun), ModelMonitorRun.project_id).order_by(ModelMonitorRun.created_at.desc()).limit(20).all()
     status_counts = Counter(run.status for run in latest_runs)
     return {
-        "objectives": db.query(ModelingObjective).count(),
-        "submissions": db.query(ModelSubmission).count(),
-        "deployments": db.query(ModelDeployment).count(),
-        "monitors": db.query(ModelMonitor).count(),
-        "prediction_logs": db.query(ModelPredictionLog).count(),
+        "objectives": scoped(db.query(ModelingObjective), ModelingObjective.project_id).count(),
+        "submissions": scoped(db.query(ModelSubmission), ModelSubmission.project_id).count(),
+        "deployments": scoped(db.query(ModelDeployment), ModelDeployment.project_id).count(),
+        "monitors": scoped(db.query(ModelMonitor), ModelMonitor.project_id).count(),
+        "prediction_logs": scoped(db.query(ModelPredictionLog), ModelPredictionLog.project_id).count(),
         "latest_monitor_status": dict(status_counts),
         "latest_runs": [_run_dict(run) for run in latest_runs[:5]],
     }
 
 
 @router.post("/modelops/monitors")
-def create_monitor(body: ModelMonitorCreate, db: Session = Depends(get_db)):
-    _get_objective(db, body.objective_id)
-    _get_asset(db, body.baseline_asset_id)
+def create_monitor(body: ModelMonitorCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
+    objective = _get_objective(db, body.objective_id)
+    if objective.project_id != body.project_id:
+        raise HTTPException(status_code=403, detail="Model monitor objective belongs to another project")
+    _assert_asset_project(db, body.baseline_asset_id, body.project_id)
     if body.deployment_id:
         deployment = _get_deployment(db, body.deployment_id)
         if deployment.objective_id != body.objective_id:
             raise HTTPException(status_code=422, detail="deployment objective does not match monitor objective")
+        if deployment.project_id != body.project_id:
+            raise HTTPException(status_code=403, detail="Model monitor deployment belongs to another project")
     monitor_id = body.id or _new_id("monitor")
     if db.get(ModelMonitor, monitor_id):
         raise HTTPException(status_code=400, detail="ModelMonitor already exists")
     now = _now()
     monitor = ModelMonitor(
         id=monitor_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         description=body.description,
         objective_id=body.objective_id,
@@ -539,15 +580,23 @@ def create_monitor(body: ModelMonitorCreate, db: Session = Depends(get_db)):
         updated_at=now,
     )
     db.add(monitor)
-    _audit(db, "modelops.monitor.created", "model_monitor", monitor.id, _monitor_dict(monitor))
+    _audit(db, "modelops.monitor.created", "model_monitor", monitor.id, _monitor_dict(monitor), actor=principal.id)
     db.commit()
     db.refresh(monitor)
     return _monitor_dict(monitor)
 
 
 @router.get("/modelops/monitors")
-def list_monitors(db: Session = Depends(get_db)):
-    monitors = db.query(ModelMonitor).order_by(ModelMonitor.updated_at.desc()).all()
+def list_monitors(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(ModelMonitor)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(ModelMonitor.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(ModelMonitor.project_id.in_(accessible)) if accessible else query.filter(ModelMonitor.id == "__none__")
+    monitors = query.order_by(ModelMonitor.updated_at.desc()).all()
     latest_by_monitor = {
         run.monitor_id: run
         for run in db.query(ModelMonitorRun).order_by(ModelMonitorRun.created_at.asc()).all()
@@ -559,43 +608,45 @@ def list_monitors(db: Session = Depends(get_db)):
 
 
 @router.get("/modelops/monitors/{monitor_id}")
-def get_monitor(monitor_id: str, db: Session = Depends(get_db)):
-    monitor = db.get(ModelMonitor, monitor_id)
-    if not monitor:
-        raise HTTPException(status_code=404, detail=f"ModelMonitor '{monitor_id}' not found")
-    latest = db.query(ModelMonitorRun).filter(ModelMonitorRun.monitor_id == monitor_id).order_by(ModelMonitorRun.created_at.desc()).first()
+def get_monitor(monitor_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    monitor = _monitor_for(db, monitor_id, principal, "view")
+    latest = db.query(ModelMonitorRun).filter(
+        ModelMonitorRun.monitor_id == monitor_id, ModelMonitorRun.project_id == monitor.project_id,
+    ).order_by(ModelMonitorRun.created_at.desc()).first()
     return {**_monitor_dict(monitor), "latest_run": _run_dict(latest) if latest else None}
 
 
 @router.patch("/modelops/monitors/{monitor_id}")
-def patch_monitor(monitor_id: str, body: ModelMonitorPatch, db: Session = Depends(get_db)):
-    monitor = db.get(ModelMonitor, monitor_id)
-    if not monitor:
-        raise HTTPException(status_code=404, detail=f"ModelMonitor '{monitor_id}' not found")
+def patch_monitor(monitor_id: str, body: ModelMonitorPatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    monitor = _monitor_for(db, monitor_id, principal, "edit")
     patch = body.model_dump(exclude_unset=True)
     if "baseline_asset_id" in patch:
-        _get_asset(db, patch["baseline_asset_id"])
+        _assert_asset_project(db, patch["baseline_asset_id"], monitor.project_id)
     if "deployment_id" in patch and patch["deployment_id"]:
-        _get_deployment(db, patch["deployment_id"])
+        deployment = _get_deployment(db, patch["deployment_id"])
+        if deployment.project_id != monitor.project_id or deployment.objective_id != monitor.objective_id:
+            raise HTTPException(status_code=403, detail="Model monitor deployment belongs to another project or objective")
     for key, value in patch.items():
         setattr(monitor, key, value)
     monitor.updated_at = _now()
-    _audit(db, "modelops.monitor.updated", "model_monitor", monitor.id, patch)
+    _audit(db, "modelops.monitor.updated", "model_monitor", monitor.id, {"project_id": monitor.project_id, **patch}, actor=principal.id)
     db.commit()
     db.refresh(monitor)
     return _monitor_dict(monitor)
 
 
 @router.post("/modelops/monitors/{monitor_id}/run")
-def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Depends(get_db)):
-    monitor = db.get(ModelMonitor, monitor_id)
-    if not monitor:
-        raise HTTPException(status_code=404, detail=f"ModelMonitor '{monitor_id}' not found")
+def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Depends(get_db),
+                principal: Principal = Depends(require_permission("execute"))):
+    if not isinstance(principal, Principal):
+        # Trusted in-process scenario/runbook calls predate HTTP authentication.
+        principal = Principal("system", "System", None, ["system"], ["*"], project_ids=["*"])
+    monitor = _monitor_for(db, monitor_id, principal, "execute")
     if not monitor.enabled:
         raise HTTPException(status_code=409, detail="ModelMonitor is disabled")
     objective = _get_objective(db, monitor.objective_id)
-    baseline_asset = _get_asset(db, monitor.baseline_asset_id)
-    current_asset = _get_asset(db, body.current_asset_id)
+    baseline_asset = _assert_asset_project(db, monitor.baseline_asset_id, monitor.project_id)
+    current_asset = _assert_asset_project(db, body.current_asset_id, monitor.project_id)
     fields = monitor.feature_fields or list(objective.feature_fields or [])
     if not fields:
         raise HTTPException(status_code=422, detail="monitor requires feature fields")
@@ -604,6 +655,8 @@ def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Dep
 
     if monitor.deployment_id and monitor.prediction_field:
         deployment = _get_deployment(db, monitor.deployment_id)
+        if deployment.project_id != monitor.project_id or deployment.objective_id != monitor.objective_id:
+            raise HTTPException(status_code=409, detail="Model monitor deployment belongs to another project or objective")
         predictions = _predict_records(current_records, objective)
         for row, prediction in zip(current_records, predictions):
             row[monitor.prediction_field] = prediction
@@ -628,6 +681,7 @@ def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Dep
     alerts = drift_alerts + quality_alerts
     run = ModelMonitorRun(
         id=_new_id("monitor_run"),
+        project_id=monitor.project_id,
         monitor_id=monitor.id,
         objective_id=monitor.objective_id,
         deployment_id=monitor.deployment_id,
@@ -642,7 +696,7 @@ def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Dep
         created_at=_now(),
     )
     db.add(run)
-    _audit(db, "modelops.monitor.run", "model_monitor", monitor.id, {"run_id": run.id, "status": status, "alerts": len(alerts)})
+    _audit(db, "modelops.monitor.run", "model_monitor", monitor.id, {"project_id": monitor.project_id, "run_id": run.id, "status": status, "alerts": len(alerts)}, actor=principal.id)
     try:
         from . import ops_control
         ops_control.record_ops_event(
@@ -653,7 +707,7 @@ def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Dep
             title=f"Model monitor {monitor.display_name} {status}",
             subject_type="model_monitor",
             subject_id=monitor.id,
-            payload={"run_id": run.id, "status": status, "alerts": alerts, "current_asset_id": current_asset.id},
+            payload={"project_id": monitor.project_id, "run_id": run.id, "status": status, "alerts": alerts, "current_asset_id": current_asset.id},
         )
     except Exception:
         pass
@@ -663,19 +717,24 @@ def run_monitor(monitor_id: str, body: ModelMonitorRunRequest, db: Session = Dep
 
 
 @router.get("/modelops/monitors/{monitor_id}/runs")
-def list_monitor_runs(monitor_id: str, db: Session = Depends(get_db)):
-    if not db.get(ModelMonitor, monitor_id):
-        raise HTTPException(status_code=404, detail=f"ModelMonitor '{monitor_id}' not found")
+def list_monitor_runs(monitor_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    monitor = _monitor_for(db, monitor_id, principal, "view")
     return [
         _run_dict(run)
-        for run in db.query(ModelMonitorRun).filter(ModelMonitorRun.monitor_id == monitor_id).order_by(ModelMonitorRun.created_at.desc()).all()
+        for run in db.query(ModelMonitorRun).filter(
+            ModelMonitorRun.monitor_id == monitor_id, ModelMonitorRun.project_id == monitor.project_id,
+        ).order_by(ModelMonitorRun.created_at.desc()).all()
     ]
 
 
 @router.get("/modelops/deployments/{deployment_id}/prediction-logs")
-def list_prediction_logs(deployment_id: str, db: Session = Depends(get_db)):
-    _get_deployment(db, deployment_id)
+def list_prediction_logs(deployment_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    deployment = _get_deployment(db, deployment_id)
+    tenancy.assert_project_permission(db, principal, deployment.project_id, "view")
     return [
         _prediction_log_dict(log)
-        for log in db.query(ModelPredictionLog).filter(ModelPredictionLog.deployment_id == deployment_id).order_by(ModelPredictionLog.created_at.desc()).all()
+        for log in db.query(ModelPredictionLog).filter(
+            ModelPredictionLog.deployment_id == deployment_id,
+            ModelPredictionLog.project_id == deployment.project_id,
+        ).order_by(ModelPredictionLog.created_at.desc()).all()
     ]
