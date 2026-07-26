@@ -162,6 +162,7 @@ class ModelEndpoint(Base):
     __tablename__ = "model_endpoints"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     provider: Mapped[str] = mapped_column(String)
@@ -354,6 +355,7 @@ class EvalSuite(Base):
     __tablename__ = "eval_suites"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     target_agent_id: Mapped[str] = mapped_column(String, ForeignKey("agent_definitions.id"), index=True)
@@ -372,6 +374,7 @@ class EvalRun(Base):
     __tablename__ = "eval_runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     suite_id: Mapped[str] = mapped_column(String, ForeignKey("eval_suites.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     score: Mapped[int] = mapped_column(Integer, default=0)
