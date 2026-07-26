@@ -89,7 +89,13 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       project_id: "outside-project",
       content: "asset_id,name\nforbidden,Forbidden Asset\n"
     });
-    return { created, validated, generated, draftValidation, applied, delivered, objects, detail, outsideProject };
+    const outsidePipeline = await request("/pipeline-builder/graphs", "POST", {
+      project_id: "outside-project",
+      display_name: "Forbidden pipeline",
+      nodes: [],
+      edges: []
+    });
+    return { created, validated, generated, draftValidation, applied, delivered, objects, detail, outsideProject, outsidePipeline };
   }, adminMutation.body.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12));
   expect(onboarding.created.status).toBe(201);
   expect(onboarding.created.body.project_id).toBe("default");
@@ -103,6 +109,8 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(onboarding.detail.body.project_id).toBe("default");
   expect(onboarding.outsideProject.status).toBe(403);
   expect(onboarding.outsideProject.body.detail.project_id).toBe("outside-project");
+  expect(onboarding.outsidePipeline.status).toBe(403);
+  expect(onboarding.outsidePipeline.body.detail.project_id).toBe("outside-project");
 
   const tenantBoundary = await page.evaluate(async () => {
     const response = await fetch("/tenancy/organizations", {
@@ -434,7 +442,7 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerSession.permissions).toEqual(["view"]);
   expect(viewerSession.project_ids).toContain("default");
 
-  const viewerAccess = await page.evaluate(async () => {
+  const viewerAccess = await page.evaluate(async (graphId) => {
     const read = await fetch("/artifacts");
     const edit = await fetch("/artifacts", {
       method: "POST",
@@ -446,10 +454,25 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ project_id: "default", content: "asset_id,name\nforbidden,Forbidden\n" })
     });
-    return { read: read.status, edit: edit.status, detail: await edit.json(), importStatus: importAttempt.status };
-  });
+    const graphRead = await fetch(`/pipeline-builder/graphs/${graphId}`);
+    const graphPreview = await fetch(`/pipeline-builder/graphs/${graphId}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    return {
+      read: read.status,
+      edit: edit.status,
+      detail: await edit.json(),
+      importStatus: importAttempt.status,
+      graphReadStatus: graphRead.status,
+      graphPreviewStatus: graphPreview.status
+    };
+  }, onboarding.applied.body.pipeline_graph_id);
   expect(viewerAccess.read).toBe(200);
   expect(viewerAccess.edit).toBe(403);
   expect(viewerAccess.importStatus).toBe(403);
+  expect(viewerAccess.graphReadStatus).toBe(200);
+  expect(viewerAccess.graphPreviewStatus).toBe(403);
   expect(viewerAccess.detail.detail).toContain("Permission 'edit' is required");
 });

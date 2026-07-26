@@ -1,4 +1,4 @@
-"""Alembic backfills project ownership for legacy import jobs."""
+"""Alembic backfills project ownership for legacy Pipeline Builder graphs."""
 import os
 from pathlib import Path
 import sqlite3
@@ -8,30 +8,25 @@ import tempfile
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-    database_path = Path(tmpdir) / "legacy_imports.db"
+    database_path = Path(tmpdir) / "legacy_pipeline_graphs.db"
     with sqlite3.connect(database_path) as connection:
         connection.executescript(
             """
             CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY);
-            INSERT INTO alembic_version (version_num) VALUES ('0013_job_idempotency');
-            CREATE TABLE import_jobs (
+            INSERT INTO alembic_version (version_num) VALUES ('0014_import_project_scope');
+            CREATE TABLE pipeline_builder_graphs (
                 id VARCHAR NOT NULL PRIMARY KEY,
-                source_type VARCHAR NOT NULL,
-                filename VARCHAR,
                 display_name VARCHAR NOT NULL,
-                target_dataset_id VARCHAR,
+                description VARCHAR,
+                nodes JSON NOT NULL,
+                edges JSON NOT NULL,
+                parameters JSON NOT NULL,
                 status VARCHAR NOT NULL,
-                inferred_schema JSON NOT NULL,
-                preview_rows JSON NOT NULL,
-                validation_errors JSON NOT NULL,
-                records JSON NOT NULL,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                promoted_at INTEGER
+                updated_at INTEGER NOT NULL
             );
-            INSERT INTO import_jobs VALUES (
-                'legacy-import', 'csv', 'assets.csv', 'Legacy Assets', NULL, 'READY',
-                '{}', '[]', '[]', '[]', 1, 1, NULL
+            INSERT INTO pipeline_builder_graphs VALUES (
+                'legacy-graph', 'Legacy graph', NULL, '[]', '[]', '{}', 'DRAFT', 1, 1
             );
             """
         )
@@ -52,11 +47,11 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
 
     with sqlite3.connect(database_path) as connection:
         version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        project_id = connection.execute("SELECT project_id FROM import_jobs WHERE id='legacy-import'").fetchone()[0]
-        indexes = {row[1] for row in connection.execute("PRAGMA index_list('import_jobs')").fetchall()}
+        project_id = connection.execute("SELECT project_id FROM pipeline_builder_graphs WHERE id='legacy-graph'").fetchone()[0]
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list('pipeline_builder_graphs')").fetchall()}
 
     assert version == "0015_pipeline_project_scope", version
     assert project_id == "default", project_id
-    assert "ix_import_jobs_project_id" in indexes, indexes
+    assert "ix_pipeline_builder_graphs_project_id" in indexes, indexes
 
-print("\nImport project-scope migration verified: legacy jobs are retained under the default project.")
+print("\nPipeline project-scope migration verified: legacy graphs are retained under the default project.")

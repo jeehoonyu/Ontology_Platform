@@ -1000,6 +1000,8 @@ def adopt_resource(body: ArtifactAdoptRequest, principal: Principal = Depends(re
         graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, body.resource_id)
         if not graph:
             raise HTTPException(status_code=404, detail="Pipeline graph not found")
+        if graph.project_id != body.project_id:
+            raise HTTPException(status_code=403, detail="Pipeline graph belongs to another project")
         nodes = []
         for index, node in enumerate(graph.nodes or []):
             node_type = pipeline_builder_ops._node_type(node)
@@ -1022,6 +1024,9 @@ def adopt_resource(body: ArtifactAdoptRequest, principal: Principal = Depends(re
         selected = db.get(models.ObjectType, body.resource_id)
         if not selected:
             raise HTTPException(status_code=404, detail="Object type not found")
+        object_project = str(((selected.properties or {}).get("__manager") or {}).get("project_id") or "default")
+        if object_project != body.project_id:
+            raise HTTPException(status_code=403, detail="Object type belongs to another project")
         links = db.query(models.LinkType).filter(
             (models.LinkType.source_object_type_id == selected.id) | (models.LinkType.target_object_type_id == selected.id)
         ).all()
