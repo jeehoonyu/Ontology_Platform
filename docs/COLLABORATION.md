@@ -34,21 +34,21 @@ Accepted command batches produce:
 - a new `ArtifactRevision`;
 - an `artifact.collaboration.commands_applied` audit entry;
 - an ordered `artifact.commands` collaboration event;
-- an idempotency receipt retained in artifact metadata; and
+- an append-only idempotency receipt in `platform_artifact_command_receipts`, bound to a canonical request hash; and
 - the normal version compare, restore, publish, and rollback path.
 
-Presence events do not create artifact revisions. Publish, restore, and whole-artifact edits conflict with stale command batches because they affect the complete artifact.
+Presence events do not create artifact revisions. Publish, restore, and whole-artifact edits conflict with stale command batches because they affect the complete artifact. Receipts are not truncated as an artifact accumulates edits. Reusing a key with different commands returns `409`; retrying the same commands returns the original receipt and does not create a revision.
 
 ## Permissions And Deployment
 
 Viewing room state and events requires `view`. Joining, heartbeats, leaving, and command submission require `edit`. The participant token is additionally bound to the authenticated principal. OIDC/RBAC therefore remains the authorization boundary; collaboration tokens do not grant permissions.
 
-Migration `0005_artifact_collaboration` creates the participant and event tables. Both are included in startup schema health checks. Production deployments should preserve event rows with artifact revision and audit history during backup and restore. PostgreSQL API replicas serialize Alembic startup with a transaction-scoped advisory lock so simultaneous container starts cannot race schema DDL.
+Migration `0005_artifact_collaboration` creates the participant and event tables. Migration `0012_artifact_receipts` adds durable receipts for both standard and collaborative builder commands and migrates retained legacy metadata receipts. These tables are included in startup schema health checks and portable snapshots. Production deployments should preserve receipts and event rows with artifact revision and audit history during backup and restore. PostgreSQL API replicas serialize Alembic startup with a transaction-scoped advisory lock so simultaneous container starts cannot race schema DDL.
 
 ## Current Scope
 
 - Ordered events use server-sent events, which works across API replicas when all replicas share the same Postgres database.
-- The production acceptance rehearsal starts two API replicas, submits a builder command to the peer, and requires the primary replica's SSE stream and artifact read to observe the same committed revision.
+- The production acceptance rehearsal starts two API replicas, submits a builder command to the peer, requires the primary replica's SSE stream and artifact read to observe the same committed revision, and then retries the command through the primary to prove cross-replica durable idempotency.
 - Presence is ephemeral and expires automatically.
 - Command application is atomic and uses row locking on databases that support it.
 - The current conflict model is target-based, not a free-form CRDT. This is intentional: governed visual artifacts retain deterministic revisions and explicit recovery semantics.

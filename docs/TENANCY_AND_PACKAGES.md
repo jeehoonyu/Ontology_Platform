@@ -40,7 +40,7 @@ The lifecycle is:
 
 Installations create namespaced resource IDs and persistent ownership records. An installer cannot overwrite a resource owned outside that package and namespace. Dependencies must already be active in the target project. Rollback restores the prior schema and installation; it refuses to remove a newly installed object type when live object instances depend on it.
 
-Every create, publish, install, and rollback operation emits audit evidence. Package versions, installations, ownership records, tenancy records, and collaboration events are included in project JSON snapshot export/import. Database backup remains the authoritative disaster-recovery mechanism.
+Every create, publish, install, and rollback operation emits audit evidence. Package versions, installations, ownership records, tenancy records, durable builder command receipts, and collaboration events are included in project JSON snapshot export/import. Database backup remains the authoritative disaster-recovery mechanism.
 
 ## User Interface
 

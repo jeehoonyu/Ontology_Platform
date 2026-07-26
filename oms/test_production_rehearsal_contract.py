@@ -1,6 +1,7 @@
 """Static contract for the real OIDC, load, restart, and recovery release gate."""
 import json
 from pathlib import Path
+import re
 
 root = Path(__file__).resolve().parents[1]
 realm = json.loads((root / "deploy" / "keycloak-realm.json").read_text(encoding="utf-8"))
@@ -11,6 +12,7 @@ acceptance = (root / "scripts" / "rehearse-production-acceptance.ps1").read_text
 browser = (root / "frontend" / "tests" / "production" / "oidc-rbac.spec.ts").read_text(encoding="utf-8")
 workflow = (root / ".github" / "workflows" / "production-acceptance.yml").read_text(encoding="utf-8")
 migration_env = (root / "oms" / "alembic" / "env.py").read_text(encoding="utf-8")
+migration_sources = [path.read_text(encoding="utf-8") for path in (root / "oms" / "alembic" / "versions").glob("*.py")]
 
 client = next(row for row in realm["clients"] if row["clientId"] == "ontology-platform")
 mapper_claims = {row["config"].get("claim.name") for row in client["protocolMappers"]}
@@ -43,9 +45,12 @@ assert "Array.from({ length: 50 }" in browser
 assert 'fetch("/tenancy/organizations"' in browser
 assert "APPROVAL_REQUIRED" in browser and 'toBe("SUCCESS")' in browser
 assert "crossReplicaEvent" in browser and "http://localhost:18001" in browser
+assert "crossReplicaReplay" in browser and "idempotent_replay" in browser
 assert "rehearse-production-acceptance.ps1" in workflow
 assert "playwright install --with-deps chrome" in workflow
 assert "pg_advisory_xact_lock" in migration_env
 assert "connection.dialect.name == \"postgresql\"" in migration_env
+revision_ids = [match.group(1) for source in migration_sources if (match := re.search(r'^revision = "([^"]+)"', source, re.MULTILINE))]
+assert revision_ids and all(len(revision_id) <= 32 for revision_id in revision_ids), revision_ids
 
 print("Production rehearsal contract verified: OIDC, tenant RBAC, load, cross-replica collaboration, migration serialization, restart, and restore gates are wired.")

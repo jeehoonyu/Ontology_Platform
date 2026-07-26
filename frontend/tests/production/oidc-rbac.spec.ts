@@ -165,6 +165,27 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   const synchronized = await page.evaluate(async (artifactId) => (await fetch(`/artifacts/${artifactId}`)).json(), sharedArtifact.id);
   expect(synchronized.lock_version).toBe(2);
   expect(synchronized.state.nodes).toHaveLength(2);
+  const crossReplicaReplay = await page.evaluate(async ({ artifactId, participantToken, lockVersion }) => {
+    const response = await fetch(`/artifacts/${artifactId}/collaboration/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        participant_token: participantToken,
+        expected_lock_version: lockVersion,
+        idempotency_key: "production-cross-replica-edit",
+        commands: [{
+          command_id: "production-add-filter",
+          command: "add_node",
+          payload: { node: { id: "filter", type: "transform", position: { x: 320, y: 120 }, data: { label: "Filter", nodeType: "filter" } } }
+        }],
+        message: "Retry peer edit through primary API"
+      })
+    });
+    return { status: response.status, body: await response.json() };
+  }, { artifactId: sharedArtifact.id, participantToken: joinedPrimary.participant_token, lockVersion: sharedArtifact.lock_version });
+  expect(crossReplicaReplay.status).toBe(200);
+  expect(crossReplicaReplay.body.idempotent_replay).toBe(true);
+  expect(crossReplicaReplay.body.lock_version).toBe(2);
   await peer.close();
 
   const workflow = await page.evaluate(async () => {
