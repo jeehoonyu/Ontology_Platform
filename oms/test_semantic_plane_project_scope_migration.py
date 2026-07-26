@@ -1,4 +1,5 @@
-"""Alembic backfills project ownership for the complete modeling lifecycle."""
+"""Alembic promotes semantic data-plane ownership to first-class project columns."""
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -8,20 +9,23 @@ import tempfile
 
 
 TABLES = (
-    "modeling_objectives", "model_submissions", "model_deployments",
-    "model_monitors", "model_monitor_runs", "model_prediction_logs",
-    "mev_releases", "mev_checks", "mev_check_results", "mev_eval_datasets",
-    "mev_eval_subsets", "mev_experiments", "mev_adapters", "mev_deployment_configs",
+    "object_types", "object_instances", "link_types", "link_instances",
+    "data_assets", "pipeline_definitions", "pipeline_runs",
+    "saved_object_sets", "map_layer_definitions", "object_explorer_explorations", "act_action_log",
 )
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-    database_path = Path(tmpdir) / "legacy_modelops.db"
+    database_path = Path(tmpdir) / "legacy_semantic_plane.db"
     with sqlite3.connect(database_path) as connection:
         connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)")
-        connection.execute("INSERT INTO alembic_version VALUES ('0018_project_scoped_ai_evals')")
+        connection.execute("INSERT INTO alembic_version VALUES ('0019_project_scoped_modelops')")
         for table_name in TABLES:
-            connection.execute(f"CREATE TABLE {table_name} (id VARCHAR NOT NULL PRIMARY KEY)")
-            connection.execute(f"INSERT INTO {table_name} VALUES ('legacy-{table_name}')")
+            if table_name == "data_assets":
+                connection.execute("CREATE TABLE data_assets (id VARCHAR NOT NULL PRIMARY KEY, asset_schema JSON)")
+                connection.execute("INSERT INTO data_assets VALUES (?, ?)", ("legacy-data", json.dumps({"project_id": "alpha"})))
+            else:
+                connection.execute(f"CREATE TABLE {table_name} (id VARCHAR NOT NULL PRIMARY KEY)")
+                connection.execute(f"INSERT INTO {table_name} VALUES ('legacy-{table_name}')")
 
     env = dict(os.environ)
     env["DATABASE_URL"] = f"sqlite:///{database_path.as_posix()}"
@@ -37,9 +41,10 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         for table_name in TABLES:
             project_id = connection.execute(f"SELECT project_id FROM {table_name}").fetchone()[0]
             indexes = {row[1] for row in connection.execute(f"PRAGMA index_list('{table_name}')").fetchall()}
-            assert project_id == "default", (table_name, project_id)
+            expected = "alpha" if table_name == "data_assets" else "default"
+            assert project_id == expected, (table_name, project_id)
             assert f"ix_{table_name}_project_id" in indexes, (table_name, indexes)
 
     assert version == "0020_project_semantic_plane", version
 
-print("\nModeling and ModelOps project-scope migration verified for 14 legacy tables.")
+print("\nSemantic data-plane project migration verified for 11 legacy tables.")

@@ -1248,13 +1248,14 @@ def promote_import_job(job_id: str, body: PromoteImportRequest, principal: Princ
     schema["record_count"] = len(dataset_records)
     schema["fields"] = _infer_schema(dataset_records).get("fields", schema.get("fields", []))
     schema["field_count"] = len(schema.get("fields", []))
-    if asset and str((asset.asset_schema or {}).get("project_id") or "default") != job.project_id:
+    if asset and asset.project_id != job.project_id:
         raise HTTPException(status_code=409, detail="DataAsset ID is owned by another project")
     if asset and not body.replace:
         raise HTTPException(status_code=409, detail="DataAsset already exists")
     if not asset:
         asset = models.DataAsset(
             id=dataset_id,
+            project_id=job.project_id,
             display_name=body.display_name or job.display_name,
             description=body.description or f"Promoted from import job {job.id}.",
             kind="dataset",
@@ -1265,6 +1266,7 @@ def promote_import_job(job_id: str, body: PromoteImportRequest, principal: Princ
         )
         db.add(asset)
     else:
+        asset.project_id = job.project_id
         asset.display_name = body.display_name or asset.display_name or job.display_name
         asset.description = body.description if body.description is not None else asset.description
         asset.asset_schema = schema

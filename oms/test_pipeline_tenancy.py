@@ -32,8 +32,8 @@ for project_id in ("alpha-pipeline", "beta-pipeline"):
 
 with SessionLocal() as db:
     db.add_all([
-        models.DataAsset(id="alpha-input", display_name="Alpha input", description=None, kind="dataset", asset_schema={"project_id": "alpha-pipeline"}, records=[{"id": "a1", "value": 4}], created_at=1, updated_at=1),
-        models.DataAsset(id="beta-input", display_name="Beta input", description=None, kind="dataset", asset_schema={"project_id": "beta-pipeline"}, records=[{"id": "b1", "value": 8}], created_at=1, updated_at=1),
+        models.DataAsset(id="alpha-input", project_id="alpha-pipeline", display_name="Alpha input", description=None, kind="dataset", asset_schema={"project_id": "alpha-pipeline"}, records=[{"id": "a1", "value": 4}], created_at=1, updated_at=1),
+        models.DataAsset(id="beta-input", project_id="beta-pipeline", display_name="Beta input", description=None, kind="dataset", asset_schema={"project_id": "beta-pipeline"}, records=[{"id": "b1", "value": 8}], created_at=1, updated_at=1),
     ])
     db.commit()
 

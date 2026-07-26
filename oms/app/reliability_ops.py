@@ -425,9 +425,12 @@ def _run_pipeline_backfill(db: Session, pipeline: models.PipelineDefinition, act
     input_asset = db.get(models.DataAsset, pipeline.input_asset_id)
     if not input_asset:
         return {"pipeline_id": pipeline.id, "status": "FAILED", "error": f"Input asset '{pipeline.input_asset_id}' not found"}
+    if input_asset.project_id != pipeline.project_id:
+        return {"pipeline_id": pipeline.id, "status": "FAILED", "error": "Pipeline input belongs to another project"}
     now = _now()
     run = models.PipelineRun(
         id=str(uuid.uuid4()),
+        project_id=pipeline.project_id,
         pipeline_id=pipeline.id,
         status="RUNNING",
         input_asset_id=input_asset.id,
@@ -443,13 +446,16 @@ def _run_pipeline_backfill(db: Session, pipeline: models.PipelineDefinition, act
         output_records, lineage, metrics = execute_pipeline_steps(db, pipeline=pipeline, run_id=run.id, input_asset=input_asset)
         output_asset_id = pipeline.output_asset_id or f"{pipeline.id}_output"
         output_asset = db.get(models.DataAsset, output_asset_id)
+        if output_asset and output_asset.project_id != pipeline.project_id:
+            raise HTTPException(status_code=409, detail="Pipeline output belongs to another project")
         if not output_asset:
             output_asset = models.DataAsset(
                 id=output_asset_id,
+                project_id=pipeline.project_id,
                 display_name=f"{pipeline.display_name} Output",
                 description=f"Backfill output of pipeline {pipeline.id}",
                 kind="dataset",
-                asset_schema={},
+                asset_schema={"project_id": pipeline.project_id},
                 records=[],
                 created_at=now,
                 updated_at=now,

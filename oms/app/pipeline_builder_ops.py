@@ -753,14 +753,13 @@ def _validate_graph(db: Session, graph: PipelineBuilderGraph) -> Dict[str, Any]:
                 asset = db.get(models.DataAsset, asset_id)
                 if not asset:
                     errors.append({"code": "INPUT_ASSET_NOT_FOUND", "node_id": node_id, "message": f"DataAsset '{asset_id}' not found"})
-                elif str((asset.asset_schema or {}).get("project_id") or "default") != graph.project_id:
+                elif asset.project_id != graph.project_id:
                     errors.append({"code": "INPUT_ASSET_PROJECT_MISMATCH", "node_id": node_id, "message": f"DataAsset '{asset_id}' belongs to another project"})
         if node_type == "ontology_output":
             object_type_id = _config(node).get("object_type_id")
             object_type = db.get(models.ObjectType, object_type_id) if object_type_id else None
             if object_type:
-                object_project = str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
-                if object_project != graph.project_id:
+                if object_type.project_id != graph.project_id:
                     errors.append({"code": "ONTOLOGY_OUTPUT_PROJECT_MISMATCH", "node_id": node_id, "message": f"Object type '{object_type_id}' belongs to another project"})
 
     for edge in edges:
@@ -1293,6 +1292,8 @@ def _execute_graph(
             asset = db.get(models.DataAsset, asset_id)
             if not asset:
                 raise HTTPException(status_code=404, detail=f"DataAsset '{asset_id}' not found")
+            if asset.project_id != graph.project_id:
+                raise HTTPException(status_code=409, detail=f"DataAsset '{asset_id}' belongs to another project")
             rows = copy.deepcopy(asset.records or [])
             input_asset_ids.append(asset.id)
         elif node_type == "filter":
@@ -1317,6 +1318,8 @@ def _execute_graph(
                 right_asset = db.get(models.DataAsset, config["right_asset_id"])
                 if not right_asset:
                     raise HTTPException(status_code=404, detail=f"DataAsset '{config['right_asset_id']}' not found")
+                if right_asset.project_id != graph.project_id:
+                    raise HTTPException(status_code=409, detail="Join dataset belongs to another project")
                 right_rows = copy.deepcopy(right_asset.records or [])
             rows = _join_rows(rows, right_rows or [], config)
         elif node_type == "union":
@@ -1325,6 +1328,8 @@ def _execute_graph(
                 other = db.get(models.DataAsset, config["asset_id"])
                 if not other:
                     raise HTTPException(status_code=404, detail=f"DataAsset '{config['asset_id']}' not found")
+                if other.project_id != graph.project_id:
+                    raise HTTPException(status_code=409, detail="Union dataset belongs to another project")
                 other_rows = copy.deepcopy(other.records or [])
             rows = rows + copy.deepcopy(other_rows)
         elif node_type == "aggregate":
@@ -1358,6 +1363,8 @@ def _execute_graph(
                 right_asset = db.get(models.DataAsset, config["right_asset_id"])
                 if not right_asset:
                     raise HTTPException(status_code=404, detail=f"DataAsset '{config['right_asset_id']}' not found")
+                if right_asset.project_id != graph.project_id:
+                    raise HTTPException(status_code=409, detail="Spatial join dataset belongs to another project")
                 right_rows = copy.deepcopy(right_asset.records or [])
             rows = _spatial_join_rows(rows, right_rows, config)
         elif node_type in {"llm_assist", "llm"}:
@@ -1376,13 +1383,18 @@ def _execute_graph(
                 object_type_id = config.get("object_type_id")
                 id_field = config.get("id_field") or "id"
                 mapping = config.get("mapping") or {}
-                if object_type_id and db.get(models.ObjectType, object_type_id):
+                object_type = db.get(models.ObjectType, object_type_id) if object_type_id else None
+                if object_type and object_type.project_id != graph.project_id:
+                    raise HTTPException(status_code=409, detail="Ontology output belongs to another project")
+                if object_type:
                     from . import decision_intelligence
                     for row in rows:
                         object_id = str(_value(row, id_field) or _stable_row_id(row, list(row.keys())))
                         properties = {target: _value(row, source) for source, target in mapping.items()} if mapping else copy.deepcopy(row)
                         existing = db.get(models.ObjectInstance, object_id)
                         if existing:
+                            if existing.project_id != graph.project_id:
+                                raise HTTPException(status_code=409, detail=f"Object ID '{object_id}' belongs to another project")
                             existing.properties = {**(existing.properties or {}), **properties}
                             existing.lineage = {
                                 **(existing.lineage or {}),
@@ -1401,6 +1413,7 @@ def _execute_graph(
                         else:
                             created = models.ObjectInstance(
                                 id=object_id,
+                                project_id=graph.project_id,
                                 object_type_id=object_type_id,
                                 properties=properties,
                                 source_asset_id=config.get("source_asset_id"),
@@ -1947,11 +1960,12 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
     output_asset_id = _output_asset_id(graph, body.output_asset_id)
     now = _now()
     asset = db.get(models.DataAsset, output_asset_id)
-    if asset and str((asset.asset_schema or {}).get("project_id") or "default") != graph.project_id:
+    if asset and asset.project_id != graph.project_id:
         raise HTTPException(status_code=409, detail="Output DataAsset ID is owned by another project")
     if not asset:
         asset = models.DataAsset(
             id=output_asset_id,
+            project_id=graph.project_id,
             display_name=f"{graph.display_name} Output",
             description=f"Delivered output from Pipeline Builder graph {graph.id}",
             kind="dataset",
@@ -1964,9 +1978,12 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
 
     input_asset_id = execution["input_asset_ids"][0] if execution["input_asset_ids"] else output_asset_id
     pipeline = db.get(models.PipelineDefinition, graph.id)
+    if pipeline and pipeline.project_id != graph.project_id:
+        raise HTTPException(status_code=409, detail="Pipeline ID is owned by another project")
     if not pipeline:
         pipeline = models.PipelineDefinition(
             id=graph.id,
+            project_id=graph.project_id,
             display_name=graph.display_name,
             description=graph.description,
             input_asset_id=input_asset_id,
@@ -1988,6 +2005,7 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
 
     run = models.PipelineRun(
         id=_new_id(),
+        project_id=graph.project_id,
         pipeline_id=pipeline.id,
         status="SUCCESS",
         input_asset_id=input_asset_id,
