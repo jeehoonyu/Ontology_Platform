@@ -8,7 +8,9 @@ os.environ["AUTH_MODE"] = "local"
 os.environ["APP_ENV"] = "test"
 
 from fastapi.testclient import TestClient  # noqa: E402
+from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.platform_runtime import ArtifactCommandReceipt, PlatformArtifact  # noqa: E402
 
 client = TestClient(app)
 passed = 0
@@ -67,6 +69,20 @@ assert updated["command_receipt"]["command_ids"] == ["add-input", "add-output", 
 
 replayed = ok(client.post("/artifacts/kernel_pipeline/commands", json=batch), "idempotent command replay")
 assert replayed["idempotent_replay"] is True and replayed["current_revision"] == 2, replayed
+changed_reuse = dict(batch)
+changed_reuse["commands"] = [{
+    "command_id": "different-command",
+    "command": "remove_nodes",
+    "payload": {"node_ids": ["input"]},
+}]
+reused = client.post("/artifacts/kernel_pipeline/commands", json=changed_reuse)
+assert reused.status_code == 409 and "different command batch" in reused.json()["detail"]["message"], reused.text
+with SessionLocal() as db:
+    receipts = db.query(ArtifactCommandReceipt).filter(ArtifactCommandReceipt.artifact_id == "kernel_pipeline").all()
+    stored = db.get(PlatformArtifact, "kernel_pipeline")
+    assert len(receipts) == 1 and receipts[0].request_hash and receipts[0].command_scope == "builder", receipts
+    assert "command_receipts" not in (stored.metadata_ or {}), stored.metadata_
+passed += 2
 
 stale = dict(batch)
 stale["idempotency_key"] = "kernel-stale-command-v1"
@@ -117,6 +133,31 @@ impact = ok(client.post("/ontology/changes/impact", json={
 }), "ontology impact analysis")
 assert impact["severity"] == "HIGH" and impact["safe_to_publish"] is False, impact
 assert impact["summary"]["objects"] == 1 and impact["summary"]["populated_values"] == 1, impact
+
+ok(client.post("/artifacts", json={
+    "id": "legacy_receipt_artifact",
+    "artifact_type": "pipeline",
+    "display_name": "Legacy receipt artifact",
+    "state": {"nodes": [], "edges": []},
+    "metadata": {"command_receipts": [{
+        "idempotency_key": "legacy-runtime-receipt",
+        "revision": 1,
+        "command_ids": ["legacy-command"],
+        "created_at": 1,
+    }]},
+}), "create artifact with legacy metadata receipt", 201)
+legacy_replay = ok(client.post("/artifacts/legacy_receipt_artifact/commands", json={
+    "expected_lock_version": 1,
+    "idempotency_key": "legacy-runtime-receipt",
+    "commands": [{"command_id": "legacy-command", "command": "auto_layout", "payload": {}}],
+}), "persist legacy receipt on replay")
+assert legacy_replay["idempotent_replay"] is True and legacy_replay["current_revision"] == 1
+with SessionLocal() as db:
+    persisted_legacy = db.query(ArtifactCommandReceipt).filter(
+        ArtifactCommandReceipt.artifact_id == "legacy_receipt_artifact"
+    ).one()
+    assert persisted_legacy.request_hash is None and persisted_legacy.idempotency_key == "legacy-runtime-receipt"
+    passed += 1
 
 print(f"\nBuilder kernel verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402

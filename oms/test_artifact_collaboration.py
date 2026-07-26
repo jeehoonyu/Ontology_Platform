@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models_action import AuditLog  # noqa: E402
-from app.platform_runtime import ArtifactCollaborationParticipant  # noqa: E402
+from app.platform_runtime import ArtifactCollaborationParticipant, ArtifactCommandReceipt, PlatformArtifact  # noqa: E402
 
 client = TestClient(app)
 passed = 0
@@ -91,6 +91,56 @@ replay_b = ok(client.post("/artifacts/collaborative_pipeline/collaboration/comma
 }), "replay collaborative command")
 assert replay_b["idempotent_replay"] is True and replay_b["lock_version"] == 3, replay_b
 
+changed_reuse = client.post("/artifacts/collaborative_pipeline/collaboration/commands", json={
+    "participant_token": token_b,
+    "expected_lock_version": 1,
+    "idempotency_key": "client-b-edit-001",
+    "commands": [{
+        "command_id": "cmd-b-different",
+        "command": "remove_nodes",
+        "payload": {"node_ids": ["node-b"]},
+    }],
+})
+assert changed_reuse.status_code == 409 and "different command batch" in changed_reuse.json()["detail"]["message"], changed_reuse.text
+passed += 1
+
+# Receipts must remain replayable after exceeding the old 100-entry metadata window.
+current_lock_version = edit_b["lock_version"]
+for index in range(105):
+    response = client.post("/artifacts/collaborative_pipeline/collaboration/commands", json={
+        "participant_token": token_b,
+        "expected_lock_version": current_lock_version,
+        "idempotency_key": f"durable-collaboration-edit-{index:03d}",
+        "commands": [{
+            "command_id": f"durable-cmd-{index:03d}",
+            "command": "update_node",
+            "payload": {"node_id": "node-b", "changes": {"data": {"label": f"Node B revision {index}", "nodeType": "select"}}},
+        }],
+    })
+    assert response.status_code == 200, response.text
+    current_lock_version = response.json()["lock_version"]
+old_replay = client.post("/artifacts/collaborative_pipeline/collaboration/commands", json={
+    "participant_token": token_b,
+    "expected_lock_version": 1,
+    "idempotency_key": "client-b-edit-001",
+    "commands": [{
+        "command_id": "cmd-b",
+        "command": "move_nodes",
+        "payload": {"positions": {"node-b": {"x": 420, "y": 220}}},
+    }],
+})
+assert old_replay.status_code == 200 and old_replay.json()["idempotent_replay"] is True
+assert old_replay.json()["lock_version"] == current_lock_version
+with SessionLocal() as db:
+    receipts = db.query(ArtifactCommandReceipt).filter(
+        ArtifactCommandReceipt.artifact_id == "collaborative_pipeline",
+        ArtifactCommandReceipt.command_scope == "collaboration",
+    ).all()
+    stored = db.get(PlatformArtifact, "collaborative_pipeline")
+    assert len(receipts) == 107 and all(receipt.request_hash for receipt in receipts), len(receipts)
+    assert "collaboration_receipts" not in (stored.metadata_ or {}), stored.metadata_
+passed += 2
+
 conflict = client.post("/artifacts/collaborative_pipeline/collaboration/commands", json={
     "participant_token": token_b,
     "expected_lock_version": 1,
@@ -118,7 +168,12 @@ events = ok(client.get("/artifacts/collaborative_pipeline/collaboration/events?a
 event_types = [event["event_type"] for event in events["events"]]
 assert "presence.joined" in event_types and "artifact.commands" in event_types and "artifact.conflict" in event_types, event_types
 sse = client.get("/artifacts/collaborative_pipeline/collaboration/stream?after=0&once=true")
-assert sse.status_code == 200 and "event: artifact.commands" in sse.text and "event: artifact.conflict" in sse.text, sse.text
+assert sse.status_code == 200 and "event: artifact.commands" in sse.text, sse.text
+conflict_event_id = next(event["id"] for event in events["events"] if event["event_type"] == "artifact.conflict")
+conflict_sse = client.get(
+    f"/artifacts/collaborative_pipeline/collaboration/stream?after={conflict_event_id - 1}&once=true"
+)
+assert conflict_sse.status_code == 200 and "event: artifact.conflict" in conflict_sse.text, conflict_sse.text
 passed += 1
 latest_event_id = events["next_cursor"]
 resumed = client.get(
@@ -145,7 +200,7 @@ assert expired_room["participants"] == [], expired_room
 
 with SessionLocal() as db:
     audits = db.query(AuditLog).filter(AuditLog.event_type == "artifact.collaboration.commands_applied").all()
-    assert len(audits) == 2 and all((audit.payload or {}).get("participant_id") for audit in audits), audits
+    assert len(audits) == 107 and all((audit.payload or {}).get("participant_id") for audit in audits), len(audits)
 passed += 1
 
 print(f"\nArtifact collaboration verified: {passed} assertions passed.")
