@@ -123,3 +123,18 @@ services:
             self.wfile.write(body)
 
         HTTPServer(("0.0.0.0", 9100), Handler).serve_forever()
+
+  sftp-source:
+    image: atmoz/sftp@sha256:a6cb3eb29202ca7f57e73bb7e527286e66e0e822fff65609207c7e0ef2d135a3
+    container_name: ontology_sftp_source
+    profiles: ["connectors"]
+    command: ["demo:demo:1001::upload"]
+    ports:
+      - "2222:22"
+    volumes:
+      - ./deploy/fixtures/sftp:/home/demo/upload:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep sshd >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

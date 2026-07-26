@@ -35,9 +35,22 @@ The local cost estimate is deterministic and intended for governance testing. Pr
 
 ## Connector Adapters
 
-`GET /connectors/adapters` is the executable adapter catalog. REST, JDBC, and S3-compatible adapters fetch live records inside the durable ingestion boundary. SFTP and Kafka appear as unavailable until a deployment registers a plugin through `CONNECTOR_PLUGIN_MODULES`; the API does not advertise those integrations as implemented when no adapter is installed.
+`GET /connectors/adapters` is the executable adapter catalog. REST, JDBC, S3-compatible, and SFTP adapters fetch live records inside the durable ingestion boundary. Kafka appears as unavailable until a deployment registers a plugin through `CONNECTOR_PLUGIN_MODULES`; the API does not advertise integrations as implemented when no adapter is installed.
 
 The S3 adapter signs requests with AWS Signature Version 4 and supports AWS S3 or path-style S3-compatible HTTPS endpoints. Store the secret access key as an `aws` runtime credential and set `access_key_id` (plus optional `session_token`) in credential metadata. Source configuration contains only non-secret fields: `bucket`, `region`, optional `endpoint_url`, `prefix`, `format`, and bounded object/record/byte limits. CSV, JSON arrays/objects, and JSONL are supported. For incremental syncs, use `_source_object_key` as the cursor field; successful object keys become the durable high-water mark.
+
+The SFTP adapter requires a SHA-256 host-key pin and never accepts unknown hosts. Configure `host`, `port`, `username`, `remote_path`, and `host_key_sha256`; store either a `sftp_password` or unencrypted Ed25519/ECDSA/RSA private key as a write-only runtime credential. CSV, JSON, and JSONL files are decoded under file, byte, and record limits. Use `_source_file_path` as the incremental cursor field. Private SFTP networks remain blocked unless `CONNECTOR_ALLOW_PRIVATE_NETWORKS=true` is explicitly enabled in a controlled connector network.
+
+The optional local demonstration uses a real SSH/SFTP server:
+
+```powershell
+docker compose --profile connectors up -d sftp-source
+docker compose exec sftp-source ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
+```
+
+Use host `127.0.0.1`, port `2222`, username `demo`, remote path `/upload`, the printed `SHA256:` fingerprint, and a `sftp_password` credential with the demo password `demo`. This credential is only for the local profile.
+
+Set those values as `SFTP_REHEARSAL_*` environment variables and run `python oms/rehearse_sftp_connector.py` to verify the full external-service preview and durable worker path.
 
 Live REST sources enforce response limits, timeouts, redirect validation, and SSRF controls. Live JDBC sources accept PostgreSQL or local-development SQLite, reject mutating SQL, and require parameterized limits and cursors for custom queries. SQLite sources are disabled in the production profile unless explicitly enabled.
 

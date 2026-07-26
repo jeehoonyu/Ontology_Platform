@@ -26,7 +26,7 @@ export function getConnectionSource(sourceId: string): Promise<ConnectionSource>
 }
 
 export function rotateConnectorCredential(sourceId: string, body: {
-  credential_type: "bearer" | "api_key" | "basic" | "aws";
+  credential_type: "bearer" | "api_key" | "basic" | "aws" | "sftp_password" | "sftp_private_key";
   secret: string;
   metadata: Record<string, string>;
 }): Promise<ConnectorCredentialMetadata> {
