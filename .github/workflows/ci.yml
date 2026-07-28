@@ -1,0 +1,191 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - "codex/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend, conformance, and SQLite migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: oms/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r oms/requirements.txt
+      - name: Verify dependency installation
+        run: python -m pip check
+      - name: Apply SQLite migrations twice
+        env:
+          DATABASE_URL: sqlite:////tmp/ontology-ci.db
+        run: |
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini current
+      - name: Run all backend test scripts
+        run: |
+          set -o pipefail
+          count=0
+          for test_file in $(find oms -maxdepth 1 -name 'test_*.py' -print | sort); do
+            echo "::group::${test_file}"
+            python "${test_file}" 2>&1 | tee -a backend-tests.log
+            echo "::endgroup::"
+            count=$((count + 1))
+          done
+          echo "Backend scripts passed: ${count}"
+          test "${count}" -ge 114
+      - name: Validate docs conformance
+        run: python oms/validate_docs_conformance.py
+      - name: Upload backend failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-failure-evidence
+          path: backend-tests.log
+          if-no-files-found: ignore
+
+  postgres-migrations:
+    name: PostgreSQL migration chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ontology
+          POSTGRES_PASSWORD: ontology-ci
+          POSTGRES_DB: ontology
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ontology -d ontology"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg2://ontology:ontology-ci@127.0.0.1:5432/ontology
+      APP_ENV: test
+      AUTH_MODE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: oms/requirements.txt
+      - run: python -m pip install -r oms/requirements.txt
+      - name: Apply and verify migration chain
+        run: |
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini current
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
+              tables = inspect(connection).get_table_names()
+          assert revision == "0021_project_operational_plane", revision
+          assert len(tables) >= 100, len(tables)
+          print(f"PostgreSQL schema ready at {revision} with {len(tables)} tables")
+          PY
+
+  frontend:
+    name: Frontend type, build, and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit production dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Typecheck and build
+        working-directory: frontend
+        run: npm run build
+
+  browser:
+    name: Browser, responsive, and accessibility acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: oms/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r oms/requirements.txt
+      - name: Install frontend and Chrome
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chrome
+      - name: Run browser acceptance
+        working-directory: frontend
+        env:
+          CI: "true"
+          PYTHON_BIN: python
+        run: npm run test:e2e
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-acceptance-evidence
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  container:
+    name: Production container and Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      POSTGRES_USER: ontology
+      POSTGRES_PASSWORD: ontology-ci
+      POSTGRES_DB: ontology
+      OIDC_ISSUER: https://identity.example.test/realms/ontology
+      OIDC_CLIENT_ID: ontology-platform
+      PUBLIC_BASE_URL: https://ontology.example.test
+      PUBLIC_HOST: ontology.example.test
+      CONNECTOR_SECRET_KEY: ci-connector-secret-with-at-least-32-characters
+      KEYCLOAK_ADMIN_PASSWORD: ontology-ci-admin
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production Compose model
+        run: docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+      - name: Build production application image
+        run: docker build --file oms/Dockerfile --tag ontology-platform:${{ github.sha }} .

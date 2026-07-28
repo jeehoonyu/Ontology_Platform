@@ -60,7 +60,7 @@ For the complete release gate, run the self-cleaning acceptance rehearsal instea
 
 It generates temporary secrets; starts digest-pinned Keycloak, Postgres, and two API replicas; registers the declared `organization_id` and `project_ids` claims; and runs the production browser workflow. The workflow verifies PKCE-backed OIDC sessions, administrator/viewer RBAC, organization boundaries, and own-data onboarding through ontology and pipeline delivery. It also creates project-owned Workshop, Action Type, AIP Logic, Agent, model endpoint, and evaluation resources, queues an asynchronous agent invocation, rejects cross-project creation, and proves viewers cannot mutate, execute, evaluate, invoke, or publish. The remaining gate exercises 50 concurrent reads, Asset Reliability approval/reporting, cross-replica collaboration and job idempotency, abandoned-worker recovery with fencing, serialized Alembic startup, API restart, and fresh-volume backup/restore. Use `-KeepStack` only for troubleshooting and `-SkipRecovery` only when the separate recovery gate has already passed for the same build.
 
-The same gate is available as the manually dispatched `Production acceptance` GitHub Actions workflow. Enable a protected pull-request trigger when the repository has Linux Actions capacity; until then, the locally executed gate above is the authoritative release evidence and avoids treating account billing failures as product failures.
+The complete containerized rehearsal remains available as the manually dispatched `Production acceptance` GitHub Actions workflow. Every pull request and push to `master` or `codex/**` also runs the automatic `Continuous integration` workflow. Its required jobs cover all backend scripts and docs conformance, SQLite and PostgreSQL migrations, frontend dependency audit/typecheck/build, the responsive WCAG browser suite, production Compose validation, and the multi-stage application image build. Protect `master` with these checks before accepting changes. The manual rehearsal remains the final OIDC, replica, load, chaos, and fresh-volume recovery gate for a release candidate.
 
 The bundled Keycloak realm and user-profile files are demonstration fixtures. They are not an internet-facing identity service. A production identity provider must emit equivalent tenant claims and restrict their administration to trusted identity operators.
 
@@ -111,9 +111,9 @@ After restoration, verify `/health/ready`, sign in, inspect `/workspace/validati
 ## Demo Reset and Project Transfer
 
 - `POST /project/demo/reset` returns the deterministic evaluator scenario to a known state.
-- `GET /project/export` exports an integrity-protected version 2 portable snapshot, including visual artifact revisions, job evidence, tenancy memberships, ontology packages/installations, and collaboration events.
+- `GET /project/export?project_id={id}` exports an integrity-protected version 3 single-project snapshot, including visual artifact revisions, job evidence, tenancy memberships, installed ontology package dependencies, operational evidence, and collaboration events. Principals with access to multiple projects must choose the scope explicitly.
 - `POST /project/import/validate` verifies checksum, compatibility, counts, and credential-rebind requirements without mutation.
-- `POST /project/import` supports dry-run validation and transactional merge restore.
+- `POST /project/import` supports dry-run validation and transactional merge restore, rejects foreign-project rows and broken dependency references, and limits unscoped legacy restores to system-wide administrators with explicit confirmation.
 
 Database backup remains the authoritative disaster-recovery mechanism because it also preserves all audit, security, and runtime tables.
 

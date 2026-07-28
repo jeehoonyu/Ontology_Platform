@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
 import { LogIn, LogOut, Search, User } from "lucide-react";
 import { api, postJson } from "./api";
 import {
@@ -148,7 +147,12 @@ interface DataAssetsResponseItem extends TableRow {
 }
 
 export function App() {
-  useLocation();
+  const [, setLocationVersion] = useState(0);
+  useEffect(() => {
+    const handleNavigation = () => setLocationVersion((version) => version + 1);
+    window.addEventListener("popstate", handleNavigation);
+    return () => window.removeEventListener("popstate", handleNavigation);
+  }, []);
   const view = currentWorkspaceView(CORE_VIEWS);
   const backendReadiness = useAsyncState<ProjectReadiness>(getProjectReadiness, []);
   const [runtimeRefresh, setRuntimeRefresh] = useState(0);
