@@ -123,17 +123,20 @@ for row in claims[1:]:
 
 fleet = ok(client.get("/ui-state/worker-fleet?project_id=alpha"), "inspect worker fleet")
 assert fleet["summary"]["workers"] >= 2 and fleet["sections"]["queue_policies"], fleet
-snapshot = ok(client.get("/project/export"), "export worker fleet snapshot")
+snapshot = ok(client.get("/project/export?project_id=alpha"), "export worker fleet snapshot")
 assert snapshot["runtime_workers"] and snapshot["runtime_queue_policies"], snapshot.keys()
+assert snapshot["project_scope"]["project_id"] == "alpha"
+assert all(row["project_id"] == "alpha" for row in snapshot["runtime_workers"])
+assert all(row["project_id"] == "alpha" for row in snapshot["runtime_queue_policies"])
 with SessionLocal() as db:
     db.query(RuntimeWorker).delete()
     db.query(RuntimeQueuePolicy).delete()
     db.commit()
 ok(client.post("/project/import", json={"snapshot": snapshot, "mode": "merge", "actor": "worker-recovery"}), "restore worker fleet snapshot")
 restored_workers = ok(client.get("/runtime/workers"), "inspect restored workers")
-assert restored_workers and all(row["configured_status"] == "OFFLINE" for row in restored_workers), restored_workers
+assert restored_workers and all(row["configured_status"] == "OFFLINE" and row["project_id"] == "alpha" for row in restored_workers), restored_workers
 restored_policies = ok(client.get("/runtime/queues"), "inspect restored queue policies")
-assert {row["project_id"] for row in restored_policies} >= {"alpha", "beta", "concurrent"}, restored_policies
+assert {row["project_id"] for row in restored_policies} == {"alpha"}, restored_policies
 with SessionLocal() as db:
     audit_types = {row.event_type for row in db.query(AuditLog).filter(AuditLog.event_type.like("runtime.%")).all()}
 assert {"runtime.worker.registered", "runtime.worker.draining", "runtime.worker.resumed", "runtime.queue_policy.updated"} <= audit_types, audit_types

@@ -49,7 +49,7 @@ from . import (
     worker_control,
 )
 from .database import Base, get_db
-from .production_auth import Principal, require_permission
+from .production_auth import Principal, current_principal, require_permission
 
 router = APIRouter(tags=["system_hardening"])
 
@@ -211,6 +211,7 @@ MIGRATIONS = [
 
 class ProjectImportRequest(BaseModel):
     snapshot: Dict[str, Any] = Field(default_factory=dict)
+    project_id: Optional[str] = None
     mode: str = "merge"
     actor: str = "workspace"
     dry_run: bool = False
@@ -218,7 +219,7 @@ class ProjectImportRequest(BaseModel):
 
 
 PORTABLE_SNAPSHOT_FORMAT = "ontology-platform-portable"
-PORTABLE_SNAPSHOT_VERSION = 2
+PORTABLE_SNAPSHOT_VERSION = 3
 _SENSITIVE_CONFIG_KEYS = {
     "api_key", "apikey", "auth_secret", "authorization", "bearer_token", "client_secret",
     "credential", "credentials", "password", "private_key", "secret", "token",
@@ -304,13 +305,13 @@ def _validate_portable_snapshot(snapshot: Dict[str, Any], *, allow_legacy: bool 
     if not isinstance(snapshot, dict):
         return {"status": "INVALID", "errors": ["Snapshot must be an object"], "warnings": [], "counts": {}}
     version = snapshot.get("snapshot_version", 1)
-    if version not in {1, PORTABLE_SNAPSHOT_VERSION}:
+    if version not in {1, 2, PORTABLE_SNAPSHOT_VERSION}:
         errors.append(f"Unsupported snapshot version: {version}")
-    if version == 1:
-        warnings.append("Legacy snapshot has no integrity manifest; export it again before production recovery")
+    if version in {1, 2}:
+        warnings.append("Legacy snapshot is not guaranteed to be project-scoped; export it again before production recovery")
         if not allow_legacy:
             errors.append("Legacy snapshot import requires explicit allow_legacy confirmation")
-    else:
+    if version in {2, PORTABLE_SNAPSHOT_VERSION}:
         if snapshot.get("snapshot_format") != PORTABLE_SNAPSHOT_FORMAT:
             errors.append("Snapshot format marker is missing or invalid")
         integrity = snapshot.get("integrity")
@@ -327,10 +328,14 @@ def _validate_portable_snapshot(snapshot: Dict[str, Any], *, allow_legacy: bool 
             if any(not isinstance(row, dict) for row in value):
                 errors.append(f"Resource collection '{key}' contains a non-object row")
     manifest_counts = (snapshot.get("integrity") or {}).get("counts") if isinstance(snapshot.get("integrity"), dict) else None
-    if version == PORTABLE_SNAPSHOT_VERSION and manifest_counts != counts:
+    if version in {2, PORTABLE_SNAPSHOT_VERSION} and manifest_counts != counts:
         errors.append("Snapshot resource counts do not match the integrity manifest")
-    if version == PORTABLE_SNAPSHOT_VERSION and (snapshot.get("integrity") or {}).get("resource_count") != sum(counts.values()):
+    if version in {2, PORTABLE_SNAPSHOT_VERSION} and (snapshot.get("integrity") or {}).get("resource_count") != sum(counts.values()):
         errors.append("Snapshot resource total does not match the integrity manifest")
+    if version == PORTABLE_SNAPSHOT_VERSION:
+        scope = snapshot.get("project_scope")
+        if not isinstance(scope, dict) or not scope.get("project_id") or not scope.get("organization_id"):
+            errors.append("Project-scoped snapshot metadata is missing")
     if snapshot.get("rebind_required"):
         warnings.append(f"{len(snapshot['rebind_required'])} runtime credential binding(s) must be recreated after import")
     return {
@@ -454,7 +459,7 @@ def _row_dict(row: Any, fields: List[str]) -> Dict[str, Any]:
     return {field: getattr(row, field) for field in fields}
 
 
-def _snapshot(db: Session) -> Dict[str, Any]:
+def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> Dict[str, Any]:
     _ensure_runtime_tables(db)
     snapshot = {
         "snapshot_version": PORTABLE_SNAPSHOT_VERSION,
@@ -663,6 +668,16 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             _row_dict(row, ["id", "project_id", "display_name", "client_id", "token_endpoint", "scopes", "created_at"])
             for row in db.query(webhooks_ops.WhOutboundApp).all()
         ],
+        "ops_events": [ops_control._event_dict(row) for row in db.query(ops_control.OpsEvent).all()],
+        "ops_alert_rules": [ops_control._rule_dict(row) for row in db.query(ops_control.AlertRule).all()],
+        "ops_alerts": [ops_control._alert_dict(row) for row in db.query(ops_control.AlertEvent).all()],
+        "ops_runbooks": [ops_control._runbook_dict(row) for row in db.query(ops_control.Runbook).all()],
+        "ops_runbook_executions": [ops_control._execution_dict(row) for row in db.query(ops_control.RunbookExecution).all()],
+        "ops_notifications": [ops_control._notification_dict(row) for row in db.query(ops_control.OpsNotification).all()],
+        "ops_sla_policies": [
+            _row_dict(row, ["id", "project_id", "display_name", "scope", "thresholds", "active", "created_at", "updated_at"])
+            for row in db.query(ops_control.OpsSlaPolicy).all()
+        ],
         "incidents": [
             ops_control._incident_dict(row)
             for row in db.query(ops_control.Incident).all()
@@ -784,7 +799,115 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(connector_runtime.ConnectorFetchAttempt).all()
         ],
     }
+    if project_id:
+        snapshot = _scope_snapshot(db, snapshot, project_id, organization_id or "local")
     return _finalize_snapshot(snapshot)
+
+
+_SNAPSHOT_CHILD_RELATIONS = {
+    "agent_sessions": ("agent_definitions", "agent_id", "id"),
+    "logic_runs": ("logic_functions", "logic_function_id", "id"),
+    "pipeline_builder_builds": ("pipeline_builder_graphs", "graph_id", "id"),
+    "workshop_module_versions": ("workshop_modules", "module_id", "id"),
+    "connection_sync_runs": ("connection_syncs", "sync_id", "id"),
+    "connection_sync_cursors": ("connection_syncs", "sync_id", "id"),
+    "connection_export_checkpoints": ("connection_exports", "export_id", "id"),
+    "stream_records": ("streams", "stream_id", "id"),
+    "platform_artifact_revisions": ("platform_artifacts", "artifact_id", "id"),
+    "platform_artifact_collaboration_events": ("platform_artifacts", "artifact_id", "id"),
+    "platform_job_events": ("platform_jobs", "job_id", "id"),
+    "ontology_package_versions": ("ontology_packages", "package_id", "id"),
+}
+
+
+def _scope_snapshot(
+    db: Session,
+    snapshot: Dict[str, Any],
+    project_id: str,
+    organization_id: str,
+) -> Dict[str, Any]:
+    """Return a confidentiality-preserving project dependency closure."""
+    scoped: Dict[str, Any] = {
+        key: [] if isinstance(value, list) else copy.deepcopy(value)
+        for key, value in snapshot.items()
+    }
+    project = db.get(tenancy.PlatformProject, project_id)
+    effective_org = project.organization_id if project else organization_id
+    scoped["project_scope"] = {
+        "project_id": project_id,
+        "organization_id": effective_org,
+        "scope_mode": "single_project",
+    }
+
+    # Resources with first-class ownership can be selected without interpreting payloads.
+    for key, rows in snapshot.items():
+        if not isinstance(rows, list):
+            continue
+        scoped[key] = [copy.deepcopy(row) for row in rows if row.get("project_id") == project_id]
+
+    # Data assets created before first-class project ownership kept the project
+    # marker in their schema. Normalize that legacy representation at the
+    # portability boundary so dependent connectors and pipelines remain valid.
+    legacy_assets = []
+    selected_asset_ids = {row.get("id") for row in scoped.get("data_assets") or []}
+    for row in snapshot.get("data_assets") or []:
+        schema_project_id = str((row.get("asset_schema") or {}).get("project_id") or "")
+        if row.get("id") not in selected_asset_ids and schema_project_id == project_id:
+            normalized = copy.deepcopy(row)
+            normalized["project_id"] = project_id
+            legacy_assets.append(normalized)
+    scoped["data_assets"] = [*(scoped.get("data_assets") or []), *legacy_assets]
+
+    selected_projects = [row for row in snapshot.get("projects") or [] if row.get("id") == project_id]
+    scoped["projects"] = copy.deepcopy(selected_projects or [{
+        "id": project_id,
+        "organization_id": effective_org,
+        "display_name": project_id,
+        "description": "Restored project",
+        "status": "ACTIVE",
+        "created_at": snapshot.get("exported_at") or _now(),
+        "updated_at": snapshot.get("exported_at") or _now(),
+    }])
+    selected_orgs = [row for row in snapshot.get("organizations") or [] if row.get("id") == effective_org]
+    scoped["organizations"] = copy.deepcopy(selected_orgs or [{
+        "id": effective_org,
+        "display_name": effective_org,
+        "status": "ACTIVE",
+        "created_at": snapshot.get("exported_at") or _now(),
+        "updated_at": snapshot.get("exported_at") or _now(),
+    }])
+    scoped["project_memberships"] = [
+        copy.deepcopy(row) for row in snapshot.get("project_memberships") or []
+        if row.get("project_id") == project_id
+    ]
+
+    installations = [
+        copy.deepcopy(row) for row in snapshot.get("ontology_package_installations") or []
+        if row.get("target_project_id") == project_id
+    ]
+    package_ids = {row.get("package_id") for row in installations if row.get("package_id")}
+    packages = [
+        copy.deepcopy(row) for row in snapshot.get("ontology_packages") or []
+        if row.get("owning_project_id") == project_id or row.get("id") in package_ids
+    ]
+    package_ids.update(row.get("id") for row in packages if row.get("id"))
+    scoped["ontology_packages"] = packages
+    scoped["ontology_package_installations"] = installations
+    scoped["ontology_package_resources"] = [
+        copy.deepcopy(row) for row in snapshot.get("ontology_package_resources") or []
+        if row.get("target_project_id") == project_id
+    ]
+
+    for child_key, (parent_key, child_fk, parent_id_field) in _SNAPSHOT_CHILD_RELATIONS.items():
+        parent_ids = {
+            row.get(parent_id_field) for row in scoped.get(parent_key) or []
+            if row.get(parent_id_field) is not None
+        }
+        scoped[child_key] = [
+            copy.deepcopy(row) for row in snapshot.get(child_key) or []
+            if row.get(child_fk) in parent_ids
+        ]
+    return scoped
 
 
 def _upsert_model(db: Session, model_cls: Any, data: Dict[str, Any], fields: List[str]) -> str:
@@ -978,6 +1101,13 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "webhook_executions",
         "webhook_credentials",
         "webhook_outbound_apps",
+        "ops_events",
+        "ops_alert_rules",
+        "ops_alerts",
+        "ops_runbooks",
+        "ops_runbook_executions",
+        "ops_notifications",
+        "ops_sla_policies",
         "incidents",
         "investigations",
         "investigation_evidence",
@@ -1193,7 +1323,7 @@ def validate_project(db: Session = Depends(get_db)):
             },
         }
     event_info = event_consistency(db)
-    snapshot = _snapshot(db)
+    snapshot = _snapshot(db, "default", "local")
     snapshot_info = _snapshot_coverage(snapshot)
     docs_info = _docs_matrix_summary()
     route_paths = [
@@ -1340,13 +1470,143 @@ def validation_ui_state(db: Session = Depends(get_db)):
     }
 
 
+def _resolve_project_scope(
+    db: Session,
+    principal: Principal,
+    requested_project_id: Optional[str],
+    permission: str,
+) -> str:
+    if requested_project_id:
+        tenancy.assert_project_permission(db, principal, requested_project_id, permission)
+        return requested_project_id
+    accessible = tenancy.accessible_project_ids(db, principal, permission)
+    if accessible is None:
+        return "default"
+    if len(accessible) == 1:
+        return next(iter(accessible))
+    if not accessible:
+        raise HTTPException(status_code=403, detail=f"No project grants permission '{permission}'")
+    raise HTTPException(status_code=422, detail="project_id is required when more than one project is accessible")
+
+
+def _validate_snapshot_project_scope(
+    snapshot: Dict[str, Any],
+    project_id: str,
+    *,
+    allow_legacy: bool = False,
+) -> List[str]:
+    version = snapshot.get("snapshot_version", 1)
+    if version < PORTABLE_SNAPSHOT_VERSION:
+        return [] if allow_legacy else ["Unscoped legacy snapshots require explicit allow_legacy confirmation"]
+    errors: List[str] = []
+    scope = snapshot.get("project_scope") or {}
+    if scope.get("project_id") != project_id:
+        errors.append(f"Snapshot project '{scope.get('project_id')}' cannot be restored into project '{project_id}'")
+
+    for key, rows in snapshot.items():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if row.get("project_id") is not None and row.get("project_id") != project_id:
+                errors.append(f"Resource '{key}:{row.get('id')}' belongs to project '{row.get('project_id')}'")
+            if row.get("owning_project_id") is not None and row.get("owning_project_id") != project_id:
+                # Installed packages may be owned elsewhere in the same organization.
+                package_id = row.get("id")
+                installed = any(item.get("package_id") == package_id for item in snapshot.get("ontology_package_installations") or [])
+                if not installed:
+                    errors.append(f"Package '{package_id}' is not owned by or installed into project '{project_id}'")
+            if row.get("target_project_id") is not None and row.get("target_project_id") != project_id:
+                errors.append(f"Resource '{key}:{row.get('id')}' targets project '{row.get('target_project_id')}'")
+
+    project_ids = {row.get("id") for row in snapshot.get("projects") or []}
+    if project_ids != {project_id}:
+        errors.append("Snapshot must contain exactly its scoped project metadata")
+    if any(row.get("project_id") != project_id for row in snapshot.get("project_memberships") or []):
+        errors.append("Snapshot contains a membership from another project")
+
+    ids = {
+        key: {row.get("id") for row in rows if isinstance(row, dict) and row.get("id") is not None}
+        for key, rows in snapshot.items() if isinstance(rows, list)
+    }
+    for child_key, (parent_key, child_fk, _) in _SNAPSHOT_CHILD_RELATIONS.items():
+        parent_ids = ids.get(parent_key, set())
+        for row in snapshot.get(child_key) or []:
+            if row.get(child_fk) not in parent_ids:
+                errors.append(f"Resource '{child_key}:{row.get('id')}' has missing scoped parent '{row.get(child_fk)}'")
+
+    reference_rules = (
+        ("link_types", "source_object_type_id", "object_types"),
+        ("link_types", "target_object_type_id", "object_types"),
+        ("approval_requests", "action_type_id", "action_types"),
+        ("action_outbox", "action_type_id", "action_types"),
+        ("action_idempotency_keys", "action_type_id", "action_types"),
+        ("agent_definitions", "model_endpoint_id", "model_endpoints"),
+        ("object_instances", "object_type_id", "object_types"),
+        ("object_instances", "source_asset_id", "data_assets"),
+        ("link_instances", "link_type_id", "link_types"),
+        ("link_instances", "source_object_id", "object_instances"),
+        ("link_instances", "target_object_id", "object_instances"),
+        ("pipeline_definitions", "input_asset_id", "data_assets"),
+        ("pipeline_definitions", "output_asset_id", "data_assets"),
+        ("pipeline_runs", "pipeline_id", "pipeline_definitions"),
+        ("saved_object_sets", "object_type_id", "object_types"),
+        ("map_layer_definitions", "object_type_id", "object_types"),
+        ("map_layer_definitions", "saved_object_set_id", "saved_object_sets"),
+        ("modeling_objectives", "input_asset_id", "data_assets"),
+        ("model_submissions", "objective_id", "modeling_objectives"),
+        ("model_submissions", "training_dataset_id", "data_assets"),
+        ("model_deployments", "objective_id", "modeling_objectives"),
+        ("model_deployments", "submission_id", "model_submissions"),
+        ("model_monitors", "objective_id", "modeling_objectives"),
+        ("model_monitors", "deployment_id", "model_deployments"),
+        ("model_monitors", "baseline_asset_id", "data_assets"),
+        ("connection_syncs", "source_id", "connection_sources"),
+        ("connection_syncs", "target_asset_id", "data_assets"),
+        ("connection_exports", "source_asset_id", "data_assets"),
+        ("webhook_listeners", "target_asset_id", "data_assets"),
+        ("webhooks", "source_id", "connection_sources"),
+        ("ops_alerts", "rule_id", "ops_alert_rules"),
+        ("ops_alerts", "event_id", "ops_events"),
+        ("ops_runbook_executions", "runbook_id", "ops_runbooks"),
+        ("ops_runbook_executions", "incident_id", "incidents"),
+    )
+    for child_key, field, parent_key in reference_rules:
+        parent_ids = ids.get(parent_key, set())
+        for row in snapshot.get(child_key) or []:
+            value = row.get(field)
+            if value is not None and value not in parent_ids:
+                errors.append(f"Resource '{child_key}:{row.get('id')}' references missing scoped {parent_key} '{value}'")
+
+    object_ids = ids.get("object_instances", set())
+    incident_ids = ids.get("incidents", set())
+    alert_ids = ids.get("ops_alerts", set())
+    for row in snapshot.get("incidents") or []:
+        for ref in row.get("linked_objects") or []:
+            if (ref.get("object_id") or ref.get("id")) not in object_ids:
+                errors.append(f"Incident '{row.get('id')}' references an object outside the snapshot")
+        if any(value not in alert_ids for value in row.get("alert_ids") or []):
+            errors.append(f"Incident '{row.get('id')}' references an alert outside the snapshot")
+    for row in snapshot.get("investigations") or []:
+        if any(value not in incident_ids for value in row.get("incident_ids") or []):
+            errors.append(f"Investigation '{row.get('id')}' references an incident outside the snapshot")
+        for ref in row.get("object_refs") or []:
+            if ref.get("object_id") not in object_ids:
+                errors.append(f"Investigation '{row.get('id')}' references an object outside the snapshot")
+    return sorted(set(errors))
+
+
 @router.get("/project/export")
 def export_project(
+    project_id: Optional[str] = None,
     db: Session = Depends(get_db),
-    principal: Principal = Depends(require_permission("administer")),
+    principal: Principal = Depends(current_principal),
 ):
-    snapshot = _snapshot(db)
-    _audit(db, principal.id, "project.snapshot.exported", "project", "local", {
+    scoped_project_id = _resolve_project_scope(db, principal, project_id, "export")
+    project = db.get(tenancy.PlatformProject, scoped_project_id)
+    organization_id = project.organization_id if project else principal.organization_id or "local"
+    snapshot = _snapshot(db, scoped_project_id, organization_id)
+    _audit(db, principal.id, "project.snapshot.exported", "project", scoped_project_id, {
+        "project_id": scoped_project_id,
         "snapshot_version": snapshot["snapshot_version"],
         "checksum": snapshot["integrity"]["checksum"],
         "counts": {key: len(value) for key, value in snapshot.items() if isinstance(value, list)},
@@ -1358,24 +1618,43 @@ def export_project(
 @router.post("/project/import/validate")
 def validate_project_import(
     body: ProjectImportRequest,
-    principal: Principal = Depends(require_permission("administer")),
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(current_principal),
 ):
-    _ = principal
-    return _validate_portable_snapshot(body.snapshot or {}, allow_legacy=body.allow_legacy)
+    snapshot = body.snapshot or {}
+    scope = snapshot.get("project_scope") or {}
+    project_id = _resolve_project_scope(db, principal, body.project_id or scope.get("project_id"), "restore")
+    validation = _validate_portable_snapshot(snapshot, allow_legacy=body.allow_legacy)
+    errors = list(validation.get("errors") or [])
+    errors.extend(_validate_snapshot_project_scope(snapshot, project_id, allow_legacy=body.allow_legacy))
+    if snapshot.get("snapshot_version", 1) < PORTABLE_SNAPSHOT_VERSION and "*" not in principal.project_ids:
+        errors.append("Only a system-wide administrator can restore an unscoped legacy snapshot")
+    if principal.organization_id and scope.get("organization_id") and scope.get("organization_id") != principal.organization_id:
+        errors.append("Snapshot organization does not match the authenticated organization")
+    return {**validation, "status": "VALID" if not errors else "INVALID", "errors": sorted(set(errors)), "project_id": project_id}
 
 
 @router.post("/project/import")
 def import_project(
     body: ProjectImportRequest,
     db: Session = Depends(get_db),
-    principal: Principal = Depends(require_permission("administer")),
+    principal: Principal = Depends(current_principal),
 ):
     _ensure_runtime_tables(db)
     if body.mode not in {"merge"}:
         raise HTTPException(status_code=400, detail="Only merge mode is supported")
     snapshot = body.snapshot or {}
     validation = _validate_portable_snapshot(snapshot, allow_legacy=body.allow_legacy)
-    if validation["status"] != "VALID":
+    scope = snapshot.get("project_scope") or {}
+    project_id = _resolve_project_scope(db, principal, body.project_id or scope.get("project_id"), "restore")
+    scope_errors = _validate_snapshot_project_scope(snapshot, project_id, allow_legacy=body.allow_legacy)
+    if snapshot.get("snapshot_version", 1) < PORTABLE_SNAPSHOT_VERSION and "*" not in principal.project_ids:
+        scope_errors.append("Only a system-wide administrator can restore an unscoped legacy snapshot")
+    if principal.organization_id and scope.get("organization_id") and scope.get("organization_id") != principal.organization_id:
+        scope_errors.append("Snapshot organization does not match the authenticated organization")
+    if validation["status"] != "VALID" or scope_errors:
+        validation["errors"] = sorted(set([*(validation.get("errors") or []), *scope_errors]))
+        validation["status"] = "INVALID"
         raise HTTPException(status_code=400, detail={"message": "Snapshot validation failed", **validation})
     if body.dry_run:
         return {"status": "VALIDATED", "mode": body.mode, "validation": validation}
@@ -1672,6 +1951,38 @@ def import_project(
     for row in snapshot.get("connector_fetch_attempts") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, connector_runtime.ConnectorFetchAttempt, row, ["id", "project_id", "source_id", "sync_id", "ingestion_run_id", "adapter_id", "operation", "status", "records_read", "bytes_read", "duration_ms", "cursor_in", "cursor_out", "metadata_", "error", "created_at"]))
+    for row in snapshot.get("ops_events") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.OpsEvent, row, ["id", "project_id", "source", "event_type", "severity", "status", "title", "message", "subject_type", "subject_id", "object_type_id", "object_id", "payload", "created_at"]))
+    for row in snapshot.get("ops_alert_rules") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.AlertRule, row, ["id", "project_id", "display_name", "description", "source", "event_type", "min_severity", "subject_type", "object_type_id", "expression", "active", "created_at", "updated_at"]))
+    for row in snapshot.get("ops_alerts") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.AlertEvent, row, ["id", "project_id", "rule_id", "event_id", "source", "severity", "status", "title", "message", "subject_type", "subject_id", "object_type_id", "object_id", "payload", "created_at", "updated_at"]))
+    for row in snapshot.get("ops_runbooks") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.Runbook, row, ["id", "project_id", "display_name", "description", "steps", "enabled", "created_at", "updated_at"]))
+    for row in snapshot.get("ops_runbook_executions") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.RunbookExecution, row, ["id", "project_id", "runbook_id", "incident_id", "actor", "status", "inputs", "step_results", "created_at", "completed_at"]))
+    for row in snapshot.get("ops_notifications") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.OpsNotification, row, ["id", "project_id", "recipient", "severity", "title", "message", "source", "subject_type", "subject_id", "status", "payload", "created_at", "acknowledged_at"]))
+    for row in snapshot.get("ops_sla_policies") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.OpsSlaPolicy, row, ["id", "project_id", "display_name", "scope", "thresholds", "active", "created_at", "updated_at"]))
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
@@ -1726,7 +2037,7 @@ def import_project(
         row.setdefault("project_id", "default")
         track(_upsert_artifact_command_receipt(db, row))
 
-    _audit(db, principal.id, "project.snapshot.imported", "project", "local", counts)
+    _audit(db, principal.id, "project.snapshot.imported", "project", project_id, {"project_id": project_id, **counts})
     ops_control.record_ops_event(
         db,
         source="project",
@@ -1734,8 +2045,9 @@ def import_project(
         severity="info",
         title="Project snapshot imported",
         subject_type="project",
-        subject_id="local",
-        payload=counts,
+        subject_id=project_id,
+        payload={"project_id": project_id, **counts},
+        project_id=project_id,
     )
     try:
         db.flush()
@@ -1743,4 +2055,4 @@ def import_project(
     except (IntegrityError, SQLAlchemyError) as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Snapshot import failed integrity checks; no changes were applied") from exc
-    return {"status": "IMPORTED", "mode": body.mode, "counts": counts, "validation": validation}
+    return {"status": "IMPORTED", "mode": body.mode, "project_id": project_id, "counts": counts, "validation": validation}
