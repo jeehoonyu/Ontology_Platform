@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import schedules as _schedules
+from . import production_auth, schedules as _schedules, semantic_scope
 
 router = APIRouter(tags=["schedules_ops"])
 
@@ -119,20 +119,18 @@ class ScheduleEvalRequest(BaseModel):
 
 
 @router.post("/schedules/cron-due")
-def cron_due_endpoint(body: CronDueRequest):
+def cron_due_endpoint(body: CronDueRequest, _principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     return {"cron": body.cron, "timestamp": body.timestamp, **cron_due(body.cron, body.timestamp)}
 
 
 @router.post("/schedules/evaluate-trigger")
-def evaluate_trigger_endpoint(body: TriggerRequest):
+def evaluate_trigger_endpoint(body: TriggerRequest, _principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     return {"result": evaluate_trigger(body.trigger, body.context)}
 
 
 @router.post("/schedules/{schedule_id}/evaluate")
-def evaluate_schedule(schedule_id: str, body: ScheduleEvalRequest, db: Session = Depends(get_db)):
-    sched = db.get(_schedules.Schedule, schedule_id)
-    if not sched:
-        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
+def evaluate_schedule(schedule_id: str, body: ScheduleEvalRequest, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    sched = semantic_scope.owned_row(db, principal, _schedules.Schedule, schedule_id, "view", "Schedule")
     # a compound trigger may be stored in event_input.trigger; otherwise build from trigger_type/cron
     trigger = (sched.event_input or {}).get("trigger") if isinstance(sched.event_input, dict) else None
     if not trigger:

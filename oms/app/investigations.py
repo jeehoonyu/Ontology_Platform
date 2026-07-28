@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from .database import Base, get_db
 
 router = APIRouter(tags=["investigations"])
@@ -34,6 +34,7 @@ class InvestigationWorkspace(Base):
     __tablename__ = "investigation_workspaces"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="OPEN", index=True)
@@ -49,6 +50,7 @@ class EvidenceItem(Base):
     __tablename__ = "investigation_evidence"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)
     source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -62,6 +64,7 @@ class InvestigationHypothesis(Base):
     __tablename__ = "investigation_hypotheses"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     statement: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="OPEN", index=True)
@@ -75,6 +78,7 @@ class InvestigationFinding(Base):
     __tablename__ = "investigation_findings"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)
     severity: Mapped[str] = mapped_column(String, default="medium")
@@ -88,6 +92,7 @@ class InvestigationReport(Base):
     __tablename__ = "investigation_reports"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)
     body: Mapped[str] = mapped_column(String)
@@ -97,6 +102,7 @@ class InvestigationReport(Base):
 
 class InvestigationCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     status: str = "OPEN"
@@ -170,6 +176,7 @@ def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, pay
 def _workspace_dict(row: InvestigationWorkspace) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "display_name": row.display_name,
         "description": row.description,
         "status": row.status,
@@ -185,6 +192,7 @@ def _workspace_dict(row: InvestigationWorkspace) -> Dict[str, Any]:
 def _evidence_dict(row: EvidenceItem) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "investigation_id": row.investigation_id,
         "title": row.title,
         "source": row.source,
@@ -198,6 +206,7 @@ def _evidence_dict(row: EvidenceItem) -> Dict[str, Any]:
 def _hypothesis_dict(row: InvestigationHypothesis) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "investigation_id": row.investigation_id,
         "statement": row.statement,
         "status": row.status,
@@ -211,6 +220,7 @@ def _hypothesis_dict(row: InvestigationHypothesis) -> Dict[str, Any]:
 def _finding_dict(row: InvestigationFinding) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "investigation_id": row.investigation_id,
         "title": row.title,
         "severity": row.severity,
@@ -224,6 +234,7 @@ def _finding_dict(row: InvestigationFinding) -> Dict[str, Any]:
 def _report_dict(row: InvestigationReport) -> Dict[str, Any]:
     return {
         "id": row.id,
+        "project_id": row.project_id,
         "investigation_id": row.investigation_id,
         "title": row.title,
         "body": row.body,
@@ -232,24 +243,46 @@ def _report_dict(row: InvestigationReport) -> Dict[str, Any]:
     }
 
 
-def _get_workspace(db: Session, investigation_id: str) -> InvestigationWorkspace:
+def _get_workspace(db: Session, investigation_id: str, principal: Optional[production_auth.Principal] = None, permission: str = "view") -> InvestigationWorkspace:
     _ensure_tables(db)
-    workspace = db.get(InvestigationWorkspace, investigation_id)
-    if not workspace:
-        raise HTTPException(status_code=404, detail=f"InvestigationWorkspace '{investigation_id}' not found")
-    return workspace
+    if principal is None:
+        workspace = db.get(InvestigationWorkspace, investigation_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail=f"InvestigationWorkspace '{investigation_id}' not found")
+        return workspace
+    return semantic_scope.owned_row(db, principal, InvestigationWorkspace, investigation_id, permission, "InvestigationWorkspace")
+
+
+def _validate_refs(db: Session, project_id: str, refs: List[Dict[str, Any]]) -> None:
+    for ref in refs or []:
+        object_id = ref.get("object_id")
+        obj = db.get(models.ObjectInstance, object_id) if object_id else None
+        if not obj or obj.project_id != project_id or obj.object_type_id != ref.get("object_type_id"):
+            raise HTTPException(status_code=422, detail=f"Object reference '{object_id}' is not valid for project '{project_id}'")
+
+
+def _validate_case_links(db: Session, project_id: str, alert_ids: List[str], incident_ids: List[str]) -> None:
+    from . import ops_control
+    for alert_id in alert_ids or []:
+        alert = db.get(ops_control.AlertEvent, alert_id)
+        if not alert or alert.project_id != project_id:
+            raise HTTPException(status_code=422, detail=f"Alert '{alert_id}' is not valid for project '{project_id}'")
+    for incident_id in incident_ids or []:
+        incident = db.get(ops_control.Incident, incident_id)
+        if not incident or incident.project_id != project_id:
+            raise HTTPException(status_code=422, detail=f"Incident '{incident_id}' is not valid for project '{project_id}'")
 
 
 def _object_ref_key(ref: Dict[str, Any]) -> str:
     return f"{ref.get('object_type_id')}:{ref.get('object_id')}"
 
 
-def _object_payload(db: Session, ref: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _object_payload(db: Session, ref: Dict[str, Any], project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     object_id = ref.get("object_id")
     if not object_id:
         return None
     obj = db.get(models.ObjectInstance, object_id)
-    if not obj:
+    if not obj or (project_id and obj.project_id != project_id):
         return None
     return {
         "id": obj.id,
@@ -262,8 +295,11 @@ def _object_payload(db: Session, ref: Dict[str, Any]) -> Optional[Dict[str, Any]
     }
 
 
-def _risk_for_ref(db: Session, ref: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _risk_for_ref(db: Session, ref: Dict[str, Any], project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     try:
+        obj = db.get(models.ObjectInstance, ref.get("object_id"))
+        if not obj or (project_id and obj.project_id != project_id):
+            return None
         from . import decision_intelligence
         return decision_intelligence.score_object_by_id(db, str(ref.get("object_type_id")), str(ref.get("object_id")))
     except Exception:
@@ -281,8 +317,11 @@ def _all_object_refs(workspace: InvestigationWorkspace, evidence: List[EvidenceI
 
 
 @router.post("/investigations")
-def create_investigation(body: InvestigationCreate, db: Session = Depends(get_db)):
+def create_investigation(body: InvestigationCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
     _ensure_tables(db)
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
+    _validate_refs(db, body.project_id, body.object_refs)
+    _validate_case_links(db, body.project_id, body.alert_ids, body.incident_ids)
     investigation_id = body.id or _new_id("inv")
     if db.get(InvestigationWorkspace, investigation_id):
         raise HTTPException(status_code=400, detail="InvestigationWorkspace already exists")
@@ -301,6 +340,7 @@ def create_investigation(body: InvestigationCreate, db: Session = Depends(get_db
             subject_type="investigation",
             subject_id=workspace.id,
             payload={"object_refs": workspace.object_refs or []},
+            project_id=workspace.project_id,
         )
     except Exception:
         pass
@@ -310,21 +350,21 @@ def create_investigation(body: InvestigationCreate, db: Session = Depends(get_db
 
 
 @router.get("/investigations")
-def list_investigations(status: Optional[str] = None, db: Session = Depends(get_db)):
+def list_investigations(status: Optional[str] = None, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    query = db.query(InvestigationWorkspace)
+    query = semantic_scope.accessible_query(db, principal, InvestigationWorkspace)
     if status:
         query = query.filter(InvestigationWorkspace.status == status)
     return [_workspace_dict(row) for row in query.order_by(InvestigationWorkspace.updated_at.desc()).all()]
 
 
 @router.get("/investigations/{investigation_id}")
-def get_investigation(investigation_id: str, db: Session = Depends(get_db)):
-    workspace = _get_workspace(db, investigation_id)
-    evidence = db.query(EvidenceItem).filter(EvidenceItem.investigation_id == investigation_id).order_by(EvidenceItem.created_at.desc()).all()
-    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.investigation_id == investigation_id).order_by(InvestigationHypothesis.updated_at.desc()).all()
-    findings = db.query(InvestigationFinding).filter(InvestigationFinding.investigation_id == investigation_id).order_by(InvestigationFinding.created_at.desc()).all()
-    reports = db.query(InvestigationReport).filter(InvestigationReport.investigation_id == investigation_id).order_by(InvestigationReport.created_at.desc()).all()
+def get_investigation(investigation_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    workspace = _get_workspace(db, investigation_id, principal)
+    evidence = db.query(EvidenceItem).filter(EvidenceItem.project_id == workspace.project_id, EvidenceItem.investigation_id == investigation_id).order_by(EvidenceItem.created_at.desc()).all()
+    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.project_id == workspace.project_id, InvestigationHypothesis.investigation_id == investigation_id).order_by(InvestigationHypothesis.updated_at.desc()).all()
+    findings = db.query(InvestigationFinding).filter(InvestigationFinding.project_id == workspace.project_id, InvestigationFinding.investigation_id == investigation_id).order_by(InvestigationFinding.created_at.desc()).all()
+    reports = db.query(InvestigationReport).filter(InvestigationReport.project_id == workspace.project_id, InvestigationReport.investigation_id == investigation_id).order_by(InvestigationReport.created_at.desc()).all()
     object_refs = _all_object_refs(workspace, evidence)
     return {
         **_workspace_dict(workspace),
@@ -332,15 +372,17 @@ def get_investigation(investigation_id: str, db: Session = Depends(get_db)):
         "hypotheses": [_hypothesis_dict(row) for row in hypotheses],
         "findings": [_finding_dict(row) for row in findings],
         "reports": [_report_dict(row) for row in reports],
-        "objects": [_object_payload(db, ref) for ref in object_refs if _object_payload(db, ref)],
-        "risk": {_object_ref_key(ref): _risk_for_ref(db, ref) for ref in object_refs},
+        "objects": [_object_payload(db, ref, workspace.project_id) for ref in object_refs if _object_payload(db, ref, workspace.project_id)],
+        "risk": {_object_ref_key(ref): _risk_for_ref(db, ref, workspace.project_id) for ref in object_refs},
     }
 
 
 @router.patch("/investigations/{investigation_id}")
-def patch_investigation(investigation_id: str, body: InvestigationPatch, db: Session = Depends(get_db)):
-    workspace = _get_workspace(db, investigation_id)
+def patch_investigation(investigation_id: str, body: InvestigationPatch, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    workspace = _get_workspace(db, investigation_id, principal, "edit")
     patch = body.model_dump(exclude_unset=True)
+    _validate_refs(db, workspace.project_id, patch.get("object_refs") or [])
+    _validate_case_links(db, workspace.project_id, patch.get("alert_ids") or [], patch.get("incident_ids") or [])
     for key, value in patch.items():
         setattr(workspace, key, value)
     workspace.updated_at = _now()
@@ -351,12 +393,13 @@ def patch_investigation(investigation_id: str, body: InvestigationPatch, db: Ses
 
 
 @router.post("/investigations/{investigation_id}/evidence")
-def add_evidence(investigation_id: str, body: EvidenceCreate, db: Session = Depends(get_db)):
-    workspace = _get_workspace(db, investigation_id)
+def add_evidence(investigation_id: str, body: EvidenceCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    workspace = _get_workspace(db, investigation_id, principal, "edit")
+    _validate_refs(db, workspace.project_id, body.object_refs)
     evidence_id = body.id or _new_id("evidence")
     if db.get(EvidenceItem, evidence_id):
         raise HTTPException(status_code=400, detail="EvidenceItem already exists")
-    evidence = EvidenceItem(id=evidence_id, investigation_id=investigation_id, created_at=_now(), **body.model_dump(exclude={"id"}))
+    evidence = EvidenceItem(id=evidence_id, project_id=workspace.project_id, investigation_id=investigation_id, created_at=_now(), **body.model_dump(exclude={"id"}))
     db.add(evidence)
     existing_refs = {_object_ref_key(ref): ref for ref in workspace.object_refs or []}
     for ref in body.object_refs:
@@ -370,22 +413,26 @@ def add_evidence(investigation_id: str, body: EvidenceCreate, db: Session = Depe
 
 
 @router.get("/investigations/{investigation_id}/evidence")
-def list_evidence(investigation_id: str, db: Session = Depends(get_db)):
-    _get_workspace(db, investigation_id)
+def list_evidence(investigation_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    workspace = _get_workspace(db, investigation_id, principal)
     return [
         _evidence_dict(row)
-        for row in db.query(EvidenceItem).filter(EvidenceItem.investigation_id == investigation_id).order_by(EvidenceItem.created_at.desc()).all()
+        for row in db.query(EvidenceItem).filter(EvidenceItem.project_id == workspace.project_id, EvidenceItem.investigation_id == investigation_id).order_by(EvidenceItem.created_at.desc()).all()
     ]
 
 
 @router.post("/investigations/{investigation_id}/hypotheses")
-def add_hypothesis(investigation_id: str, body: HypothesisCreate, db: Session = Depends(get_db)):
-    _get_workspace(db, investigation_id)
+def add_hypothesis(investigation_id: str, body: HypothesisCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    workspace = _get_workspace(db, investigation_id, principal, "edit")
+    for evidence_id in body.linked_evidence_ids:
+        evidence = db.get(EvidenceItem, evidence_id)
+        if not evidence or evidence.project_id != workspace.project_id or evidence.investigation_id != investigation_id:
+            raise HTTPException(status_code=422, detail=f"Evidence '{evidence_id}' is not valid for this investigation")
     hypothesis_id = body.id or _new_id("hyp")
     if db.get(InvestigationHypothesis, hypothesis_id):
         raise HTTPException(status_code=400, detail="InvestigationHypothesis already exists")
     now = _now()
-    hypothesis = InvestigationHypothesis(id=hypothesis_id, investigation_id=investigation_id, created_at=now, updated_at=now, **body.model_dump(exclude={"id"}))
+    hypothesis = InvestigationHypothesis(id=hypothesis_id, project_id=workspace.project_id, investigation_id=investigation_id, created_at=now, updated_at=now, **body.model_dump(exclude={"id"}))
     db.add(hypothesis)
     _audit(db, "investigation.hypothesis.added", "hypothesis", hypothesis.id, _hypothesis_dict(hypothesis))
     db.commit()
@@ -394,12 +441,16 @@ def add_hypothesis(investigation_id: str, body: HypothesisCreate, db: Session = 
 
 
 @router.patch("/investigations/{investigation_id}/hypotheses/{hypothesis_id}")
-def patch_hypothesis(investigation_id: str, hypothesis_id: str, body: HypothesisPatch, db: Session = Depends(get_db)):
-    _get_workspace(db, investigation_id)
+def patch_hypothesis(investigation_id: str, hypothesis_id: str, body: HypothesisPatch, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    workspace = _get_workspace(db, investigation_id, principal, "edit")
     hypothesis = db.get(InvestigationHypothesis, hypothesis_id)
-    if not hypothesis or hypothesis.investigation_id != investigation_id:
+    if not hypothesis or hypothesis.project_id != workspace.project_id or hypothesis.investigation_id != investigation_id:
         raise HTTPException(status_code=404, detail=f"InvestigationHypothesis '{hypothesis_id}' not found")
     patch = body.model_dump(exclude_unset=True)
+    for evidence_id in patch.get("linked_evidence_ids") or []:
+        evidence = db.get(EvidenceItem, evidence_id)
+        if not evidence or evidence.project_id != workspace.project_id or evidence.investigation_id != investigation_id:
+            raise HTTPException(status_code=422, detail=f"Evidence '{evidence_id}' is not valid for this investigation")
     for key, value in patch.items():
         setattr(hypothesis, key, value)
     hypothesis.updated_at = _now()
@@ -410,10 +461,10 @@ def patch_hypothesis(investigation_id: str, hypothesis_id: str, body: Hypothesis
 
 
 @router.get("/investigations/{investigation_id}/graph")
-def investigation_graph(investigation_id: str, db: Session = Depends(get_db)):
-    workspace = _get_workspace(db, investigation_id)
-    evidence = db.query(EvidenceItem).filter(EvidenceItem.investigation_id == investigation_id).all()
-    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.investigation_id == investigation_id).all()
+def investigation_graph(investigation_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    workspace = _get_workspace(db, investigation_id, principal)
+    evidence = db.query(EvidenceItem).filter(EvidenceItem.project_id == workspace.project_id, EvidenceItem.investigation_id == investigation_id).all()
+    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.project_id == workspace.project_id, InvestigationHypothesis.investigation_id == investigation_id).all()
     refs = _all_object_refs(workspace, evidence)
     nodes: Dict[str, Dict[str, Any]] = {
         f"investigation:{workspace.id}": {"id": f"investigation:{workspace.id}", "kind": "investigation", "label": workspace.display_name, "status": workspace.status}
@@ -421,12 +472,12 @@ def investigation_graph(investigation_id: str, db: Session = Depends(get_db)):
     edges: List[Dict[str, Any]] = []
 
     for ref in refs:
-        obj = _object_payload(db, ref)
+        obj = _object_payload(db, ref, workspace.project_id)
         if not obj:
             continue
         node_id = f"object:{obj['id']}"
         props = obj.get("properties") or {}
-        risk = _risk_for_ref(db, ref)
+        risk = _risk_for_ref(db, ref, workspace.project_id)
         nodes[node_id] = {
             "id": node_id,
             "kind": "object",
@@ -457,6 +508,7 @@ def investigation_graph(investigation_id: str, db: Session = Depends(get_db)):
 
     object_ids = [ref.get("object_id") for ref in refs]
     links = db.query(models.LinkInstance).filter(
+        models.LinkInstance.project_id == workspace.project_id,
         (models.LinkInstance.source_object_id.in_(object_ids)) | (models.LinkInstance.target_object_id.in_(object_ids))
     ).all() if object_ids else []
     for link in links:
@@ -469,11 +521,11 @@ def investigation_graph(investigation_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/investigations/{investigation_id}/timeline")
-def investigation_timeline(investigation_id: str, db: Session = Depends(get_db)):
-    workspace = _get_workspace(db, investigation_id)
-    evidence = db.query(EvidenceItem).filter(EvidenceItem.investigation_id == investigation_id).all()
-    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.investigation_id == investigation_id).all()
-    reports = db.query(InvestigationReport).filter(InvestigationReport.investigation_id == investigation_id).all()
+def investigation_timeline(investigation_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    workspace = _get_workspace(db, investigation_id, principal)
+    evidence = db.query(EvidenceItem).filter(EvidenceItem.project_id == workspace.project_id, EvidenceItem.investigation_id == investigation_id).all()
+    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.project_id == workspace.project_id, InvestigationHypothesis.investigation_id == investigation_id).all()
+    reports = db.query(InvestigationReport).filter(InvestigationReport.project_id == workspace.project_id, InvestigationReport.investigation_id == investigation_id).all()
     events = [
         {"at": workspace.created_at, "kind": "investigation", "title": "Investigation created", "id": workspace.id},
         {"at": workspace.updated_at, "kind": "investigation", "title": "Investigation updated", "id": workspace.id},
@@ -501,12 +553,12 @@ def investigation_timeline(investigation_id: str, db: Session = Depends(get_db))
 
 
 @router.post("/investigations/{investigation_id}/report")
-def create_report(investigation_id: str, body: ReportRequest = ReportRequest(), db: Session = Depends(get_db)):
-    workspace = _get_workspace(db, investigation_id)
-    evidence = db.query(EvidenceItem).filter(EvidenceItem.investigation_id == investigation_id).order_by(EvidenceItem.created_at.asc()).all()
-    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.investigation_id == investigation_id).order_by(InvestigationHypothesis.updated_at.desc()).all()
+def create_report(investigation_id: str, body: ReportRequest = ReportRequest(), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("export"))):
+    workspace = _get_workspace(db, investigation_id, principal, "export")
+    evidence = db.query(EvidenceItem).filter(EvidenceItem.project_id == workspace.project_id, EvidenceItem.investigation_id == investigation_id).order_by(EvidenceItem.created_at.asc()).all()
+    hypotheses = db.query(InvestigationHypothesis).filter(InvestigationHypothesis.project_id == workspace.project_id, InvestigationHypothesis.investigation_id == investigation_id).order_by(InvestigationHypothesis.updated_at.desc()).all()
     refs = _all_object_refs(workspace, evidence)
-    risks = {ref.get("object_id"): _risk_for_ref(db, ref) for ref in refs}
+    risks = {ref.get("object_id"): _risk_for_ref(db, ref, workspace.project_id) for ref in refs}
     high_risk = [
         {"object_id": object_id, "band": risk.get("band"), "score": risk.get("score")}
         for object_id, risk in risks.items()
@@ -528,6 +580,7 @@ def create_report(investigation_id: str, body: ReportRequest = ReportRequest(), 
     ])
     report = InvestigationReport(
         id=_new_id("report"),
+        project_id=workspace.project_id,
         investigation_id=investigation_id,
         title=title,
         body=body_text,
@@ -537,6 +590,7 @@ def create_report(investigation_id: str, body: ReportRequest = ReportRequest(), 
     db.add(report)
     finding = InvestigationFinding(
         id=_new_id("finding"),
+        project_id=workspace.project_id,
         investigation_id=investigation_id,
         title="Report generated",
         severity="high" if high_risk else "medium",

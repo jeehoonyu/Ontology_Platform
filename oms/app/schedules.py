@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, Session
 
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from .database import Base, get_db
 
 router = APIRouter(tags=["schedules"])
@@ -23,6 +23,7 @@ class Schedule(Base):
     __tablename__ = "schedules"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     target_type: Mapped[str] = mapped_column(String, nullable=False)  # pipeline/logic/automation
     target_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -40,6 +41,7 @@ class Build(Base):
     __tablename__ = "builds"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     target_type: Mapped[str] = mapped_column(String, nullable=False)
     target_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -56,6 +58,7 @@ class Build(Base):
 
 class ScheduleCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     target_type: str = Field(..., pattern="^(pipeline|logic|automation)$")
     target_id: str
@@ -69,6 +72,7 @@ class ScheduleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     target_type: str
     target_id: str
@@ -88,6 +92,7 @@ class BuildRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     schedule_id: Optional[str]
     target_type: str
     target_id: str
@@ -150,12 +155,27 @@ def _append_audit(
     )
 
 
+def _target_for(db: Session, principal: production_auth.Principal, target_type: str, target_id: str, permission: str):
+    target_models = {
+        "pipeline": models.PipelineDefinition,
+        "logic": models.LogicFunction,
+        "automation": models.AutomationDefinition,
+    }
+    model = target_models.get(target_type)
+    if not model:
+        raise HTTPException(status_code=422, detail=f"Unsupported schedule target type '{target_type}'")
+    target = db.get(model, target_id)
+    if target:
+        semantic_scope.assert_project(db, principal, target.project_id, permission)
+    return target
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.post("/schedules", response_model=ScheduleRead, status_code=201)
-def create_schedule(body: ScheduleCreate, db: Session = Depends(get_db)) -> Schedule:
+def create_schedule(body: ScheduleCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))) -> Schedule:
     """Create a new schedule resource."""
     schedule_id = body.id or uuid.uuid4().hex
     existing = db.query(Schedule).filter(Schedule.id == schedule_id).first()
@@ -164,10 +184,15 @@ def create_schedule(body: ScheduleCreate, db: Session = Depends(get_db)) -> Sche
 
     if body.trigger_type == "cron" and not body.cron:
         raise HTTPException(status_code=422, detail="cron expression required when trigger_type is 'cron'")
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
+    target = _target_for(db, principal, body.target_type, body.target_id, "edit")
+    if target and target.project_id != body.project_id:
+        raise HTTPException(status_code=422, detail="Schedule target must belong to the same project")
 
     now = _now()
     row = Schedule(
         id=schedule_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         target_type=body.target_type,
         target_id=body.target_id,
@@ -193,18 +218,15 @@ def create_schedule(body: ScheduleCreate, db: Session = Depends(get_db)) -> Sche
 
 
 @router.get("/schedules", response_model=List[ScheduleRead])
-def list_schedules(db: Session = Depends(get_db)) -> List[Schedule]:
+def list_schedules(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))) -> List[Schedule]:
     """List all schedules ordered by creation time descending."""
-    return db.query(Schedule).order_by(Schedule.created_at.desc()).all()
+    return semantic_scope.accessible_query(db, principal, Schedule).order_by(Schedule.created_at.desc()).all()
 
 
 @router.get("/schedules/{schedule_id}", response_model=ScheduleRead)
-def get_schedule(schedule_id: str, db: Session = Depends(get_db)) -> Schedule:
+def get_schedule(schedule_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))) -> Schedule:
     """Retrieve a single schedule by ID."""
-    row = db.query(Schedule).filter(Schedule.id == schedule_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
-    return row
+    return semantic_scope.owned_row(db, principal, Schedule, schedule_id, "view", "Schedule")
 
 
 @router.post("/schedules/{schedule_id}/enable", response_model=ScheduleRead)
@@ -212,11 +234,10 @@ def set_schedule_enabled(
     schedule_id: str,
     body: ScheduleEnableRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("edit")),
 ) -> Schedule:
     """Enable or disable a schedule."""
-    row = db.query(Schedule).filter(Schedule.id == schedule_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
+    row = semantic_scope.owned_row(db, principal, Schedule, schedule_id, "edit", "Schedule")
 
     row.enabled = body.enabled
     row.updated_at = _now()
@@ -238,16 +259,16 @@ def trigger_schedule(
     schedule_id: str,
     actor: str = "system",
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("execute")),
 ) -> Build:
     """Manually trigger a schedule, creating a build record with status 'success'."""
-    row = db.query(Schedule).filter(Schedule.id == schedule_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
+    row = semantic_scope.owned_row(db, principal, Schedule, schedule_id, "execute", "Schedule")
 
     build_id = uuid.uuid4().hex
     now = _now()
     build = Build(
         id=build_id,
+        project_id=row.project_id,
         schedule_id=schedule_id,
         target_type=row.target_type,
         target_id=row.target_id,
@@ -281,6 +302,7 @@ def run_schedule(
     body: ScheduleRunRequest,
     actor: str = "system",
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("execute")),
 ) -> Build:
     """
     Evaluate the schedule's trigger against the supplied context and record a
@@ -289,9 +311,7 @@ def run_schedule(
     distinct outcome from success/failed). This does not change the existing
     /trigger endpoint, which always records 'success'.
     """
-    row = db.query(Schedule).filter(Schedule.id == schedule_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
+    row = semantic_scope.owned_row(db, principal, Schedule, schedule_id, "execute", "Schedule")
 
     # Lazy import to avoid a top-level import cycle (schedules_ops imports schedules).
     from . import schedules_ops as _ops
@@ -316,6 +336,7 @@ def run_schedule(
     now = _now()
     build = Build(
         id=build_id,
+        project_id=row.project_id,
         schedule_id=schedule_id,
         target_type=row.target_type,
         target_id=row.target_id,
@@ -340,15 +361,13 @@ def run_schedule(
 
 
 @router.get("/schedules/{schedule_id}/metrics", response_model=ScheduleMetricsRead)
-def get_schedule_metrics(schedule_id: str, db: Session = Depends(get_db)) -> ScheduleMetricsRead:
+def get_schedule_metrics(schedule_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))) -> ScheduleMetricsRead:
     """Aggregate build outcomes for a schedule by status, plus the last run."""
-    row = db.query(Schedule).filter(Schedule.id == schedule_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
+    row = semantic_scope.owned_row(db, principal, Schedule, schedule_id, "view", "Schedule")
 
     builds = (
         db.query(Build)
-        .filter(Build.schedule_id == schedule_id)
+        .filter(Build.project_id == row.project_id, Build.schedule_id == schedule_id)
         .order_by(Build.created_at.desc())
         .all()
     )
@@ -378,9 +397,10 @@ def get_schedule_metrics(schedule_id: str, db: Session = Depends(get_db)) -> Sch
 def list_builds(
     target_id: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ) -> List[Build]:
     """List builds, optionally filtered by target_id."""
-    query = db.query(Build)
+    query = semantic_scope.accessible_query(db, principal, Build)
     if target_id:
         query = query.filter(Build.target_id == target_id)
     return query.order_by(Build.created_at.desc()).all()

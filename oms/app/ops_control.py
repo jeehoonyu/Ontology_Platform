@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from .database import Base, get_db
 
 router = APIRouter(tags=["ops_control"])
@@ -38,6 +38,7 @@ class OpsEvent(Base):
     __tablename__ = "ops_events"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     source: Mapped[str] = mapped_column(String, index=True)
     event_type: Mapped[str] = mapped_column(String, index=True)
     severity: Mapped[str] = mapped_column(String, default="info", index=True)
@@ -56,6 +57,7 @@ class AlertRule(Base):
     __tablename__ = "ops_alert_rules"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
@@ -73,6 +75,7 @@ class AlertEvent(Base):
     __tablename__ = "ops_alert_events"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     rule_id: Mapped[str] = mapped_column(String, index=True)
     event_id: Mapped[str] = mapped_column(String, index=True)
     source: Mapped[str] = mapped_column(String, index=True)
@@ -93,6 +96,7 @@ class Incident(Base):
     __tablename__ = "ops_incidents"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     severity: Mapped[str] = mapped_column(String, default="medium", index=True)
@@ -111,6 +115,7 @@ class Runbook(Base):
     __tablename__ = "ops_runbooks"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     steps: Mapped[list] = mapped_column(JSON, default=list)
@@ -123,6 +128,7 @@ class RunbookExecution(Base):
     __tablename__ = "ops_runbook_executions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     runbook_id: Mapped[str] = mapped_column(String, index=True)
     incident_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     actor: Mapped[str] = mapped_column(String, default="workspace")
@@ -137,6 +143,7 @@ class OpsNotification(Base):
     __tablename__ = "ops_notifications"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     recipient: Mapped[str] = mapped_column(String, default="workspace", index=True)
     severity: Mapped[str] = mapped_column(String, default="info", index=True)
     title: Mapped[str] = mapped_column(String)
@@ -154,6 +161,7 @@ class OpsSlaPolicy(Base):
     __tablename__ = "ops_sla_policies"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     scope: Mapped[dict] = mapped_column(JSON, default=dict)
     thresholds: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -163,6 +171,7 @@ class OpsSlaPolicy(Base):
 
 
 class OpsEventIngest(BaseModel):
+    project_id: str = "default"
     source: str
     event_type: str
     severity: str = "info"
@@ -178,6 +187,7 @@ class OpsEventIngest(BaseModel):
 
 class AlertRuleCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     source: Optional[str] = None
@@ -210,6 +220,7 @@ class AlertEvaluateRequest(BaseModel):
 
 class IncidentCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     severity: str = "medium"
@@ -237,6 +248,7 @@ class IncidentLinkObject(BaseModel):
 
 class RunbookCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     steps: List[Dict[str, Any]] = Field(default_factory=list)
@@ -263,6 +275,7 @@ def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, pay
 def _event_dict(event: OpsEvent) -> Dict[str, Any]:
     return {
         "id": event.id,
+        "project_id": event.project_id,
         "source": event.source,
         "event_type": event.event_type,
         "severity": event.severity,
@@ -281,6 +294,7 @@ def _event_dict(event: OpsEvent) -> Dict[str, Any]:
 def _rule_dict(rule: AlertRule) -> Dict[str, Any]:
     return {
         "id": rule.id,
+        "project_id": rule.project_id,
         "display_name": rule.display_name,
         "description": rule.description,
         "source": rule.source,
@@ -298,6 +312,7 @@ def _rule_dict(rule: AlertRule) -> Dict[str, Any]:
 def _alert_dict(alert: AlertEvent) -> Dict[str, Any]:
     return {
         "id": alert.id,
+        "project_id": alert.project_id,
         "rule_id": alert.rule_id,
         "event_id": alert.event_id,
         "source": alert.source,
@@ -318,6 +333,7 @@ def _alert_dict(alert: AlertEvent) -> Dict[str, Any]:
 def _incident_dict(incident: Incident) -> Dict[str, Any]:
     return {
         "id": incident.id,
+        "project_id": incident.project_id,
         "display_name": incident.display_name,
         "description": incident.description,
         "severity": incident.severity,
@@ -336,6 +352,7 @@ def _incident_dict(incident: Incident) -> Dict[str, Any]:
 def _runbook_dict(runbook: Runbook) -> Dict[str, Any]:
     return {
         "id": runbook.id,
+        "project_id": runbook.project_id,
         "display_name": runbook.display_name,
         "description": runbook.description,
         "steps": runbook.steps or [],
@@ -348,6 +365,7 @@ def _runbook_dict(runbook: Runbook) -> Dict[str, Any]:
 def _execution_dict(execution: RunbookExecution) -> Dict[str, Any]:
     return {
         "id": execution.id,
+        "project_id": execution.project_id,
         "runbook_id": execution.runbook_id,
         "incident_id": execution.incident_id,
         "actor": execution.actor,
@@ -362,6 +380,7 @@ def _execution_dict(execution: RunbookExecution) -> Dict[str, Any]:
 def _notification_dict(notification: OpsNotification) -> Dict[str, Any]:
     return {
         "id": notification.id,
+        "project_id": notification.project_id,
         "recipient": notification.recipient,
         "severity": notification.severity,
         "title": notification.title,
@@ -469,9 +488,11 @@ def _create_notification(
     subject_id: Optional[str] = None,
     payload: Optional[Dict[str, Any]] = None,
     recipient: str = "workspace",
+    project_id: str = "default",
 ) -> OpsNotification:
     notification = OpsNotification(
         id=_new_id("note"),
+        project_id=project_id,
         recipient=recipient,
         severity=severity,
         title=title,
@@ -494,6 +515,8 @@ def _evaluate_alert_rules(db: Session, events: List[OpsEvent]) -> List[AlertEven
     now = _now()
     for event in events:
         for rule in rules:
+            if rule.project_id != event.project_id:
+                continue
             if not _matches_rule(event, rule):
                 continue
             existing = (
@@ -505,6 +528,7 @@ def _evaluate_alert_rules(db: Session, events: List[OpsEvent]) -> List[AlertEven
                 continue
             alert = AlertEvent(
                 id=_new_id("alert"),
+                project_id=event.project_id,
                 rule_id=rule.id,
                 event_id=event.id,
                 source=event.source,
@@ -530,6 +554,7 @@ def _evaluate_alert_rules(db: Session, events: List[OpsEvent]) -> List[AlertEven
                 subject_type="alert",
                 subject_id=alert.id,
                 payload={"event_id": event.id, "rule_id": rule.id},
+                project_id=event.project_id,
             )
             created.append(alert)
     return created
@@ -550,10 +575,14 @@ def record_ops_event(
     payload: Optional[Dict[str, Any]] = None,
     status: str = "OPEN",
     evaluate_alerts: bool = True,
+    project_id: Optional[str] = None,
 ) -> OpsEvent:
     _ensure_tables(db)
+    event_payload = payload or {}
+    effective_project_id = str(project_id or event_payload.get("project_id") or "default")
     event = OpsEvent(
         id=_new_id("ops_evt"),
+        project_id=effective_project_id,
         source=source,
         event_type=event_type,
         severity=severity.lower(),
@@ -564,7 +593,7 @@ def record_ops_event(
         subject_id=subject_id,
         object_type_id=object_type_id,
         object_id=object_id,
-        payload=payload or {},
+        payload=event_payload,
         created_at=_now(),
     )
     db.add(event)
@@ -586,11 +615,26 @@ def create_incident_inline(
     approval_ids: Optional[List[str]] = None,
     actor: str = "workspace",
     incident_id: Optional[str] = None,
+    project_id: str = "default",
 ) -> Incident:
     _ensure_tables(db)
+    for ref in linked_objects or []:
+        object_id = ref.get("object_id") or ref.get("id")
+        obj = db.get(models.ObjectInstance, object_id) if object_id else None
+        if not obj or obj.project_id != project_id:
+            raise HTTPException(status_code=422, detail=f"Linked object '{object_id}' is not in project '{project_id}'")
+    for alert_id in alert_ids or []:
+        alert = db.get(AlertEvent, alert_id)
+        if not alert or alert.project_id != project_id:
+            raise HTTPException(status_code=422, detail=f"Alert '{alert_id}' is not in project '{project_id}'")
+    for approval_id in approval_ids or []:
+        approval = db.get(models_action.ApprovalRequest, approval_id)
+        if not approval or approval.project_id != project_id:
+            raise HTTPException(status_code=422, detail=f"Approval '{approval_id}' is not in project '{project_id}'")
     now = _now()
     incident = Incident(
         id=incident_id or _new_id("incident"),
+        project_id=project_id,
         display_name=display_name,
         description=description,
         severity=severity,
@@ -616,6 +660,7 @@ def create_incident_inline(
         subject_type="incident",
         subject_id=incident.id,
         payload={"status": status, "linked_objects": linked_objects or [], "alert_ids": alert_ids or []},
+        project_id=project_id,
     )
     return incident
 
@@ -658,16 +703,20 @@ def execute_runbook_inline(
     incident_id: Optional[str] = None,
     inputs: Optional[Dict[str, Any]] = None,
     actor: str = "workspace",
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     _ensure_tables(db)
     runbook = db.get(Runbook, runbook_id)
     if not runbook:
+        raise HTTPException(status_code=404, detail=f"Runbook '{runbook_id}' not found")
+    if project_id and runbook.project_id != project_id:
         raise HTTPException(status_code=404, detail=f"Runbook '{runbook_id}' not found")
     if not runbook.enabled:
         raise HTTPException(status_code=409, detail="Runbook is disabled")
 
     execution = RunbookExecution(
         id=_new_id("runbook_exec"),
+        project_id=runbook.project_id,
         runbook_id=runbook.id,
         incident_id=incident_id,
         actor=actor,
@@ -678,6 +727,10 @@ def execute_runbook_inline(
     )
     db.add(execution)
     context: Dict[str, Any] = dict(inputs or {})
+    if incident_id and not str(incident_id).startswith("$"):
+        incident = db.get(Incident, incident_id)
+        if not incident or incident.project_id != runbook.project_id:
+            raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
     if incident_id:
         context["incident_id"] = incident_id
     results: List[Dict[str, Any]] = []
@@ -693,7 +746,10 @@ def execute_runbook_inline(
                 filters = _resolve(step.get("filters") or {}, context)
                 limit = int(step.get("limit") or 25)
                 rows = [
-                    obj for obj in db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id).all()
+                    obj for obj in db.query(models.ObjectInstance).filter(
+                        models.ObjectInstance.project_id == runbook.project_id,
+                        models.ObjectInstance.object_type_id == object_type_id,
+                    ).all()
                     if _object_matches(obj, filters)
                 ][:limit]
                 result = {
@@ -719,12 +775,12 @@ def execute_runbook_inline(
                 asset_id = _resolve(step.get("asset_id"), context) if step.get("asset_id") else None
                 result = reliability_ops.run_data_contract_inline(db, contract_id=contract_id, asset_id=asset_id)
             elif step_type == "evaluate_alert_rules":
-                result = evaluate_alert_rules_inline(db, limit=int(step.get("limit") or 500))
+                result = evaluate_alert_rules_inline(db, limit=int(step.get("limit") or 500), project_id=runbook.project_id)
             elif step_type == "propose_action":
                 action_id = _resolve(step.get("action_type_id"), context)
                 parameters = _resolve(step.get("parameters") or {}, context)
                 action = db.get(models.ActionType, action_id)
-                if not action:
+                if not action or action.project_id != runbook.project_id:
                     raise HTTPException(status_code=404, detail=f"ActionType '{action_id}' not found")
                 rules = action.rules or {}
                 requires_approval = bool(
@@ -737,7 +793,7 @@ def execute_runbook_inline(
                 action_id = _resolve(step.get("action_type_id"), context)
                 parameters = _resolve(step.get("parameters") or {}, context)
                 action = db.get(models.ActionType, action_id)
-                if not action:
+                if not action or action.project_id != runbook.project_id:
                     raise HTTPException(status_code=404, detail=f"ActionType '{action_id}' not found")
                 approval = models_action.ApprovalRequest(
                     id=str(uuid.uuid4()),
@@ -764,6 +820,7 @@ def execute_runbook_inline(
                     subject_type="runbook_execution",
                     subject_id=execution.id,
                     payload={"runbook_id": runbook.id, "incident_id": incident_id},
+                    project_id=runbook.project_id,
                 )
                 result = _notification_dict(notification)
             elif step_type == "open_incident":
@@ -774,6 +831,7 @@ def execute_runbook_inline(
                     severity=str(_resolve(step.get("severity") or "medium", context)),
                     linked_objects=_resolve(step.get("linked_objects") or [], context),
                     actor=actor,
+                    project_id=runbook.project_id,
                 )
                 incident_id = incident.id
                 execution.incident_id = incident.id
@@ -781,7 +839,7 @@ def execute_runbook_inline(
             elif step_type == "update_incident":
                 target_incident_id = _resolve(step.get("incident_id") or "$incident_id", context)
                 incident = db.get(Incident, target_incident_id)
-                if not incident:
+                if not incident or incident.project_id != runbook.project_id:
                     raise HTTPException(status_code=404, detail=f"Incident '{target_incident_id}' not found")
                 for field in ("display_name", "description", "severity", "status", "owner"):
                     if field in step:
@@ -819,14 +877,17 @@ def execute_runbook_inline(
         subject_type="runbook_execution",
         subject_id=execution.id,
         payload={"runbook_id": runbook.id, "incident_id": execution.incident_id, "status": execution.status},
+        project_id=runbook.project_id,
     )
     _audit(db, "ops.runbook.executed", "runbook_execution", execution.id, {"status": execution.status, "runbook_id": runbook.id})
     return _execution_dict(execution)
 
 
-def evaluate_alert_rules_inline(db: Session, *, limit: int = 500, source: Optional[str] = None, event_type: Optional[str] = None, status: Optional[str] = None) -> Dict[str, Any]:
+def evaluate_alert_rules_inline(db: Session, *, limit: int = 500, source: Optional[str] = None, event_type: Optional[str] = None, status: Optional[str] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
     _ensure_tables(db)
     query = db.query(OpsEvent).order_by(OpsEvent.created_at.desc())
+    if project_id:
+        query = query.filter(OpsEvent.project_id == project_id)
     if source:
         query = query.filter(OpsEvent.source == source)
     if event_type:
@@ -839,23 +900,23 @@ def evaluate_alert_rules_inline(db: Session, *, limit: int = 500, source: Option
 
 
 @router.get("/ops/summary")
-def ops_summary(db: Session = Depends(get_db)):
+def ops_summary(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    open_alerts = db.query(AlertEvent).filter(AlertEvent.status == "OPEN").all()
-    open_incidents = db.query(Incident).filter(Incident.status.in_(["OPEN", "TRIAGE", "INVESTIGATING"])).all()
-    pending_approvals = db.query(models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value).all()
-    failed_pipelines = db.query(models.PipelineRun).filter(models.PipelineRun.status == "FAILED").order_by(models.PipelineRun.created_at.desc()).limit(10).all()
-    latest_events = db.query(OpsEvent).order_by(OpsEvent.created_at.desc()).limit(10).all()
+    open_alerts = semantic_scope.accessible_query(db, principal, AlertEvent).filter(AlertEvent.status == "OPEN").all()
+    open_incidents = semantic_scope.accessible_query(db, principal, Incident).filter(Incident.status.in_(["OPEN", "TRIAGE", "INVESTIGATING"])).all()
+    pending_approvals = semantic_scope.accessible_query(db, principal, models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value).all()
+    failed_pipelines = semantic_scope.accessible_query(db, principal, models.PipelineRun).filter(models.PipelineRun.status == "FAILED").order_by(models.PipelineRun.created_at.desc()).limit(10).all()
+    latest_events = semantic_scope.accessible_query(db, principal, OpsEvent).order_by(OpsEvent.created_at.desc()).limit(10).all()
     severity_counts: Dict[str, int] = {}
     for alert in open_alerts:
         severity_counts[alert.severity] = severity_counts.get(alert.severity, 0) + 1
     return {
-        "events": db.query(OpsEvent).count(),
+        "events": semantic_scope.accessible_query(db, principal, OpsEvent).count(),
         "open_alerts": len(open_alerts),
         "open_incidents": len(open_incidents),
-        "runbooks": db.query(Runbook).count(),
+        "runbooks": semantic_scope.accessible_query(db, principal, Runbook).count(),
         "pending_approvals": len(pending_approvals),
-        "unread_notifications": db.query(OpsNotification).filter(OpsNotification.status == "UNREAD").count(),
+        "unread_notifications": semantic_scope.accessible_query(db, principal, OpsNotification).filter(OpsNotification.status == "UNREAD").count(),
         "failed_pipelines": [{"id": run.id, "pipeline_id": run.pipeline_id, "error": run.error} for run in failed_pipelines],
         "severity_counts": severity_counts,
         "latest_events": [_event_dict(event) for event in latest_events],
@@ -871,9 +932,10 @@ def list_events(
     status: Optional[str] = None,
     limit: int = Query(default=100, ge=1, le=1000),
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ):
     _ensure_tables(db)
-    query = db.query(OpsEvent)
+    query = semantic_scope.accessible_query(db, principal, OpsEvent)
     if source:
         query = query.filter(OpsEvent.source == source)
     if severity:
@@ -884,7 +946,8 @@ def list_events(
 
 
 @router.post("/ops/events/ingest")
-def ingest_event(body: OpsEventIngest, db: Session = Depends(get_db)):
+def ingest_event(body: OpsEventIngest, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    semantic_scope.assert_project(db, principal, body.project_id, "execute")
     event = record_ops_event(db, **body.model_dump())
     _audit(db, "ops.event.ingested", "ops_event", event.id, _event_dict(event))
     db.commit()
@@ -893,8 +956,9 @@ def ingest_event(body: OpsEventIngest, db: Session = Depends(get_db)):
 
 
 @router.post("/ops/alert-rules")
-def create_alert_rule(body: AlertRuleCreate, db: Session = Depends(get_db)):
+def create_alert_rule(body: AlertRuleCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
     _ensure_tables(db)
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
     rule_id = body.id or _new_id("alert_rule")
     if db.get(AlertRule, rule_id):
         raise HTTPException(status_code=400, detail="AlertRule already exists")
@@ -908,16 +972,14 @@ def create_alert_rule(body: AlertRuleCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/ops/alert-rules")
-def list_alert_rules(db: Session = Depends(get_db)):
+def list_alert_rules(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    return [_rule_dict(rule) for rule in db.query(AlertRule).order_by(AlertRule.updated_at.desc()).all()]
+    return [_rule_dict(rule) for rule in semantic_scope.accessible_query(db, principal, AlertRule).order_by(AlertRule.updated_at.desc()).all()]
 
 
 @router.patch("/ops/alert-rules/{rule_id}")
-def patch_alert_rule(rule_id: str, body: AlertRulePatch, db: Session = Depends(get_db)):
-    rule = db.get(AlertRule, rule_id)
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"AlertRule '{rule_id}' not found")
+def patch_alert_rule(rule_id: str, body: AlertRulePatch, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    rule = semantic_scope.owned_row(db, principal, AlertRule, rule_id, "edit", "AlertRule")
     patch = body.model_dump(exclude_unset=True)
     for key, value in patch.items():
         setattr(rule, key, value)
@@ -929,16 +991,23 @@ def patch_alert_rule(rule_id: str, body: AlertRulePatch, db: Session = Depends(g
 
 
 @router.post("/ops/alerts/evaluate")
-def evaluate_alerts(body: AlertEvaluateRequest = AlertEvaluateRequest(), db: Session = Depends(get_db)):
-    result = evaluate_alert_rules_inline(db, limit=body.limit, source=body.source, event_type=body.event_type, status=body.status)
+def evaluate_alerts(body: AlertEvaluateRequest = AlertEvaluateRequest(), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    projects = semantic_scope.accessible_query(db, principal, OpsEvent, "execute").with_entities(OpsEvent.project_id).distinct().all()
+    alerts: List[Dict[str, Any]] = []
+    evaluated = 0
+    for (project_id,) in projects:
+        project_result = evaluate_alert_rules_inline(db, limit=body.limit, source=body.source, event_type=body.event_type, status=body.status, project_id=project_id)
+        evaluated += project_result["evaluated_events"]
+        alerts.extend(project_result["alerts"])
+    result = {"evaluated_events": evaluated, "created_alerts": len(alerts), "alerts": alerts}
     db.commit()
     return result
 
 
 @router.get("/ops/alerts")
-def list_alerts(status: Optional[str] = None, severity: Optional[str] = None, db: Session = Depends(get_db)):
+def list_alerts(status: Optional[str] = None, severity: Optional[str] = None, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    query = db.query(AlertEvent)
+    query = semantic_scope.accessible_query(db, principal, AlertEvent)
     if status:
         query = query.filter(AlertEvent.status == status)
     if severity:
@@ -947,7 +1016,8 @@ def list_alerts(status: Optional[str] = None, severity: Optional[str] = None, db
 
 
 @router.post("/ops/incidents")
-def create_incident(body: IncidentCreate, db: Session = Depends(get_db)):
+def create_incident(body: IncidentCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
     payload = body.model_dump(exclude={"id"})
     incident = create_incident_inline(db, **payload, actor="workspace", incident_id=body.id)
     db.commit()
@@ -956,27 +1026,23 @@ def create_incident(body: IncidentCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/ops/incidents")
-def list_incidents(status: Optional[str] = None, db: Session = Depends(get_db)):
+def list_incidents(status: Optional[str] = None, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    query = db.query(Incident)
+    query = semantic_scope.accessible_query(db, principal, Incident)
     if status:
         query = query.filter(Incident.status == status)
     return [_incident_dict(incident) for incident in query.order_by(Incident.updated_at.desc()).all()]
 
 
 @router.get("/ops/incidents/{incident_id}")
-def get_incident(incident_id: str, db: Session = Depends(get_db)):
-    incident = db.get(Incident, incident_id)
-    if not incident:
-        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+def get_incident(incident_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    incident = semantic_scope.owned_row(db, principal, Incident, incident_id, "view", "Incident")
     return _incident_dict(incident)
 
 
 @router.patch("/ops/incidents/{incident_id}")
-def patch_incident(incident_id: str, body: IncidentPatch, db: Session = Depends(get_db)):
-    incident = db.get(Incident, incident_id)
-    if not incident:
-        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+def patch_incident(incident_id: str, body: IncidentPatch, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    incident = semantic_scope.owned_row(db, principal, Incident, incident_id, "edit", "Incident")
     patch = body.model_dump(exclude_unset=True)
     for key, value in patch.items():
         setattr(incident, key, value)
@@ -989,11 +1055,10 @@ def patch_incident(incident_id: str, body: IncidentPatch, db: Session = Depends(
 
 
 @router.post("/ops/incidents/{incident_id}/link-object")
-def link_incident_object(incident_id: str, body: IncidentLinkObject, db: Session = Depends(get_db)):
-    incident = db.get(Incident, incident_id)
-    if not incident:
-        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
-    if not db.get(models.ObjectInstance, body.object_id):
+def link_incident_object(incident_id: str, body: IncidentLinkObject, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    incident = semantic_scope.owned_row(db, principal, Incident, incident_id, "edit", "Incident")
+    obj = db.get(models.ObjectInstance, body.object_id)
+    if not obj or obj.project_id != incident.project_id or obj.object_type_id != body.object_type_id:
         raise HTTPException(status_code=404, detail=f"Object '{body.object_id}' not found")
     link = body.model_dump()
     links = incident.linked_objects or []
@@ -1008,8 +1073,9 @@ def link_incident_object(incident_id: str, body: IncidentLinkObject, db: Session
 
 
 @router.post("/ops/runbooks")
-def create_runbook(body: RunbookCreate, db: Session = Depends(get_db)):
+def create_runbook(body: RunbookCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
     _ensure_tables(db)
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
     runbook_id = body.id or _new_id("runbook")
     if db.get(Runbook, runbook_id):
         raise HTTPException(status_code=400, detail="Runbook already exists")
@@ -1023,32 +1089,31 @@ def create_runbook(body: RunbookCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/ops/runbooks")
-def list_runbooks(db: Session = Depends(get_db)):
+def list_runbooks(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    return [_runbook_dict(runbook) for runbook in db.query(Runbook).order_by(Runbook.updated_at.desc()).all()]
+    return [_runbook_dict(runbook) for runbook in semantic_scope.accessible_query(db, principal, Runbook).order_by(Runbook.updated_at.desc()).all()]
 
 
 @router.post("/ops/runbooks/{runbook_id}/execute")
-def execute_runbook(runbook_id: str, body: RunbookExecutionRequest = RunbookExecutionRequest(), db: Session = Depends(get_db)):
-    result = execute_runbook_inline(db, runbook_id=runbook_id, incident_id=body.incident_id, inputs=body.inputs, actor=body.actor)
+def execute_runbook(runbook_id: str, body: RunbookExecutionRequest = RunbookExecutionRequest(), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    runbook = semantic_scope.owned_row(db, principal, Runbook, runbook_id, "execute", "Runbook")
+    result = execute_runbook_inline(db, runbook_id=runbook_id, incident_id=body.incident_id, inputs=body.inputs, actor=body.actor, project_id=runbook.project_id)
     db.commit()
     return result
 
 
 @router.get("/ops/inbox")
-def inbox(status: Optional[str] = None, recipient: str = "workspace", db: Session = Depends(get_db)):
+def inbox(status: Optional[str] = None, recipient: str = "workspace", db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
-    query = db.query(OpsNotification).filter(OpsNotification.recipient == recipient)
+    query = semantic_scope.accessible_query(db, principal, OpsNotification).filter(OpsNotification.recipient == recipient)
     if status:
         query = query.filter(OpsNotification.status == status)
     return [_notification_dict(note) for note in query.order_by(OpsNotification.created_at.desc()).all()]
 
 
 @router.post("/ops/inbox/{notification_id}/ack")
-def ack_notification(notification_id: str, db: Session = Depends(get_db)):
-    note = db.get(OpsNotification, notification_id)
-    if not note:
-        raise HTTPException(status_code=404, detail=f"OpsNotification '{notification_id}' not found")
+def ack_notification(notification_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    note = semantic_scope.owned_row(db, principal, OpsNotification, notification_id, "edit", "OpsNotification")
     note.status = "ACKED"
     note.acknowledged_at = _now()
     db.commit()
