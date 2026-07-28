@@ -10,8 +10,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import threading
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -52,6 +54,9 @@ from .database import Base, get_db
 from .production_auth import Principal, current_principal, require_permission
 
 router = APIRouter(tags=["system_hardening"])
+
+_RUNTIME_SCHEMA_LOCK = threading.Lock()
+_RUNTIME_SCHEMA_READY_ENGINES: weakref.WeakSet[Any] = weakref.WeakSet()
 
 
 @router.get("/health/live", include_in_schema=False)
@@ -354,56 +359,62 @@ def _now() -> int:
 
 
 def _ensure_runtime_tables(db: Session) -> None:
-    MigrationRecord.__table__.create(bind=db.get_bind(), checkfirst=True)
-    imports_ops._ensure_tables(db)
-    platform_core._ensure_tables(db)
-    ops_control._ensure_tables(db)
-    investigations._ensure_tables(db)
-    for table in (
-        apps.WorkshopModule.__table__,
-        apps.WorkshopModuleVersion.__table__,
-        object_explorer_ops.ObjectExplorerExploration.__table__,
-        modelops.ModelMonitor.__table__,
-        modelops.ModelMonitorRun.__table__,
-        modelops.ModelPredictionLog.__table__,
-        connectivity.ConnectionSource.__table__,
-        connectivity.ConnectionSync.__table__,
-        connectivity.SyncRun.__table__,
-        connectivity.ConnectionExport.__table__,
-        connectivity.ConnectionExportCheckpoint.__table__,
-        connectivity_ops.SyncCursorState.__table__,
-        streaming.Stream.__table__,
-        streaming.StreamRecord.__table__,
-        schedules.Schedule.__table__,
-        schedules.Build.__table__,
-        webhooks_ops.WhListener.__table__,
-        webhooks_ops.WhListenerEvent.__table__,
-        tenancy.PlatformOrganization.__table__,
-        tenancy.PlatformProject.__table__,
-        tenancy.ProjectMembership.__table__,
-        ontology_packages.OntologyPackage.__table__,
-        ontology_packages.OntologyPackageVersion.__table__,
-        ontology_packages.OntologyPackageInstallation.__table__,
-        ontology_packages.OntologyPackageResource.__table__,
-        ingestion_runtime.IngestionRun.__table__,
-        ingestion_runtime.IngestionBudget.__table__,
-        ingestion_runtime.IngestionDeadLetter.__table__,
-        runtime_observability.RuntimeJobObservation.__table__,
-        runtime_observability.RuntimeBudgetPolicy.__table__,
-        runtime_observability.RuntimeSloPolicy.__table__,
-        runtime_observability.RuntimeSloEvaluation.__table__,
-        worker_control.RuntimeWorker.__table__,
-        worker_control.RuntimeQueuePolicy.__table__,
-        connector_runtime.ConnectorCredential.__table__,
-        connector_runtime.ConnectorFetchAttempt.__table__,
-    ):
-        table.create(bind=db.get_bind(), checkfirst=True)
-    _ensure_column(db, "streams", "archive_policy", "JSON")
-    _ensure_column(db, "stream_records", "archived", "BOOLEAN DEFAULT 0")
-    _ensure_column(db, "stream_records", "archived_at", "INTEGER")
-    for table_name in ("platform_jobs", "connection_sources", "connection_syncs", "connection_exports", "streams"):
-        _ensure_column(db, table_name, "project_id", "VARCHAR DEFAULT 'default' NOT NULL")
-    _ensure_migration_records(db)
+    bind = db.get_bind()
+    if bind in _RUNTIME_SCHEMA_READY_ENGINES:
+        return
+    with _RUNTIME_SCHEMA_LOCK:
+        if bind in _RUNTIME_SCHEMA_READY_ENGINES:
+            return
+        MigrationRecord.__table__.create(bind=bind, checkfirst=True)
+        imports_ops._ensure_tables(db)
+        platform_core._ensure_tables(db)
+        ops_control._ensure_tables(db)
+        investigations._ensure_tables(db)
+        for table in (
+            apps.WorkshopModule.__table__,
+            apps.WorkshopModuleVersion.__table__,
+            object_explorer_ops.ObjectExplorerExploration.__table__,
+            modelops.ModelMonitor.__table__,
+            modelops.ModelMonitorRun.__table__,
+            modelops.ModelPredictionLog.__table__,
+            connectivity.ConnectionSource.__table__,
+            connectivity.ConnectionSync.__table__,
+            connectivity.SyncRun.__table__,
+            connectivity.ConnectionExport.__table__,
+            connectivity.ConnectionExportCheckpoint.__table__,
+            connectivity_ops.SyncCursorState.__table__,
+            streaming.Stream.__table__,
+            streaming.StreamRecord.__table__,
+            schedules.Schedule.__table__,
+            schedules.Build.__table__,
+            webhooks_ops.WhListener.__table__,
+            webhooks_ops.WhListenerEvent.__table__,
+            tenancy.PlatformOrganization.__table__,
+            tenancy.PlatformProject.__table__,
+            tenancy.ProjectMembership.__table__,
+            ontology_packages.OntologyPackage.__table__,
+            ontology_packages.OntologyPackageVersion.__table__,
+            ontology_packages.OntologyPackageInstallation.__table__,
+            ontology_packages.OntologyPackageResource.__table__,
+            ingestion_runtime.IngestionRun.__table__,
+            ingestion_runtime.IngestionBudget.__table__,
+            ingestion_runtime.IngestionDeadLetter.__table__,
+            runtime_observability.RuntimeJobObservation.__table__,
+            runtime_observability.RuntimeBudgetPolicy.__table__,
+            runtime_observability.RuntimeSloPolicy.__table__,
+            runtime_observability.RuntimeSloEvaluation.__table__,
+            worker_control.RuntimeWorker.__table__,
+            worker_control.RuntimeQueuePolicy.__table__,
+            connector_runtime.ConnectorCredential.__table__,
+            connector_runtime.ConnectorFetchAttempt.__table__,
+        ):
+            table.create(bind=bind, checkfirst=True)
+        _ensure_column(db, "streams", "archive_policy", "JSON")
+        _ensure_column(db, "stream_records", "archived", "BOOLEAN DEFAULT 0")
+        _ensure_column(db, "stream_records", "archived_at", "INTEGER")
+        for table_name in ("platform_jobs", "connection_sources", "connection_syncs", "connection_exports", "streams"):
+            _ensure_column(db, table_name, "project_id", "VARCHAR DEFAULT 'default' NOT NULL")
+        _RUNTIME_SCHEMA_READY_ENGINES.add(bind)
 
 
 def _ensure_column(db: Session, table_name: str, column_name: str, column_ddl: str) -> None:
@@ -1179,6 +1190,7 @@ def schema_health(db: Session = Depends(get_db)):
 @router.get("/system/migrations")
 def migrations(db: Session = Depends(get_db)):
     health = schema_health(db)
+    _ensure_migration_records(db)
     db.commit()
     records = db.query(MigrationRecord).order_by(MigrationRecord.version.asc()).all()
     return {
