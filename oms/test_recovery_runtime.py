@@ -66,7 +66,12 @@ recovery_job = ok(client.post("/jobs", json={
 }), "create durable job idempotency receipt", 201)
 
 snapshot = ok(client.get("/project/export"), "export portable snapshot")
-assert snapshot["snapshot_version"] == 2
+assert snapshot["snapshot_version"] == 3
+assert snapshot["project_scope"] == {
+    "project_id": "default",
+    "organization_id": "local",
+    "scope_mode": "single_project",
+}
 assert snapshot["snapshot_format"] == "ontology-platform-portable"
 assert len(snapshot["integrity"]["checksum"]) == 64
 assert snapshot["integrity"]["resource_count"] == sum(snapshot["integrity"]["counts"].values())
@@ -106,16 +111,19 @@ with SessionLocal() as db:
     assert db.get(models.ObjectType, "recovery_asset").display_name == "Recovery Asset"
     passed += 1
 
-# A valid manifest can still contain a relational constraint error; all prior rows must roll back.
+# A valid manifest with a relational error is rejected before any rows are applied.
 relationally_broken = system_hardening._finalize_snapshot({
-    "object_types": [{"id": "rollback_asset", "display_name": "Must Roll Back", "properties": {}}],
+    "project_scope": {"project_id": "default", "organization_id": "local", "scope_mode": "single_project"},
+    "organizations": [{"id": "local"}],
+    "projects": [{"id": "default", "organization_id": "local"}],
+    "object_types": [{"id": "rollback_asset", "project_id": "default", "display_name": "Must Roll Back", "properties": {}}],
     "link_types": [{
-        "id": "broken_link", "display_name": "Broken", "source_object_type_id": "rollback_asset",
+        "id": "broken_link", "project_id": "default", "display_name": "Broken", "source_object_type_id": "rollback_asset",
         "target_object_type_id": "missing_target", "cardinality": "ONE_TO_MANY",
     }],
 })
 failed_restore = client.post("/project/import", json={"snapshot": relationally_broken, "mode": "merge"})
-assert failed_restore.status_code == 409, failed_restore.text
+assert failed_restore.status_code == 400, failed_restore.text
 passed += 1
 with SessionLocal() as db:
     assert db.get(models.ObjectType, "rollback_asset") is None

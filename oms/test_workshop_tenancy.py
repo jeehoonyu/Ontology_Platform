@@ -57,7 +57,7 @@ with SessionLocal() as db:
     ])
     db.commit()
 
-permissions = ["view", "edit", "execute", "publish", "restore", "administer"]
+permissions = ["view", "edit", "execute", "publish", "export", "restore", "administer"]
 alpha = production_auth.Principal("alpha-workshop-user", "Alpha", None, ["administrator"], permissions, organization_id="workshop-org", project_ids=["alpha-workshop"])
 beta = production_auth.Principal("beta-workshop-user", "Beta", None, ["administrator"], permissions, organization_id="workshop-org", project_ids=["beta-workshop"])
 viewer = production_auth.Principal("alpha-workshop-viewer", "Viewer", None, ["viewer"], ["view"], organization_id="workshop-org", project_ids=["alpha-workshop"])
