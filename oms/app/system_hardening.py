@@ -102,6 +102,12 @@ CORE_TABLES = [
     "approval_requests",
     "audit_logs",
     "ops_events",
+    "ops_alert_rules",
+    "ops_alert_events",
+    "ops_runbooks",
+    "ops_runbook_executions",
+    "ops_notifications",
+    "ops_sla_policies",
     "import_jobs",
     "system_migration_records",
     "platform_artifacts",
@@ -144,6 +150,10 @@ CORE_TABLES = [
     "builds",
     "wh_listeners",
     "wh_listener_events",
+    "wh_webhooks",
+    "wh_executions",
+    "wh_credentials",
+    "wh_outbound_apps",
     "platform_policy_rules",
     "platform_policy_decisions",
     "workshop_modules",
@@ -164,10 +174,13 @@ CORE_TABLES = [
     "mev_deployment_configs",
     "ops_incidents",
     "investigation_workspaces",
+    "investigation_evidence",
+    "investigation_hypotheses",
+    "investigation_findings",
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -192,6 +205,7 @@ MIGRATIONS = [
     {"version": 21, "name": "project_scoped_ai_evaluations", "status": "applied"},
     {"version": 22, "name": "project_scoped_modelops_lifecycle", "status": "applied"},
     {"version": 23, "name": "project_scoped_semantic_data_plane", "status": "applied"},
+    {"version": 24, "name": "project_scoped_operational_control_plane", "status": "applied"},
 ]
 
 
@@ -267,6 +281,10 @@ def _finalize_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         attempt["metadata_"] = _redact_config(attempt.get("metadata_") or {})
     for event in safe.get("webhook_listener_events") or []:
         event["raw_payload"] = _redact_config(event.get("raw_payload") or {})
+    for credential in safe.get("webhook_credentials") or []:
+        rebind.append({"resource_type": "webhook_credential", "resource_id": str(credential.get("id", "")), "field": "token"})
+    for app in safe.get("webhook_outbound_apps") or []:
+        rebind.append({"resource_type": "webhook_outbound_app", "resource_id": str(app.get("id", "")), "field": "client_secret"})
     safe["snapshot_format"] = PORTABLE_SNAPSHOT_FORMAT
     safe["snapshot_version"] = PORTABLE_SNAPSHOT_VERSION
     safe["rebind_required"] = rebind
@@ -614,20 +632,36 @@ def _snapshot(db: Session) -> Dict[str, Any]:
             for row in db.query(streaming.StreamRecord).all()
         ],
         "schedules": [
-            _row_dict(row, ["id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
             for row in db.query(schedules.Schedule).all()
         ],
         "builds": [
-            _row_dict(row, ["id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"])
+            _row_dict(row, ["id", "project_id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"])
             for row in db.query(schedules.Build).all()
         ],
         "webhook_listeners": [
-            _row_dict(row, ["id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"])
             for row in db.query(webhooks_ops.WhListener).all()
         ],
         "webhook_listener_events": [
-            _row_dict(row, ["id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"])
+            _row_dict(row, ["id", "project_id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"])
             for row in db.query(webhooks_ops.WhListenerEvent).all()
+        ],
+        "webhooks": [
+            _row_dict(row, ["id", "project_id", "source_id", "display_name", "mode", "request_config", "input_parameters", "output_parameters", "mock_response", "created_at", "updated_at"])
+            for row in db.query(webhooks_ops.WhWebhook).all()
+        ],
+        "webhook_executions": [
+            _row_dict(row, ["id", "project_id", "webhook_id", "request_payload", "response_payload", "response_status", "status", "extracted_outputs", "idempotency_key", "actor", "created_at"])
+            for row in db.query(webhooks_ops.WhExecution).all()
+        ],
+        "webhook_credentials": [
+            _row_dict(row, ["id", "project_id", "source_id", "credential_type", "expires_at", "created_at"])
+            for row in db.query(webhooks_ops.WhCredential).all()
+        ],
+        "webhook_outbound_apps": [
+            _row_dict(row, ["id", "project_id", "display_name", "client_id", "token_endpoint", "scopes", "created_at"])
+            for row in db.query(webhooks_ops.WhOutboundApp).all()
         ],
         "incidents": [
             ops_control._incident_dict(row)
@@ -940,6 +974,10 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "builds",
         "webhook_listeners",
         "webhook_listener_events",
+        "webhooks",
+        "webhook_executions",
+        "webhook_credentials",
+        "webhook_outbound_apps",
         "incidents",
         "investigations",
         "investigation_evidence",
@@ -1535,19 +1573,41 @@ def import_project(
     for row in snapshot.get("schedules") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, schedules.Schedule, row, ["id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, schedules.Schedule, row, ["id", "project_id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"]))
     for row in snapshot.get("builds") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, schedules.Build, row, ["id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, schedules.Build, row, ["id", "project_id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"]))
     for row in snapshot.get("webhook_listeners") or []:
         row.setdefault("created_at", now)
-        listener_fields = ["id", "display_name", "auth_type", "target_asset_id", "event_schema", "created_at"]
+        row.setdefault("project_id", "default")
+        listener_fields = ["id", "project_id", "display_name", "auth_type", "target_asset_id", "event_schema", "created_at"]
         if row.get("auth_secret"):
             listener_fields.append("auth_secret")
         track(_upsert_model(db, webhooks_ops.WhListener, row, listener_fields))
     for row in snapshot.get("webhook_listener_events") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, webhooks_ops.WhListenerEvent, row, ["id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, webhooks_ops.WhListenerEvent, row, ["id", "project_id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"]))
+    for row in snapshot.get("webhooks") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, webhooks_ops.WhWebhook, row, ["id", "project_id", "source_id", "display_name", "mode", "request_config", "input_parameters", "output_parameters", "mock_response", "created_at", "updated_at"]))
+    for row in snapshot.get("webhook_executions") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, webhooks_ops.WhExecution, row, ["id", "project_id", "webhook_id", "request_payload", "response_payload", "response_status", "status", "extracted_outputs", "idempotency_key", "actor", "created_at"]))
+    for row in snapshot.get("webhook_credentials") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, webhooks_ops.WhCredential, row, ["id", "project_id", "source_id", "credential_type", "expires_at", "created_at"]))
+    for row in snapshot.get("webhook_outbound_apps") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("project_id", "default")
+        row.setdefault("client_secret", "")
+        track(_upsert_model(db, webhooks_ops.WhOutboundApp, row, ["id", "project_id", "display_name", "client_id", "client_secret", "token_endpoint", "scopes", "created_at"]))
     for row in snapshot.get("organizations") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
@@ -1615,24 +1675,30 @@ def import_project(
     for row in snapshot.get("incidents") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, ops_control.Incident, row, ["id", "display_name", "description", "severity", "status", "owner", "linked_objects", "alert_ids", "approval_ids", "runbook_execution_ids", "timeline", "created_at", "updated_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, ops_control.Incident, row, ["id", "project_id", "display_name", "description", "severity", "status", "owner", "linked_objects", "alert_ids", "approval_ids", "runbook_execution_ids", "timeline", "created_at", "updated_at"]))
     for row in snapshot.get("investigations") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, investigations.InvestigationWorkspace, row, ["id", "display_name", "description", "owner", "status", "object_refs", "incident_ids", "alert_ids", "created_at", "updated_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, investigations.InvestigationWorkspace, row, ["id", "project_id", "display_name", "description", "owner", "status", "object_refs", "incident_ids", "alert_ids", "created_at", "updated_at"]))
     for row in snapshot.get("investigation_evidence") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, investigations.EvidenceItem, row, ["id", "investigation_id", "title", "source", "object_refs", "payload", "tags", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, investigations.EvidenceItem, row, ["id", "project_id", "investigation_id", "title", "source", "object_refs", "payload", "tags", "created_at"]))
     for row in snapshot.get("investigation_hypotheses") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
-        track(_upsert_model(db, investigations.InvestigationHypothesis, row, ["id", "investigation_id", "statement", "status", "confidence", "linked_evidence_ids", "created_at", "updated_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, investigations.InvestigationHypothesis, row, ["id", "project_id", "investigation_id", "statement", "status", "confidence", "linked_evidence_ids", "created_at", "updated_at"]))
     for row in snapshot.get("investigation_findings") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, investigations.InvestigationFinding, row, ["id", "investigation_id", "title", "severity", "summary", "object_refs", "evidence_ids", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, investigations.InvestigationFinding, row, ["id", "project_id", "investigation_id", "title", "severity", "summary", "object_refs", "evidence_ids", "created_at"]))
     for row in snapshot.get("investigation_reports") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, investigations.InvestigationReport, row, ["id", "investigation_id", "title", "body", "sections", "created_at"]))
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, investigations.InvestigationReport, row, ["id", "project_id", "investigation_id", "title", "body", "sections", "created_at"]))
     for row in snapshot.get("platform_artifacts") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)

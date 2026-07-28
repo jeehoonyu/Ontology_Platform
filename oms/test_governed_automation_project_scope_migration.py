@@ -61,6 +61,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             assert project_id == "default", (table_name, project_id)
             assert f"ix_{table_name}_project_id" in indexes, (table_name, indexes)
 
-    assert version == "0020_project_semantic_plane", version
+    assert version == "0021_project_operational_plane", version
 
 print("\nGoverned automation project-scope migration verified for six legacy tables.")
