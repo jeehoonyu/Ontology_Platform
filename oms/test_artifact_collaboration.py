@@ -1,6 +1,7 @@
 """Real-time artifact presence, optimistic rebasing, and conflict evidence."""
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'artifact_collaboration.db')}"
@@ -157,6 +158,30 @@ assert "node:node-a" in conflict_detail["incoming_targets"], conflict_detail
 assert "node:node-a" in conflict_detail["concurrent_targets"], conflict_detail
 passed += 1
 
+# SQLite must serialize simultaneous revision allocation just as Postgres does
+# with SELECT FOR UPDATE. Non-overlapping edits may rebase, but revision IDs
+# must remain unique.
+def concurrent_move(index):
+    node_id = "node-a" if index == 0 else "node-b"
+    return client.post("/artifacts/collaborative_pipeline/collaboration/commands", json={
+        "participant_token": token_a if index == 0 else token_b,
+        "expected_lock_version": current_lock_version,
+        "idempotency_key": f"concurrent-edit-{index}",
+        "commands": [{
+            "command_id": f"concurrent-command-{index}",
+            "command": "move_nodes",
+            "payload": {"positions": {node_id: {"x": 500 + index * 100, "y": 300}}},
+        }],
+    })
+
+
+with ThreadPoolExecutor(max_workers=2) as pool:
+    concurrent_results = list(pool.map(concurrent_move, range(2)))
+assert all(response.status_code == 200 for response in concurrent_results), [response.text for response in concurrent_results]
+concurrent_payloads = [response.json() for response in concurrent_results]
+assert sorted(item["current_revision"] for item in concurrent_payloads) == [current_lock_version + 1, current_lock_version + 2]
+passed += 1
+
 heartbeat = ok(client.post("/artifacts/collaborative_pipeline/collaboration/heartbeat", json={
     "participant_token": token_b,
     "cursor": {"x": 320, "y": 180},
@@ -200,7 +225,7 @@ assert expired_room["participants"] == [], expired_room
 
 with SessionLocal() as db:
     audits = db.query(AuditLog).filter(AuditLog.event_type == "artifact.collaboration.commands_applied").all()
-    assert len(audits) == 107 and all((audit.payload or {}).get("participant_id") for audit in audits), len(audits)
+    assert len(audits) == 109 and all((audit.payload or {}).get("participant_id") for audit in audits), len(audits)
 passed += 1
 
 print(f"\nArtifact collaboration verified: {passed} assertions passed.")

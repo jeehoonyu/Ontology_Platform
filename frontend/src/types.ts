@@ -382,6 +382,69 @@ export interface PipelineOutputsState {
   summary: StatusSummary;
 }
 
+export interface OntologyContractError {
+  code: string;
+  field: string;
+  message: string;
+}
+
+export interface OntologyContractViolation {
+  row_index: number;
+  object_id?: string | null;
+  errors: OntologyContractError[];
+}
+
+export interface OntologyFieldLineage {
+  source_field: string;
+  target_property: string;
+  origins: Array<{
+    node_id?: string;
+    operation?: string;
+    asset_id?: string;
+    field?: string;
+  }>;
+}
+
+export interface PipelineOntologyContract {
+  id?: string;
+  project_id?: string;
+  graph_id?: string;
+  build_id?: string;
+  node_id: string;
+  object_type_id: string;
+  status: string;
+  input_rows: number;
+  accepted_rows: number;
+  rejected_rows: number;
+  created_objects: number;
+  updated_objects: number;
+  unchanged_objects: number;
+  quarantine_asset_id?: string | null;
+  on_error?: string;
+  write_mode?: string;
+  field_lineage: OntologyFieldLineage[];
+  violations: OntologyContractViolation[];
+  created_at?: number;
+}
+
+export interface PipelineOntologyContractState {
+  summary: {
+    status: string;
+    outputs: number;
+    accepted_rows: number;
+    rejected_rows: number;
+  };
+  primary_actions: ActionLink[];
+  sections: {
+    latest: PipelineOntologyContract[];
+    history: PipelineOntologyContract[];
+  };
+  evidence_links: EvidenceLink[];
+  warnings: Array<{ code: string; message: string }>;
+  permissions: string[];
+  last_updated: number;
+}
+
 export interface OntologyObjectSummary {
   id: string;
   display_name: string;

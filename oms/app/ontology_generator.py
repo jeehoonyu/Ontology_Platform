@@ -268,6 +268,8 @@ def _pipeline_graph_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
         for prop in _included_properties(draft)
         if prop.get("source_field")
     }
+    if draft.get("requires_unique_id_node"):
+        mapping[draft["primary_key"]] = draft["primary_key"]
     ontology_x = 640 if draft.get("requires_unique_id_node") else 360
     nodes.append({
         "id": "ontology_output",
@@ -276,8 +278,11 @@ def _pipeline_graph_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
         "position": {"x": ontology_x, "y": 150},
         "config": {
             "object_type_id": draft["object_type_id"],
-            "id_field": draft["primary_key"] if draft.get("requires_unique_id_node") else (draft.get("source_primary_key") or draft["primary_key"]),
-            "mapping": mapping,
+            "primary_key": draft["primary_key"] if draft.get("requires_unique_id_node") else (draft.get("source_primary_key") or draft["primary_key"]),
+            "property_mapping": mapping,
+            "write_mode": "upsert",
+            "on_error": "quarantine",
+            "quarantine_asset_id": f"{draft['asset_id']}_{draft['object_type_id']}_quarantine",
             "source_asset_id": draft["asset_id"],
         },
     })

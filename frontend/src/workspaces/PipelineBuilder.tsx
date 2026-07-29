@@ -1,6 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { postJson } from "../api";
 import { cancelJob, enqueuePipelineJob, getJob, retryJob, runPipelineJob } from "../api/jobApi";
+import { getPipelineOntologyContracts } from "../api/pipelineOntologyApi";
 import {
   createPipelineNode,
   deletePipelineNode,
@@ -25,6 +26,8 @@ import type {
   JsonObject,
   PipelineCanvasState,
   PipelineNodeDetails,
+  PipelineOntologyContract,
+  PipelineOntologyContractState,
   PipelineOutputsState,
   PipelineUiState,
   PlatformJob
@@ -39,6 +42,7 @@ export function PipelineBuilder() {
   const [suggestions, setSuggestions] = useState<NodeSuggestions | null>(null);
   const [details, setDetails] = useState<PipelineNodeDetails | null>(null);
   const [outputs, setOutputs] = useState<PipelineOutputsState | null>(null);
+  const [contracts, setContracts] = useState<PipelineOntologyContractState | null>(null);
   const [zoom, setZoom] = useState(0.86);
   const [quickAddType, setQuickAddType] = useState("filter");
   const [executionJob, setExecutionJob] = useState<PlatformJob | null>(null);
@@ -82,6 +86,17 @@ export function PipelineBuilder() {
     getPipelineOutputs(selectedGraphId)
       .then((nextOutputs) => !cancelled && setOutputs(nextOutputs))
       .catch(() => !cancelled && setOutputs(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedGraphId, refreshKey]);
+
+  useEffect(() => {
+    if (!selectedGraphId) return;
+    let cancelled = false;
+    getPipelineOntologyContracts(selectedGraphId)
+      .then((nextContracts) => !cancelled && setContracts(nextContracts))
+      .catch(() => !cancelled && setContracts(null));
     return () => {
       cancelled = true;
     };
@@ -227,6 +242,8 @@ export function PipelineBuilder() {
 
   const outputRows = asRows((outputs?.outputs || canvas?.outputs)?.nodes);
   const buildRows = asRows((outputs?.outputs || canvas?.outputs)?.builds);
+  const prospectiveContract = details?.metadata.ontology_contract as PipelineOntologyContract | null | undefined;
+  const latestContract = contracts?.sections.latest.find((contract) => contract.node_id === selectedNodeId);
 
   async function createGraph() {
     setActionStatus("Creating pipeline draft...");
@@ -353,7 +370,22 @@ export function PipelineBuilder() {
                 <summary>Field lineage</summary>
                 <DataTable rows={asRows(details.metadata.field_lineage)} empty="No propagated fields are available yet." />
               </details>
+              {details.node.type === "ontology_output" ? (
+                <OntologyContractPanel contract={prospectiveContract || latestContract || null} mode={prospectiveContract ? "preview" : "latest run"} />
+              ) : null}
             </> : <div className="empty">Select a node to inspect lineage, config, and preview details.</div>}
+          </Panel>
+          <Panel title="Ontology Contracts" action={<StatusBadge value={contracts?.summary.status || "NOT_RUN"} />}>
+            {contracts?.sections.latest.length ? (
+              <div className="ontology-contract-list">
+                {contracts.sections.latest.map((contract) => (
+                  <button key={contract.id || contract.node_id} className="ontology-contract-row" onClick={() => setSelectedNodeId(contract.node_id)}>
+                    <span><strong>{contract.object_type_id}</strong><small>{contract.node_id}</small></span>
+                    <span><StatusBadge value={contract.status} /><small>{contract.accepted_rows} accepted / {contract.rejected_rows} rejected</small></span>
+                  </button>
+                ))}
+              </div>
+            ) : <div className="empty">Deploy an ontology output to record reconciliation and quarantine evidence.</div>}
           </Panel>
           <Panel title="Pipeline Outputs" action={<button onClick={() => insertAfter("dataset_output")}>Add</button>}>
             <input className="compact-input" placeholder="Search outputs..." />
@@ -390,6 +422,41 @@ export function PipelineBuilder() {
           </Panel>
         </aside>
       </div>
+    </section>
+  );
+}
+
+function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyContract | null; mode: string }) {
+  if (!contract) return <div className="empty">Configure the ontology output to preview its data contract.</div>;
+  const issues = contract.violations.flatMap((violation) => violation.errors.map((error) => ({
+    row: violation.row_index + 1,
+    object: violation.object_id || "Not resolved",
+    field: error.field,
+    issue: error.message
+  })));
+  const lineage = contract.field_lineage.map((field) => ({
+    source: field.source_field,
+    ontology_property: field.target_property,
+    origin: field.origins.map((origin) => [origin.asset_id, origin.field].filter(Boolean).join(".") || origin.operation || origin.node_id).filter(Boolean).join(" -> ")
+  }));
+  return (
+    <section className="ontology-contract-panel" aria-label="Ontology output contract">
+      <div className="pipeline-config-heading">
+        <strong>Ontology contract</strong>
+        <span className="contract-mode">{mode}</span>
+        <StatusBadge value={contract.status} />
+      </div>
+      <KeyValueGrid data={{
+        object_type: contract.object_type_id,
+        accepted: contract.accepted_rows,
+        rejected: contract.rejected_rows,
+        created: contract.created_objects,
+        updated: contract.updated_objects,
+        unchanged: contract.unchanged_objects
+      }} />
+      {issues.length ? <details open><summary>{issues.length} contract issue{issues.length === 1 ? "" : "s"}</summary><DataTable rows={issues.slice(0, 25)} /></details> : <p className="contract-success">All preview rows satisfy the ontology contract.</p>}
+      {lineage.length ? <details><summary>Mapped field lineage ({lineage.length})</summary><DataTable rows={lineage} /></details> : null}
+      {contract.quarantine_asset_id ? <a className="evidence-link" href={`/workspace/imports?asset=${encodeURIComponent(contract.quarantine_asset_id)}`}>Open quarantine dataset</a> : null}
     </section>
   );
 }

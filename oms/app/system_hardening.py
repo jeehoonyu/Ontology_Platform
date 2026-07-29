@@ -38,7 +38,10 @@ from . import (
     models,
     models_action,
     object_explorer_ops,
+    ontology_health,
     ontology_packages,
+    ontology_registry,
+    ontology_versioning,
     ops_control,
     platform_core,
     pipeline_builder_ops,
@@ -104,6 +107,12 @@ CORE_TABLES = [
     "act_action_log",
     "pipeline_builder_graphs",
     "pipeline_builder_builds",
+    "pipeline_ontology_contract_runs",
+    "ontology_revisions",
+    "ontology_change_sets",
+    "ontology_environments",
+    "ontology_health_runs",
+    "ontology_registry_entries",
     "approval_requests",
     "audit_logs",
     "ops_events",
@@ -566,6 +575,30 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         "pipeline_builder_builds": [
             _row_dict(row, ["id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at"])
             for row in db.query(pipeline_builder_ops.PipelineBuilderBuild).all()
+        ],
+        "pipeline_ontology_contract_runs": [
+            _row_dict(row, ["id", "project_id", "graph_id", "build_id", "node_id", "object_type_id", "status", "input_rows", "accepted_rows", "rejected_rows", "created_objects", "updated_objects", "unchanged_objects", "quarantine_asset_id", "field_lineage", "violations", "created_at"])
+            for row in db.query(pipeline_builder_ops.PipelineOntologyContractRun).all()
+        ],
+        "ontology_revisions": [
+            _row_dict(row, ["id", "project_id", "revision", "status", "parent_revision_id", "branch_id", "manifest", "checksum", "validation", "created_by", "created_at", "published_at"])
+            for row in db.query(ontology_versioning.OntologyRevision).all()
+        ],
+        "ontology_change_sets": [
+            _row_dict(row, ["id", "project_id", "title", "description", "base_revision_id", "draft_revision_id", "proposal_id", "status", "changes", "diff", "impact", "validation", "migration_plan", "created_by", "reviewer", "created_at", "updated_at"])
+            for row in db.query(ontology_versioning.OntologyChangeSet).all()
+        ],
+        "ontology_environments": [
+            _row_dict(row, ["id", "project_id", "name", "current_revision_id", "previous_revision_id", "updated_by", "updated_at"])
+            for row in db.query(ontology_versioning.OntologyEnvironment).all()
+        ],
+        "ontology_health_runs": [
+            _row_dict(row, ["id", "project_id", "object_type_id", "status", "score", "summary", "metrics", "findings", "created_by", "created_at"])
+            for row in db.query(ontology_health.OntologyHealthRun).all()
+        ],
+        "ontology_registry_entries": [
+            _row_dict(row, ["id", "project_id", "channel", "version", "revision_id", "revision_number", "status", "manifest", "contract_schema", "compatibility", "checksum", "published_by", "created_at"])
+            for row in db.query(ontology_registry.OntologyRegistryEntry).all()
         ],
         "import_jobs": [
             imports_ops._job_dict(row, include_records=True)
@@ -1083,6 +1116,12 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "pipeline_definitions",
         "pipeline_builder_graphs",
         "pipeline_builder_builds",
+        "pipeline_ontology_contract_runs",
+        "ontology_revisions",
+        "ontology_change_sets",
+        "ontology_environments",
+        "ontology_health_runs",
+        "ontology_registry_entries",
         "import_jobs",
         "modeling_objectives",
         "model_submissions",
@@ -1775,6 +1814,49 @@ def import_project(
         row.setdefault("created_at", now)
         track(_upsert_model(db, pipeline_builder_ops.PipelineBuilderBuild, row, [
             "id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at",
+        ]))
+    for row in snapshot.get("pipeline_ontology_contract_runs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, pipeline_builder_ops.PipelineOntologyContractRun, row, [
+            "id", "project_id", "graph_id", "build_id", "node_id", "object_type_id", "status",
+            "input_rows", "accepted_rows", "rejected_rows", "created_objects", "updated_objects",
+            "unchanged_objects", "quarantine_asset_id", "field_lineage", "violations", "created_at",
+        ]))
+    for row in snapshot.get("ontology_revisions") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, ontology_versioning.OntologyRevision, row, [
+            "id", "project_id", "revision", "status", "parent_revision_id", "branch_id", "manifest",
+            "checksum", "validation", "created_by", "created_at", "published_at",
+        ]))
+    for row in snapshot.get("ontology_change_sets") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, ontology_versioning.OntologyChangeSet, row, [
+            "id", "project_id", "title", "description", "base_revision_id", "draft_revision_id",
+            "proposal_id", "status", "changes", "diff", "impact", "validation", "migration_plan",
+            "created_by", "reviewer", "created_at", "updated_at",
+        ]))
+    for row in snapshot.get("ontology_environments") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, ontology_versioning.OntologyEnvironment, row, [
+            "id", "project_id", "name", "current_revision_id", "previous_revision_id", "updated_by", "updated_at",
+        ]))
+    for row in snapshot.get("ontology_health_runs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, ontology_health.OntologyHealthRun, row, [
+            "id", "project_id", "object_type_id", "status", "score", "summary", "metrics", "findings", "created_by", "created_at",
+        ]))
+    for row in snapshot.get("ontology_registry_entries") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, ontology_registry.OntologyRegistryEntry, row, [
+            "id", "project_id", "channel", "version", "revision_id", "revision_number", "status",
+            "manifest", "contract_schema", "compatibility", "checksum", "published_by", "created_at",
         ]))
     for row in snapshot.get("import_jobs") or []:
         row.setdefault("project_id", "default")
