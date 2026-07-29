@@ -35,7 +35,13 @@ export function PipelineCanvas({
   onMoveNode: (nodeId: string, position: { x: number; y: number }, commit: boolean) => void;
   onDeleteNode: (nodeId: string) => void;
 }) {
-  const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
+  const [dragging, setDragging] = useState<{
+    nodeId: string;
+    offsetX: number;
+    offsetY: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const nodes = canvas?.nodes || [];
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -53,13 +59,20 @@ export function PipelineCanvas({
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = toCanvasPoint(event);
-    setDragging({ nodeId: node.id, offsetX: point.x - node.position.x, offsetY: point.y - node.position.y });
+    setDragging({
+      nodeId: node.id,
+      offsetX: point.x - node.position.x,
+      offsetY: point.y - node.position.y,
+      startX: point.x,
+      startY: point.y
+    });
     onSelect(node.id);
   }
 
   function moveNode(event: ReactPointerEvent<HTMLButtonElement>) {
     if (!dragging) return;
     const point = toCanvasPoint(event);
+    if (Math.hypot(point.x - dragging.startX, point.y - dragging.startY) < 3) return;
     onMoveNode(dragging.nodeId, {
       x: Math.max(0, point.x - dragging.offsetX),
       y: Math.max(0, point.y - dragging.offsetY)
@@ -69,10 +82,12 @@ export function PipelineCanvas({
   function endNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     if (!dragging) return;
     const point = toCanvasPoint(event);
-    onMoveNode(dragging.nodeId, {
-      x: Math.max(0, point.x - dragging.offsetX),
-      y: Math.max(0, point.y - dragging.offsetY)
-    }, true);
+    if (Math.hypot(point.x - dragging.startX, point.y - dragging.startY) >= 3) {
+      onMoveNode(dragging.nodeId, {
+        x: Math.max(0, point.x - dragging.offsetX),
+        y: Math.max(0, point.y - dragging.offsetY)
+      }, true);
+    }
     setDragging(null);
   }
 

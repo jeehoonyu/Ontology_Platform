@@ -22,7 +22,7 @@ export default defineConfig({
     { name: "wide-1600", use: { viewport: { width: 1600, height: 1000 } } }
   ],
   webServer: {
-    command: `${python} -m alembic -c ../oms/alembic.ini upgrade head && ${python} -m uvicorn app.main:app --app-dir ../oms --host 127.0.0.1 --port 8010`,
+    command: `${python} -c "from pathlib import Path; Path('playwright.db').unlink(missing_ok=True)" && ${python} -m alembic -c ../oms/alembic.ini upgrade head && ${python} -m uvicorn app.main:app --app-dir ../oms --host 127.0.0.1 --port 8010`,
     url: "http://127.0.0.1:8010/health/live",
     env: {
       DATABASE_URL: process.env.PLAYWRIGHT_DATABASE_URL || "sqlite:///playwright.db",

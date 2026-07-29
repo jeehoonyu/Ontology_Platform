@@ -1,6 +1,6 @@
 # Collaborative Operational Intelligence Runtime Acceptance
 
-Validated on 2026-07-28 from `codex/builder-ux-production` at runtime commit `0d3aece`.
+Validated on 2026-07-28 from `codex/builder-ux-production` in pull request 4.
 This record maps the production-runtime goal to executable evidence. It does not claim
 Palantir source or infrastructure compatibility.
 
@@ -18,19 +18,19 @@ Palantir source or infrastructure compatibility.
 | Explainable governed automation | Decision, AIP agent, policy, approval, action, audit, and operational-event tests; production workflow reaches `APPROVAL_REQUIRED`, approval, action success, and report | PASS |
 | Connectors and streaming ingestion | REST/PostgreSQL/S3/SFTP/Kafka adapter tests, durable cursors, credential protections, budgets, dead letters, retries, and stream replay tests | PASS |
 | Observability and cost/performance controls | Runtime observations, budgets, SLOs, fair queues, worker fleet controls, and Control Panel browser acceptance | PASS |
-| Human-usable responsive experience | 116 Playwright cases across 375, 768, 1280, and 1600 pixel profiles, including WCAG serious/critical checks and stateful builder workflows | PASS |
+| Human-usable responsive experience | 140 Playwright cases across 375, 768, 1280, and 1600 pixel profiles; 70 applicable cases passed and 70 profile-specific cases were intentionally skipped, including WCAG serious/critical checks and stateful builder workflows | PASS |
 | Failure and version recovery | Artifact compare/restore tests, version 3 project snapshots, 48-request readiness concurrency test, API restart recovery, and fresh-volume PostgreSQL staged backup/restore | PASS |
 | Security boundaries | Zero production npm audit vulnerabilities; viewer mutation/execution denial, cross-project denial, cross-organization denial, hashed worker tokens, and encrypted connector credentials | PASS |
-| Migration safety | Idempotent SQLite migration chain, PostgreSQL migration head `0021_project_operational_plane`, serialized replica startup, and restored-head verification | PASS |
+| Migration safety | Idempotent SQLite migration chain, PostgreSQL migration head `0025_ontology_schema_registry`, serialized replica startup, and restored-head verification | PASS |
 
 ## Executed Release Gates
 
-- `114` backend test scripts: PASS in one sequential run.
-- `python oms/validate_docs_conformance.py`: PASS, 56 rows and no required P0 gap.
+- `123` backend test scripts: PASS in one sequential run (322 seconds).
+- `python oms/validate_docs_conformance.py`: PASS, 60 rows and no required P0 gap.
 - P0/P1 matrix audit: `0` `PARTIAL` or `MISSING` rows.
 - `npm audit --omit=dev --audit-level=high`: PASS, zero vulnerabilities.
 - `npm run build`: PASS.
-- `npm run test:e2e`: PASS, 116 cases in 77 seconds.
+- `npm run test:e2e`: PASS, 70 applicable cases and 70 intentional profile skips across 140 cases in 67 seconds.
 - Production Compose validation and multi-stage Docker image build: PASS.
 - `scripts/rehearse-production-acceptance.ps1`: PASS in 121 seconds.
 - Integrated fresh-volume backup/restore: `RECOVERY_REHEARSAL_PASSED`.
@@ -48,7 +48,7 @@ Two non-blocking conditions remain:
    triggers correctly, but jobs terminate before checkout with zero steps. The exact
    local equivalents above pass. Owner: repository administrator; resolution is an
    account billing/spending-limit change, not a product patch.
-2. Vite reports a 609.7 KB main chunk. Route-level code splitting is a P2 performance
+2. Vite reports a 635.4 KB main chunk. Route-level code splitting is a P2 performance
    follow-up; the responsive, load, accessibility, and production acceptance gates pass.
    Owner: frontend platform.
 

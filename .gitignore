@@ -49,6 +49,9 @@ frontend/playwright-report/
 frontend/playwright-production-report/
 frontend/playwright.db
 frontend/test-results/
+.ontology-studio-server.err
+.ontology-studio-server.log
+ontology-studio-dev.*.bak
 
 # OS generated files
 .DS_Store
