@@ -10,6 +10,7 @@ import hashlib
 import math
 import time
 import uuid
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -195,8 +196,12 @@ NODE_CONFIGURATION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "dataset_output": {"fields": [{"name": "asset_id", "label": "Output dataset", "type": "string", "required": True}]},
     "ontology_output": {"fields": [
         {"name": "object_type_id", "label": "Object type", "type": "resource", "resource_type": "object_type", "required": True},
-        {"name": "primary_key", "label": "Primary key field", "type": "field", "required": True},
+        {"name": "primary_key", "label": "Source primary key field", "type": "field", "required": True},
         {"name": "property_mapping", "label": "Property mapping", "type": "key_value", "required": True},
+        {"name": "write_mode", "label": "Write mode", "type": "select", "options": ["upsert", "insert_only", "update_only"]},
+        {"name": "on_error", "label": "Invalid row handling", "type": "select", "options": ["quarantine", "skip", "fail"]},
+        {"name": "quarantine_asset_id", "label": "Quarantine dataset", "type": "string"},
+        {"name": "source_asset_id", "label": "Source lineage dataset", "type": "resource", "resource_type": "data_asset"},
     ]},
 }
 
@@ -228,6 +233,40 @@ class PipelineBuilderBuild(Base):
     lineage: Mapped[dict] = mapped_column(JSON, default=dict)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer)
+
+
+class PipelineOntologyContractRun(Base):
+    """Immutable ontology-output reconciliation and quarantine evidence for a build."""
+    __tablename__ = "pipeline_ontology_contract_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    graph_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    build_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    object_type_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    input_rows: Mapped[int] = mapped_column(Integer, nullable=False)
+    accepted_rows: Mapped[int] = mapped_column(Integer, nullable=False)
+    rejected_rows: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_objects: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_objects: Mapped[int] = mapped_column(Integer, nullable=False)
+    unchanged_objects: Mapped[int] = mapped_column(Integer, nullable=False)
+    quarantine_asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    field_lineage: Mapped[list] = mapped_column(JSON, default=list)
+    violations: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+
+
+def _contract_run_dict(row: PipelineOntologyContractRun) -> Dict[str, Any]:
+    return {
+        "id": row.id, "project_id": row.project_id, "graph_id": row.graph_id, "build_id": row.build_id,
+        "node_id": row.node_id, "object_type_id": row.object_type_id, "status": row.status,
+        "input_rows": row.input_rows, "accepted_rows": row.accepted_rows, "rejected_rows": row.rejected_rows,
+        "created_objects": row.created_objects, "updated_objects": row.updated_objects, "unchanged_objects": row.unchanged_objects,
+        "quarantine_asset_id": row.quarantine_asset_id, "field_lineage": row.field_lineage or [],
+        "violations": row.violations or [], "created_at": row.created_at,
+    }
 
 
 class PipelineGraphCreate(BaseModel):
@@ -471,11 +510,25 @@ def _node_from_request(graph: PipelineBuilderGraph, body: PipelineInsertNodeRequ
         "type": node_type,
         "label": body.label or catalog.get("label") or new_id,
         "position": {"x": float(position.get("x", 0)), "y": float(position.get("y", 0))},
-        "config": body.config or {},
+        "config": _normalize_node_config(node_type, body.config or {}),
     }
 
 
+def _normalize_node_config(node_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep saved pre-contract ontology nodes editable without a data migration."""
+    normalized = copy.deepcopy(config or {})
+    if node_type == "ontology_output":
+        if "primary_key" not in normalized and normalized.get("id_field"):
+            normalized["primary_key"] = normalized.pop("id_field")
+        if "property_mapping" not in normalized and isinstance(normalized.get("mapping"), dict):
+            normalized["property_mapping"] = normalized.pop("mapping")
+        normalized.setdefault("write_mode", "upsert")
+        normalized.setdefault("on_error", "quarantine")
+    return normalized
+
+
 def _validate_node_config(node_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    config = _normalize_node_config(node_type, config)
     schema = NODE_CONFIGURATION_SCHEMAS.get(node_type, {"fields": []})
     errors: List[Dict[str, Any]] = []
     warnings: List[Dict[str, Any]] = []
@@ -561,6 +614,10 @@ def _canvas_payload(db: Session, graph: PipelineBuilderGraph, *, selected_node_i
     ]
     selected_id = selected_node_id or (nodes[0]["id"] if nodes else None)
     selected = next((node for node in nodes if node["id"] == selected_id), None)
+    recent_contracts = db.query(PipelineOntologyContractRun).filter(PipelineOntologyContractRun.graph_id == graph.id).order_by(PipelineOntologyContractRun.created_at.desc()).all()
+    contracts_by_build: Dict[str, List[PipelineOntologyContractRun]] = defaultdict(list)
+    for contract in recent_contracts:
+        contracts_by_build[contract.build_id].append(contract)
     builds = [
         {
             "id": build.id,
@@ -569,6 +626,7 @@ def _canvas_payload(db: Session, graph: PipelineBuilderGraph, *, selected_node_i
             "output_asset_id": build.output_asset_id,
             "row_count": (build.preview or {}).get("row_count"),
             "created_at": build.created_at,
+            "ontology_contracts": [_contract_run_dict(row) for row in contracts_by_build.get(build.id, [])],
         }
         for build in db.query(PipelineBuilderBuild).filter(PipelineBuilderBuild.graph_id == graph.id).order_by(PipelineBuilderBuild.created_at.desc()).limit(5).all()
     ]
@@ -648,17 +706,9 @@ def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str
     config = _config(node)
     available_fields = [field.get("name") for field in preview.get("columns", []) if field.get("name")]
     upstream_ids = _predecessors(graph).get(node_id, [])
-    field_lineage = []
-    for field_name in available_fields:
-        sources = []
-        for upstream_id in upstream_ids:
-            upstream_output = (execution or {}).get("node_outputs", {}).get(upstream_id, {})
-            if field_name in [field.get("name") for field in (upstream_output.get("schema") or {}).get("fields", [])]:
-                sources.append({"node_id": upstream_id, "field": field_name})
-        if not sources and node_type in {"derive", "unique_id", "derive_geo_point", "derive_mgrs", "window"}:
-            source_names = config.get("source_fields") or config.get("fields") or [config.get("latitude_field"), config.get("longitude_field")]
-            sources = [{"node_id": upstream_ids[0] if upstream_ids else None, "field": value} for value in source_names if value]
-        field_lineage.append({"field": field_name, "sources": sources, "operation": node_type})
+    lineage_map = (execution or {}).get("lineage", {}).get("fields_by_node", {}).get(node_id, {})
+    field_lineage = [{"field": field_name, "origins": lineage_map.get(field_name, []), "operation": node_type} for field_name in available_fields]
+    ontology_contract = next((item for item in (execution or {}).get("ontology_contracts", []) if item.get("node_id") == node_id), None)
     context_actions = [
         {"id": "transform", "label": "Transform", "node_type": "filter"},
         {"id": "split", "label": "Split", "node_type": "project"},
@@ -686,6 +736,7 @@ def _node_details_payload(db: Session, graph: PipelineBuilderGraph, node_id: str
             "configuration_validation": _validate_node_config(node_type, config),
             "available_fields": available_fields,
             "field_lineage": field_lineage,
+            "ontology_contract": ontology_contract,
             "upstream": upstream_ids,
             "downstream": [_edge_target(edge) for edge in graph.edges or [] if _edge_source(edge) == node_id],
         },
@@ -756,11 +807,31 @@ def _validate_graph(db: Session, graph: PipelineBuilderGraph) -> Dict[str, Any]:
                 elif asset.project_id != graph.project_id:
                     errors.append({"code": "INPUT_ASSET_PROJECT_MISMATCH", "node_id": node_id, "message": f"DataAsset '{asset_id}' belongs to another project"})
         if node_type == "ontology_output":
-            object_type_id = _config(node).get("object_type_id")
+            output_config = _config(node)
+            object_type_id = output_config.get("object_type_id")
             object_type = db.get(models.ObjectType, object_type_id) if object_type_id else None
-            if object_type:
-                if object_type.project_id != graph.project_id:
-                    errors.append({"code": "ONTOLOGY_OUTPUT_PROJECT_MISMATCH", "node_id": node_id, "message": f"Object type '{object_type_id}' belongs to another project"})
+            if not object_type:
+                errors.append({"code": "ONTOLOGY_OUTPUT_TYPE_NOT_FOUND", "node_id": node_id, "message": f"Object type '{object_type_id or ''}' not found"})
+            elif object_type.project_id != graph.project_id:
+                errors.append({"code": "ONTOLOGY_OUTPUT_PROJECT_MISMATCH", "node_id": node_id, "message": f"Object type '{object_type_id}' belongs to another project"})
+            else:
+                properties, target_primary_key = _ontology_schema(db, object_type)
+                mapping = output_config.get("property_mapping") or output_config.get("mapping") or {}
+                primary_key = output_config.get("primary_key") or output_config.get("id_field")
+                if not primary_key:
+                    errors.append({"code": "ONTOLOGY_OUTPUT_PRIMARY_KEY_REQUIRED", "node_id": node_id, "message": "Ontology output needs a source primary key field"})
+                if not mapping:
+                    warnings.append({"code": "ONTOLOGY_OUTPUT_AUTO_MAPPING", "node_id": node_id, "message": "Matching source and ontology field names will be mapped automatically"})
+                unknown_targets = sorted({str(target) for target in mapping.values()} - set(properties))
+                if unknown_targets:
+                    errors.append({"code": "ONTOLOGY_OUTPUT_UNKNOWN_PROPERTIES", "node_id": node_id, "message": f"Unknown target properties: {', '.join(unknown_targets)}"})
+                mapped_targets = set(str(value) for value in mapping.values())
+                required_targets = {name for name, spec in properties.items() if isinstance(spec, dict) and spec.get("required")}
+                if mapping and target_primary_key and target_primary_key not in mapped_targets:
+                    errors.append({"code": "ONTOLOGY_OUTPUT_PRIMARY_KEY_UNMAPPED", "node_id": node_id, "message": f"Target primary key '{target_primary_key}' is not mapped"})
+                missing_required = sorted(required_targets - mapped_targets) if mapping else []
+                if missing_required:
+                    errors.append({"code": "ONTOLOGY_OUTPUT_REQUIRED_UNMAPPED", "node_id": node_id, "message": f"Required target properties are not mapped: {', '.join(missing_required)}"})
 
     for edge in edges:
         source = str(edge.get("source") or edge.get("from") or "")
@@ -1260,6 +1331,244 @@ def _schema(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"fields": [{"name": key, "type": value} for key, value in fields.items()]}
 
 
+def _append_lineage_step(origins: List[Dict[str, Any]], node_id: str, operation: str) -> List[Dict[str, Any]]:
+    result = copy.deepcopy(origins)
+    if not result:
+        result = [{"asset_id": None, "field": None, "path": []}]
+    for origin in result:
+        path = list(origin.get("path") or [])
+        if not path or path[-1].get("node_id") != node_id:
+            path.append({"node_id": node_id, "operation": operation})
+        origin["path"] = path
+    return result
+
+
+def _field_lineage_for_node(
+    node_id: str,
+    node_type: str,
+    config: Dict[str, Any],
+    rows: List[Dict[str, Any]],
+    parent_lineages: List[Dict[str, List[Dict[str, Any]]]],
+    input_asset_id: Optional[str] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    output_fields = [item["name"] for item in _schema(rows).get("fields", [])]
+    if node_type in {"input_dataset", "dataset_input"}:
+        return {field: [{"asset_id": input_asset_id, "field": field, "path": [{"node_id": node_id, "operation": node_type}]}] for field in output_fields}
+    combined: Dict[str, List[Dict[str, Any]]] = {}
+    for parent_index, lineage in enumerate(parent_lineages):
+        for field, origins in lineage.items():
+            output_name = field if field not in combined else f"right_{field}" if parent_index else field
+            combined.setdefault(output_name, []).extend(copy.deepcopy(origins))
+    rename_inverse = {target: source for source, target in (config.get("mapping") or {}).items()} if node_type == "rename" else {}
+    derivations = config.get("derivations") or [config]
+    generated_sources: Dict[str, List[str]] = {}
+    if node_type == "derive":
+        for spec in derivations:
+            target = spec.get("target") or spec.get("target_field") or spec.get("as")
+            if target:
+                generated_sources[target] = list(spec.get("fields") or spec.get("source_fields") or ([spec.get("field")] if spec.get("field") else []))
+    elif node_type in {"unique_id", "llm_assist", "llm"}:
+        target = config.get("target_field") or config.get("output_field") or ("id" if node_type == "unique_id" else "llm_summary")
+        generated_sources[target] = list(config.get("source_fields") or config.get("fields") or [])
+    elif node_type in {"derive_geo_point", "derive_mgrs"}:
+        target = config.get("target_field") or ("geometry" if node_type == "derive_geo_point" else "mgrs")
+        generated_sources[target] = [config.get("latitude_field") or "latitude", config.get("longitude_field") or "longitude"]
+    elif node_type == "window":
+        target = config.get("target_field") or config.get("operation") or "row_number"
+        generated_sources[target] = list(config.get("partition_by") or []) + [value for value in [config.get("order_by"), config.get("value_field") or config.get("field")] if value]
+    elif node_type == "aggregate":
+        metrics = config.get("metrics") or [{"field": config.get("field"), "alias": config.get("target_field") or config.get("alias") or "count"}]
+        for metric in metrics:
+            generated_sources[metric.get("alias") or metric.get("as") or "count"] = [metric.get("field")] if metric.get("field") else []
+    elif node_type == "unpivot":
+        generated_sources[config.get("name_field") or "field"] = list(config.get("value_fields") or [])
+        generated_sources[config.get("value_field") or "value"] = list(config.get("value_fields") or [])
+    elif node_type == "spatial_join":
+        generated_sources[config.get("distance_field") or "distance_meters"] = [config.get("left_geometry_field") or "geometry", config.get("right_geometry_field") or "geometry"]
+
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for field in output_fields:
+        source_field = rename_inverse.get(field, field)
+        if field in generated_sources:
+            origins = []
+            for source in generated_sources[field]:
+                origins.extend(combined.get(source, []))
+        else:
+            origins = combined.get(source_field, [])
+        result[field] = _append_lineage_step(origins, node_id, node_type)
+    return result
+
+
+def _ontology_schema(db: Session, object_type: models.ObjectType) -> tuple[Dict[str, Dict[str, Any]], Optional[str]]:
+    from . import ontology_core
+    profile = db.get(ontology_core.ObjectTypeProfile, object_type.id)
+    if profile and profile.properties:
+        return dict(profile.properties), profile.primary_key
+    manager = (object_type.properties or {}).get("__manager", {}) if isinstance(object_type.properties, dict) else {}
+    properties = {
+        name: spec if isinstance(spec, dict) else {"base_type": str(spec)}
+        for name, spec in (object_type.properties or {}).items()
+        if not str(name).startswith("__")
+    }
+    return properties, manager.get("primary_key") or manager.get("source_primary_key")
+
+
+def _ontology_value_matches(value: Any, base_type: str) -> bool:
+    if value is None:
+        return True
+    if base_type in {"string", "date", "timestamp", "attachment", "mediaReference", "timeSeries", "marking", "cipherText"}:
+        return isinstance(value, str)
+    if base_type in {"byte", "short", "integer", "long"}:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if base_type in {"float", "double", "decimal", "number"}:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if base_type == "boolean":
+        return isinstance(value, bool)
+    if base_type in {"array", "vector"}:
+        return isinstance(value, list)
+    if base_type in {"struct", "object", "json"}:
+        return isinstance(value, dict)
+    if base_type in {"geopoint", "geoshape", "geometry", "geojson"}:
+        return isinstance(value, (dict, list, str))
+    return True
+
+
+def _quarantine_rows(db: Session, graph: PipelineBuilderGraph, node_id: str, asset_id: str, records: List[Dict[str, Any]]) -> str:
+    now = _now()
+    asset = db.get(models.DataAsset, asset_id)
+    if asset and asset.project_id != graph.project_id:
+        raise HTTPException(status_code=409, detail=f"Quarantine DataAsset '{asset_id}' belongs to another project")
+    if not asset:
+        asset = models.DataAsset(
+            id=asset_id, project_id=graph.project_id, display_name=f"{graph.display_name} Quarantine",
+            description=f"Rejected ontology rows from {graph.id}/{node_id}", kind="quarantine",
+            asset_schema={"project_id": graph.project_id, "contract": "ontology_output_rejections"},
+            records=[], created_at=now, updated_at=now,
+        )
+        db.add(asset)
+        db.flush()
+    _commit_snapshot_transaction(db, asset, records, "_row_index")
+    return asset.id
+
+
+def _execute_ontology_contract(
+    db: Session,
+    graph: PipelineBuilderGraph,
+    node_id: str,
+    config: Dict[str, Any],
+    rows: List[Dict[str, Any]],
+    source_lineage: Dict[str, List[Dict[str, Any]]],
+    write_ontology: bool,
+) -> Dict[str, Any]:
+    object_type_id = str(config.get("object_type_id") or "")
+    object_type = db.get(models.ObjectType, object_type_id) if object_type_id else None
+    if not object_type:
+        raise HTTPException(status_code=422, detail={"message": "Ontology output object type not found", "object_type_id": object_type_id})
+    if object_type.project_id != graph.project_id:
+        raise HTTPException(status_code=409, detail="Ontology output belongs to another project")
+    properties, target_primary_key = _ontology_schema(db, object_type)
+    primary_key = str(config.get("primary_key") or config.get("id_field") or target_primary_key or "id")
+    mapping = config.get("property_mapping") or config.get("mapping") or {}
+    if not mapping:
+        mapping = {field: field for field in source_lineage if field in properties}
+    write_mode = str(config.get("write_mode") or "upsert").lower()
+    on_error = str(config.get("on_error") or "quarantine").lower()
+    if write_mode not in {"upsert", "insert_only", "update_only"}:
+        raise HTTPException(status_code=422, detail=f"Unsupported ontology write_mode '{write_mode}'")
+    if on_error not in {"quarantine", "skip", "fail"}:
+        raise HTTPException(status_code=422, detail=f"Unsupported ontology on_error '{on_error}'")
+    unknown_targets = sorted({str(target) for target in mapping.values()} - set(properties))
+    field_lineage = [
+        {"source_field": source, "target_property": target, "origins": _append_lineage_step(source_lineage.get(source, []), node_id, "ontology_output")}
+        for source, target in mapping.items()
+    ]
+    required_targets = {name for name, spec in properties.items() if isinstance(spec, dict) and spec.get("required")}
+    accepted: List[tuple[int, Dict[str, Any], str, Dict[str, Any], Optional[models.ObjectInstance]]] = []
+    violations: List[Dict[str, Any]] = []
+    quarantine_records: List[Dict[str, Any]] = []
+    created_count = updated_count = unchanged_count = 0
+    for row_index, row in enumerate(rows):
+        row_errors: List[Dict[str, Any]] = []
+        object_id_value = _value(row, primary_key)
+        if object_id_value in (None, ""):
+            row_errors.append({"code": "PRIMARY_KEY_MISSING", "field": primary_key, "message": "Source primary key is missing"})
+        for target in unknown_targets:
+            row_errors.append({"code": "UNKNOWN_TARGET_PROPERTY", "field": target, "message": "Mapped ontology property does not exist"})
+        mapped_properties = {str(target): _value(row, str(source)) for source, target in mapping.items() if str(target) in properties}
+        if not mapping:
+            mapped_properties = {name: _value(row, name) for name in properties if name in row}
+        for target in required_targets:
+            if mapped_properties.get(target) in (None, ""):
+                row_errors.append({"code": "REQUIRED_PROPERTY_MISSING", "field": target, "message": "Required ontology property is missing"})
+        for target, value in mapped_properties.items():
+            spec = properties.get(target) or {}
+            base_type = str(spec.get("base_type") or spec.get("type") or "string") if isinstance(spec, dict) else str(spec)
+            if not _ontology_value_matches(value, base_type):
+                row_errors.append({"code": "PROPERTY_TYPE_MISMATCH", "field": target, "message": f"Value is not compatible with {base_type}"})
+        object_id = str(object_id_value) if object_id_value not in (None, "") else ""
+        existing = db.get(models.ObjectInstance, object_id) if object_id else None
+        if existing and (existing.project_id != graph.project_id or existing.object_type_id != object_type_id):
+            row_errors.append({"code": "OBJECT_ID_CONFLICT", "field": primary_key, "message": "Object ID belongs to another type or project"})
+        if write_mode == "insert_only" and existing:
+            row_errors.append({"code": "INSERT_ONLY_CONFLICT", "field": primary_key, "message": "Object already exists"})
+        if write_mode == "update_only" and not existing:
+            row_errors.append({"code": "UPDATE_ONLY_MISSING", "field": primary_key, "message": "Object does not exist"})
+        if row_errors:
+            violation = {"row_index": row_index, "object_id": object_id or None, "errors": row_errors}
+            violations.append(violation)
+            quarantine_records.append({"_row_index": row_index, "_pipeline_graph_id": graph.id, "_node_id": node_id, "_object_type_id": object_type_id, "_errors": row_errors, "record": copy.deepcopy(row)})
+        else:
+            accepted.append((row_index, row, object_id, mapped_properties, existing))
+
+    if violations and on_error == "fail":
+        raise HTTPException(status_code=422, detail={"message": "Ontology contract rejected rows", "node_id": node_id, "rejected_rows": len(violations), "violations": violations[:25]})
+    quarantine_asset_id = None
+    if write_ontology and violations and on_error == "quarantine":
+        quarantine_asset_id = _quarantine_rows(db, graph, node_id, str(config.get("quarantine_asset_id") or f"{graph.id}_{node_id}_quarantine"), quarantine_records)
+
+    if write_ontology:
+        from . import decision_intelligence
+        for _row_index, _row, object_id, mapped_properties, existing in accepted:
+            if existing:
+                before = dict(existing.properties or {})
+                after = {**before, **mapped_properties}
+                if after == before:
+                    unchanged_count += 1
+                else:
+                    existing.properties = after
+                    existing.source_asset_id = config.get("source_asset_id") or existing.source_asset_id
+                    existing.lineage = {**(existing.lineage or {}), "pipeline_builder_graph_id": graph.id, "node_id": node_id, "field_lineage": field_lineage}
+                    existing.updated_at = _now()
+                    updated_count += 1
+                    decision_intelligence.record_object_snapshot(db, existing, event_type="pipeline_builder.object.updated", actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id)
+            else:
+                created = models.ObjectInstance(
+                    id=object_id, project_id=graph.project_id, object_type_id=object_type_id,
+                    properties=mapped_properties, source_asset_id=config.get("source_asset_id"),
+                    lineage={"pipeline_builder_graph_id": graph.id, "node_id": node_id, "field_lineage": field_lineage},
+                    created_at=_now(), updated_at=_now(),
+                )
+                db.add(created)
+                created_count += 1
+                decision_intelligence.record_object_snapshot(db, created, event_type="pipeline_builder.object.created", actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id)
+    else:
+        for _row_index, _row, _object_id, mapped_properties, existing in accepted:
+            if not existing:
+                created_count += 1
+            elif {**(existing.properties or {}), **mapped_properties} == (existing.properties or {}):
+                unchanged_count += 1
+            else:
+                updated_count += 1
+    status = "SUCCESS" if not violations else ("PARTIAL" if accepted else "FAILED")
+    return {
+        "node_id": node_id, "object_type_id": object_type_id, "status": status,
+        "input_rows": len(rows), "accepted_rows": len(accepted), "rejected_rows": len(violations),
+        "created_objects": created_count, "updated_objects": updated_count, "unchanged_objects": unchanged_count,
+        "quarantine_asset_id": quarantine_asset_id, "on_error": on_error, "write_mode": write_mode,
+        "field_lineage": field_lineage, "violations": violations[:100],
+    }
+
+
 def _execute_graph(
     db: Session,
     graph: PipelineBuilderGraph,
@@ -1274,18 +1583,23 @@ def _execute_graph(
     incoming = _predecessors(graph)
     ordered = _topological_nodes(graph)
     outputs: Dict[str, List[Dict[str, Any]]] = {}
+    lineage_outputs: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     current: List[Dict[str, Any]] = []
     final_node_id: Optional[str] = None
     step_metrics: List[Dict[str, Any]] = []
     input_asset_ids: List[str] = []
     materialized_objects = 0
+    rejected_ontology_rows = 0
+    ontology_contracts: List[Dict[str, Any]] = []
 
     for node_id, node in ordered:
         node_type = _node_type(node)
         config = {**_config(node), **((parameters or {}).get(node_id, {}) if isinstance((parameters or {}).get(node_id), dict) else {})}
         parents = [outputs[parent] for parent in incoming.get(node_id, []) if parent in outputs]
+        parent_lineages = [lineage_outputs[parent] for parent in incoming.get(node_id, []) if parent in lineage_outputs]
         rows = copy.deepcopy(parents[0] if parents else current)
         records_in = len(rows)
+        input_asset_for_lineage: Optional[str] = None
 
         if node_type in {"input_dataset", "dataset_input"}:
             asset_id = config.get("asset_id") or config.get("dataset_id")
@@ -1296,6 +1610,7 @@ def _execute_graph(
                 raise HTTPException(status_code=409, detail=f"DataAsset '{asset_id}' belongs to another project")
             rows = copy.deepcopy(asset.records or [])
             input_asset_ids.append(asset.id)
+            input_asset_for_lineage = asset.id
         elif node_type == "filter":
             rows = _filter_rows(rows, config)
         elif node_type in {"project", "select"}:
@@ -1379,62 +1694,19 @@ def _execute_graph(
                 for row in rows
             ]
         elif node_type == "ontology_output":
-            if write_ontology:
-                object_type_id = config.get("object_type_id")
-                id_field = config.get("id_field") or "id"
-                mapping = config.get("mapping") or {}
-                object_type = db.get(models.ObjectType, object_type_id) if object_type_id else None
-                if object_type and object_type.project_id != graph.project_id:
-                    raise HTTPException(status_code=409, detail="Ontology output belongs to another project")
-                if object_type:
-                    from . import decision_intelligence
-                    for row in rows:
-                        object_id = str(_value(row, id_field) or _stable_row_id(row, list(row.keys())))
-                        properties = {target: _value(row, source) for source, target in mapping.items()} if mapping else copy.deepcopy(row)
-                        existing = db.get(models.ObjectInstance, object_id)
-                        if existing:
-                            if existing.project_id != graph.project_id:
-                                raise HTTPException(status_code=409, detail=f"Object ID '{object_id}' belongs to another project")
-                            existing.properties = {**(existing.properties or {}), **properties}
-                            existing.lineage = {
-                                **(existing.lineage or {}),
-                                "pipeline_builder_graph_id": graph.id,
-                                "node_id": node_id,
-                            }
-                            existing.updated_at = _now()
-                            decision_intelligence.record_object_snapshot(
-                                db,
-                                existing,
-                                event_type="pipeline_builder.object.updated",
-                                actor="pipeline_builder",
-                                source_type="pipeline_builder_graph",
-                                source_id=graph.id,
-                            )
-                        else:
-                            created = models.ObjectInstance(
-                                id=object_id,
-                                project_id=graph.project_id,
-                                object_type_id=object_type_id,
-                                properties=properties,
-                                source_asset_id=config.get("source_asset_id"),
-                                lineage={"pipeline_builder_graph_id": graph.id, "node_id": node_id},
-                                created_at=_now(),
-                                updated_at=_now(),
-                            )
-                            db.add(created)
-                            decision_intelligence.record_object_snapshot(
-                                db,
-                                created,
-                                event_type="pipeline_builder.object.created",
-                                actor="pipeline_builder",
-                                source_type="pipeline_builder_graph",
-                                source_id=graph.id,
-                            )
-                        materialized_objects += 1
+            pass
         elif node_type in {"dataset_output", "output_dataset"}:
             final_node_id = node_id
 
+        node_lineage = _field_lineage_for_node(node_id, node_type, config, rows, parent_lineages, input_asset_for_lineage)
+        if node_type == "ontology_output":
+            contract = _execute_ontology_contract(db, graph, node_id, config, rows, node_lineage, write_ontology)
+            ontology_contracts.append(contract)
+            if write_ontology:
+                materialized_objects += contract["created_objects"] + contract["updated_objects"] + contract["unchanged_objects"]
+                rejected_ontology_rows += contract["rejected_rows"]
         outputs[node_id] = rows
+        lineage_outputs[node_id] = node_lineage
         current = rows
         step_metrics.append({
             "node_id": node_id,
@@ -1449,11 +1721,12 @@ def _execute_graph(
         "final_node_id": final_node_id or (ordered[-1][0] if ordered else None),
         "rows": current,
         "node_outputs": {
-            node_id: {"row_count": len(rows), "schema": _schema(rows), "sample": rows[:5]}
+            node_id: {"row_count": len(rows), "schema": _schema(rows), "sample": rows[:5], "field_lineage": lineage_outputs.get(node_id, {})}
             for node_id, rows in outputs.items()
         },
-        "lineage": {"graph_id": graph.id, "steps": step_metrics, "input_asset_ids": input_asset_ids},
-        "metrics": {"records_out": len(current), "materialized_objects": materialized_objects, "steps": len(step_metrics)},
+        "lineage": {"graph_id": graph.id, "steps": step_metrics, "input_asset_ids": input_asset_ids, "fields_by_node": lineage_outputs},
+        "ontology_contracts": ontology_contracts,
+        "metrics": {"records_out": len(current), "materialized_objects": materialized_objects, "rejected_ontology_rows": rejected_ontology_rows, "steps": len(step_metrics)},
     }
 
 
@@ -1610,10 +1883,11 @@ def update_pipeline_node(graph_id: str, node_id: str, body: PipelineNodeUpdateRe
             raise HTTPException(status_code=422, detail="Node label cannot be empty")
         next_node["label"] = label
     if body.config is not None:
-        validation = _validate_node_config(_node_type(node), body.config)
+        normalized_config = _normalize_node_config(_node_type(node), body.config)
+        validation = _validate_node_config(_node_type(node), normalized_config)
         if validation["status"] == "INVALID":
             raise HTTPException(status_code=422, detail={"message": "Node configuration is invalid", "validation": validation})
-        next_node["config"] = body.config
+        next_node["config"] = normalized_config
     nodes = list(graph.nodes or [])
     nodes[index] = next_node
     graph.nodes = nodes
@@ -1917,6 +2191,7 @@ def preview_graph(graph_id: str, body: PipelinePreviewRequest = PipelinePreviewR
         "schema": _schema(execution["rows"]),
         "node_outputs": execution["node_outputs"],
         "lineage": execution["lineage"],
+        "ontology_contracts": execution["ontology_contracts"],
         "metrics": execution["metrics"],
     }
     try:
@@ -2032,6 +2307,43 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         created_at=now,
     )
     db.add(build)
+    contract_run_ids: List[str] = []
+    previous_contract = db.query(PipelineOntologyContractRun).filter(
+        PipelineOntologyContractRun.graph_id == graph.id,
+    ).order_by(PipelineOntologyContractRun.created_at.desc()).first()
+    contract_created_at = max(now, (previous_contract.created_at + 1) if previous_contract else now)
+    for contract in execution.get("ontology_contracts", []):
+        contract_row = PipelineOntologyContractRun(
+            id=_new_id(), project_id=graph.project_id, graph_id=graph.id, build_id=build.id,
+            node_id=contract["node_id"], object_type_id=contract["object_type_id"], status=contract["status"],
+            input_rows=contract["input_rows"], accepted_rows=contract["accepted_rows"], rejected_rows=contract["rejected_rows"],
+            created_objects=contract["created_objects"], updated_objects=contract["updated_objects"], unchanged_objects=contract["unchanged_objects"],
+            quarantine_asset_id=contract.get("quarantine_asset_id"), field_lineage=contract.get("field_lineage") or [],
+            violations=contract.get("violations") or [], created_at=contract_created_at,
+        )
+        db.add(contract_row)
+        contract_run_ids.append(contract_row.id)
+        db.add(models_action.AuditLog(
+            id=_new_id(), actor=principal.id, event_type="pipeline_builder.ontology_contract.evaluated",
+            subject_type="pipeline_ontology_contract_run", subject_id=contract_row.id,
+            payload={"project_id": graph.project_id, "graph_id": graph.id, "build_id": build.id, "status": contract_row.status, "accepted_rows": contract_row.accepted_rows, "rejected_rows": contract_row.rejected_rows, "quarantine_asset_id": contract_row.quarantine_asset_id},
+        ))
+        try:
+            from . import ops_control
+            ops_control.record_ops_event(
+                db, source="pipeline_builder", event_type="pipeline_builder.ontology_contract.evaluated",
+                severity="high" if contract_row.status == "FAILED" else ("medium" if contract_row.status == "PARTIAL" else "info"),
+                title=f"Ontology contract {contract_row.status} for {contract_row.object_type_id}",
+                subject_type="pipeline_ontology_contract_run", subject_id=contract_row.id,
+                object_type_id=contract_row.object_type_id,
+                payload={"project_id": graph.project_id, "graph_id": graph.id, "build_id": build.id, "accepted_rows": contract_row.accepted_rows, "rejected_rows": contract_row.rejected_rows, "quarantine_asset_id": contract_row.quarantine_asset_id},
+                evaluate_alerts=True,
+            )
+        except Exception:
+            pass
+        contract_created_at += 1
+    build.metrics = {**(build.metrics or {}), "ontology_contract_run_ids": contract_run_ids}
+    run.metrics = {**(run.metrics or {}), "ontology_contract_run_ids": contract_run_ids}
     db.add(models_action.AuditLog(
         id=_new_id(),
         actor=principal.id,
@@ -2078,4 +2390,75 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         "records_out": len(execution["rows"]),
         "lineage": execution["lineage"],
         "metrics": build.metrics,
+    }
+
+
+@router.get("/pipeline-builder/graphs/{graph_id}/ontology-contracts")
+def list_graph_ontology_contracts(graph_id: str, limit: int = 50, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "view")
+    rows = db.query(PipelineOntologyContractRun).filter(
+        PipelineOntologyContractRun.graph_id == graph.id,
+        PipelineOntologyContractRun.project_id == graph.project_id,
+    ).order_by(PipelineOntologyContractRun.created_at.desc()).limit(max(1, min(limit, 250))).all()
+    return {"graph_id": graph.id, "count": len(rows), "contracts": [_contract_run_dict(row) for row in rows]}
+
+
+@router.get("/pipeline-builder/builds/{build_id}/ontology-contracts")
+def list_build_ontology_contracts(build_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    build = db.get(PipelineBuilderBuild, build_id)
+    if not build:
+        raise HTTPException(status_code=404, detail="Pipeline build not found")
+    graph = _graph_for(db, build.graph_id, principal, "view")
+    rows = db.query(PipelineOntologyContractRun).filter(
+        PipelineOntologyContractRun.build_id == build.id,
+        PipelineOntologyContractRun.project_id == graph.project_id,
+    ).order_by(PipelineOntologyContractRun.created_at.desc()).all()
+    return {"graph_id": graph.id, "build_id": build.id, "count": len(rows), "contracts": [_contract_run_dict(row) for row in rows]}
+
+
+@router.get("/pipeline-builder/ontology-contracts/{contract_run_id}")
+def get_ontology_contract_run(contract_run_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    row = db.get(PipelineOntologyContractRun, contract_run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Ontology contract run not found")
+    _graph_for(db, row.graph_id, principal, "view")
+    return _contract_run_dict(row)
+
+
+@router.get("/pipeline-builder/ontology-contracts/{contract_run_id}/quarantine")
+def get_ontology_contract_quarantine(contract_run_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    row = db.get(PipelineOntologyContractRun, contract_run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Ontology contract run not found")
+    graph = _graph_for(db, row.graph_id, principal, "view")
+    if not row.quarantine_asset_id:
+        return {"contract_run_id": row.id, "status": "EMPTY", "asset": None, "records": []}
+    asset = db.get(models.DataAsset, row.quarantine_asset_id)
+    if not asset or asset.project_id != graph.project_id:
+        raise HTTPException(status_code=404, detail="Quarantine dataset not found")
+    return {
+        "contract_run_id": row.id, "status": "AVAILABLE",
+        "asset": {"id": asset.id, "display_name": asset.display_name, "row_count": len(asset.records or []), "schema": asset.asset_schema or {}},
+        "records": (asset.records or [])[:100],
+    }
+
+
+@router.get("/ui-state/pipeline/{graph_id}/ontology-contracts")
+def ontology_contract_ui_state(graph_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    graph = _graph_for(db, graph_id, principal, "view")
+    rows = db.query(PipelineOntologyContractRun).filter(PipelineOntologyContractRun.graph_id == graph.id).order_by(PipelineOntologyContractRun.created_at.desc()).limit(50).all()
+    latest_by_node: Dict[str, PipelineOntologyContractRun] = {}
+    for row in rows:
+        latest_by_node.setdefault(row.node_id, row)
+    latest = list(latest_by_node.values())
+    rejected = sum(row.rejected_rows for row in latest)
+    status = "FAIL" if any(row.status == "FAILED" for row in latest) else ("WARN" if rejected else ("PASS" if latest else "NOT_RUN"))
+    return {
+        "summary": {"status": status, "outputs": len(latest), "accepted_rows": sum(row.accepted_rows for row in latest), "rejected_rows": rejected},
+        "primary_actions": [{"id": "deliver", "label": "Deliver and reconcile", "method": "POST", "path": f"/pipeline-builder/graphs/{graph.id}/deliver"}],
+        "sections": {"latest": [_contract_run_dict(row) for row in latest], "history": [_contract_run_dict(row) for row in rows]},
+        "evidence_links": [{"label": f"Contract {row.node_id}", "href": f"/pipeline-builder/ontology-contracts/{row.id}", "kind": "ontology_contract"} for row in latest],
+        "warnings": [{"code": "ONTOLOGY_ROWS_REJECTED", "message": f"{rejected} rows were rejected by ontology contracts."}] if rejected else [],
+        "permissions": sorted(tenancy.project_permissions(db, principal, graph.project_id)),
+        "last_updated": max((row.created_at for row in rows), default=graph.updated_at),
     }

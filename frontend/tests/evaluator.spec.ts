@@ -47,6 +47,51 @@ test("command palette supports keyboard navigation", async ({ page }) => {
   await expect(page).toHaveURL(/\/workspace\/entity-resolution$/);
 });
 
+test("responsive workspace navigation stays compact and keyboard operable", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.includes("mobile"), "Responsive navigation is exercised in a mobile project.");
+  await page.goto("/workspace/ontology");
+  const navigation = page.getByRole("navigation", { name: "Workspaces" });
+  const toggle = page.getByRole("button", { name: "Open workspace navigation" });
+  await expect(toggle).toBeVisible();
+  await expect(navigation).toBeHidden();
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(navigation).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close workspace navigation" })).toBeVisible();
+  await navigation.getByRole("button", { name: /Pipeline Builder/ }).click();
+  await expect(page).toHaveURL(/\/workspace\/pipeline$/);
+  await expect(navigation).toBeHidden();
+});
+
+test("builder route transitions release collaboration stream database sessions", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the streaming connection lifecycle stress once on desktop.");
+  const suffix = Date.now();
+  const builders = [
+    { route: "workshop", artifactType: "workshop" },
+    { route: "aip", artifactType: "aip_logic" },
+    { route: "investigations", artifactType: "investigation_graph" },
+    { route: "entity-resolution", artifactType: "entity_resolution" }
+  ];
+  for (const builder of builders) {
+    const response = await page.request.post("/artifacts", { data: {
+      id: `stream_lifecycle_${builder.artifactType}_${suffix}`,
+      artifact_type: builder.artifactType,
+      display_name: `Stream lifecycle ${builder.artifactType} ${suffix}`,
+      state: { nodes: [], edges: [] }
+    } });
+    expect(response.ok()).toBeTruthy();
+  }
+  for (let cycle = 0; cycle < 5; cycle += 1) {
+    for (const builder of builders) {
+      await page.goto(`/workspace/${builder.route}`);
+      await expect(page.locator(".collaboration-presence")).toBeVisible();
+    }
+  }
+  await page.goto("/workspace/command-center");
+  const probes = await Promise.all(Array.from({ length: 20 }, () => page.request.get("/jobs/summary")));
+  expect(probes.every((response) => response.ok())).toBeTruthy();
+});
+
 test("data onboarding previews a live connector with write-only credentials and fetch evidence", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful live connector workflow once on desktop.");
   const server = createServer((request, response) => {
@@ -345,6 +390,125 @@ test("ontology manager publishes and installs a governed package", async ({ page
   await expect(packagePanel).toContainText("Installed 1.0.0");
 });
 
+test("ontology release studio reviews a semantic change before publication", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ontology release workflow once on desktop.");
+  const suffix = Date.now();
+  const objectTypeId = `release_asset_${suffix}`;
+  const displayName = `Release Asset ${suffix}`;
+  const created = await page.request.post("/object-types", { data: {
+    id: objectTypeId,
+    display_name: displayName,
+    description: "Browser release acceptance type",
+    properties: { asset_id: { type: "string", required: true } }
+  } });
+  expect(created.ok()).toBeTruthy();
+
+  await page.goto("/workspace/ontology");
+  await page.locator(".manager-resource-nav .resource-row").filter({ hasText: displayName }).click();
+  await page.getByRole("button", { name: /^releases$/i }).click();
+  const studio = page.locator(".ontology-release-studio");
+  await expect(studio.getByRole("heading", { name: "Ontology Releases" })).toBeVisible();
+
+  await studio.getByRole("button", { name: "Capture current" }).click();
+  await expect(studio.getByRole("status")).toContainText("immutable draft revision");
+  const propertyName = `reviewedField${suffix}`;
+  await studio.getByLabel("Property API name").fill(propertyName);
+  await studio.getByLabel("Reason and description").fill("Browser acceptance evidence for a reviewed additive change.");
+  await studio.getByRole("button", { name: "Create change set" }).click();
+  await studio.getByRole("button", { name: new RegExp(`^Add ${propertyName}`) }).click();
+  await expect(studio.getByText("NON_BREAKING", { exact: true }).first()).toBeVisible();
+  await expect(studio.getByRole("heading", { name: "Semantic diff" })).toBeVisible();
+  await expect(studio.getByRole("heading", { name: "Migration plan" })).toBeVisible();
+
+  await studio.getByRole("button", { name: "Validate", exact: true }).click();
+  await expect(studio.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
+  await studio.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(studio.getByRole("button", { name: "Publish", exact: true })).toBeEnabled();
+  await expect(studio.locator(".ontology-revision-history .release-table-row").first()).toBeVisible();
+});
+
+test("ontology health center evaluates, remediates, and simulates policy", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ontology health workflow once on desktop.");
+  const suffix = Date.now();
+  const objectTypeId = `health_browser_asset_${suffix}`;
+  const displayName = `Health Browser Asset ${suffix}`;
+  const assetId = `health_browser_dataset_${suffix}`;
+  expect((await page.request.post("/object-types", { data: {
+    id: objectTypeId, display_name: displayName, description: "Browser health acceptance object",
+    properties: { assetId: { type: "string" }, name: { type: "string" } }
+  } })).ok()).toBeTruthy();
+  expect((await page.request.put(`/ontology/object-types/${objectTypeId}/profile`, { data: {
+    api_name: `HealthBrowserAsset${suffix}`, primary_key: "assetId", title_key: "name",
+    properties: { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true } }
+  } })).ok()).toBeTruthy();
+  expect((await page.request.post("/data-assets", { data: {
+    id: assetId, display_name: displayName, kind: "dataset", asset_schema: {}, records: [{ assetId: "HB-1", name: "Browser pump" }]
+  } })).ok()).toBeTruthy();
+  expect((await page.request.post("/objects", { data: {
+    id: `${objectTypeId}_1`, object_type_id: objectTypeId, source_asset_id: assetId,
+    properties: { assetId: "HB-1", name: "Browser pump" }
+  } })).ok()).toBeTruthy();
+
+  await page.goto("/workspace/ontology");
+  await page.locator(".manager-resource-nav .resource-row").filter({ hasText: displayName }).click();
+  await page.getByRole("button", { name: /^health center$/i }).click();
+  const center = page.locator(".ontology-health-center");
+  await expect(center.getByRole("heading", { name: "Ontology Health Center" })).toBeVisible();
+  await center.getByRole("button", { name: "Run health check" }).click();
+  await expect(center.getByRole("status")).toContainText("Health evaluation completed: WARN");
+  await expect(center.getByText("No configured object view", { exact: true })).toBeVisible();
+  await center.getByRole("button", { name: "Generate view" }).click();
+  await expect(center.getByRole("status")).toContainText("Standard object view generated and published");
+  await expect(center.getByText("No configured object view", { exact: true })).toHaveCount(0);
+  await center.getByRole("button", { name: "Simulate", exact: true }).click();
+  await expect(center.locator(".policy-decision-card")).toContainText("DENY");
+  await expect(center.locator(".policy-decision-card")).toContainText("Denied by policy rule");
+});
+
+test("ontology schema registry publishes a revision and downloads a typed client", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful schema registry workflow once on desktop.");
+  const suffix = Date.now();
+  const objectTypeId = `registry_browser_asset_${suffix}`;
+  const displayName = `Registry Browser Asset ${suffix}`;
+  expect((await page.request.post("/object-types", { data: {
+    id: objectTypeId, display_name: displayName, description: "Browser registry contract",
+    properties: { assetId: { type: "string" }, name: { type: "string" } }
+  } })).ok()).toBeTruthy();
+  expect((await page.request.put(`/ontology/object-types/${objectTypeId}/profile`, { data: {
+    api_name: `RegistryBrowserAsset${suffix}`, primary_key: "assetId", title_key: "name",
+    properties: { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true } }
+  } })).ok()).toBeTruthy();
+  const createdChange = await page.request.post("/ontology/change-sets", { data: {
+    project_id: "default", title: `Registry browser baseline ${suffix}`, changes: []
+  } });
+  expect(createdChange.ok()).toBeTruthy();
+  const change = await createdChange.json();
+  expect((await page.request.post(`/ontology/change-sets/${change.id}/validate`)).ok()).toBeTruthy();
+  expect((await page.request.post(`/ontology/change-sets/${change.id}/decision`, { data: { approve: true } })).ok()).toBeTruthy();
+  const publication = await page.request.post(`/ontology/change-sets/${change.id}/publish`, { data: { environment: "production" } });
+  expect(publication.ok()).toBeTruthy();
+  const published = await publication.json();
+  const revisionId = published.revision.id as string;
+  const version = `1.0.${suffix}`;
+
+  await page.goto("/workspace/ontology");
+  await page.locator(".manager-resource-nav .resource-row").filter({ hasText: displayName }).click();
+  await page.getByRole("button", { name: /^schema registry$/i }).click();
+  const registry = page.getByRole("region", { name: "Ontology schema registry" });
+  await expect(registry.getByRole("heading", { name: "Schema Registry" })).toBeVisible();
+  await registry.getByLabel("Published revision").selectOption(revisionId);
+  await registry.getByLabel("Semantic version").fill(version);
+  await registry.getByRole("button", { name: "Check compatibility" }).click();
+  await expect(registry.getByRole("status")).toContainText(/Compatibility result: (NON_BREAKING|NO_CHANGE)/);
+  await registry.getByRole("button", { name: "Publish registry" }).click();
+  await expect(registry.getByRole("status")).toContainText(`Published production registry version ${version}`);
+  await expect(registry.getByRole("button", { name: new RegExp(`${version} production`) })).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await registry.getByRole("button", { name: "TypeScript client" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("ontology.ts");
+});
+
 test("pipeline creates a graph and accepts a dragged node", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful pipeline workflow once on desktop.");
   await page.goto("/workspace/pipeline");
@@ -401,6 +565,49 @@ test("pipeline preview runs through durable worker evidence", async ({ page }, t
   await execution.getByText("Execution events").click();
   await expect(execution).toContainText("job.progress");
   await expect(page.locator(".workbench-status-strip")).toContainText(/preview succeeded/i);
+});
+
+test("pipeline ontology output previews and persists contract evidence", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ontology contract workflow once on desktop.");
+  const suffix = Date.now();
+  const assetId = `browser_contract_asset_${suffix}`;
+  const objectTypeId = `browser_contract_type_${suffix}`;
+  const graphId = `browser_contract_graph_${suffix}`;
+  const graphName = `Browser ontology contract ${suffix}`;
+  expect((await page.request.post("/data-assets", { data: {
+    id: assetId, display_name: graphName, kind: "dataset", asset_schema: {},
+    records: [{ asset_id: `BC-${suffix}-1`, name: "Valid asset" }, { asset_id: `BC-${suffix}-2`, name: null }]
+  } })).ok()).toBeTruthy();
+  expect((await page.request.post("/object-types", { data: {
+    id: objectTypeId, display_name: graphName, description: "Browser contract target",
+    properties: { assetId: { type: "string" }, name: { type: "string" } }
+  } })).ok()).toBeTruthy();
+  expect((await page.request.put(`/ontology/object-types/${objectTypeId}/profile`, { data: {
+    api_name: `BrowserContract${suffix}`, primary_key: "assetId", title_key: "name",
+    properties: { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true } }
+  } })).ok()).toBeTruthy();
+  expect((await page.request.post("/pipeline-builder/graphs", { data: {
+    id: graphId, display_name: graphName, nodes: [
+      { id: "input", type: "input_dataset", label: "Contract input", position: { x: 80, y: 120 }, config: { asset_id: assetId } },
+      { id: "ontology", type: "ontology_output", label: "Contract ontology output", position: { x: 390, y: 120 }, config: {
+        object_type_id: objectTypeId, primary_key: "asset_id",
+        property_mapping: { asset_id: "assetId", name: "name" }, write_mode: "upsert",
+        on_error: "quarantine", quarantine_asset_id: `${assetId}_quarantine`, source_asset_id: assetId
+      } }
+    ], edges: [{ source: "input", target: "ontology" }]
+  } })).ok()).toBeTruthy();
+
+  await page.goto("/workspace/pipeline");
+  await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+  await page.getByRole("button", { name: /Contract ontology output 2 rows ontology_output/ }).click();
+  const contract = page.getByRole("region", { name: "Ontology output contract" });
+  await expect(contract).toContainText("PARTIAL");
+  await expect(contract).toContainText("1 contract issue");
+  await expect(contract).toContainText("Required ontology property is missing");
+  await page.getByRole("button", { name: "Deploy", exact: true }).click();
+  await expect(page.locator(".pipeline-execution-state")).toContainText("SUCCEEDED");
+  await expect(page.getByRole("heading", { name: "Ontology Contracts" }).locator("xpath=.." )).toContainText("WARN");
+  await expect(page.getByRole("button", { name: new RegExp(`${objectTypeId} ontology PARTIAL`) })).toBeVisible();
 });
 
 test("AIP agent runtime exposes durable policy and citation evidence", async ({ page }, testInfo) => {

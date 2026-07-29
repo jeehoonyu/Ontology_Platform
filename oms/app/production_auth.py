@@ -214,6 +214,24 @@ def require_permission(permission: str):
     return dependency
 
 
+def require_detached_permission(permission: str):
+    """Authorize a long-lived response without retaining a pooled DB session."""
+    def dependency(request: Request) -> Principal:
+        db = SessionLocal()
+        try:
+            principal = resolve_principal(request, db)
+            if not principal:
+                raise HTTPException(status_code=401, detail="Authentication required")
+            if not principal.allows(permission):
+                raise HTTPException(status_code=403, detail=f"Permission '{permission}' is required")
+            db.commit()
+            return principal
+        finally:
+            db.close()
+
+    return dependency
+
+
 def _discovery() -> Dict[str, Any]:
     issuer = os.environ["OIDC_ISSUER"].rstrip("/")
     url = f"{issuer}/.well-known/openid-configuration"

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { LogIn, LogOut, Search, User } from "lucide-react";
+import { LogIn, LogOut, Menu, Search, User, X } from "lucide-react";
 import { api, postJson } from "./api";
 import {
   bootstrapProjectDemo,
@@ -159,6 +159,7 @@ export function App() {
   const jobSummary = useAsyncState<JobSummary>(getJobSummary, [runtimeRefresh]);
   const authSession = useAsyncState<AuthSession>(getAuthSession, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [recentViews, setRecentViews] = useState<string[]>(() => JSON.parse(localStorage.getItem("ontology.recentViews") || "[]"));
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -177,6 +178,7 @@ export function App() {
 
   function openView(nextView: string) {
     navigate(nextView);
+    setNavigationOpen(false);
     const nextRecent = [nextView, ...recentViews.filter((item) => item !== nextView)].slice(0, 5);
     setRecentViews(nextRecent);
     localStorage.setItem("ontology.recentViews", JSON.stringify(nextRecent));
@@ -184,7 +186,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={classNames("sidebar", navigationOpen && "navigation-open")}>
         <div className="brand">
           <span>OA</span>
           <div>
@@ -192,8 +194,18 @@ export function App() {
             <small>React evaluator shell</small>
           </div>
         </div>
-        <button className="command-palette-trigger" onClick={() => setPaletteOpen(true)}><Search size={16} /><span>Search and commands</span><kbd>Ctrl K</kbd></button>
-        <nav>
+        <button className="command-palette-trigger" aria-label="Search and commands" onClick={() => setPaletteOpen(true)}><Search size={16} /><span>Search and commands</span><kbd>Ctrl K</kbd></button>
+        <button
+          className="sidebar-toggle"
+          type="button"
+          aria-controls="primary-navigation"
+          aria-expanded={navigationOpen}
+          aria-label={navigationOpen ? "Close workspace navigation" : "Open workspace navigation"}
+          onClick={() => setNavigationOpen((open) => !open)}
+        >
+          {navigationOpen ? <X size={18} /> : <Menu size={18} />}
+        </button>
+        <nav id="primary-navigation" aria-label="Workspaces">
           {NAV_ITEMS.map((item) => (
             <button key={item.id} className={classNames("nav-item", view === item.id && "active")} onClick={() => openView(item.id)}>
               <strong>{item.label}</strong>

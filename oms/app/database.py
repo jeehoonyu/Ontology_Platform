@@ -4,12 +4,16 @@ import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./oms.db")
 
-_sqlite = "sqlite" in DATABASE_URL
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 30} if _sqlite else {},
-    pool_pre_ping=True,
-)
+_sqlite = DATABASE_URL.startswith("sqlite")
+_engine_options = {
+    "connect_args": {"check_same_thread": False, "timeout": 30} if _sqlite else {},
+    "pool_pre_ping": True,
+    "pool_size": int(os.getenv("DATABASE_POOL_SIZE", "25")),
+    "max_overflow": int(os.getenv("DATABASE_MAX_OVERFLOW", "25")),
+    "pool_timeout": int(os.getenv("DATABASE_POOL_TIMEOUT_SECONDS", "30")),
+}
+
+engine = create_engine(DATABASE_URL, **_engine_options)
 
 
 if _sqlite:

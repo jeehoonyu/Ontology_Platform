@@ -11,13 +11,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import models_action, ops_control, tenancy
-from .database import Base, get_db
-from .production_auth import Principal, require_permission
+from .database import Base, SessionLocal, get_db
+from .production_auth import Principal, require_detached_permission, require_permission
 
 router = APIRouter(tags=["platform_runtime"])
 
@@ -28,6 +28,26 @@ def _now() -> int:
 
 def _id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
+
+
+def _locked_artifact_for(
+    db: Session,
+    artifact_id: str,
+    principal: Principal,
+    permission: str,
+) -> "PlatformArtifact":
+    """Authorize and lock an artifact before allocating a new revision."""
+    _artifact_for(db, artifact_id, principal, permission)
+    if db.get_bind().dialect.name == "sqlite":
+        # SQLite ignores SELECT FOR UPDATE. BEGIN IMMEDIATE serializes local
+        # writers so autosave and explicit save cannot allocate one revision.
+        db.rollback()
+        db.execute(text("BEGIN IMMEDIATE"))
+        return _artifact_for(db, artifact_id, principal, permission)
+    row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
+    return row
 
 
 class PlatformArtifact(Base):
@@ -1173,7 +1193,7 @@ def get_artifact(artifact_id: str, principal: Principal = Depends(require_permis
 
 @router.patch("/artifacts/{artifact_id}")
 def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
-    row = _artifact_for(db, artifact_id, principal, "edit")
+    row = _locked_artifact_for(db, artifact_id, principal, "edit")
     if body.expected_lock_version != row.lock_version:
         raise HTTPException(status_code=409, detail={"message": "Artifact changed since it was loaded", "current_lock_version": row.lock_version})
     _assert_lease(db, artifact_id, principal.id, body.lease_token)
@@ -1204,10 +1224,7 @@ def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal 
 
 @router.post("/artifacts/{artifact_id}/commands")
 def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
-    _artifact_for(db, artifact_id, principal, "edit")
-    row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
+    row = _locked_artifact_for(db, artifact_id, principal, "edit")
     request_hash = _command_request_hash(body.commands)
     prior = _find_command_receipt(db, row, "builder", body.idempotency_key, request_hash)
     if prior:
@@ -1315,7 +1332,7 @@ def preview_artifact(artifact_id: str, body: ArtifactPreviewRequest, principal: 
 
 @router.post("/artifacts/{artifact_id}/validate")
 def validate_artifact(artifact_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    row = _artifact_for(db, artifact_id, principal, "view")
+    row = _locked_artifact_for(db, artifact_id, principal, "view")
     revision = _revision(db, artifact_id, row.current_revision)
     revision.validation = _validate_state(row.artifact_type, revision.state or {})
     db.commit()
@@ -1324,7 +1341,7 @@ def validate_artifact(artifact_id: str, principal: Principal = Depends(require_p
 
 @router.post("/artifacts/{artifact_id}/publish")
 def publish_artifact(artifact_id: str, body: PublishRequest, principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
-    row = _artifact_for(db, artifact_id, principal, "publish")
+    row = _locked_artifact_for(db, artifact_id, principal, "publish")
     if body.expected_lock_version is not None and body.expected_lock_version != row.lock_version:
         raise HTTPException(status_code=409, detail={"message": "Artifact changed since it was loaded", "current_lock_version": row.lock_version})
     revision = _revision(db, artifact_id, row.current_revision)
@@ -1367,7 +1384,7 @@ def artifact_diff(artifact_id: str, from_revision: int = Query(...), to_revision
 
 @router.post("/artifacts/{artifact_id}/versions/{version}/restore")
 def restore_artifact(artifact_id: str, version: int, principal: Principal = Depends(require_permission("restore")), db: Session = Depends(get_db)):
-    row = _artifact_for(db, artifact_id, principal, "restore")
+    row = _locked_artifact_for(db, artifact_id, principal, "restore")
     source = _revision(db, artifact_id, version)
     row.current_revision += 1
     row.lock_version += 1
@@ -1563,11 +1580,8 @@ def apply_collaborative_commands(
     principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
-    _artifact_for(db, artifact_id, principal, "edit")
+    row = _locked_artifact_for(db, artifact_id, principal, "edit")
     participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
-    row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
     request_hash = _command_request_hash(body.commands)
     prior = _find_command_receipt(db, row, "collaboration", body.idempotency_key, request_hash)
     if prior:
@@ -1697,9 +1711,9 @@ async def stream_artifact_collaboration_events(
     after: int = 0,
     once: bool = False,
     last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
-    principal: Principal = Depends(require_permission("view")),
+    principal: Principal = Depends(require_detached_permission("view")),
 ):
-    db = next(get_db())
+    db = SessionLocal()
     try:
         _artifact_for(db, artifact_id, principal, "view")
     finally:
@@ -1716,18 +1730,26 @@ async def stream_artifact_collaboration_events(
         cursor = resume_cursor
         idle_cycles = 0
         while True:
-            event_db = next(get_db())
+            event_db = SessionLocal()
             try:
                 events = event_db.query(ArtifactCollaborationEvent).filter(
                     ArtifactCollaborationEvent.artifact_id == artifact_id,
                     ArtifactCollaborationEvent.id > cursor,
                 ).order_by(ArtifactCollaborationEvent.id).limit(100).all()
-                for event in events:
-                    cursor = event.id
-                    yield f"id: {event.id}\nevent: {event.event_type}\ndata: {json.dumps(_event_dict(event), separators=(',', ':'))}\n\n"
-                idle_cycles = 0 if events else idle_cycles + 1
+                serialized_events = [
+                    (
+                        event.id,
+                        event.event_type,
+                        json.dumps(_event_dict(event), separators=(",", ":")),
+                    )
+                    for event in events
+                ]
             finally:
                 event_db.close()
+            for event_id, event_type, event_data in serialized_events:
+                cursor = event_id
+                yield f"id: {event_id}\nevent: {event_type}\ndata: {event_data}\n\n"
+            idle_cycles = 0 if serialized_events else idle_cycles + 1
             if once or await request.is_disconnected():
                 break
             if idle_cycles >= 10:
@@ -2181,13 +2203,17 @@ def retry_job(job_id: str, principal: Principal = Depends(require_permission("ex
 
 
 @router.get("/events/stream")
-async def event_stream(request: Request, after: int = 0, job_id: Optional[str] = None, once: bool = False, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    allowed_projects = tenancy.accessible_project_ids(db, principal)
+async def event_stream(request: Request, after: int = 0, job_id: Optional[str] = None, once: bool = False, principal: Principal = Depends(require_detached_permission("view"))):
+    scope_db = SessionLocal()
+    try:
+        allowed_projects = tenancy.accessible_project_ids(scope_db, principal)
+    finally:
+        scope_db.close()
     async def generate():
         cursor = after
         idle_cycles = 0
         while True:
-            db = next(get_db())
+            db = SessionLocal()
             try:
                 query = db.query(PlatformJobEvent).filter(PlatformJobEvent.id > cursor)
                 if job_id:
@@ -2196,12 +2222,19 @@ async def event_stream(request: Request, after: int = 0, job_id: Optional[str] =
                 elif allowed_projects is not None:
                     query = query.join(PlatformJob, PlatformJob.id == PlatformJobEvent.job_id).filter(PlatformJob.project_id.in_(allowed_projects))
                 events = query.order_by(PlatformJobEvent.id).limit(100).all()
-                for event in events:
-                    cursor = event.id
-                    data = json_dumps({"id": event.id, "job_id": event.job_id, "event_type": event.event_type, "status": event.status, "payload": event.payload, "created_at": event.created_at})
-                    yield f"id: {event.id}\nevent: {event.event_type}\ndata: {data}\n\n"
+                serialized_events = [
+                    (
+                        event.id,
+                        event.event_type,
+                        json_dumps({"id": event.id, "job_id": event.job_id, "event_type": event.event_type, "status": event.status, "payload": event.payload, "created_at": event.created_at}),
+                    )
+                    for event in events
+                ]
             finally:
                 db.close()
+            for event_id, event_type, event_data in serialized_events:
+                cursor = event_id
+                yield f"id: {event_id}\nevent: {event_type}\ndata: {event_data}\n\n"
             if once:
                 break
             if await request.is_disconnected():

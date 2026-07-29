@@ -31,6 +31,9 @@ import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
 import { navigate } from "../utils/navigation";
 import { OntologyPackagePanel } from "./OntologyPackagePanel";
+import { OntologyReleasePanel } from "./OntologyReleasePanel";
+import { OntologyHealthPanel } from "./OntologyHealthPanel";
+import { OntologyRegistryPanel } from "./OntologyRegistryPanel";
 import type {
   JsonObject,
   OntologyFieldMapping,
@@ -92,6 +95,10 @@ export function OntologyManager() {
 
   useEffect(() => {
     if (!selectedId) return;
+    if (["releases", "health_center", "schema_registry"].includes(selectedSection)) {
+      setSectionState(null);
+      return;
+    }
     let cancelled = false;
     getOntologySection(selectedId, selectedSection)
       .then((nextSection) => !cancelled && setSectionState(nextSection))
@@ -100,6 +107,11 @@ export function OntologyManager() {
       cancelled = true;
     };
   }, [selectedId, selectedSection, refreshKey]);
+
+  useEffect(() => {
+    const workspace = document.querySelector<HTMLElement>(".workspace");
+    workspace?.scrollTo({ top: 0, behavior: "auto" });
+  }, [selectedId, selectedSection]);
 
   async function createDraft() {
     if (!assetId) return;
@@ -168,7 +180,7 @@ export function OntologyManager() {
   }
 
   return (
-    <section className="workbench-page ontology-workbench-page">
+    <section className={classNames("workbench-page ontology-workbench-page", ["releases", "health_center", "schema_registry"].includes(selectedSection) && "release-mode")}>
       <header className="manager-topbar">
         <div>
           <strong>Ontology Manager</strong>
@@ -196,7 +208,7 @@ export function OntologyManager() {
             ))}
           </Panel>
           <Panel title="Resource Navigation">
-            {(manager?.navigation || []).map((item) => (
+            {Array.from(new Set([...(manager?.navigation || []), "health_center", "releases", "schema_registry"])).map((item) => (
               <button key={item} className={classNames("resource-row", selectedSection === item && "selected")} onClick={() => setSelectedSection(item)}>
                 <strong>{item.replace(/_/g, " ")}</strong>
               </button>
@@ -219,7 +231,13 @@ export function OntologyManager() {
           <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} />
         </aside>
         <section className="manager-surface">
-          {manager ? (
+          {manager && selectedSection === "releases" ? (
+            <OntologyReleasePanel objectTypeId={manager.object_type.id} onBack={() => setSelectedSection("overview")} />
+          ) : manager && selectedSection === "health_center" ? (
+            <OntologyHealthPanel objectTypeId={manager.object_type.id} onBack={() => setSelectedSection("overview")} />
+          ) : manager && selectedSection === "schema_registry" ? (
+            <OntologyRegistryPanel onBack={() => setSelectedSection("overview")} />
+          ) : manager ? (
             <ManagerSurface
               manager={manager}
               objectTypes={state.value?.object_types || []}

@@ -919,14 +919,16 @@ function RecoverySection() {
     try {
       const exported = await admin.exportPortableSnapshot();
       setSnapshot(exported);
-      setValidation(await admin.validatePortableSnapshot(exported));
       const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = href;
       link.download = `ontology-platform-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(href);
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+      setValidation(await admin.validatePortableSnapshot(exported));
       setError("");
     } catch (err) {
       setError(errorMessage(err));
