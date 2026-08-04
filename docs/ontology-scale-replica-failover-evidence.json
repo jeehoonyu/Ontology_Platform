@@ -1,0 +1,32 @@
+{
+  "basebackup_seconds": 55.437,
+  "committed_lsn": "17/6801D708",
+  "committed_probe_id": "replica_probe_ad7ee03fa14f453d9979d955ef203ba0",
+  "committed_probe_preserved": true,
+  "failover_promotion_seconds": 0.686,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "promoted_out_of_recovery": true,
+  "promoted_state": {
+    "links": 50000000,
+    "migration": "0031_artifact_review_workflows",
+    "mixed_events": 200000,
+    "objects": 10000000
+  },
+  "replayed_lsn": "17/6801D708",
+  "replication_mode": "postgresql_physical_streaming",
+  "replication_network_cidr": "172.22.0.0/16",
+  "replication_replay_seconds": 0.015,
+  "rpo_limit_seconds": 300.0,
+  "rto_limit_seconds": 1800.0,
+  "source_state": {
+    "links": 50000000,
+    "migration": "0031_artifact_review_workflows",
+    "mixed_events": 200000,
+    "objects": 10000000
+  },
+  "status": "PASS"
+}

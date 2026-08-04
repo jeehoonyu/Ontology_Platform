@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models_action import AuditLog  # noqa: E402
-from app.platform_runtime import ArtifactCollaborationParticipant, ArtifactCommandReceipt, PlatformArtifact  # noqa: E402
+from app.platform_runtime import ArtifactCollaborationParticipant, ArtifactCommandReceipt, ArtifactRevision, PlatformArtifact  # noqa: E402
 
 client = TestClient(app)
 passed = 0
@@ -213,6 +213,26 @@ invalid_resume = client.get(
 assert invalid_resume.status_code == 400, invalid_resume.text
 passed += 1
 
+with client.websocket_connect(
+    f"/artifacts/collaborative_pipeline/collaboration/ws?after={latest_event_id}"
+) as websocket:
+    ready = websocket.receive_json()
+    assert ready["type"] == "connection.ready" and ready["cursor"] == latest_event_id, ready
+    heartbeat_response = client.post("/artifacts/collaborative_pipeline/collaboration/heartbeat", json={
+        "participant_token": token_b,
+        "cursor": {"x": 360, "y": 220},
+        "selection": ["node-b"],
+    })
+    assert heartbeat_response.status_code == 200, heartbeat_response.text
+    websocket_event = websocket.receive_json()
+    assert websocket_event["type"] == "event", websocket_event
+    assert websocket_event["cursor"] > latest_event_id, websocket_event
+    assert websocket_event["event"]["event_type"] == "presence.updated", websocket_event
+    websocket.send_json({"type": "ping"})
+    pong = websocket.receive_json()
+    assert pong["type"] == "pong" and pong["cursor"] == websocket_event["cursor"], pong
+passed += 1
+
 ok(client.post("/artifacts/collaborative_pipeline/collaboration/leave", json={
     "participant_token": token_a,
 }), "leave collaboration room")
@@ -226,6 +246,71 @@ assert expired_room["participants"] == [], expired_room
 with SessionLocal() as db:
     audits = db.query(AuditLog).filter(AuditLog.event_type == "artifact.collaboration.commands_applied").all()
     assert len(audits) == 109 and all((audit.payload or {}).get("participant_id") for audit in audits), len(audits)
+passed += 1
+
+# Repeated race on an isolated artifact. Committing expires the artifact row, so
+# a response built from a post-commit re-read reports whichever writer committed
+# last: both concurrent writers can then be told they produced the same revision
+# and the same state. Each writer must describe the revision it allocated, which
+# its own receipt records. A single round observes the interleaving only
+# occasionally, and this artifact is separate so repeated edits do not perturb
+# the event-cursor and receipt expectations above.
+race_artifact = ok(client.post("/artifacts", json={
+    "id": "collaborative_race",
+    "artifact_type": "pipeline",
+    "display_name": "Collaborative race",
+    "state": {
+        "nodes": [
+            {"id": "node-a", "position": {"x": 100, "y": 100}, "data": {"label": "Node A", "nodeType": "filter"}},
+            {"id": "node-b", "position": {"x": 360, "y": 100}, "data": {"label": "Node B", "nodeType": "select"}},
+        ],
+        "edges": [],
+    },
+}), "create race artifact", 201)
+race_token_a = ok(client.post("/artifacts/collaborative_race/collaboration/join", json={
+    "client_id": "race-client-a",
+}), "join first race collaborator")["participant_token"]
+race_token_b = ok(client.post("/artifacts/collaborative_race/collaboration/join", json={
+    "client_id": "race-client-b",
+}), "join second race collaborator")["participant_token"]
+race_lock_version = race_artifact["lock_version"]
+
+
+def race_move(index, base, round_id):
+    node_id = "node-a" if index == 0 else "node-b"
+    return client.post("/artifacts/collaborative_race/collaboration/commands", json={
+        "participant_token": race_token_a if index == 0 else race_token_b,
+        "expected_lock_version": base,
+        "idempotency_key": f"race-edit-{round_id}-{index}",
+        "commands": [{
+            "command_id": f"race-command-{round_id}-{index}",
+            "command": "move_nodes",
+            "payload": {"positions": {node_id: {"x": 500 + index * 100, "y": 300 + round_id}}},
+        }],
+    })
+
+
+for race_round in range(120):
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        race_results = list(pool.map(
+            lambda index: race_move(index, race_lock_version, race_round), range(2),
+        ))
+    assert all(response.status_code == 200 for response in race_results), [response.text for response in race_results]
+    race_payloads = [response.json() for response in race_results]
+    assert sorted(item["current_revision"] for item in race_payloads) == [
+        race_lock_version + 1, race_lock_version + 2,
+    ], (race_round, race_lock_version, race_payloads)
+    for item in race_payloads:
+        assert item["current_revision"] == item["collaboration_receipt"]["revision"], (race_round, item)
+        assert item["lock_version"] == item["collaboration_receipt"]["lock_version"], (race_round, item)
+    race_lock_version = max(item["lock_version"] for item in race_payloads)
+with SessionLocal() as db:
+    race_revisions = [
+        row.revision for row in db.query(ArtifactRevision).filter(
+            ArtifactRevision.artifact_id == "collaborative_race",
+        ).all()
+    ]
+assert len(race_revisions) == len(set(race_revisions)) == 241, sorted(race_revisions)
 passed += 1
 
 print(f"\nArtifact collaboration verified: {passed} assertions passed.")

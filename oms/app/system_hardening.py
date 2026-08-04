@@ -8,8 +8,10 @@ deliberately small and deterministic so they work with SQLite or Postgres.
 from __future__ import annotations
 
 import copy
+import base64
 import hashlib
 import json
+import os
 import threading
 import time
 import uuid
@@ -29,26 +31,33 @@ from . import (
     connectivity,
     connectivity_ops,
     connector_runtime,
+    data_plane,
+    decision_intelligence,
+    event_outbox,
     imports_ops,
     ingestion_runtime,
     investigations,
     modeling,
     modeling_evaluation_ops,
     modelops,
+    model_gateway,
     models,
     models_action,
     object_explorer_ops,
     ontology_health,
     ontology_packages,
     ontology_registry,
+    ontology_runtime_v1,
     ontology_versioning,
     ops_control,
     platform_core,
     pipeline_builder_ops,
     platform_runtime,
+    plugin_runtime,
     runtime_observability,
     schedules,
     streaming,
+    stream_processing,
     tenancy,
     webhooks_ops,
     worker_control,
@@ -113,9 +122,31 @@ CORE_TABLES = [
     "ontology_environments",
     "ontology_health_runs",
     "ontology_registry_entries",
+    "plugin_trust_keys",
+    "plugin_versions",
+    "plugin_executions",
+    "ontology_property_definitions",
+    "ontology_resource_definitions",
+    "object_change_events",
+    "data_asset_snapshots",
+    "pipeline_execution_plans",
+    "model_gateway_providers",
+    "model_gateway_runs",
+    "decision_rules",
+    "decision_scorecards",
+    "decision_runs",
+    "object_snapshots",
+    "entity_resolution_jobs",
+    "entity_candidates",
+    "decision_scenarios",
     "approval_requests",
     "audit_logs",
     "ops_events",
+    "event_outbox",
+    "platform_event_log",
+    "event_transport_receipts",
+    "event_stream_bindings",
+    "event_stream_receipts",
     "ops_alert_rules",
     "ops_alert_events",
     "ops_runbooks",
@@ -134,6 +165,8 @@ CORE_TABLES = [
     "platform_artifact_collaborators",
     "platform_artifact_collaboration_events",
     "platform_artifact_command_receipts",
+    "platform_artifact_review_comments",
+    "platform_artifact_change_proposals",
     "platform_organizations",
     "platform_projects",
     "platform_project_memberships",
@@ -160,6 +193,14 @@ CORE_TABLES = [
     "sync_cursor_state",
     "streams",
     "stream_records",
+    "stream_processors",
+    "stream_partition_states",
+    "stream_window_states",
+    "stream_processing_receipts",
+    "stream_join_inputs",
+    "stream_join_receipts",
+    "stream_quarantine_records",
+    "stream_processing_runs",
     "schedules",
     "builds",
     "wh_listeners",
@@ -194,7 +235,7 @@ CORE_TABLES = [
     "investigation_reports",
 ]
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 32
 MIGRATIONS = [
     {"version": 1, "name": "core_local_foundry_runtime", "status": "applied"},
     {"version": 2, "name": "productized_imports_validation_snapshot_runtime", "status": "applied"},
@@ -220,6 +261,14 @@ MIGRATIONS = [
     {"version": 22, "name": "project_scoped_modelops_lifecycle", "status": "applied"},
     {"version": 23, "name": "project_scoped_semantic_data_plane", "status": "applied"},
     {"version": 24, "name": "project_scoped_operational_control_plane", "status": "applied"},
+    {"version": 25, "name": "ontologyos_semantic_temporal_data_plane", "status": "applied"},
+    {"version": 26, "name": "transactional_operational_event_outbox", "status": "applied"},
+    {"version": 27, "name": "durable_external_event_transport_receipts", "status": "applied"},
+    {"version": 28, "name": "durable_event_time_stream_processing", "status": "applied"},
+    {"version": 29, "name": "artifact_comments_and_reviewed_change_proposals", "status": "applied"},
+    {"version": 30, "name": "signed_sandboxed_plugin_runtime", "status": "applied"},
+    {"version": 31, "name": "durable_isolated_plugin_execution", "status": "applied"},
+    {"version": 32, "name": "project_scoped_decision_intelligence", "status": "applied"},
 ]
 
 
@@ -363,6 +412,39 @@ def _validate_portable_snapshot(snapshot: Dict[str, Any], *, allow_legacy: bool 
     }
 
 
+def _validate_plugin_snapshot(snapshot: Dict[str, Any]) -> List[str]:
+    """Re-establish plugin signatures and bundle integrity at restore boundary."""
+    errors: List[str] = []
+    keys = {str(row.get("id")): row for row in snapshot.get("plugin_trust_keys") or [] if row.get("id")}
+    for row in snapshot.get("plugin_versions") or []:
+        label = f"{row.get('plugin_id', 'unknown')}@{row.get('version', 'unknown')}"
+        key = keys.get(str(row.get("signer_key_id") or ""))
+        if not key:
+            errors.append(f"Plugin {label} has no included trust key")
+            continue
+        try:
+            raw = base64.b64decode(str(row.get("bundle_base64") or ""), validate=True)
+            bundle_hash = hashlib.sha256(raw).hexdigest()
+            if bundle_hash != row.get("bundle_sha256"):
+                raise ValueError("bundle digest differs")
+            manifest = row.get("manifest") or {}
+            manifest_bytes = plugin_runtime.canonical_manifest(manifest)
+            if hashlib.sha256(manifest_bytes).hexdigest() != row.get("manifest_sha256"):
+                raise ValueError("manifest digest differs")
+            parsed = plugin_runtime._validate_manifest(manifest, bundle_hash)
+            plugin_runtime._validate_zip(raw, parsed["entrypoint"])
+            plugin_runtime.Ed25519PublicKey.from_public_bytes(
+                plugin_runtime._decode_public_key(str(key.get("public_key") or ""))
+            ).verify(
+                plugin_runtime._decode_signature(str(row.get("signature") or "")),
+                manifest_bytes,
+            )
+        except Exception as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            errors.append(f"Plugin {label} failed restore verification: {detail}")
+    return errors
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -394,6 +476,14 @@ def _ensure_runtime_tables(db: Session) -> None:
             connectivity_ops.SyncCursorState.__table__,
             streaming.Stream.__table__,
             streaming.StreamRecord.__table__,
+            stream_processing.StreamProcessor.__table__,
+            stream_processing.StreamPartitionState.__table__,
+            stream_processing.StreamWindowState.__table__,
+            stream_processing.StreamProcessingReceipt.__table__,
+            stream_processing.StreamJoinInput.__table__,
+            stream_processing.StreamJoinReceipt.__table__,
+            stream_processing.StreamQuarantineRecord.__table__,
+            stream_processing.StreamProcessingRun.__table__,
             schedules.Schedule.__table__,
             schedules.Build.__table__,
             webhooks_ops.WhListener.__table__,
@@ -416,11 +506,37 @@ def _ensure_runtime_tables(db: Session) -> None:
             worker_control.RuntimeQueuePolicy.__table__,
             connector_runtime.ConnectorCredential.__table__,
             connector_runtime.ConnectorFetchAttempt.__table__,
+            ontology_runtime_v1.OntologyPropertyDefinition.__table__,
+            ontology_runtime_v1.OntologyResourceDefinition.__table__,
+            ontology_runtime_v1.ObjectChangeEvent.__table__,
+            data_plane.DataAssetSnapshot.__table__,
+            data_plane.PipelineExecutionPlan.__table__,
+            decision_intelligence.DecisionRule.__table__,
+            decision_intelligence.DecisionScorecard.__table__,
+            decision_intelligence.DecisionRun.__table__,
+            decision_intelligence.ObjectSnapshot.__table__,
+            decision_intelligence.EntityResolutionJob.__table__,
+            decision_intelligence.EntityCandidate.__table__,
+            decision_intelligence.DecisionScenario.__table__,
+            model_gateway.ModelGatewayProvider.__table__,
+            model_gateway.ModelGatewayRun.__table__,
+            event_outbox.EventOutbox.__table__,
+            event_outbox.PlatformEventLog.__table__,
+            event_outbox.EventTransportReceipt.__table__,
+            event_outbox.EventStreamBinding.__table__,
+            event_outbox.EventStreamReceipt.__table__,
+            platform_runtime.ArtifactReviewComment.__table__,
+            platform_runtime.ArtifactChangeProposal.__table__,
+            plugin_runtime.PluginTrustKey.__table__,
+            plugin_runtime.PluginVersion.__table__,
+            plugin_runtime.PluginExecution.__table__,
         ):
             table.create(bind=bind, checkfirst=True)
         _ensure_column(db, "streams", "archive_policy", "JSON")
+        _ensure_column(db, "streams", "next_sequence", "INTEGER DEFAULT 0 NOT NULL")
         _ensure_column(db, "stream_records", "archived", "BOOLEAN DEFAULT 0")
         _ensure_column(db, "stream_records", "archived_at", "INTEGER")
+        _ensure_column(db, "stream_records", "sequence", "INTEGER DEFAULT 0")
         for table_name in ("platform_jobs", "connection_sources", "connection_syncs", "connection_exports", "streams"):
             _ensure_column(db, table_name, "project_id", "VARCHAR DEFAULT 'default' NOT NULL")
         _RUNTIME_SCHEMA_READY_ENGINES.add(bind)
@@ -477,6 +593,19 @@ def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_
 
 def _row_dict(row: Any, fields: List[str]) -> Dict[str, Any]:
     return {field: getattr(row, field) for field in fields}
+
+
+def _plugin_version_snapshot(row: plugin_runtime.PluginVersion) -> Dict[str, Any]:
+    source = Path(row.bundle_path)
+    if not source.is_file():
+        raise HTTPException(status_code=409, detail=f"Plugin bundle '{row.plugin_id}@{row.version}' is missing")
+    raw = source.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != row.bundle_sha256:
+        raise HTTPException(status_code=409, detail=f"Plugin bundle '{row.plugin_id}@{row.version}' failed export integrity verification")
+    return {
+        **_row_dict(row, ["id", "project_id", "plugin_id", "version", "kind", "runtime", "entrypoint", "manifest", "manifest_sha256", "bundle_sha256", "signature", "signer_key_id", "capabilities", "operations", "status", "created_by", "created_at", "activated_at", "revoked_at"]),
+        "bundle_base64": base64.b64encode(raw).decode("ascii"),
+    }
 
 
 def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> Dict[str, Any]:
@@ -540,6 +669,34 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             _row_dict(row, ["id", "project_id", "target", "total", "passed", "pass_rate", "results", "created_at"])
             for row in db.query(aip_evals.AipEvalRun).all()
         ],
+        "decision_rules": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "expression", "output_property", "severity", "recommended_actions", "active", "created_at", "updated_at"])
+            for row in db.query(decision_intelligence.DecisionRule).all()
+        ],
+        "decision_scorecards": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "features", "thresholds", "recommended_actions", "active", "created_at", "updated_at"])
+            for row in db.query(decision_intelligence.DecisionScorecard).all()
+        ],
+        "decision_runs": [
+            _row_dict(row, ["id", "project_id", "scope", "status", "object_count", "findings", "created_at", "completed_at"])
+            for row in db.query(decision_intelligence.DecisionRun).all()
+        ],
+        "object_snapshots": [
+            _row_dict(row, ["id", "project_id", "object_id", "object_type_id", "properties", "lineage", "event_type", "actor", "source_type", "source_id", "created_at", "seq"])
+            for row in db.query(decision_intelligence.ObjectSnapshot).all()
+        ],
+        "entity_resolution_jobs": [
+            _row_dict(row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count"])
+            for row in db.query(decision_intelligence.EntityResolutionJob).all()
+        ],
+        "entity_candidates": [
+            _row_dict(row, ["id", "project_id", "job_id", "object_type_id", "object_ids", "score", "reasons", "status", "merged_object_id", "created_at", "decided_at"])
+            for row in db.query(decision_intelligence.EntityCandidate).all()
+        ],
+        "decision_scenarios": [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "seed_object_ids", "overrides", "propagation_rules", "baseline", "scenario_output", "impact", "created_at", "updated_at"])
+            for row in db.query(decision_intelligence.DecisionScenario).all()
+        ],
         "object_instances": [
             _row_dict(row, ["id", "project_id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
             for row in db.query(models.ObjectInstance).all()
@@ -599,6 +756,49 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         "ontology_registry_entries": [
             _row_dict(row, ["id", "project_id", "channel", "version", "revision_id", "revision_number", "status", "manifest", "contract_schema", "compatibility", "checksum", "published_by", "created_at"])
             for row in db.query(ontology_registry.OntologyRegistryEntry).all()
+        ],
+        "ontology_property_definitions": [
+            _row_dict(row, ["id", "project_id", "object_type_id", "property_name", "display_name", "base_type", "required", "primary_key", "title_key", "indexed", "position", "status", "definition", "ontology_revision_id", "created_at", "updated_at"])
+            for row in db.query(ontology_runtime_v1.OntologyPropertyDefinition).all()
+        ],
+        "ontology_resource_definitions": [
+            _row_dict(row, ["id", "project_id", "resource_kind", "resource_id", "object_type_id", "display_name", "status", "version", "definition", "ontology_revision_id", "created_at", "updated_at"])
+            for row in db.query(ontology_runtime_v1.OntologyResourceDefinition).all()
+        ],
+        "object_change_events": [
+            _row_dict(row, ["id", "project_id", "object_type_id", "object_id", "object_version", "event_type", "actor", "source_type", "source_id", "before_state", "after_state", "changed_fields", "evidence", "ontology_revision_id", "valid_from", "valid_to", "transaction_time"])
+            for row in db.query(ontology_runtime_v1.ObjectChangeEvent).all()
+        ],
+        "data_asset_snapshots": [
+            _row_dict(row, ["id", "project_id", "asset_id", "snapshot_number", "status", "storage_format", "storage_uri", "content_hash", "row_count", "byte_size", "schema", "partition_spec", "lineage", "created_by", "created_at"])
+            for row in db.query(data_plane.DataAssetSnapshot).all()
+        ],
+        "pipeline_execution_plans": [
+            _row_dict(row, ["id", "project_id", "graph_id", "graph_updated_at", "status", "executor", "plan_hash", "logical_plan", "input_schema", "output_schema", "field_lineage", "validation", "created_by", "created_at"])
+            for row in db.query(data_plane.PipelineExecutionPlan).all()
+        ],
+        "model_gateway_providers": [
+            _row_dict(row, ["id", "project_id", "display_name", "provider_type", "base_url", "secret_ref", "allowed_models", "policy", "configuration", "status", "created_at", "updated_at"])
+            for row in db.query(model_gateway.ModelGatewayProvider).all()
+        ],
+        "model_gateway_runs": [
+            _row_dict(row, ["id", "project_id", "provider_id", "model_name", "status", "request_hash", "idempotency_key", "input_summary", "output", "usage", "policy_decision", "trace", "evidence", "error", "created_by", "created_at", "completed_at"])
+            for row in db.query(model_gateway.ModelGatewayRun).all()
+        ],
+        "plugin_trust_keys": [
+            _row_dict(row, ["id", "organization_id", "display_name", "algorithm", "public_key", "fingerprint", "status", "created_by", "created_at", "revoked_at"])
+            for row in db.query(plugin_runtime.PluginTrustKey).all()
+        ],
+        "plugin_versions": [
+            _plugin_version_snapshot(row)
+            for row in (
+                db.query(plugin_runtime.PluginVersion).filter(plugin_runtime.PluginVersion.project_id == project_id).all()
+                if project_id else db.query(plugin_runtime.PluginVersion).all()
+            )
+        ],
+        "plugin_executions": [
+            _row_dict(row, ["id", "job_id", "project_id", "plugin_version_id", "plugin_id", "operation", "status", "request_hash", "idempotency_key", "input_summary", "output", "evidence", "sandbox", "exit_code", "duration_ms", "error", "actor", "created_at", "completed_at"])
+            for row in db.query(plugin_runtime.PluginExecution).all()
         ],
         "import_jobs": [
             imports_ops._job_dict(row, include_records=True)
@@ -673,12 +873,67 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             for row in db.query(connectivity_ops.SyncCursorState).all()
         ],
         "streams": [
-            _row_dict(row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"])
+            _row_dict(row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "next_sequence", "created_at"])
             for row in db.query(streaming.Stream).all()
         ],
         "stream_records": [
-            _row_dict(row, ["id", "stream_id", "payload", "ts", "archived", "archived_at", "created_at"])
+            _row_dict(row, ["id", "stream_id", "sequence", "payload", "ts", "archived", "archived_at", "created_at"])
             for row in db.query(streaming.StreamRecord).all()
+        ],
+        "stream_processors": [
+            _row_dict(row, [
+                "id", "project_id", "stream_id", "display_name", "timestamp_field",
+                "partition_key_field", "allowed_lateness_seconds", "late_policy",
+                "window_size_seconds", "value_field", "aggregation", "target_asset_id",
+                "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds",
+                "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
+                "created_by", "created_at", "updated_at",
+            ]) for row in db.query(stream_processing.StreamProcessor).all()
+        ],
+        "stream_partition_states": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "partition_key", "max_event_time",
+                "watermark", "processed_count", "late_count", "quarantined_count", "updated_at",
+            ]) for row in db.query(stream_processing.StreamPartitionState).all()
+        ],
+        "stream_window_states": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "partition_key", "window_start", "window_end",
+                "count", "numeric_count", "value_sum", "value_min", "value_max", "status",
+                "emitted_at", "updated_at",
+            ]) for row in db.query(stream_processing.StreamWindowState).all()
+        ],
+        "stream_processing_receipts": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
+                "status", "reason", "run_id", "created_at",
+            ]) for row in db.query(stream_processing.StreamProcessingReceipt).all()
+        ],
+        "stream_join_inputs": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "stream_id", "side",
+                "join_key", "event_time", "created_at",
+            ]) for row in db.query(stream_processing.StreamJoinInput).all()
+        ],
+        "stream_join_receipts": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "left_record_id", "right_record_id",
+                "output_record_id", "join_key", "left_event_time", "right_event_time",
+                "run_id", "created_at",
+            ]) for row in db.query(stream_processing.StreamJoinReceipt).all()
+        ],
+        "stream_quarantine_records": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
+                "watermark", "reason", "payload", "status", "created_at", "resolved_at",
+            ]) for row in db.query(stream_processing.StreamQuarantineRecord).all()
+        ],
+        "stream_processing_runs": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
+                "backlog_after", "records_processed", "records_late", "records_quarantined",
+                "windows_emitted", "joins_emitted", "metrics", "error", "created_at", "completed_at",
+            ]) for row in db.query(stream_processing.StreamProcessingRun).all()
         ],
         "schedules": [
             _row_dict(row, ["id", "project_id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
@@ -713,6 +968,45 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             for row in db.query(webhooks_ops.WhOutboundApp).all()
         ],
         "ops_events": [ops_control._event_dict(row) for row in db.query(ops_control.OpsEvent).all()],
+        "event_outbox": [
+            _row_dict(row, [
+                "id", "project_id", "topic", "event_type", "aggregate_type", "aggregate_id", "actor",
+                "payload", "headers", "idempotency_key", "status", "attempts", "max_attempts",
+                "available_at", "lease_owner", "lease_token", "lease_expires_at", "last_error",
+                "created_at", "updated_at", "published_at",
+            ])
+            for row in db.query(event_outbox.EventOutbox).all()
+        ],
+        "platform_event_log": [
+            _row_dict(row, [
+                "sequence", "event_id", "outbox_event_id", "project_id", "topic", "event_type",
+                "aggregate_type", "aggregate_id", "actor", "payload", "headers", "occurred_at",
+                "published_at",
+            ])
+            for row in db.query(event_outbox.PlatformEventLog).all()
+        ],
+        "event_transport_receipts": [
+            _row_dict(row, [
+                "id", "outbox_event_id", "project_id", "transport", "destination", "status",
+                "attempts", "max_attempts", "available_at", "lease_owner", "lease_token",
+                "lease_expires_at", "broker_metadata", "last_error", "created_at", "updated_at",
+                "delivered_at",
+            ])
+            for row in db.query(event_outbox.EventTransportReceipt).all()
+        ],
+        "event_stream_bindings": [
+            _row_dict(row, [
+                "id", "project_id", "display_name", "target_stream_id", "topics",
+                "event_types", "aggregate_types", "object_type_ids", "active",
+                "cursor_sequence", "created_by", "created_at", "updated_at",
+            ]) for row in db.query(event_outbox.EventStreamBinding).all()
+        ],
+        "event_stream_receipts": [
+            _row_dict(row, [
+                "id", "project_id", "binding_id", "event_id", "event_sequence",
+                "stream_record_id", "created_at",
+            ]) for row in db.query(event_outbox.EventStreamReceipt).all()
+        ],
         "ops_alert_rules": [ops_control._rule_dict(row) for row in db.query(ops_control.AlertRule).all()],
         "ops_alerts": [ops_control._alert_dict(row) for row in db.query(ops_control.AlertEvent).all()],
         "ops_runbooks": [ops_control._runbook_dict(row) for row in db.query(ops_control.Runbook).all()],
@@ -773,6 +1067,21 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         "platform_artifact_command_receipts": [
             _row_dict(row, ["id", "artifact_id", "project_id", "command_scope", "idempotency_key", "request_hash", "revision", "lock_version", "participant_id", "command_ids", "rebased_from_lock_version", "created_at"])
             for row in db.query(platform_runtime.ArtifactCommandReceipt).all()
+        ],
+        "platform_artifact_review_comments": [
+            _row_dict(row, [
+                "id", "artifact_id", "project_id", "revision", "target", "thread_id",
+                "parent_id", "body", "status", "author", "resolved_by", "resolved_at",
+                "created_at", "updated_at",
+            ]) for row in db.query(platform_runtime.ArtifactReviewComment).all()
+        ],
+        "platform_artifact_change_proposals": [
+            _row_dict(row, [
+                "id", "artifact_id", "project_id", "base_revision", "base_lock_version",
+                "version", "title", "description", "commands", "targets", "validation",
+                "status", "author", "reviewer", "review_note", "applied_revision",
+                "created_at", "updated_at", "reviewed_at", "applied_at",
+            ]) for row in db.query(platform_runtime.ArtifactChangeProposal).all()
         ],
         "organizations": [
             _row_dict(row, ["id", "display_name", "status", "created_at", "updated_at"])
@@ -857,10 +1166,24 @@ _SNAPSHOT_CHILD_RELATIONS = {
     "connection_sync_cursors": ("connection_syncs", "sync_id", "id"),
     "connection_export_checkpoints": ("connection_exports", "export_id", "id"),
     "stream_records": ("streams", "stream_id", "id"),
+    "stream_partition_states": ("stream_processors", "processor_id", "id"),
+    "stream_window_states": ("stream_processors", "processor_id", "id"),
+    "stream_processing_receipts": ("stream_processors", "processor_id", "id"),
+    "stream_join_inputs": ("stream_processors", "processor_id", "id"),
+    "stream_join_receipts": ("stream_processors", "processor_id", "id"),
+    "stream_quarantine_records": ("stream_processors", "processor_id", "id"),
+    "stream_processing_runs": ("stream_processors", "processor_id", "id"),
     "platform_artifact_revisions": ("platform_artifacts", "artifact_id", "id"),
     "platform_artifact_collaboration_events": ("platform_artifacts", "artifact_id", "id"),
+    "platform_artifact_review_comments": ("platform_artifacts", "artifact_id", "id"),
+    "platform_artifact_change_proposals": ("platform_artifacts", "artifact_id", "id"),
     "platform_job_events": ("platform_jobs", "job_id", "id"),
     "ontology_package_versions": ("ontology_packages", "package_id", "id"),
+    "platform_event_log": ("event_outbox", "outbox_event_id", "id"),
+    "event_transport_receipts": ("event_outbox", "outbox_event_id", "id"),
+    "event_stream_bindings": ("streams", "target_stream_id", "id"),
+    "event_stream_receipts": ("event_stream_bindings", "binding_id", "id"),
+    "entity_candidates": ("entity_resolution_jobs", "job_id", "id"),
 }
 
 
@@ -888,6 +1211,14 @@ def _scope_snapshot(
         if not isinstance(rows, list):
             continue
         scoped[key] = [copy.deepcopy(row) for row in rows if row.get("project_id") == project_id]
+
+    # Signing keys are organization-scoped, so include only keys referenced by
+    # plugin versions in this project's dependency closure.
+    plugin_key_ids = {str(row.get("signer_key_id")) for row in scoped.get("plugin_versions") or [] if row.get("signer_key_id")}
+    scoped["plugin_trust_keys"] = [
+        copy.deepcopy(row) for row in snapshot.get("plugin_trust_keys") or []
+        if row.get("id") in plugin_key_ids and row.get("organization_id") == effective_org
+    ]
 
     # Data assets created before first-class project ownership kept the project
     # marker in their schema. Normalize that legacy representation at the
@@ -1122,6 +1453,13 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "ontology_environments",
         "ontology_health_runs",
         "ontology_registry_entries",
+        "ontology_property_definitions",
+        "ontology_resource_definitions",
+        "object_change_events",
+        "data_asset_snapshots",
+        "pipeline_execution_plans",
+        "model_gateway_providers",
+        "model_gateway_runs",
         "import_jobs",
         "modeling_objectives",
         "model_submissions",
@@ -1143,6 +1481,14 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "connection_sync_cursors",
         "streams",
         "stream_records",
+        "stream_processors",
+        "stream_partition_states",
+        "stream_window_states",
+        "stream_processing_receipts",
+        "stream_join_inputs",
+        "stream_join_receipts",
+        "stream_quarantine_records",
+        "stream_processing_runs",
         "schedules",
         "builds",
         "webhook_listeners",
@@ -1152,6 +1498,9 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "webhook_credentials",
         "webhook_outbound_apps",
         "ops_events",
+        "event_outbox",
+        "platform_event_log",
+        "event_transport_receipts",
         "ops_alert_rules",
         "ops_alerts",
         "ops_runbooks",
@@ -1171,6 +1520,8 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "platform_job_idempotency_receipts",
         "platform_artifact_collaboration_events",
         "platform_artifact_command_receipts",
+        "platform_artifact_review_comments",
+        "platform_artifact_change_proposals",
         "organizations",
         "projects",
         "project_memberships",
@@ -1265,6 +1616,51 @@ def event_consistency(db: Session = Depends(get_db)):
     report_exports = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type == "scenario.report.exported").count()
     audits = db.query(models_action.AuditLog).count()
     events = db.query(ops_control.OpsEvent).count()
+    outbox_total = db.query(event_outbox.EventOutbox).count()
+    outbox_pending = db.query(event_outbox.EventOutbox).filter(
+        event_outbox.EventOutbox.status.in_(["PENDING", "RETRY", "IN_FLIGHT"])
+    ).count()
+    outbox_dead_letter = db.query(event_outbox.EventOutbox).filter(
+        event_outbox.EventOutbox.status == "DEAD_LETTER"
+    ).count()
+    outbox_published = db.query(event_outbox.EventOutbox).filter(
+        event_outbox.EventOutbox.status == "PUBLISHED"
+    ).count()
+    outbox_stale = db.query(event_outbox.EventOutbox).filter(
+        event_outbox.EventOutbox.status.in_(["PENDING", "RETRY", "IN_FLIGHT"]),
+        event_outbox.EventOutbox.created_at < _now() - 300,
+    ).count()
+    published_events = db.query(event_outbox.PlatformEventLog).count()
+    transport_deliveries = db.query(event_outbox.EventTransportReceipt).count()
+    transport_dead_letter = db.query(event_outbox.EventTransportReceipt).filter(
+        event_outbox.EventTransportReceipt.status == "DEAD_LETTER"
+    ).count()
+    transport_stale = db.query(event_outbox.EventTransportReceipt).filter(
+        event_outbox.EventTransportReceipt.status.in_(["PENDING", "RETRY", "IN_FLIGHT"]),
+        event_outbox.EventTransportReceipt.created_at < _now() - 300,
+    ).count()
+    processors = db.query(stream_processing.StreamProcessor).all()
+    processor_runs = db.query(stream_processing.StreamProcessingRun).count()
+    processor_failures = db.query(stream_processing.StreamProcessingRun).filter(
+        stream_processing.StreamProcessingRun.status == "FAILED"
+    ).count()
+    pending_quarantine = db.query(stream_processing.StreamQuarantineRecord).filter(
+        stream_processing.StreamQuarantineRecord.status == "PENDING"
+    ).count()
+    processor_backlog = sum(stream_processing._backlog(db, row) for row in processors)
+    processors_over_capacity = sum(
+        1 for row in processors
+        if stream_processing._backlog(db, row) >= row.max_backlog_records
+    )
+    open_review_comments = db.query(platform_runtime.ArtifactReviewComment).filter(
+        platform_runtime.ArtifactReviewComment.status == "OPEN"
+    ).count()
+    open_change_proposals = db.query(platform_runtime.ArtifactChangeProposal).filter(
+        platform_runtime.ArtifactChangeProposal.status.in_(["OPEN", "APPROVED", "CONFLICT"])
+    ).count()
+    conflicted_change_proposals = db.query(platform_runtime.ArtifactChangeProposal).filter(
+        platform_runtime.ArtifactChangeProposal.status == "CONFLICT"
+    ).count()
     source_counts: Dict[str, int] = {}
     for row in db.query(ops_control.OpsEvent).all():
         source_counts[row.source] = source_counts.get(row.source, 0) + 1
@@ -1320,6 +1716,51 @@ def event_consistency(db: Session = Depends(get_db)):
             "status": "PASS" if events >= 0 else "WARN",
             "count": events,
         },
+        {
+            "name": "transactional outbox has no dead-letter events",
+            "status": "PASS" if outbox_dead_letter == 0 else "WARN",
+            "count": outbox_dead_letter,
+        },
+        {
+            "name": "published outbox events have durable event-log evidence",
+            "status": "PASS" if published_events == outbox_published else "WARN",
+            "count": published_events,
+        },
+        {
+            "name": "transactional outbox delivery lag is below five minutes",
+            "status": "PASS" if outbox_stale == 0 else "WARN",
+            "count": outbox_stale,
+        },
+        {
+            "name": "external event transports have no dead-letter deliveries",
+            "status": "PASS" if transport_dead_letter == 0 else "WARN",
+            "count": transport_dead_letter,
+        },
+        {
+            "name": "external event transport lag is below five minutes",
+            "status": "PASS" if transport_stale == 0 else "WARN",
+            "count": transport_stale,
+        },
+        {
+            "name": "stream processors have no failed executions",
+            "status": "PASS" if processor_failures == 0 else "WARN",
+            "count": processor_failures,
+        },
+        {
+            "name": "stream processor backlogs remain within configured capacity",
+            "status": "PASS" if processors_over_capacity == 0 else "WARN",
+            "count": processors_over_capacity,
+        },
+        {
+            "name": "late or invalid stream records have been reviewed",
+            "status": "PASS" if pending_quarantine == 0 else "WARN",
+            "count": pending_quarantine,
+        },
+        {
+            "name": "artifact change proposals have no unresolved conflicts",
+            "status": "PASS" if conflicted_change_proposals == 0 else "WARN",
+            "count": conflicted_change_proposals,
+        },
     ]
     status = "PASS" if all(check["status"] == "PASS" for check in checks) else "WARN"
     return {
@@ -1338,6 +1779,24 @@ def event_consistency(db: Session = Depends(get_db)):
             "report_exports": report_exports,
             "audit_logs": audits,
             "ops_events": events,
+            "event_outbox": outbox_total,
+            "outbox_pending": outbox_pending,
+            "outbox_dead_letter": outbox_dead_letter,
+            "outbox_published": outbox_published,
+            "outbox_stale": outbox_stale,
+            "platform_event_log": published_events,
+            "event_transport_receipts": transport_deliveries,
+            "transport_dead_letter": transport_dead_letter,
+            "transport_stale": transport_stale,
+            "stream_processors": len(processors),
+            "stream_processing_runs": processor_runs,
+            "stream_processing_failures": processor_failures,
+            "stream_processing_backlog": processor_backlog,
+            "stream_quarantine_pending": pending_quarantine,
+            "stream_processors_over_capacity": processors_over_capacity,
+            "artifact_review_comments_open": open_review_comments,
+            "artifact_change_proposals_open": open_change_proposals,
+            "artifact_change_proposals_conflicted": conflicted_change_proposals,
         },
         "source_counts": source_counts,
         "checks": checks,
@@ -1386,6 +1845,7 @@ def validate_project(db: Session = Depends(get_db)):
         "/imports/jobs",
         "/connections/sources",
         "/streams",
+        "/api/v1/streams/processing/summary",
         "/project/export",
         "/project/validate",
         "/project/readiness",
@@ -1425,6 +1885,24 @@ def validate_project(db: Session = Depends(get_db)):
 def project_readiness(db: Session = Depends(get_db)):
     validation = validate_project(db)
     sections = validation.get("sections") or {}
+    plugin_mode = os.getenv("PLUGIN_EXECUTION_MODE", "direct").strip().lower()
+    plugin_workers = [
+        row for row in db.query(worker_control.RuntimeWorker).all()
+        if "plugin.execute" in (row.supported_job_types or [])
+        and row.status == "ACTIVE"
+        and row.heartbeat_at >= _now() - 120
+    ]
+    plugin_status = "PASS"
+    plugin_description = "Direct execution is available for local development."
+    if plugin_mode == "worker":
+        plugin_status = "PASS" if plugin_workers else "WARN"
+        plugin_description = (
+            f"{len(plugin_workers)} isolated plugin executor worker(s) are online."
+            if plugin_workers else "Worker execution is enabled, but no plugin executor has an active heartbeat."
+        )
+    elif os.getenv("APP_ENV", "development").strip().lower() == "production":
+        plugin_status = "WARN"
+        plugin_description = "Production should queue signed extensions to a dedicated OCI executor."
     checks = [
         {"id": "schema", "label": "Schema health", "status": (sections.get("schema_health") or {}).get("status", "WARN"), "href": "/system/schema-health"},
         {"id": "migrations", "label": "Migration metadata", "status": (sections.get("migrations") or {}).get("status", "WARN"), "href": "/system/migrations"},
@@ -1432,6 +1910,15 @@ def project_readiness(db: Session = Depends(get_db)):
         {"id": "snapshot", "label": "Snapshot coverage", "status": (sections.get("snapshot_coverage") or {}).get("status", "WARN"), "href": "/project/export"},
         {"id": "docs", "label": "Docs conformance", "status": (sections.get("docs_conformance") or {}).get("status", "WARN"), "href": "/workspace/validation"},
         {"id": "routes", "label": "Evaluator routes", "status": (sections.get("route_health") or {}).get("status", "WARN"), "href": "/workspace/command-center"},
+        {
+            "id": "plugin_execution",
+            "label": "Signed extension executor",
+            "status": plugin_status,
+            "href": "/workspace/control-panel",
+            "description": plugin_description,
+            "mode": plugin_mode,
+            "active_workers": len(plugin_workers),
+        },
     ]
     failing = [check for check in checks if check["status"] != "PASS"]
     return {
@@ -1611,9 +2098,24 @@ def _validate_snapshot_project_scope(
         ("model_monitors", "objective_id", "modeling_objectives"),
         ("model_monitors", "deployment_id", "model_deployments"),
         ("model_monitors", "baseline_asset_id", "data_assets"),
+        ("decision_rules", "object_type_id", "object_types"),
+        ("decision_scorecards", "object_type_id", "object_types"),
+        ("object_snapshots", "object_type_id", "object_types"),
+        ("object_snapshots", "object_id", "object_instances"),
+        ("entity_resolution_jobs", "object_type_id", "object_types"),
+        ("entity_candidates", "object_type_id", "object_types"),
         ("connection_syncs", "source_id", "connection_sources"),
         ("connection_syncs", "target_asset_id", "data_assets"),
         ("connection_exports", "source_asset_id", "data_assets"),
+        ("stream_processors", "stream_id", "streams"),
+        ("stream_processors", "join_stream_id", "streams"),
+        ("stream_processors", "target_asset_id", "data_assets"),
+        ("stream_processing_receipts", "record_id", "stream_records"),
+        ("stream_join_inputs", "record_id", "stream_records"),
+        ("stream_join_inputs", "stream_id", "streams"),
+        ("stream_join_receipts", "left_record_id", "stream_records"),
+        ("stream_join_receipts", "right_record_id", "stream_records"),
+        ("stream_join_receipts", "run_id", "stream_processing_runs"),
         ("webhook_listeners", "target_asset_id", "data_assets"),
         ("webhooks", "source_id", "connection_sources"),
         ("ops_alerts", "rule_id", "ops_alert_rules"),
@@ -1643,6 +2145,16 @@ def _validate_snapshot_project_scope(
         for ref in row.get("object_refs") or []:
             if ref.get("object_id") not in object_ids:
                 errors.append(f"Investigation '{row.get('id')}' references an object outside the snapshot")
+    for row in snapshot.get("entity_candidates") or []:
+        if any(value not in object_ids for value in row.get("object_ids") or []):
+            errors.append(f"Entity candidate '{row.get('id')}' references an object outside the snapshot")
+        merged = row.get("merged_object_id")
+        if merged and merged not in object_ids:
+            errors.append(f"Entity candidate '{row.get('id')}' references a canonical object outside the snapshot")
+    for row in snapshot.get("decision_scenarios") or []:
+        referenced = set(row.get("seed_object_ids") or []) | set((row.get("overrides") or {}).keys())
+        if any(value not in object_ids for value in referenced):
+            errors.append(f"Decision scenario '{row.get('id')}' references an object outside the snapshot")
     return sorted(set(errors))
 
 
@@ -1677,6 +2189,7 @@ def validate_project_import(
     project_id = _resolve_project_scope(db, principal, body.project_id or scope.get("project_id"), "restore")
     validation = _validate_portable_snapshot(snapshot, allow_legacy=body.allow_legacy)
     errors = list(validation.get("errors") or [])
+    errors.extend(_validate_plugin_snapshot(snapshot))
     errors.extend(_validate_snapshot_project_scope(snapshot, project_id, allow_legacy=body.allow_legacy))
     if snapshot.get("snapshot_version", 1) < PORTABLE_SNAPSHOT_VERSION and "*" not in principal.project_ids:
         errors.append("Only a system-wide administrator can restore an unscoped legacy snapshot")
@@ -1699,6 +2212,7 @@ def import_project(
     scope = snapshot.get("project_scope") or {}
     project_id = _resolve_project_scope(db, principal, body.project_id or scope.get("project_id"), "restore")
     scope_errors = _validate_snapshot_project_scope(snapshot, project_id, allow_legacy=body.allow_legacy)
+    scope_errors.extend(_validate_plugin_snapshot(snapshot))
     if snapshot.get("snapshot_version", 1) < PORTABLE_SNAPSHOT_VERSION and "*" not in principal.project_ids:
         scope_errors.append("Only a system-wide administrator can restore an unscoped legacy snapshot")
     if principal.organization_id and scope.get("organization_id") and scope.get("organization_id") != principal.organization_id:
@@ -1715,6 +2229,44 @@ def import_project(
         counts[result] = counts.get(result, 0) + 1
 
     now = _now()
+    for item in snapshot.get("plugin_trust_keys") or []:
+        row = dict(item)
+        row.setdefault("created_at", now)
+        existing = db.get(plugin_runtime.PluginTrustKey, row.get("id"))
+        if existing and existing.fingerprint != row.get("fingerprint"):
+            raise HTTPException(status_code=409, detail="A plugin trust key ID is already bound to another fingerprint")
+        track(_upsert_model(db, plugin_runtime.PluginTrustKey, row, [
+            "id", "organization_id", "display_name", "algorithm", "public_key", "fingerprint",
+            "status", "created_by", "created_at", "revoked_at",
+        ]))
+    db.flush()
+    for item in snapshot.get("plugin_versions") or []:
+        row = dict(item)
+        encoded_bundle = row.pop("bundle_base64", None)
+        raw = base64.b64decode(str(encoded_bundle or ""), validate=True)
+        existing = db.get(plugin_runtime.PluginVersion, row.get("id"))
+        if existing and (existing.manifest_sha256 != row.get("manifest_sha256") or existing.bundle_sha256 != row.get("bundle_sha256")):
+            raise HTTPException(status_code=409, detail="An immutable plugin version ID already contains different signed content")
+        target_dir = plugin_runtime._bundle_root() / plugin_runtime._safe_name(str(row.get("project_id") or project_id)) / str(row["plugin_id"]) / str(row["version"])
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{row['bundle_sha256']}.zip"
+        temporary = target.with_suffix(".tmp")
+        temporary.write_bytes(raw)
+        os.replace(temporary, target)
+        row["bundle_path"] = str(target)
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, plugin_runtime.PluginVersion, row, [
+            "id", "project_id", "plugin_id", "version", "kind", "runtime", "entrypoint", "manifest",
+            "manifest_sha256", "bundle_sha256", "bundle_path", "signature", "signer_key_id",
+            "capabilities", "operations", "status", "created_by", "created_at", "activated_at", "revoked_at",
+        ]))
+    for row in snapshot.get("plugin_executions") or []:
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, plugin_runtime.PluginExecution, row, [
+            "id", "job_id", "project_id", "plugin_version_id", "plugin_id", "operation", "status", "request_hash",
+            "idempotency_key", "input_summary", "output", "evidence", "sandbox", "exit_code",
+            "duration_ms", "error", "actor", "created_at", "completed_at",
+        ]))
     for row in snapshot.get("object_types") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
@@ -1783,6 +2335,37 @@ def import_project(
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
         track(_upsert_model(db, models.LinkInstance, row, ["id", "project_id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"]))
+    for row in snapshot.get("decision_rules") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, decision_intelligence.DecisionRule, row, ["id", "project_id", "display_name", "description", "object_type_id", "expression", "output_property", "severity", "recommended_actions", "active", "created_at", "updated_at"]))
+    for row in snapshot.get("decision_scorecards") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, decision_intelligence.DecisionScorecard, row, ["id", "project_id", "display_name", "description", "object_type_id", "features", "thresholds", "recommended_actions", "active", "created_at", "updated_at"]))
+    for row in snapshot.get("decision_runs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, decision_intelligence.DecisionRun, row, ["id", "project_id", "scope", "status", "object_count", "findings", "created_at", "completed_at"]))
+    for row in snapshot.get("object_snapshots") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, decision_intelligence.ObjectSnapshot, row, ["id", "project_id", "object_id", "object_type_id", "properties", "lineage", "event_type", "actor", "source_type", "source_id", "created_at", "seq"]))
+    for row in snapshot.get("entity_resolution_jobs") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, decision_intelligence.EntityResolutionJob, row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count"]))
+    for row in snapshot.get("entity_candidates") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, decision_intelligence.EntityCandidate, row, ["id", "project_id", "job_id", "object_type_id", "object_ids", "score", "reasons", "status", "merged_object_id", "created_at", "decided_at"]))
+    for row in snapshot.get("decision_scenarios") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, decision_intelligence.DecisionScenario, row, ["id", "project_id", "display_name", "description", "seed_object_ids", "overrides", "propagation_rules", "baseline", "scenario_output", "impact", "created_at", "updated_at"]))
     for row in snapshot.get("pipeline_definitions") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
@@ -1858,6 +2441,22 @@ def import_project(
             "id", "project_id", "channel", "version", "revision_id", "revision_number", "status",
             "manifest", "contract_schema", "compatibility", "checksum", "published_by", "created_at",
         ]))
+    ontologyos_restore_specs = [
+        ("ontology_property_definitions", ontology_runtime_v1.OntologyPropertyDefinition, ["id", "project_id", "object_type_id", "property_name", "display_name", "base_type", "required", "primary_key", "title_key", "indexed", "position", "status", "definition", "ontology_revision_id", "created_at", "updated_at"]),
+        ("ontology_resource_definitions", ontology_runtime_v1.OntologyResourceDefinition, ["id", "project_id", "resource_kind", "resource_id", "object_type_id", "display_name", "status", "version", "definition", "ontology_revision_id", "created_at", "updated_at"]),
+        ("object_change_events", ontology_runtime_v1.ObjectChangeEvent, ["id", "project_id", "object_type_id", "object_id", "object_version", "event_type", "actor", "source_type", "source_id", "before_state", "after_state", "changed_fields", "evidence", "ontology_revision_id", "valid_from", "valid_to", "transaction_time"]),
+        ("data_asset_snapshots", data_plane.DataAssetSnapshot, ["id", "project_id", "asset_id", "snapshot_number", "status", "storage_format", "storage_uri", "content_hash", "row_count", "byte_size", "schema", "partition_spec", "lineage", "created_by", "created_at"]),
+        ("pipeline_execution_plans", data_plane.PipelineExecutionPlan, ["id", "project_id", "graph_id", "graph_updated_at", "status", "executor", "plan_hash", "logical_plan", "input_schema", "output_schema", "field_lineage", "validation", "created_by", "created_at"]),
+        ("model_gateway_providers", model_gateway.ModelGatewayProvider, ["id", "project_id", "display_name", "provider_type", "base_url", "secret_ref", "allowed_models", "policy", "configuration", "status", "created_at", "updated_at"]),
+        ("model_gateway_runs", model_gateway.ModelGatewayRun, ["id", "project_id", "provider_id", "model_name", "status", "request_hash", "idempotency_key", "input_summary", "output", "usage", "policy_decision", "trace", "evidence", "error", "created_by", "created_at", "completed_at"]),
+    ]
+    for snapshot_key, model_class, fields in ontologyos_restore_specs:
+        for item in snapshot.get(snapshot_key) or []:
+            item.setdefault("project_id", "default")
+            item.setdefault("created_at", now)
+            if "updated_at" in fields:
+                item.setdefault("updated_at", now)
+            track(_upsert_model(db, model_class, item, fields))
     for row in snapshot.get("import_jobs") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
@@ -1939,10 +2538,86 @@ def import_project(
     for row in snapshot.get("streams") or []:
         row.setdefault("created_at", now)
         row.setdefault("project_id", "default")
-        track(_upsert_model(db, streaming.Stream, row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "created_at"]))
+        row.setdefault("next_sequence", 0)
+        track(_upsert_model(db, streaming.Stream, row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "next_sequence", "created_at"]))
+    stream_sequences = {
+        row.id: int(row.next_sequence or 0)
+        for row in db.query(streaming.Stream).all()
+    }
     for row in snapshot.get("stream_records") or []:
         row.setdefault("created_at", now)
-        track(_upsert_model(db, streaming.StreamRecord, row, ["id", "stream_id", "payload", "ts", "archived", "archived_at", "created_at"]))
+        stream_id = row.get("stream_id")
+        if row.get("sequence") is None:
+            stream_sequences[stream_id] = stream_sequences.get(stream_id, 0) + 1
+            row["sequence"] = stream_sequences[stream_id]
+        else:
+            stream_sequences[stream_id] = max(stream_sequences.get(stream_id, 0), int(row["sequence"]))
+        track(_upsert_model(db, streaming.StreamRecord, row, ["id", "stream_id", "sequence", "payload", "ts", "archived", "archived_at", "created_at"]))
+    for stream_id, next_sequence in stream_sequences.items():
+        stream = db.get(streaming.Stream, stream_id)
+        if stream and int(stream.next_sequence or 0) < next_sequence:
+            stream.next_sequence = next_sequence
+    processor_restore_specs = [
+        ("stream_processors", stream_processing.StreamProcessor, [
+            "id", "project_id", "stream_id", "display_name", "timestamp_field",
+            "partition_key_field", "allowed_lateness_seconds", "late_policy",
+            "window_size_seconds", "value_field", "aggregation", "target_asset_id",
+            "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds",
+            "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
+            "created_by", "created_at", "updated_at",
+        ]),
+        ("stream_partition_states", stream_processing.StreamPartitionState, [
+            "id", "processor_id", "project_id", "partition_key", "max_event_time", "watermark",
+            "processed_count", "late_count", "quarantined_count", "updated_at",
+        ]),
+        ("stream_window_states", stream_processing.StreamWindowState, [
+            "id", "processor_id", "project_id", "partition_key", "window_start", "window_end",
+            "count", "numeric_count", "value_sum", "value_min", "value_max", "status",
+            "emitted_at", "updated_at",
+        ]),
+        ("stream_processing_receipts", stream_processing.StreamProcessingReceipt, [
+            "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
+            "status", "reason", "run_id", "created_at",
+        ]),
+        ("stream_join_inputs", stream_processing.StreamJoinInput, [
+            "id", "processor_id", "project_id", "record_id", "stream_id", "side",
+            "join_key", "event_time", "created_at",
+        ]),
+        ("stream_join_receipts", stream_processing.StreamJoinReceipt, [
+            "id", "processor_id", "project_id", "left_record_id", "right_record_id",
+            "output_record_id", "join_key", "left_event_time", "right_event_time",
+            "run_id", "created_at",
+        ]),
+        ("stream_quarantine_records", stream_processing.StreamQuarantineRecord, [
+            "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
+            "watermark", "reason", "payload", "status", "created_at", "resolved_at",
+        ]),
+        ("stream_processing_runs", stream_processing.StreamProcessingRun, [
+            "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
+            "backlog_after", "records_processed", "records_late", "records_quarantined",
+            "windows_emitted", "joins_emitted", "metrics", "error", "created_at", "completed_at",
+        ]),
+    ]
+    for snapshot_key, model_class, fields in processor_restore_specs:
+        for row in snapshot.get(snapshot_key) or []:
+            row.setdefault("project_id", "default")
+            track(_upsert_model(db, model_class, row, fields))
+    for row in snapshot.get("event_stream_bindings") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        track(_upsert_model(db, event_outbox.EventStreamBinding, row, [
+            "id", "project_id", "display_name", "target_stream_id", "topics",
+            "event_types", "aggregate_types", "object_type_ids", "active",
+            "cursor_sequence", "created_by", "created_at", "updated_at",
+        ]))
+    for row in snapshot.get("event_stream_receipts") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        track(_upsert_model(db, event_outbox.EventStreamReceipt, row, [
+            "id", "project_id", "binding_id", "event_id", "event_sequence",
+            "stream_record_id", "created_at",
+        ]))
     for row in snapshot.get("schedules") or []:
         row.setdefault("created_at", now)
         row.setdefault("updated_at", now)
@@ -2045,6 +2720,47 @@ def import_project(
     for row in snapshot.get("connector_fetch_attempts") or []:
         row.setdefault("created_at", now)
         track(_upsert_model(db, connector_runtime.ConnectorFetchAttempt, row, ["id", "project_id", "source_id", "sync_id", "ingestion_run_id", "adapter_id", "operation", "status", "records_read", "bytes_read", "duration_ms", "cursor_in", "cursor_out", "metadata_", "error", "created_at"]))
+    for row in snapshot.get("event_outbox") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("available_at", now)
+        # Editing leases are process-local recovery state and cannot survive restore.
+        if row.get("status") == "IN_FLIGHT":
+            row["status"] = "RETRY"
+            row["lease_owner"] = None
+            row["lease_token"] = None
+            row["lease_expires_at"] = None
+        track(_upsert_model(db, event_outbox.EventOutbox, row, [
+            "id", "project_id", "topic", "event_type", "aggregate_type", "aggregate_id", "actor",
+            "payload", "headers", "idempotency_key", "status", "attempts", "max_attempts",
+            "available_at", "lease_owner", "lease_token", "lease_expires_at", "last_error",
+            "created_at", "updated_at", "published_at",
+        ]))
+    for row in snapshot.get("event_transport_receipts") or []:
+        row.setdefault("project_id", "default")
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("available_at", now)
+        if row.get("status") == "IN_FLIGHT":
+            row["status"] = "RETRY"
+            row["lease_owner"] = None
+            row["lease_token"] = None
+            row["lease_expires_at"] = None
+        track(_upsert_model(db, event_outbox.EventTransportReceipt, row, [
+            "id", "outbox_event_id", "project_id", "transport", "destination", "status",
+            "attempts", "max_attempts", "available_at", "lease_owner", "lease_token",
+            "lease_expires_at", "broker_metadata", "last_error", "created_at", "updated_at",
+            "delivered_at",
+        ]))
+    for row in snapshot.get("platform_event_log") or []:
+        row.setdefault("occurred_at", now)
+        row.setdefault("published_at", now)
+        track(_upsert_model_by_key(db, event_outbox.PlatformEventLog, row, "sequence", [
+            "sequence", "event_id", "outbox_event_id", "project_id", "topic", "event_type",
+            "aggregate_type", "aggregate_id", "actor", "payload", "headers", "occurred_at",
+            "published_at",
+        ]))
     for row in snapshot.get("ops_events") or []:
         row.setdefault("created_at", now)
         row.setdefault("project_id", "default")
@@ -2130,6 +2846,25 @@ def import_project(
         row.setdefault("created_at", now)
         row.setdefault("project_id", "default")
         track(_upsert_artifact_command_receipt(db, row))
+    for row in snapshot.get("platform_artifact_review_comments") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, platform_runtime.ArtifactReviewComment, row, [
+            "id", "artifact_id", "project_id", "revision", "target", "thread_id",
+            "parent_id", "body", "status", "author", "resolved_by", "resolved_at",
+            "created_at", "updated_at",
+        ]))
+    for row in snapshot.get("platform_artifact_change_proposals") or []:
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", now)
+        row.setdefault("project_id", "default")
+        track(_upsert_model(db, platform_runtime.ArtifactChangeProposal, row, [
+            "id", "artifact_id", "project_id", "base_revision", "base_lock_version",
+            "version", "title", "description", "commands", "targets", "validation",
+            "status", "author", "reviewer", "review_note", "applied_revision",
+            "created_at", "updated_at", "reviewed_at", "applied_at",
+        ]))
 
     _audit(db, principal.id, "project.snapshot.imported", "project", project_id, {"project_id": project_id, **counts})
     ops_control.record_ops_event(

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { LogIn, LogOut, Menu, Search, User, X } from "lucide-react";
+import { Check, LogIn, LogOut, Menu, PlayCircle, Search, User, X, XCircle } from "lucide-react";
 import { api, postJson } from "./api";
 import {
   bootstrapProjectDemo,
@@ -27,19 +27,8 @@ import { Page, PlatformFlow } from "./components/workbench/Workbench";
 import { useAsyncState } from "./hooks/useAsyncState";
 import { asRows, asString, classNames } from "./utils/format";
 import { currentWorkspaceView, navigate } from "./utils/navigation";
-import { OntologyManager } from "./workspaces/OntologyManager";
-import { PipelineBuilder } from "./workspaces/PipelineBuilder";
-import { ControlPanel } from "./workspaces/ControlPanel";
-import { Security } from "./workspaces/Security";
-import { Automate } from "./workspaces/Automate";
-import { DataMedia } from "./workspaces/DataMedia";
-import { Vertex } from "./workspaces/Vertex";
-import { Fusion } from "./workspaces/Fusion";
-import { Analytics } from "./workspaces/Analytics";
-import { Delivery } from "./workspaces/Delivery";
-import { PlatformGraphWorkspace } from "./workspaces/PlatformGraph";
 import { getAuthSession, logout, type AuthSession } from "./api/authApi";
-import { getJobSummary } from "./api/jobApi";
+import { getJob, getJobSummary } from "./api/jobApi";
 import {
   createConnectionSource,
   getConnectionSource,
@@ -53,18 +42,39 @@ import type {
   ConnectionSource,
   ConnectorCredentialMetadata,
   ConnectorFetchAttempt,
+  ApprovalRequest,
+  AssetReliabilityTriageResult,
   CommandCenterSummary,
   CommandCenterUiState,
+  GovernedActionEvidence,
   ImportsUiState,
+  IndustrialWorkflowState,
   JsonObject,
   JobSummary,
+  PlatformJob,
   ProjectReadiness,
   TableRow,
   ValidationUiState,
   WorkflowState
 } from "./types";
 
-const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "workshop", "aip", "investigations", "entity-resolution", "graph", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"]);
+const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "object-explorer", "map", "models", "decision", "ops", "workshop", "aip", "investigations", "entity-resolution", "graph", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"]);
+const OntologyManager = lazy(() => import("./workspaces/OntologyManager").then((module) => ({ default: module.OntologyManager })));
+const PipelineBuilder = lazy(() => import("./workspaces/PipelineBuilder").then((module) => ({ default: module.PipelineBuilder })));
+const ObjectExplorer = lazy(() => import("./workspaces/ObjectExplorer").then((module) => ({ default: module.ObjectExplorer })));
+const MapWorkspace = lazy(() => import("./workspaces/MapWorkspace").then((module) => ({ default: module.MapWorkspace })));
+const ModelOps = lazy(() => import("./workspaces/ModelOps").then((module) => ({ default: module.ModelOps })));
+const DecisionWorkspace = lazy(() => import("./workspaces/DecisionWorkspace").then((module) => ({ default: module.DecisionWorkspace })));
+const OpsWorkspace = lazy(() => import("./workspaces/OpsWorkspace").then((module) => ({ default: module.OpsWorkspace })));
+const ControlPanel = lazy(() => import("./workspaces/ControlPanel").then((module) => ({ default: module.ControlPanel })));
+const Security = lazy(() => import("./workspaces/Security").then((module) => ({ default: module.Security })));
+const Automate = lazy(() => import("./workspaces/Automate").then((module) => ({ default: module.Automate })));
+const DataMedia = lazy(() => import("./workspaces/DataMedia").then((module) => ({ default: module.DataMedia })));
+const Vertex = lazy(() => import("./workspaces/Vertex").then((module) => ({ default: module.Vertex })));
+const Fusion = lazy(() => import("./workspaces/Fusion").then((module) => ({ default: module.Fusion })));
+const Analytics = lazy(() => import("./workspaces/Analytics").then((module) => ({ default: module.Analytics })));
+const Delivery = lazy(() => import("./workspaces/Delivery").then((module) => ({ default: module.Delivery })));
+const PlatformGraphWorkspace = lazy(() => import("./workspaces/PlatformGraph").then((module) => ({ default: module.PlatformGraphWorkspace })));
 const VisualBuilder = lazy(() => import("./workspaces/VisualBuilder").then((module) => ({ default: module.VisualBuilder })));
 
 const NAV_ITEMS = [
@@ -72,6 +82,11 @@ const NAV_ITEMS = [
   { id: "imports", label: "Data Onboarding", hint: "Upload, map, transform, connect, replay" },
   { id: "ontology", label: "Ontology Manager", hint: "Generate and manage object types" },
   { id: "pipeline", label: "Pipeline Builder", hint: "Canvas, previews, outputs" },
+  { id: "object-explorer", label: "Object Explorer", hint: "Search, filter, inspect, and act" },
+  { id: "map", label: "Operational Map", hint: "Layers, MGRS, geofences, and risk" },
+  { id: "models", label: "ModelOps", hint: "Train, gate, deploy, monitor, and infer" },
+  { id: "decision", label: "Decision Intelligence", hint: "Explain risk, history, duplicates, and scenarios" },
+  { id: "ops", label: "Operational Control", hint: "Alerts, incidents, runbooks, and reliability" },
   { id: "workshop", label: "Workshop", hint: "Compose operational applications" },
   { id: "aip", label: "AIP Logic", hint: "Build governed decision logic" },
   { id: "investigations", label: "Investigations", hint: "Evidence, entities, hypotheses" },
@@ -88,7 +103,7 @@ const NAV_ITEMS = [
   { id: "delivery", label: "Delivery", hint: "Marketplace, DevOps, code & compute" }
 ];
 
-const LEGACY_ITEMS = ["map", "object-explorer", "models", "decision", "ops"];
+const LEGACY_ITEMS: string[] = [];
 
 const ENDPOINT_INVENTORY: TableRow[] = [
   {
@@ -114,6 +129,36 @@ const ENDPOINT_INVENTORY: TableRow[] = [
     ui_state: "/ui-state/pipeline",
     primary_actions: "/pipeline-builder/graphs/{id}/nodes, /pipeline-builder/graphs/{id}/layout, /pipeline-builder/graphs/{id}/deliver",
     evidence: "/ui-state/pipeline/{id}/canvas, /ui-state/pipeline/{id}/outputs"
+  },
+  {
+    route: "/workspace/object-explorer",
+    ui_state: "/object-explorer/query, /object-explorer/explorations",
+    primary_actions: "/objects/{type}/{id}/profile, /decision/evaluate, /actions/execute",
+    evidence: "/object-explorer/histogram, /object-sets/search-around"
+  },
+  {
+    route: "/workspace/map",
+    ui_state: "/gis/map-layers, /gis/map-layers/{id}/features",
+    primary_actions: "/gis/feature-collection, /gis/mgrs/encode, /gis/mgrs/decode, /gis/geofence/evaluate",
+    evidence: "/gis/spatial-query, /gis/ops/buffer"
+  },
+  {
+    route: "/workspace/models",
+    ui_state: "/modelops/summary, /modeling/objectives, /modelops/monitors",
+    primary_actions: "/modeling/objectives/{id}/train, /modeling/deployments, /modelops/monitors/{id}/run",
+    evidence: "/modeling/submissions/{id}/release-eligibility, /modelops/deployments/{id}/prediction-logs"
+  },
+  {
+    route: "/workspace/decision",
+    ui_state: "/decision/rules, /decision/scorecards, /decision/evaluate",
+    primary_actions: "/decision/objects/{type}/{id}/explain, /entity-resolution/jobs, /decision/scenarios",
+    evidence: "/temporal/objects/{type}/{id}/timeline, /aip/agents/{id}/runs"
+  },
+  {
+    route: "/workspace/ops",
+    ui_state: "/ops/summary, /ops/events, /ops/alerts, /reliability/summary",
+    primary_actions: "/ops/alerts/evaluate, /ops/incidents, /ops/runbooks/{id}/execute",
+    evidence: "/ops/inbox, /ops/incidents/{id}, /reliability/data-contracts/{id}/runs"
   },
   {
     route: "/workspace/graph",
@@ -231,6 +276,11 @@ export function App() {
           {view === "imports" && <DataOnboarding />}
           {view === "ontology" && <OntologyManager />}
           {view === "pipeline" && <PipelineBuilder />}
+          {view === "object-explorer" && <ObjectExplorer />}
+          {view === "map" && <MapWorkspace />}
+          {view === "models" && <ModelOps />}
+          {view === "decision" && <DecisionWorkspace />}
+          {view === "ops" && <OpsWorkspace />}
           {view === "workshop" && <VisualBuilder artifactType="workshop" title="Workshop" subtitle="Compose responsive operational applications from governed data and actions." />}
           {view === "aip" && <VisualBuilder artifactType="aip_logic" title="AIP Logic" subtitle="Build typed, governed decision flows with visible tools and approval gates." />}
           {view === "investigations" && <VisualBuilder artifactType="investigation_graph" title="Investigations" subtitle="Organize entities, evidence, hypotheses, findings, and reports." />}
@@ -316,43 +366,231 @@ function BackendConnection({ readiness, loading, error, jobs, jobsError }: { rea
 function CommandCenter() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [lastRun, setLastRun] = useState<JsonObject | null>(null);
+  const [activeApproval, setActiveApproval] = useState<ApprovalRequest | null>(null);
+  const [actionResult, setActionResult] = useState<GovernedActionEvidence | null>(null);
+  const [approvalReason, setApprovalReason] = useState("Operational evidence reviewed; escalation is authorized.");
+  const [governanceBusy, setGovernanceBusy] = useState(false);
+  const [governanceError, setGovernanceError] = useState<string | null>(null);
+  const [governanceMessage, setGovernanceMessage] = useState<string | null>(null);
+  const [industrialSource, setIndustrialSource] = useState({
+    projectId: "default", assetId: "", idField: "id", nameField: "name", statusField: "status",
+    criticalityField: "criticality", riskField: "predicted_failure_probability", latitudeField: "latitude", longitudeField: "longitude",
+    executionMode: "synchronous" as "synchronous" | "background"
+  });
+  const [industrialResult, setIndustrialResult] = useState<JsonObject | null>(null);
+  const [industrialJob, setIndustrialJob] = useState<PlatformJob | null>(null);
+  const [industrialWorkflow, setIndustrialWorkflow] = useState<IndustrialWorkflowState | null>(null);
   const ui = useAsyncState<CommandCenterUiState>(getCommandCenterState, [refreshKey]);
   const workflow = ui.value?.workflow || null;
   const summary: CommandCenterSummary = workflow?.summary || {};
   const kpis = summary.kpis || {};
   const highRisk = summary.high_risk_assets || [];
   const evaluatorSummary = ui.value?.evaluator_summary || {};
+  const approval = activeApproval || industrialWorkflow?.summary.latest_approval || summary.approvals?.[0] || summary.latest_approval || null;
+  const latestAction = actionResult || industrialWorkflow?.summary.latest_action || summary.latest_action || null;
+  const actionMatchesApproval = Boolean(approval?.id && latestAction?.approval_request_id === approval.id);
+  const activeWorkflow = industrialWorkflow || workflow;
+
+  async function refreshIndustrialWorkflow(projectId = industrialSource.projectId) {
+    const state = await api<IndustrialWorkflowState>(`/api/v1/industrial/workflows/asset-reliability/workflow-state?project_id=${encodeURIComponent(projectId)}`);
+    if (state.status !== "NOT_CONFIGURED") setIndustrialWorkflow(state);
+    if (state.summary.latest_execution_job) setIndustrialJob(state.summary.latest_execution_job);
+    if (state.summary.latest_approval) setActiveApproval(state.summary.latest_approval);
+    return state;
+  }
+
+  useEffect(() => {
+    void refreshIndustrialWorkflow(industrialSource.projectId).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!industrialJob?.id || !["QUEUED", "RUNNING"].includes(industrialJob.status)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await getJob(industrialJob.id);
+        if (cancelled) return;
+        setIndustrialJob(next);
+        if (next.status === "SUCCEEDED") {
+          setIndustrialResult(next.result);
+          await refreshIndustrialWorkflow(industrialSource.projectId);
+          setGovernanceMessage("Background onboarding completed. Snapshot, ontology, risk, and execution evidence are ready.");
+          setRefreshKey((key) => key + 1);
+        } else if (["FAILED", "CANCELLED"].includes(next.status)) {
+          setGovernanceError(next.error || `Background onboarding ${next.status.toLowerCase()}.`);
+        }
+      } catch (error) {
+        if (!cancelled) setGovernanceError(error instanceof Error ? error.message : "Could not refresh background onboarding");
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1500);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [industrialJob?.id, industrialJob?.status, industrialSource.projectId]);
 
   async function bootstrap() {
-    setLastRun(await bootstrapProjectDemo());
-    setRefreshKey((key) => key + 1);
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      setLastRun(await bootstrapProjectDemo());
+      setIndustrialWorkflow(null);
+      setIndustrialResult(null);
+      setIndustrialJob(null);
+      setGovernanceMessage("Sample data, pipeline evidence, ontology objects, and reliability checks are ready.");
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Scenario bootstrap failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
   }
 
   async function resetDemo() {
-    setLastRun(await resetProjectDemo());
-    setRefreshKey((key) => key + 1);
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      setLastRun(await resetProjectDemo());
+      setActiveApproval(null);
+      setActionResult(null);
+      setIndustrialWorkflow(null);
+      setIndustrialResult(null);
+      setIndustrialJob(null);
+      setGovernanceMessage("Demo resources are ready.");
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Demo reset failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
   }
 
   async function triage() {
-    setLastRun(await postJson<JsonObject>("/scenarios/asset-reliability/run-triage", { actor: "react" }));
-    setRefreshKey((key) => key + 1);
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      const result = industrialWorkflow
+        ? await postJson<AssetReliabilityTriageResult>("/api/v1/industrial/workflows/asset-reliability/triage", { project_id: industrialWorkflow.project_id })
+        : await postJson<AssetReliabilityTriageResult>("/scenarios/asset-reliability/run-triage", { actor: "react" });
+      setLastRun(result as unknown as JsonObject);
+      setActiveApproval(result.approval);
+      setActionResult(null);
+      setGovernanceMessage("Triage completed. The proposed action is waiting for human approval.");
+      if (industrialWorkflow) await refreshIndustrialWorkflow(industrialWorkflow.project_id);
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Reliability triage failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
+  }
+
+  async function decideApproval(decision: "APPROVED" | "REJECTED") {
+    if (!approval) return;
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      const decided = await postJson<ApprovalRequest>(`/approvals/${encodeURIComponent(approval.id)}/decision`, {
+        actor: "react",
+        decision,
+        reason: approvalReason
+      });
+      setActiveApproval(decided);
+      setGovernanceMessage(decision === "APPROVED" ? "Approval recorded. The governed action is ready to execute." : "Proposal rejected. No object state was changed.");
+      if (industrialWorkflow) await refreshIndustrialWorkflow(industrialWorkflow.project_id);
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Approval decision failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
+  }
+
+  async function executeApprovedAction() {
+    if (!approval || approval.status !== "APPROVED") return;
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      const result = await postJson<GovernedActionEvidence>("/actions/execute", {
+        action_type_id: approval.action_type_id,
+        parameters: approval.parameters,
+        idempotency_key: `command-center-${approval.id}`,
+        actor: "react",
+        approval_request_id: approval.id
+      });
+      setActionResult({ ...result, approval_request_id: approval.id, action_type_id: approval.action_type_id });
+      setGovernanceMessage("Governed action executed. Audit and transactional outbox evidence are available.");
+      if (industrialWorkflow) await refreshIndustrialWorkflow(industrialWorkflow.project_id);
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Action execution failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
   }
 
   async function exportReport() {
-    const markdown = await api<string>("/scenarios/asset-reliability/report?format=markdown");
+    const reportPath = industrialWorkflow
+      ? `/api/v1/industrial/workflows/asset-reliability/report?project_id=${encodeURIComponent(industrialWorkflow.project_id)}&format=markdown`
+      : "/scenarios/asset-reliability/report?format=markdown";
+    const markdown = await api<string>(reportPath);
     const blob = new Blob([markdown], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "asset-reliability-report.md";
+    link.download = industrialWorkflow ? `${industrialWorkflow.project_id}-asset-reliability-report.md` : "asset-reliability-report.md";
     link.click();
     URL.revokeObjectURL(url);
     setRefreshKey((key) => key + 1);
   }
 
+  async function onboardPromotedDataset() {
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      const result = await postJson<JsonObject>("/api/v1/industrial/workflows/asset-reliability/onboard", {
+        project_id: industrialSource.projectId,
+        source_asset_id: industrialSource.assetId,
+        display_name: "Industrial Asset",
+        mapping: {
+          id_field: industrialSource.idField,
+          name_field: industrialSource.nameField || null,
+          status_field: industrialSource.statusField || null,
+          criticality_field: industrialSource.criticalityField || null,
+          risk_field: industrialSource.riskField || null,
+          latitude_field: industrialSource.latitudeField || null,
+          longitude_field: industrialSource.longitudeField || null,
+          serial_number_field: null
+        },
+        risk_threshold: 0.7,
+        run_pipeline: true,
+        publish_ontology: true,
+        allow_breaking_ontology: false,
+        execution_mode: industrialSource.executionMode
+      });
+      setIndustrialResult(result);
+      const queuedJob = result.execution as unknown as PlatformJob | undefined;
+      setIndustrialJob(queuedJob?.id ? queuedJob : null);
+      if (asString(result.status) !== "QUEUED") await refreshIndustrialWorkflow(industrialSource.projectId);
+      setActiveApproval(null);
+      setActionResult(null);
+      setLastRun(result);
+      setGovernanceMessage(asString(result.status) === "QUEUED"
+        ? "Background onboarding queued. A worker will deliver the snapshot and reconcile ontology objects with resumable checkpoints."
+        : "Your dataset is connected to a project-owned ontology, hydration pipeline, and explainable risk scorecard.");
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Industrial dataset onboarding failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
+  }
+
   return (
     <Page title="Asset Reliability Command Center" subtitle="Guided path from data onboarding to governed operational action.">
-      <ErrorBanner message={ui.error} />
+      <ErrorBanner message={ui.error || governanceError || undefined} />
       {ui.loading && <LoadingState label="Loading Command Center evidence..." />}
       <WarningList warnings={ui.value?.warnings} />
       <div className="hero-summary">
@@ -368,13 +606,45 @@ function CommandCenter() {
         </div>
       </div>
       <div className="button-row top-actions">
-        <button onClick={bootstrap}>Start with sample data</button>
-        <button onClick={triage}>Run reliability triage</button>
-        <button onClick={exportReport}>Export proof report</button>
-        <button onClick={resetDemo}>Reset demo state</button>
+        <button onClick={bootstrap} disabled={governanceBusy}>Start with sample data</button>
+        <button onClick={triage} disabled={governanceBusy || Boolean(industrialResult && !industrialWorkflow)}>{governanceBusy ? "Working..." : industrialWorkflow ? "Analyze your highest-risk asset" : "Run reliability triage"}</button>
+        <button onClick={exportReport} disabled={governanceBusy}>Export proof report</button>
+        <button onClick={resetDemo} disabled={governanceBusy}>Reset demo state</button>
       </div>
+      <Panel title="Use your promoted dataset" action={<StatusBadge value={industrialResult ? "READY" : "OPTIONAL"} />}>
+        <p className="panel-intro">Compile a project-owned asset ontology, executable hydration pipeline, geospatial fields, and governed reliability scorecard from imported data.</p>
+        <div className="form-grid industrial-onboarding-grid">
+          <label><span>Project ID</span><input value={industrialSource.projectId} onChange={(event) => setIndustrialSource((value) => ({ ...value, projectId: event.target.value }))} /></label>
+          <label><span>Promoted dataset ID</span><input value={industrialSource.assetId} placeholder="asset-import-output" onChange={(event) => setIndustrialSource((value) => ({ ...value, assetId: event.target.value }))} /></label>
+          <label><span>Unique asset field</span><input value={industrialSource.idField} onChange={(event) => setIndustrialSource((value) => ({ ...value, idField: event.target.value }))} /></label>
+          <label><span>Display name field</span><input value={industrialSource.nameField} onChange={(event) => setIndustrialSource((value) => ({ ...value, nameField: event.target.value }))} /></label>
+          <label><span>Status field</span><input value={industrialSource.statusField} onChange={(event) => setIndustrialSource((value) => ({ ...value, statusField: event.target.value }))} /></label>
+          <label><span>Criticality field</span><input value={industrialSource.criticalityField} onChange={(event) => setIndustrialSource((value) => ({ ...value, criticalityField: event.target.value }))} /></label>
+          <label><span>Failure probability field</span><input value={industrialSource.riskField} onChange={(event) => setIndustrialSource((value) => ({ ...value, riskField: event.target.value }))} /></label>
+          <label><span>Latitude / longitude fields</span><div className="inline-field-pair"><input aria-label="Latitude field" value={industrialSource.latitudeField} onChange={(event) => setIndustrialSource((value) => ({ ...value, latitudeField: event.target.value }))} /><input aria-label="Longitude field" value={industrialSource.longitudeField} onChange={(event) => setIndustrialSource((value) => ({ ...value, longitudeField: event.target.value }))} /></div></label>
+          <label><span>Execution mode</span><select aria-label="Execution mode" value={industrialSource.executionMode} onChange={(event) => setIndustrialSource((value) => ({ ...value, executionMode: event.target.value as "synchronous" | "background" }))}><option value="synchronous">Immediate - small datasets</option><option value="background">Background worker - large datasets</option></select></label>
+        </div>
+        <div className="button-row">
+          <button className="primary" onClick={() => void onboardPromotedDataset()} disabled={governanceBusy || !industrialSource.projectId.trim() || !industrialSource.assetId.trim() || !industrialSource.idField.trim()}>Compile and run workflow</button>
+          <a className="button-link" href="/workspace/imports">Import or promote data</a>
+        </div>
+        {industrialResult ? <div className="governed-action-summary industrial-result-summary">
+          <div><span>Workflow</span><strong>{asString(industrialResult.status, "READY")}</strong></div>
+          <div><span>Ontology contract</span><strong>{asString(((industrialResult.ontology_contract as JsonObject | undefined)?.registry as JsonObject | undefined)?.version, "published")}</strong></div>
+          <div><span>Objects hydrated</span><strong>{asString((industrialResult.summary as JsonObject | undefined)?.objects_hydrated, "0")}</strong></div>
+          <div><span>High-risk assets</span><strong>{asString((industrialResult.summary as JsonObject | undefined)?.high_risk_assets, "0")}</strong></div>
+          <div><span>Immutable source</span><strong>{asString((industrialResult.resources as JsonObject | undefined)?.source_snapshot, "not created")}</strong></div>
+          <div><span>Execution plan</span><strong>{asString((industrialResult.resources as JsonObject | undefined)?.pipeline_plan, "not compiled")}</strong></div>
+        </div> : null}
+        {industrialJob ? <div className="operation-feedback" role="status" aria-label="Background onboarding status">
+          <StatusBadge value={industrialJob.status} />
+          <span>Background onboarding {industrialJob.progress}%</span>
+          <span>Attempt {industrialJob.attempt}</span>
+          {industrialJob.error ? <span>{industrialJob.error}</span> : null}
+        </div> : null}
+      </Panel>
       <section className="stepper">
-        {(workflow?.steps || []).map((step, index) => (
+        {(activeWorkflow?.steps || []).map((step, index) => (
           <button key={step.id} className={classNames(step.status === "complete" && "complete", step.status === "active" && "active")} onClick={() => {
             if (step.id === "bootstrap") void bootstrap();
             else if (step.id === "triage") void triage();
@@ -393,18 +663,58 @@ function CommandCenter() {
         <Metric label="Failing checks" value={kpis.data_contract_status ?? "NOT_RUN"} />
         <Metric label="Open approvals" value={kpis.open_approvals ?? 0} />
       </div>
+      <Panel title="Governed Approval and Action" action={<StatusBadge value={actionMatchesApproval ? "EXECUTED" : approval?.status || "NOT_STAGED"} />}>
+        {approval ? (
+          <div className="governed-action-panel">
+            <div className="governed-action-summary">
+              <div><span>Action</span><strong>{approval.action_type_id}</strong></div>
+              <div><span>Requested by</span><strong>{approval.requester}</strong></div>
+              <div><span>Approval</span><StatusBadge value={approval.status} /></div>
+              <div><span>Execution</span><StatusBadge value={actionMatchesApproval ? latestAction?.status || "EXECUTED" : "NOT_EXECUTED"} /></div>
+            </div>
+            <KeyValueGrid data={approval.parameters} />
+            {approval.status === "PENDING" ? (
+              <>
+                <label className="approval-reason-field"><span>Decision reason</span><input value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} /></label>
+                <div className="button-row">
+                  <button onClick={() => void decideApproval("APPROVED")} disabled={governanceBusy || !approvalReason.trim()}><Check size={15} /> Approve action</button>
+                  <button className="secondary" onClick={() => void decideApproval("REJECTED")} disabled={governanceBusy || !approvalReason.trim()}><XCircle size={15} /> Reject</button>
+                </div>
+              </>
+            ) : null}
+            {approval.status === "APPROVED" && !actionMatchesApproval ? (
+              <button onClick={() => void executeApprovedAction()} disabled={governanceBusy}><PlayCircle size={15} /> Execute approved action</button>
+            ) : null}
+            {actionMatchesApproval && latestAction ? (
+              <div className="action-evidence" aria-label="Governed action evidence">
+                <strong>Execution evidence</strong>
+                <KeyValueGrid data={{
+                  status: latestAction.status,
+                  outbox_event_id: latestAction.id || latestAction.outbox_event_id || "recorded",
+                  delivery_status: latestAction.outbox_status || "QUEUED",
+                  mutated_objects: latestAction.mutated_object_ids?.join(", ") || "No direct mutation"
+                }} />
+              </div>
+            ) : null}
+          </div>
+        ) : <EmptyState title="No action is staged" description="Run reliability triage to produce an explainable recommendation and approval request." action={<button onClick={triage}>Run triage</button>} />}
+        {governanceMessage ? <div className="operation-feedback" role="status">{governanceMessage}</div> : null}
+      </Panel>
       <div className="two-col">
         <Panel title="High-Risk Assets" action={<button onClick={() => setRefreshKey((key) => key + 1)}>Refresh</button>}>
-          {highRisk.length ? <DataTable rows={highRisk.map((item) => ({
-            id: item.object_id,
-            name: asString(item.object?.name || item.object?.display_name || item.object?.id),
-            risk: asString(item.risk?.band),
-            score: item.risk?.score,
-            explanation: item.risk?.explanation
-          }))} /> : <EmptyState title="No high-risk assets yet" description="Start with sample data or run triage to populate risk evidence." action={<button onClick={bootstrap}>Bootstrap scenario</button>} />}
+          {highRisk.length ? <DataTable rows={highRisk.map((item) => {
+            const properties = (item.object?.properties || {}) as JsonObject;
+            return {
+              id: item.object_id,
+              name: asString(properties.name || properties.display_name || item.object?.id),
+              risk: asString(item.risk?.band),
+              score: item.risk?.score,
+              explanation: item.risk?.explanation
+            };
+          })} /> : <EmptyState title="No high-risk assets yet" description="Start with sample data or run triage to populate risk evidence." action={<button onClick={bootstrap}>Bootstrap scenario</button>} />}
         </Panel>
         <Panel title="Proof Trail" action={<button onClick={() => navigate("graph")}>Open graph</button>}>
-          <ProofTrail workflow={workflow} />
+          <ProofTrail workflow={activeWorkflow} />
           <EvidenceList links={ui.value?.evidence_links} />
         </Panel>
       </div>
@@ -744,7 +1054,7 @@ function ImportJobSummary({ job }: { job: ImportJob | null }) {
   );
 }
 
-function ProofTrail({ workflow }: { workflow: WorkflowState | null }) {
+function ProofTrail({ workflow }: { workflow: Pick<WorkflowState, "steps" | "evidence_links"> | Pick<IndustrialWorkflowState, "steps" | "evidence_links"> | null }) {
   const links = workflow?.evidence_links || [];
   return (
     <ol className="proof-trail">

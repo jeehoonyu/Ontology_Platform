@@ -1,0 +1,58 @@
+{
+  "allowed_destination": {
+    "host": "plugin-egress-mock-dabfea78aa",
+    "port": 8088,
+    "status": 200
+  },
+  "direct_socket_bypass_denied": true,
+  "executed_at": "2026-08-01T06:51:56.107597+00:00",
+  "https_custom_ca": {
+    "ca_bundle_sha256": "967336a2e9ec0cd9812a501889d81a1cace7bb779e9eb56a8a49fa5f6becf4e6",
+    "certificate_count": 1,
+    "host": "plugin-egress-tls-dabfea78aa",
+    "mode": "custom_ca",
+    "port": 8443,
+    "status": 200
+  },
+  "network_internal": true,
+  "private_ca_rejected_without_signed_bundle": true,
+  "proxy_credentials_redacted": true,
+  "proxy_image": "sha256:16b1e00f942444404c02126235a432ed65596afdc580f754c501513cb4f3c3cc",
+  "required_command_flags": [
+    "--cap-drop",
+    "--network",
+    "--read-only",
+    "--security-opt",
+    "--user"
+  ],
+  "sandbox": {
+    "capabilities_dropped": true,
+    "cpus": 1,
+    "egress_policy": {
+      "allow_http": true,
+      "allowed_hosts": [
+        "plugin-egress-mock-dabfea78aa"
+      ],
+      "allowed_ports": [
+        8088
+      ]
+    },
+    "egress_proxy": true,
+    "image": "sha256:76d2095606cae2186c9840f57d370bb8ecc4ee5c9afadf88aba936e9e44d4af1",
+    "memory_mb": 128,
+    "mode": "oci",
+    "network": "ontology-plugin-egress-dabfea78aa",
+    "no_new_privileges": true,
+    "non_root": true,
+    "pids": 64,
+    "read_only": true,
+    "runner": "/app/app/plugin_sandbox_runner.py",
+    "sdk_api_version": 1,
+    "tls_trust": {
+      "mode": "system"
+    }
+  },
+  "sandbox_image": "sha256:76d2095606cae2186c9840f57d370bb8ecc4ee5c9afadf88aba936e9e44d4af1",
+  "status": "PASS",
+  "undeclared_destination_denied": true
+}

@@ -78,6 +78,14 @@ executed = ok(client.post("/actions/execute", json={
 assert_true(executed["status"] == "SUCCESS", "approved action executes", executed)
 assert_true("wo_pump_urgent" in executed["mutated_object_ids"], "work order mutated", executed)
 
+governed_state = ok(client.get("/ui-state/command-center"), "command center governed state")
+assert_true(governed_state["workflow"]["summary"]["latest_approval"]["status"] == "APPROVED", "ui state exposes durable approval decision", governed_state["workflow"]["summary"])
+assert_true(governed_state["workflow"]["summary"]["latest_action"]["approval_request_id"] == approval["id"], "ui state links action to approval", governed_state["workflow"]["summary"])
+action_step = next(step for step in governed_state["workflow"]["steps"] if step["id"] == "action")
+assert_true(action_step["status"] == "complete" and action_step["evidence_id"], "workflow exposes completed governed action step", action_step)
+report_step_before_export = next(step for step in governed_state["workflow"]["steps"] if step["id"] == "report")
+assert_true(report_step_before_export["status"] == "available", "report remains available until evidence is exported", report_step_before_export)
+
 work_order = ok(client.get("/objects/work_order/wo_pump_urgent"), "read escalated work order")
 assert_true(work_order["properties"]["escalated"] is True and work_order["properties"]["priority"] == "critical", "work order escalation persisted", work_order)
 
@@ -88,5 +96,11 @@ assert_true(events["count"] >= 1, "event bus has asset event", events)
 
 dashboard = ok(client.get("/scenarios/asset-reliability/validation-dashboard"), "validation dashboard")
 assert_true(dashboard["row_count"] >= 20 and not dashboard["priority_gaps"], "validation dashboard summarizes matrix", dashboard)
+
+report = client.get("/scenarios/asset-reliability/report?format=markdown")
+assert_true(report.status_code == 200 and "Action execution" in report.text, "report exports governed action evidence", report.text[:500])
+workflow_after_export = ok(client.get("/scenarios/asset-reliability/workflow-state"), "workflow after report export")
+report_step_after_export = next(step for step in workflow_after_export["steps"] if step["id"] == "report")
+assert_true(report_step_after_export["status"] == "complete", "report step completes after evidence export", report_step_after_export)
 
 print(f"PASS asset reliability command center: {passed} assertions")

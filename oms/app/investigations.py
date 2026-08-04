@@ -7,6 +7,7 @@ entity graphs, timelines, and deterministic reports.
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -152,6 +153,8 @@ class ReportRequest(BaseModel):
 
 
 def _ensure_tables(db: Session) -> None:
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     for table in (
         InvestigationWorkspace.__table__,
         EvidenceItem.__table__,
@@ -301,7 +304,12 @@ def _risk_for_ref(db: Session, ref: Dict[str, Any], project_id: Optional[str] = 
         if not obj or (project_id and obj.project_id != project_id):
             return None
         from . import decision_intelligence
-        return decision_intelligence.score_object_by_id(db, str(ref.get("object_type_id")), str(ref.get("object_id")))
+        return decision_intelligence.score_object_by_id(
+            db,
+            str(ref.get("object_type_id")),
+            str(ref.get("object_id")),
+            project_id=project_id,
+        )
     except Exception:
         return None
 

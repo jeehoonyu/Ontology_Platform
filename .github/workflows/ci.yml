@@ -25,6 +25,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: oms/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Install backend dependencies
         run: python -m pip install -r oms/requirements.txt
       - name: Verify dependency installation
@@ -47,9 +50,14 @@ jobs:
             count=$((count + 1))
           done
           echo "Backend scripts passed: ${count}"
-          test "${count}" -ge 114
+          test "${count}" -ge 150
       - name: Validate docs conformance
         run: python oms/validate_docs_conformance.py
+      - name: Benchmark snapshot-native pipeline execution
+        env:
+          PIPELINE_SCALE_PROFILE: smoke
+          PIPELINE_SCALE_SAMPLES: "3"
+        run: python oms/benchmark_pipeline_scale.py
       - name: Upload backend failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -101,10 +109,35 @@ jobs:
           with engine.connect() as connection:
               revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
               tables = inspect(connection).get_table_names()
-          assert revision == "0025_ontology_schema_registry", revision
+          assert revision == "0037_cross_stream_joins", revision
           assert len(tables) >= 100, len(tables)
           print(f"PostgreSQL schema ready at {revision} with {len(tables)} tables")
           PY
+      - name: Rehearse PostgreSQL ontology query compiler
+        run: python oms/verify_ontology_query_postgres.py
+      - name: Benchmark PostgreSQL ontology query plans
+        env:
+          ONTOLOGY_SCALE_PROFILE: smoke
+          ONTOLOGY_SCALE_SAMPLES: "10"
+        run: python oms/benchmark_ontology_scale_postgres.py
+      - name: Benchmark PostgreSQL ontology mixed workload
+        env:
+          ONTOLOGY_MIXED_PROFILE: smoke
+          ONTOLOGY_MIXED_WRITES: "2000"
+          ONTOLOGY_MIXED_READERS: "4"
+        run: python oms/benchmark_ontology_mixed_workload_postgres.py
+      - name: Rehearse PostgreSQL stream ordering and processor fencing
+        run: python oms/verify_stream_processing_postgres.py
+      - name: Rehearse PostgreSQL durable event-to-stream routing
+        run: python oms/verify_event_stream_routing_postgres.py
+      - name: Rehearse PostgreSQL cross-stream interval joins
+        run: python oms/verify_cross_stream_join_postgres.py
+      - name: Rehearse PostgreSQL artifact review serialization
+        run: python oms/verify_artifact_review_postgres.py
+      - name: Rehearse PostgreSQL collaboration scale
+        run: python oms/verify_collaboration_scale_postgres.py
+      - name: Rehearse collaboration WebSocket replica loss and cursor recovery
+        run: python oms/verify_collaboration_websocket_chaos_postgres.py
 
   frontend:
     name: Frontend type, build, and dependency audit
@@ -182,9 +215,31 @@ jobs:
       PUBLIC_HOST: ontology.example.test
       CONNECTOR_SECRET_KEY: ci-connector-secret-with-at-least-32-characters
       KEYCLOAK_ADMIN_PASSWORD: ontology-ci-admin
+      PLUGIN_EXECUTOR_TOKEN: ci-plugin-executor-token
+      REHEARSAL_POSTGRES_PASSWORD: ontology-ci
+      REHEARSAL_KEYCLOAK_ADMIN_PASSWORD: ontology-ci-admin
+      REHEARSAL_CONNECTOR_SECRET_KEY: ci-rehearsal-connector-secret-with-at-least-32-characters
+      REHEARSAL_PLUGIN_EXECUTOR_TOKEN: ci-plugin-executor-token
+      REHEARSAL_PLUGIN_SANDBOX_IMAGE: registry.example.test/ontology-plugin-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     steps:
       - uses: actions/checkout@v4
       - name: Validate production Compose model
         run: docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+      - name: Validate OIDC plugin recovery rehearsal model
+        run: docker compose -f docker-compose.rehearsal.yml --profile plugin-execution config --quiet
       - name: Build production application image
         run: docker build --file oms/Dockerfile --tag ontology-platform:${{ github.sha }} .
+      - name: Build isolated plugin executor image
+        run: docker build --file oms/plugin-executor.Dockerfile --tag ontology-plugin-executor:${{ github.sha }} .
+      - name: Build governed plugin egress proxy image
+        run: docker build --file oms/plugin-egress-proxy.Dockerfile --tag ontology-plugin-egress-proxy:${{ github.sha }} .
+      - name: Rehearse digest-pinned plugin sandbox
+        run: |
+          docker build --file oms/plugin-sandbox.Dockerfile --tag ontologyos-plugin-sandbox:${{ github.sha }} .
+          SANDBOX_IMAGE="$(docker image inspect --format '{{.Id}}' ontologyos-plugin-sandbox:${{ github.sha }})"
+          python oms/rehearse_plugin_oci.py --image "$SANDBOX_IMAGE"
+      - name: Rehearse governed plugin egress
+        run: |
+          SANDBOX_IMAGE="$(docker image inspect --format '{{.Id}}' ontologyos-plugin-sandbox:${{ github.sha }})"
+          PROXY_IMAGE="$(docker image inspect --format '{{.Id}}' ontology-plugin-egress-proxy:${{ github.sha }})"
+          python oms/rehearse_plugin_egress.py --sandbox-image "$SANDBOX_IMAGE" --proxy-image "$PROXY_IMAGE"

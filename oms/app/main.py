@@ -17,6 +17,7 @@ from . import (
     ontology_functions,
     connectivity,
     streaming,
+    stream_processing,
     schedules,
     media_sets,
     lineage,
@@ -87,11 +88,17 @@ from . import (
     ontology_packages,
     ontology_health,
     ontology_registry,
+    ontology_runtime_v1,
+    data_plane,
+    model_gateway,
     platform_runtime,
     ingestion_runtime,
     runtime_observability,
     worker_control,
     connector_runtime,
+    plugin_runtime,
+    event_outbox,
+    industrial_workflow,
     semantic_scope,
 )
 from .database import engine, get_db
@@ -172,6 +179,7 @@ for _ext_module in (
     ontology_functions,
     connectivity,
     streaming,
+    stream_processing,
     schedules,
     media_sets,
     lineage,
@@ -242,11 +250,17 @@ for _ext_module in (
     ontology_packages,
     ontology_health,
     ontology_registry,
+    ontology_runtime_v1,
+    data_plane,
+    model_gateway,
     platform_runtime,
     ingestion_runtime,
     runtime_observability,
     worker_control,
     connector_runtime,
+    plugin_runtime,
+    event_outbox,
+    industrial_workflow,
 ):
     app.include_router(_ext_module.router)
 
@@ -359,6 +373,7 @@ def serve_workspace_view(view: str, request: Request):
         _not_found("Workspace", view)
     return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
+@app.get("/api/v1")
 @app.get("/")
 def read_root():
     return {
@@ -411,6 +426,13 @@ def read_root():
             "ui_state_contracts",
             "pipeline_canvas_node_preview",
             "ontology_manager_workspace",
+            "normalized_ontology_definitions",
+            "typed_object_query_v1",
+            "typed_graph_query_v1",
+            "append_only_object_change_events",
+            "immutable_dataset_snapshots",
+            "portable_pipeline_execution_plans",
+            "provider_neutral_model_gateway",
             "asset_reliability_workflow_state",
             "validation_dashboard",
             "project_snapshot",
@@ -428,6 +450,7 @@ def read_root():
 
 # --- Object Type Endpoints ---
 
+@app.post("/api/v1/object-types", response_model=schemas.ObjectType)
 @app.post("/object-types", response_model=schemas.ObjectType)
 def create_object_type(obj: schemas.ObjectTypeCreate,
                        db: Session = Depends(get_db),
@@ -448,10 +471,17 @@ def create_object_type(obj: schemas.ObjectTypeCreate,
         subject_id=obj.id,
         payload=obj.model_dump(),
     )
+    ontology_runtime_v1.materialize_semantic_definitions(
+        db,
+        project_id=obj.project_id,
+        actor=semantic_scope.principal_id(principal),
+        object_type_ids=[obj.id],
+    )
     db.commit()
     db.refresh(db_model)
     return db_model
 
+@app.get("/api/v1/object-types", response_model=List[schemas.ObjectType])
 @app.get("/object-types", response_model=List[schemas.ObjectType])
 def list_object_types(db: Session = Depends(get_db), project_id: Optional[str] = None,
                       principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
@@ -463,6 +493,7 @@ def list_object_types(db: Session = Depends(get_db), project_id: Optional[str] =
 
 # --- Object Instance Endpoints ---
 
+@app.post("/api/v1/objects", response_model=schemas.ObjectInstance)
 @app.post("/objects", response_model=schemas.ObjectInstance)
 def create_object_instance(obj: schemas.ObjectInstanceCreate,
                            db: Session = Depends(get_db),
@@ -539,11 +570,22 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate,
         source_type="object_api",
         source_id=object_id,
     )
+    ontology_runtime_v1.record_object_change(
+        db,
+        db_model,
+        before_state={},
+        event_type="ontology.object.created",
+        actor=semantic_scope.principal_id(principal),
+        source_type="object_api",
+        source_id=object_id,
+        evidence={"audit_event": "ontology.object.created", "lineage": obj.lineage},
+    )
     db.commit()
     db.refresh(db_model)
     return db_model
 
 
+@app.get("/api/v1/objects/{object_type_id}", response_model=List[schemas.ObjectInstance])
 @app.get("/objects/{object_type_id}", response_model=List[schemas.ObjectInstance])
 def list_object_instances(
     object_type_id: str,
@@ -558,6 +600,7 @@ def list_object_instances(
     ).limit(limit).all()
 
 
+@app.get("/api/v1/objects/{object_type_id}/{object_id}", response_model=schemas.ObjectInstance)
 @app.get("/objects/{object_type_id}/{object_id}", response_model=schemas.ObjectInstance)
 def get_object_instance(object_type_id: str, object_id: str,
                         db: Session = Depends(get_db),
@@ -592,6 +635,7 @@ def get_object_profile(
 
 # --- Link Type Endpoints ---
 
+@app.post("/api/v1/link-types", response_model=schemas.LinkType)
 @app.post("/link-types", response_model=schemas.LinkType)
 def create_link_type(link: schemas.LinkTypeCreate,
                      db: Session = Depends(get_db),
@@ -616,10 +660,16 @@ def create_link_type(link: schemas.LinkTypeCreate,
         subject_id=link.id,
         payload=link.model_dump(),
     )
+    ontology_runtime_v1.materialize_semantic_definitions(
+        db,
+        project_id=link.project_id,
+        actor=semantic_scope.principal_id(principal),
+    )
     db.commit()
     db.refresh(db_model)
     return db_model
 
+@app.get("/api/v1/link-types", response_model=List[schemas.LinkType])
 @app.get("/link-types", response_model=List[schemas.LinkType])
 def list_link_types(db: Session = Depends(get_db), project_id: Optional[str] = None,
                     principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
@@ -646,11 +696,17 @@ def update_link_type(link_type_id: str, patch: schemas.LinkTypePatch,
     for field, value in changes.items():
         setattr(row, field, value)
     create_audit_log(db, actor=semantic_scope.principal_id(principal), event_type="ontology.link_type.updated", subject_type="link_type", subject_id=link_type_id, payload={"project_id": row.project_id, **changes})
+    ontology_runtime_v1.materialize_semantic_definitions(
+        db,
+        project_id=row.project_id,
+        actor=semantic_scope.principal_id(principal),
+    )
     db.commit()
     db.refresh(row)
     return row
 
 
+@app.post("/api/v1/links", response_model=schemas.LinkInstance)
 @app.post("/links", response_model=schemas.LinkInstance)
 def create_link_instance(link: schemas.LinkInstanceCreate,
                          db: Session = Depends(get_db),
@@ -1006,6 +1062,7 @@ def render_gis_map_layer(layer_id: str, limit: int = 1000,
 
 # --- Action Type Endpoints ---
 
+@app.post("/api/v1/action-types", response_model=schemas.ActionType)
 @app.post("/action-types", response_model=schemas.ActionType)
 def create_action_type(
     action: schemas.ActionTypeCreate,
@@ -1030,10 +1087,16 @@ def create_action_type(
         subject_id=action.id,
         payload=action.model_dump(),
     )
+    ontology_runtime_v1.materialize_semantic_definitions(
+        db,
+        project_id=action.project_id,
+        actor=semantic_scope.principal_id(principal),
+    )
     db.commit()
     db.refresh(db_model)
     return db_model
 
+@app.get("/api/v1/action-types", response_model=List[schemas.ActionType])
 @app.get("/action-types", response_model=List[schemas.ActionType])
 def list_action_types(project_id: Optional[str] = None, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
     query = db.query(models.ActionType)
@@ -1055,6 +1118,11 @@ def update_action_type(action_type_id: str, patch: schemas.ActionTypePatch, prin
     for field, value in changes.items():
         setattr(row, field, value)
     create_audit_log(db, actor=principal.id, event_type="ontology.action_type.updated", subject_type="action_type", subject_id=action_type_id, payload={"project_id": row.project_id, **changes})
+    ontology_runtime_v1.materialize_semantic_definitions(
+        db,
+        project_id=row.project_id,
+        actor=principal.id,
+    )
     db.commit()
     db.refresh(row)
     return row
@@ -1062,6 +1130,7 @@ def update_action_type(action_type_id: str, patch: schemas.ActionTypePatch, prin
 
 # --- Data Assets and Pipeline Builder ---
 
+@app.post("/api/v1/data-assets", response_model=schemas.DataAsset)
 @app.post("/data-assets", response_model=schemas.DataAsset)
 def create_data_asset(asset: schemas.DataAssetCreate,
                       db: Session = Depends(get_db),
@@ -1360,6 +1429,7 @@ def list_model_endpoints(project_id: Optional[str] = None, principal: production
 
 # --- Action Execution Engine ---
 
+@app.post("/api/v1/actions/execute", response_model=schemas.ActionExecutionResponse)
 @app.post("/actions/execute", response_model=schemas.ActionExecutionResponse)
 def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     if not isinstance(principal, production_auth.Principal):
@@ -1700,7 +1770,7 @@ def get_agent_context(
     db: Session = Depends(get_db),
 ):
     agent = _agent_for(db, agent_id, principal, "view")
-    return build_context_pack(db, allowed_object_types=agent.allowed_object_types or [], limit=limit)
+    return build_context_pack(db, allowed_object_types=agent.allowed_object_types or [], limit=limit, project_id=agent.project_id)
 
 
 # --- AIP Tooling Surface ---

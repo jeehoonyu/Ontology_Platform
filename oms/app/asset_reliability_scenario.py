@@ -28,7 +28,9 @@ from . import (
     models_action,
     ops_control,
     platform_core,
+    production_auth,
     reliability_ops,
+    tenancy,
 )
 from .database import get_db
 from .domain_maintenance import (
@@ -720,6 +722,11 @@ def _scenario_report_payload(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
         _pipeline_run_dict(row)
         for row in db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).limit(12).all()
     ]
+    approval_ids = [row.get("id") for row in summary.get("approvals", []) if row.get("id")]
+    latest_approval = summary.get("latest_approval") or {}
+    if latest_approval.get("id") and latest_approval["id"] not in approval_ids:
+        approval_ids.append(latest_approval["id"])
+    latest_action = summary.get("latest_action") or {}
     evidence = {
         "asset_id": asset_id,
         "selected_asset_id": (summary.get("selected_asset") or {}).get("id"),
@@ -727,7 +734,8 @@ def _scenario_report_payload(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
         "pipeline_run_ids": [row["id"] for row in pipeline_runs],
         "data_contract_status": (summary.get("data_contract") or {}).get("status"),
         "model_monitor_status": (summary.get("model_monitor") or {}).get("status"),
-        "approval_ids": [row.get("id") for row in summary.get("approvals", [])],
+        "approval_ids": approval_ids,
+        "action_execution_id": latest_action.get("id"),
         "incident_ids": [row.get("id") for row in summary.get("incidents", [])],
         "report_id": (report or {}).get("id"),
         "timeline_ids": [row.get("id") for row in summary.get("timeline", []) if row.get("id")],
@@ -740,6 +748,27 @@ def _scenario_report_payload(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
         "pipeline_runs": pipeline_runs,
         "evidence": evidence,
     }
+
+
+def _action_evidence_dict(row: Optional[models_action.OutboxEvent]) -> Optional[Dict[str, Any]]:
+    if row is None:
+        return None
+    payload = dict(row.payload or {})
+    return {
+        "id": row.id,
+        "action_type_id": row.action_type_id,
+        "status": "EXECUTED",
+        "outbox_status": row.status,
+        "approval_request_id": payload.get("approval_request_id"),
+        "parameters": payload.get("parameters") or {},
+        "mutated_object_ids": payload.get("mutated_object_ids") or [],
+        "actor": payload.get("actor"),
+        "created_at": row.created_at,
+    }
+
+
+def _request_actor(principal: production_auth.Principal, requested: str) -> str:
+    return principal.id if production_auth.auth_mode() == "oidc" else requested
 
 
 def _scenario_report_markdown(payload: Dict[str, Any]) -> str:
@@ -764,6 +793,7 @@ def _scenario_report_markdown(payload: Dict[str, Any]) -> str:
         f"- Work order: {evidence.get('selected_work_order_id') or '-'}",
         f"- Pipeline runs: {', '.join(evidence.get('pipeline_run_ids') or []) or '-'}",
         f"- Approvals: {', '.join(evidence.get('approval_ids') or []) or '-'}",
+        f"- Action execution: {evidence.get('action_execution_id') or '-'}",
         f"- Incidents: {', '.join(evidence.get('incident_ids') or []) or '-'}",
         f"- Report: {evidence.get('report_id') or '-'}",
         "",
@@ -819,6 +849,20 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
     monitor_run = _latest_monitor_run(db)
     alerts = _open_alerts(db)
     approvals = _open_approvals(db)
+    latest_approval_row = db.query(models_action.ApprovalRequest).filter(
+        models_action.ApprovalRequest.project_id == "default",
+        models_action.ApprovalRequest.action_type_id == "escalate_work_order",
+        models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value,
+    ).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    if latest_approval_row is None:
+        latest_approval_row = db.query(models_action.ApprovalRequest).filter(
+            models_action.ApprovalRequest.project_id == "default",
+            models_action.ApprovalRequest.action_type_id == "escalate_work_order",
+        ).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    latest_action_row = db.query(models_action.OutboxEvent).filter(
+        models_action.OutboxEvent.project_id == "default",
+        models_action.OutboxEvent.action_type_id == "escalate_work_order",
+    ).order_by(models_action.OutboxEvent.created_at.desc()).first()
     incidents = _incidents(db)
     timeline = platform_core._build_timeline(
         db,
@@ -851,6 +895,8 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
         "model_monitor": monitor_run,
         "alerts": alerts,
         "approvals": approvals,
+        "latest_approval": _approval_dict(latest_approval_row) if latest_approval_row else None,
+        "latest_action": _action_evidence_dict(latest_action_row),
         "incidents": incidents,
         "latest_report": _latest_report(db),
         "timeline": timeline.get("timeline", []),
@@ -868,7 +914,35 @@ def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[
     except Exception:
         latest_import = latest_draft = latest_graph = None
     latest_run = db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).first()
-    latest_approval = db.query(models_action.ApprovalRequest).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    latest_approval = db.query(models_action.ApprovalRequest).filter(
+        models_action.ApprovalRequest.project_id == "default",
+        models_action.ApprovalRequest.action_type_id == "escalate_work_order",
+        models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value,
+    ).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    if latest_approval is None:
+        latest_approval = db.query(models_action.ApprovalRequest).filter(
+            models_action.ApprovalRequest.project_id == "default",
+            models_action.ApprovalRequest.action_type_id == "escalate_work_order",
+        ).order_by(models_action.ApprovalRequest.created_at.desc()).first()
+    latest_action = db.query(models_action.OutboxEvent).filter(
+        models_action.OutboxEvent.project_id == "default",
+        models_action.OutboxEvent.action_type_id == "escalate_work_order",
+    ).order_by(models_action.OutboxEvent.created_at.desc()).first()
+    current_action = latest_action if (
+        latest_action
+        and latest_approval
+        and (latest_action.payload or {}).get("approval_request_id") == latest_approval.id
+    ) else None
+    report_exported = False
+    if current_action:
+        export_rows = db.query(models_action.AuditLog).filter(
+            models_action.AuditLog.event_type == "scenario.report.exported",
+            models_action.AuditLog.subject_id == SCENARIO_ID,
+        ).order_by(models_action.AuditLog.created_at.desc()).limit(100).all()
+        report_exported = any(
+            ((row.payload or {}).get("evidence") or {}).get("action_execution_id") == current_action.id
+            for row in export_rows
+        )
     report = summary.get("latest_report")
     selected_asset = summary.get("selected_asset") or {}
     steps = [
@@ -916,9 +990,16 @@ def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[
             "href": "/workspace/command-center",
         },
         {
+            "id": "action",
+            "label": "Execute governed action",
+            "status": "complete" if current_action else ("active" if latest_approval and latest_approval.status == models_action.ApprovalStatus.APPROVED.value else ("blocked" if not latest_approval or latest_approval.status == models_action.ApprovalStatus.PENDING.value else "available")),
+            "evidence_id": getattr(current_action, "id", None),
+            "href": "/workspace/command-center",
+        },
+        {
             "id": "report",
             "label": "Export proof report",
-            "status": "complete" if report else "available",
+            "status": "complete" if report and current_action and report_exported else ("available" if current_action else "blocked"),
             "evidence_id": (report or {}).get("id"),
             "href": "/scenarios/asset-reliability/report?format=markdown",
         },
@@ -941,6 +1022,7 @@ def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[
             {"kind": "pipeline_graph", "id": getattr(latest_graph, "id", None), "href": "/workspace/pipeline"},
             {"kind": "pipeline_run", "id": getattr(latest_run, "id", None), "href": "/workspace/pipeline"},
             {"kind": "approval", "id": getattr(latest_approval, "id", None), "href": "/workspace/command-center"},
+            {"kind": "action_execution", "id": getattr(current_action, "id", None), "href": "/workspace/command-center"},
             {"kind": "report", "id": (report or {}).get("id"), "href": "/scenarios/asset-reliability/report?format=markdown"},
         ],
         "summary": summary,
@@ -964,6 +1046,8 @@ def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
     selected_asset = summary.get("selected_asset") or {}
     selected_work_order = summary.get("selected_work_order") or {}
     approvals = summary.get("approvals") or []
+    latest_approval = summary.get("latest_approval") or {}
+    latest_action = summary.get("latest_action") or {}
     incidents = summary.get("incidents") or []
     report = summary.get("latest_report") or {}
     data_contract = summary.get("data_contract") or {}
@@ -986,7 +1070,7 @@ def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
     )
     evaluator_summary = {
         "title": "Reliability decision summary",
-        "decision": "Approval required" if approvals else ("Run triage" if selected_asset else "Bootstrap sample data"),
+        "decision": "Approval required" if approvals else ("Action executed" if latest_action else ("Execute approved action" if latest_approval.get("status") == "APPROVED" else ("Run triage" if selected_asset else "Bootstrap sample data"))),
         "recommendation": recommendation,
         "why": top_risk_score.get("explanation") or "The workflow combines pipeline evidence, ontology objects, risk scoring, checks, approvals, and report output.",
         "selected_asset": selected_asset.get("id"),
@@ -1029,7 +1113,16 @@ def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
             "status": _step_status(workflow, "approval"),
             "description": "High-risk operational changes are staged for human approval instead of mutating directly.",
             "metrics": {"open_approvals": kpis.get("open_approvals", 0), "open_incidents": kpis.get("open_incidents", 0)},
-            "rows": approvals[:6],
+            "rows": (approvals or ([latest_approval] if latest_approval else []))[:6],
+            "href": "/workspace/command-center",
+        },
+        {
+            "id": "action",
+            "title": "Governed action execution",
+            "status": _step_status(workflow, "action"),
+            "description": "Approved mutations execute once with an idempotency key, audit evidence, and transactional outbox delivery.",
+            "metrics": {"status": latest_action.get("status", "NOT_EXECUTED"), "mutated_objects": len(latest_action.get("mutated_object_ids") or [])},
+            "rows": [latest_action] if latest_action else [],
             "href": "/workspace/command-center",
         },
         {
@@ -1300,7 +1393,13 @@ def _validation_dashboard(db: Session, *, include_summary: bool = True) -> Dict[
 
 
 @router.post("/scenarios/asset-reliability/bootstrap")
-def bootstrap_asset_reliability(body: ScenarioBootstrapRequest = ScenarioBootstrapRequest(), db: Session = Depends(get_db)):
+def bootstrap_asset_reliability(
+    body: ScenarioBootstrapRequest = ScenarioBootstrapRequest(),
+    db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("edit")),
+):
+    tenancy.assert_project_permission(db, principal, "default", "edit")
+    body = body.model_copy(update={"actor": _request_actor(principal, body.actor)})
     resources: List[Dict[str, str]] = []
     maintenance = bootstrap_maintenance_copilot(db, actor=body.actor)
     resources.extend(maintenance.get("resources", []))
@@ -1316,7 +1415,7 @@ def bootstrap_asset_reliability(body: ScenarioBootstrapRequest = ScenarioBootstr
             pipeline_runs.append(_run_pipeline_inline(db, pipeline_id, actor=body.actor))
         resources.extend(_ensure_links(db))
 
-    decision_result = decision_intelligence.evaluate_decision_scope(
+    decision_result = decision_intelligence.evaluate_decision_scope_inline(
         decision_intelligence.DecisionEvaluateRequest(
             object_type_id="asset",
             scorecard_ids=[DECISION_SCORECARD_ID],
@@ -1369,25 +1468,31 @@ def bootstrap_asset_reliability(body: ScenarioBootstrapRequest = ScenarioBootstr
 
 
 @router.get("/scenarios/asset-reliability/summary")
-def asset_reliability_summary(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+def asset_reliability_summary(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    tenancy.assert_project_permission(db, principal, "default", "view")
     return _summarize(db, asset_id=asset_id)
 
 
 @router.get("/scenarios/asset-reliability/workflow-state")
-def asset_reliability_workflow_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+def asset_reliability_workflow_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    tenancy.assert_project_permission(db, principal, "default", "view")
     return _workflow_state(db, asset_id=asset_id)
 
 
 @router.get("/ui-state/command-center")
-def command_center_ui_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db)):
+def command_center_ui_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    tenancy.assert_project_permission(db, principal, "default", "view")
     return _command_center_ui_state(db, asset_id=asset_id)
 
 
 @router.post("/project/demo/bootstrap")
-def bootstrap_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db)):
+def bootstrap_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    tenancy.assert_project_permission(db, principal, "default", "edit")
+    body = body.model_copy(update={"actor": _request_actor(principal, body.actor)})
     result = bootstrap_asset_reliability(
         ScenarioBootstrapRequest(actor=body.actor, run_pipelines=body.run_pipelines, run_checks=body.run_checks),
         db,
+        principal,
     )
     return {
         "status": "READY",
@@ -1399,10 +1504,13 @@ def bootstrap_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: 
 
 
 @router.post("/project/demo/reset")
-def reset_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db)):
+def reset_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    tenancy.assert_project_permission(db, principal, "default", "edit")
+    body = body.model_copy(update={"actor": _request_actor(principal, body.actor)})
     result = bootstrap_asset_reliability(
         ScenarioBootstrapRequest(actor=body.actor, run_pipelines=body.run_pipelines, run_checks=body.run_checks),
         db,
+        principal,
     )
     return {
         "status": "READY",
@@ -1415,13 +1523,15 @@ def reset_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Sess
 
 
 @router.post("/scenarios/asset-reliability/run-triage")
-def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageRequest(), db: Session = Depends(get_db)):
+def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageRequest(), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
+    tenancy.assert_project_permission(db, principal, "default", "execute")
+    body = body.model_copy(update={"actor": _request_actor(principal, body.actor)})
     asset = db.get(models.ObjectInstance, body.asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail=f"Asset '{body.asset_id}' not found. Run /scenarios/asset-reliability/bootstrap first.")
     if not db.get(models.ObjectInstance, body.work_order_id):
         raise HTTPException(status_code=404, detail=f"Work order '{body.work_order_id}' not found")
-    decision_result = decision_intelligence.evaluate_decision_scope(
+    decision_result = decision_intelligence.evaluate_decision_scope_inline(
         decision_intelligence.DecisionEvaluateRequest(
             object_type_id="asset",
             object_ids=[body.asset_id],
@@ -1486,7 +1596,8 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
 
 
 @router.get("/scenarios/asset-reliability/validation-dashboard")
-def asset_reliability_validation_dashboard(db: Session = Depends(get_db)):
+def asset_reliability_validation_dashboard(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    tenancy.assert_project_permission(db, principal, "default", "view")
     return _validation_dashboard(db)
 
 
@@ -1496,7 +1607,10 @@ def asset_reliability_report(
     format: str = Query("json", pattern="^(json|markdown)$"),
     actor: str = Query("workspace"),
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("export")),
 ):
+    tenancy.assert_project_permission(db, principal, "default", "export")
+    actor = _request_actor(principal, actor)
     payload = _scenario_report_payload(db, asset_id=asset_id)
     create_audit_log(
         db,

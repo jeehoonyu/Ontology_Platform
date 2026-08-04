@@ -81,4 +81,11 @@ def downgrade() -> None:
             op.drop_table(table)
     for table in ("streams", "connection_exports", "connection_syncs", "connection_sources", "platform_jobs"):
         if table in tables and "project_id" in {column["name"] for column in sa.inspect(op.get_bind()).get_columns(table)}:
+            # Drop the index first. SQLite leaves an index referencing the
+            # dropped column behind and then rejects the table, while
+            # PostgreSQL removes it by cascade.
+            indexes = {index["name"] for index in sa.inspect(op.get_bind()).get_indexes(table)}
+            index_name = f"ix_{table}_project_id"
+            if index_name in indexes:
+                op.drop_index(index_name, table_name=table)
             op.drop_column(table, "project_id")

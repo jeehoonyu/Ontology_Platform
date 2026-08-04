@@ -2,6 +2,8 @@
 
 The ingestion runtime executes connector syncs and stream replays through the same durable job control plane used by pipelines and agents. Resources and jobs carry a project identity, and worker claims are filtered by project permissions.
 
+Event-time consumption, partition watermarks, late-data quarantine, windows, and producer backpressure are documented in [Durable Event-Time Stream Processing](DURABLE_STREAM_PROCESSING.md).
+
 ## Runtime Flow
 
 1. Create a project-scoped connection source and sync, or stream.

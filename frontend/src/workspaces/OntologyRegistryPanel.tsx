@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   checkRegistryCompatibility,
+  downloadRegistryPackage,
   getOntologyRegistryState,
   getPublishedOntologyRevisions,
+  getRegistryPackages,
   getRegistrySchema,
   getRegistrySdk,
   publishOntologyRegistry,
   type OntologyRegistryEntry,
+  type OntologySdkPackage,
   type OntologyRegistryState,
   type OntologyRevisionSummary,
   type RegistryCompatibility
@@ -22,6 +25,7 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
   const [allowBreaking, setAllowBreaking] = useState(false);
   const [compatibility, setCompatibility] = useState<RegistryCompatibility | null>(null);
   const [selected, setSelected] = useState<OntologyRegistryEntry | null>(null);
+  const [packages, setPackages] = useState<OntologySdkPackage[]>([]);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Select a published ontology revision to check compatibility.");
 
@@ -40,6 +44,16 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     void refresh().catch((error: Error) => setMessage(`Could not load schema registry: ${error.message}`));
   }, [channel]);
+
+  useEffect(() => {
+    if (!selected) {
+      setPackages([]);
+      return;
+    }
+    void getRegistryPackages(selected.id)
+      .then((manifest) => setPackages(manifest.packages))
+      .catch((error: Error) => setMessage(`Could not load installable packages: ${error.message}`));
+  }, [selected?.id]);
 
   const compatibilityRows = useMemo(() => (compatibility?.entries || selected?.compatibility.entries || []).map((entry) => ({
     change: entry.kind.replace(/_/g, " "),
@@ -112,6 +126,18 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function downloadPackage(packageInfo: OntologySdkPackage) {
+    setBusy(`package-${packageInfo.ecosystem}`);
+    try {
+      await downloadRegistryPackage(packageInfo);
+      setMessage(`Downloaded installable ${packageInfo.package_name} ${selected?.version || ""}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <section className="ontology-registry" aria-label="Ontology schema registry">
       <header className="ontology-release-header">
@@ -143,7 +169,13 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
         <Panel title="Contract Evidence" action={selected ? <StatusBadge value={selected.compatibility.classification} /> : undefined}>
           {selected ? <>
             <KeyValueGrid data={{ version: selected.version, revision: selected.revision_number, publisher: selected.published_by, checksum: selected.checksum, prior_registry: selected.compatibility.against_registry_id || "Initial contract" }} />
-            <div className="button-row registry-downloads"><button onClick={downloadSchema} disabled={Boolean(busy)}>Download schema</button><button onClick={() => downloadSdk("typescript")} disabled={Boolean(busy)}>TypeScript client</button><button onClick={() => downloadSdk("python")} disabled={Boolean(busy)}>Python client</button></div>
+            <div className="button-row registry-downloads"><button onClick={downloadSchema} disabled={Boolean(busy)}>Download schema</button><button onClick={() => downloadSdk("typescript")} disabled={Boolean(busy)}>TypeScript source</button><button onClick={() => downloadSdk("python")} disabled={Boolean(busy)}>Python source</button></div>
+            <div className="ontology-package-list" aria-label="Installable SDK packages">
+              {packages.map((packageInfo) => <div className="ontology-package-row" key={packageInfo.ecosystem}>
+                <span><strong>{packageInfo.ecosystem === "npm" ? "npm package" : "Python wheel"}</strong><small>{packageInfo.package_name} · {(packageInfo.byte_size / 1024).toFixed(1)} KB · SHA-256 {packageInfo.sha256.slice(0, 12)}</small></span>
+                <button onClick={() => downloadPackage(packageInfo)} disabled={Boolean(busy)}>{busy === `package-${packageInfo.ecosystem}` ? "Preparing..." : `Download ${packageInfo.filename.endsWith(".whl") ? ".whl" : ".tgz"}`}</button>
+              </div>)}
+            </div>
           </> : <div className="empty">Select a published version to inspect its contract.</div>}
         </Panel>
       </div>

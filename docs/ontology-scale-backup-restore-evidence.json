@@ -1,0 +1,32 @@
+{
+  "backup_method": "pg_basebackup_physical_stream",
+  "backup_seconds": 50.917,
+  "fresh_volume": true,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "restore_readiness_seconds": 1.144,
+  "rpo_semantics": "consistent physical snapshot at pg_basebackup completion",
+  "rto_limit_seconds": 1800.0,
+  "source_container": "ontology_scale_reference",
+  "source_state": {
+    "indexed_plan": true,
+    "links": 50000000,
+    "migration": "0031_artifact_review_workflows",
+    "mixed_events": 200000,
+    "objects": 10000000
+  },
+  "status": "PASS",
+  "target_container": "ontology_scale_restore_reference",
+  "target_state": {
+    "indexed_plan": true,
+    "links": 50000000,
+    "migration": "0031_artifact_review_workflows",
+    "mixed_events": 200000,
+    "objects": 10000000
+  },
+  "target_volume": "ontology_scale_restore_pgdata",
+  "target_volume_bytes": 36588560369
+}

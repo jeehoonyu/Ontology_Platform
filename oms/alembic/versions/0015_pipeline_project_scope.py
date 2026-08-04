@@ -33,5 +33,11 @@ def downgrade() -> None:
         return
     columns = {column["name"] for column in inspector.get_columns("pipeline_builder_graphs")}
     if "project_id" in columns:
+        # Drop the index first. SQLite rebuilds the table for a column drop and
+        # recreates reflected indexes, so an index still referencing project_id
+        # fails the rebuild. PostgreSQL drops it by cascade.
+        indexes = {index["name"] for index in inspector.get_indexes("pipeline_builder_graphs")}
+        if "ix_pipeline_builder_graphs_project_id" in indexes:
+            op.drop_index("ix_pipeline_builder_graphs_project_id", table_name="pipeline_builder_graphs")
         with op.batch_alter_table("pipeline_builder_graphs") as batch:
             batch.drop_column("project_id")

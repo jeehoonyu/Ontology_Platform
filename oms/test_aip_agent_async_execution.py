@@ -55,7 +55,7 @@ ok(client.put("/aip/agents/async_ops_agent/tools", json={
     "retrieval": {"ontology": ["async_incident"]},
 }), "configure agent tools")
 
-queued = ok(client.post("/aip/agents/async_ops_agent/invoke/async", json={
+queued = ok(client.post("/api/v1/agents/async_ops_agent/tasks", json={
     "prompt": "escalate the critical incident",
     "parameters": {"incident_id": "incident-1"},
     "idempotency_key": "agent-invocation-v1",
@@ -91,6 +91,8 @@ runs = ok(client.get("/aip/agents/async_ops_agent/runs"), "inspect persisted age
 assert len(runs) == 1 and runs[0]["execution_job_id"] == queued["id"], runs
 detail = ok(client.get(f"/jobs/{queued['id']}"), "inspect job trace")
 assert [event["event_type"] for event in detail["events"]] == ["job.queued", "job.claimed", "job.progress", "job.succeeded"], detail
+task_detail = ok(client.get(f"/api/v1/agents/tasks/{queued['id']}"), "inspect versioned agent task")
+assert task_detail["id"] == queued["id"] and task_detail["job_type"] == "aip.agent.invoke", task_detail
 
 denied = ok(client.post("/aip/agents/async_ops_agent/invoke", json={
     "prompt": "escalate",

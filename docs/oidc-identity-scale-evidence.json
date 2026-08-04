@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "authorization_flow": "authorization_code_pkce",
+  "identities": 200,
+  "unique_principals": 200,
+  "replicas_verified": [
+    "http://localhost:18000",
+    "http://localhost:18001"
+  ],
+  "role": "viewer",
+  "organization_id": "pilot",
+  "project_id": "default",
+  "mutation_denials": 200,
+  "concurrency": 20,
+  "elapsed_seconds": 55.584,
+  "login_p50_ms": 4522.317,
+  "login_p95_ms": 5625.772,
+  "login_p95_limit_ms": 15000
+}

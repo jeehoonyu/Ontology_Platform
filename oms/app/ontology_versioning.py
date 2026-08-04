@@ -920,6 +920,7 @@ def diff_ontology_revision(revision_id: str, against: Optional[str] = None, prin
     return {"revision_id": row.id, "against_revision_id": comparison_id, **_ontology_diff(before, row.manifest or {})}
 
 
+@router.post("/api/v1/ontology/change-sets", status_code=201)
 @router.post("/ontology/change-sets", status_code=201)
 def create_ontology_change_set(body: ChangeSetCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
     tenancy.assert_project_permission(db, principal, body.project_id, "edit")
@@ -972,6 +973,7 @@ def create_ontology_change_set(body: ChangeSetCreate, principal: Principal = Dep
     return _change_set_dict(db, row)
 
 
+@router.get("/api/v1/ontology/change-sets")
 @router.get("/ontology/change-sets")
 def list_ontology_change_sets(project_id: Optional[str] = None, status: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     query = semantic_scope.accessible_query(db, principal, OntologyChangeSet)
@@ -983,12 +985,14 @@ def list_ontology_change_sets(project_id: Optional[str] = None, status: Optional
     return [_change_set_dict(db, row) for row in query.order_by(OntologyChangeSet.updated_at.desc()).all()]
 
 
+@router.get("/api/v1/ontology/change-sets/{change_set_id}")
 @router.get("/ontology/change-sets/{change_set_id}")
 def get_ontology_change_set(change_set_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     row = semantic_scope.owned_row(db, principal, OntologyChangeSet, change_set_id, "view", "OntologyChangeSet")
     return _change_set_dict(db, row)
 
 
+@router.post("/api/v1/ontology/change-sets/{change_set_id}/validate")
 @router.post("/ontology/change-sets/{change_set_id}/validate")
 def validate_ontology_change_set(change_set_id: str, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
     row = semantic_scope.owned_row(db, principal, OntologyChangeSet, change_set_id, "edit", "OntologyChangeSet")
@@ -1011,6 +1015,7 @@ def validate_ontology_change_set(change_set_id: str, principal: Principal = Depe
     return _change_set_dict(db, row)
 
 
+@router.post("/api/v1/ontology/change-sets/{change_set_id}/decision")
 @router.post("/ontology/change-sets/{change_set_id}/decision")
 def decide_ontology_change_set(change_set_id: str, body: ChangeSetDecision, principal: Principal = Depends(require_permission("approve")), db: Session = Depends(get_db)):
     row = semantic_scope.owned_row(db, principal, OntologyChangeSet, change_set_id, "approve", "OntologyChangeSet")
@@ -1024,6 +1029,7 @@ def decide_ontology_change_set(change_set_id: str, body: ChangeSetDecision, prin
     return _change_set_dict(db, row)
 
 
+@router.post("/api/v1/ontology/change-sets/{change_set_id}/publish")
 @router.post("/ontology/change-sets/{change_set_id}/publish")
 def publish_ontology_change_set(change_set_id: str, body: ChangeSetPublishRequest, principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
     row = semantic_scope.owned_row(db, principal, OntologyChangeSet, change_set_id, "publish", "OntologyChangeSet")
@@ -1059,8 +1065,12 @@ def publish_ontology_change_set(change_set_id: str, body: ChangeSetPublishReques
             if branch:
                 branch.status = "merged"
     _append_audit(db, principal.id, "ontology.change_set.published", "ontology_change_set", row.id, {"project_id": row.project_id, "environment": body.environment, "revision_id": draft.id, "checksum": draft.checksum, "applied": applied})
+    from . import ontology_runtime_v1
+    semantic_contract = ontology_runtime_v1.materialize_semantic_definitions(
+        db, project_id=row.project_id, actor=principal.id, revision_id=draft.id,
+    )
     db.commit()
-    return {"change_set": _change_set_dict(db, row), "revision": _revision_dict(draft), "environment": {"name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "applied": applied}
+    return {"change_set": _change_set_dict(db, row), "revision": _revision_dict(draft), "environment": {"name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "applied": applied, "semantic_contract": semantic_contract}
 
 
 @router.get("/ontology/environments")
@@ -1089,5 +1099,9 @@ def rollback_ontology_environment(environment_name: str, body: EnvironmentRollba
     environment.updated_by = principal.id
     environment.updated_at = _now()
     _append_audit(db, principal.id, "ontology.environment.rolled_back", "ontology_environment", environment.id, {"project_id": body.project_id, "environment": environment_name, "restored_from_revision_id": target.id, "rollback_revision_id": rollback.id, "applied": applied})
+    from . import ontology_runtime_v1
+    semantic_contract = ontology_runtime_v1.materialize_semantic_definitions(
+        db, project_id=body.project_id, actor=principal.id, revision_id=rollback.id,
+    )
     db.commit()
-    return {"environment": {"id": environment.id, "project_id": environment.project_id, "name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "revision": _revision_dict(rollback), "restored_from_revision_id": target.id, "applied": applied}
+    return {"environment": {"id": environment.id, "project_id": environment.project_id, "name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "revision": _revision_dict(rollback), "restored_from_revision_id": target.id, "applied": applied, "semantic_contract": semantic_contract}

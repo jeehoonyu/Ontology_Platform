@@ -299,7 +299,13 @@ def _invoke_agent(
 
     # 1) retrieval context
     ontology_types = retrieval_cfg.get("ontology") or agent.allowed_object_types or []
-    context = runtime.build_context_pack(db, allowed_object_types=ontology_types, filters={}, limit=5) if ontology_types else {"packs": []}
+    context = runtime.build_context_pack(
+        db,
+        allowed_object_types=ontology_types,
+        filters={},
+        limit=5,
+        project_id=agent.project_id,
+    ) if ontology_types else {"packs": [], "project_id": agent.project_id}
     documents = retrieval_cfg.get("documents", [])
     retrieval = {
         "ontology_packs": context.get("packs", []),
@@ -422,6 +428,7 @@ def invoke_agent(agent_id: str, body: InvokeRequest, principal: Principal = Depe
 
 
 @router.post("/aip/agents/{agent_id}/invoke/async", status_code=202)
+@router.post("/api/v1/agents/{agent_id}/tasks", status_code=202)
 def enqueue_agent_invocation(
     agent_id: str,
     body: AsyncInvokeRequest,
@@ -445,6 +452,44 @@ def enqueue_agent_invocation(
         timeout_seconds=body.timeout_seconds,
         idempotency_key=body.idempotency_key,
     ), principal, db)
+
+
+def _agent_task_or_404(task_id: str, principal: Principal, db: Session, permission: str = "view") -> Dict[str, Any]:
+    job = platform_runtime.get_job(task_id, principal, db)
+    if job.get("job_type") != "aip.agent.invoke":
+        raise HTTPException(status_code=404, detail=f"Agent task '{task_id}' not found")
+    if permission == "execute" and not principal.allows("execute"):
+        raise HTTPException(status_code=403, detail="Missing permission 'execute'")
+    return job
+
+
+@router.get("/api/v1/agents/tasks/{task_id}")
+def get_agent_task(
+    task_id: str,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    return _agent_task_or_404(task_id, principal, db)
+
+
+@router.post("/api/v1/agents/tasks/{task_id}/cancel")
+def cancel_agent_task(
+    task_id: str,
+    principal: Principal = Depends(require_permission("execute")),
+    db: Session = Depends(get_db),
+):
+    _agent_task_or_404(task_id, principal, db, "execute")
+    return platform_runtime.cancel_job(task_id, principal, db)
+
+
+@router.post("/api/v1/agents/tasks/{task_id}/retry")
+def retry_agent_task(
+    task_id: str,
+    principal: Principal = Depends(require_permission("execute")),
+    db: Session = Depends(get_db),
+):
+    _agent_task_or_404(task_id, principal, db, "execute")
+    return platform_runtime.retry_job(task_id, principal, db)
 
 
 @router.post("/aip/agents/workers/run-next")

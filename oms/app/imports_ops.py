@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 import time
 import uuid
@@ -203,6 +204,8 @@ def _new_id(prefix: str) -> str:
 
 
 def _ensure_tables(db: Session) -> None:
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     ImportJob.__table__.create(bind=db.get_bind(), checkfirst=True)
     ops_control._ensure_tables(db)
 

@@ -708,11 +708,31 @@ function rowName(row: TableRow) {
 function rowEditState(row: TableRow): JsonObject {
   return {
     name: rowName(row),
+    display_name: asString(row.display_name, rowName(row)),
     base_type: asString(row.base_type, "string"),
     status: asString(row.status, "active"),
     required: Boolean(row.required),
-    description: asString(row.description, "")
+    indexed: Boolean(row.indexed),
+    sensitive: Boolean(row.sensitive),
+    description: asString(row.description, ""),
+    minimum: row.minimum ?? "",
+    maximum: row.maximum ?? "",
+    unit: asString(row.unit, ""),
+    pattern: asString(row.pattern, ""),
+    enum_text: Array.isArray(row.enum) ? row.enum.join(", ") : ""
   };
+}
+
+function propertyPayload(draft: JsonObject): JsonObject {
+  const payload = { ...draft };
+  const enumText = asString(payload.enum_text).trim();
+  payload.enum = enumText ? enumText.split(",").map((value) => value.trim()).filter(Boolean) : [];
+  delete payload.enum_text;
+  for (const field of ["minimum", "maximum"] as const) {
+    if (payload[field] === "" || payload[field] === null || payload[field] === undefined) payload[field] = null;
+    else payload[field] = Number(payload[field]);
+  }
+  return payload;
 }
 
 function PropertyEditor({
@@ -732,7 +752,7 @@ function PropertyEditor({
 }) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, JsonObject>>({});
-  const [newField, setNewField] = useState<JsonObject>({ name: "", base_type: "string", status: "active", required: false, description: "" });
+  const [newField, setNewField] = useState<JsonObject>({ name: "", display_name: "", base_type: "string", status: "active", required: false, indexed: false, sensitive: false, description: "", unit: "", minimum: "", maximum: "", enum_text: "" });
   const [confirmArchive, setConfirmArchive] = useState("");
   const [dragName, setDragName] = useState("");
   const [impactMessage, setImpactMessage] = useState("");
@@ -749,12 +769,12 @@ function PropertyEditor({
   async function addField() {
     const name = asString(newField.name).trim();
     if (!name) return;
-    await onAddProperty(newField);
-    setNewField({ name: "", base_type: "string", status: "active", required: false, description: "" });
+    await onAddProperty(propertyPayload(newField));
+    setNewField({ name: "", display_name: "", base_type: "string", status: "active", required: false, indexed: false, sensitive: false, description: "", unit: "", minimum: "", maximum: "", enum_text: "" });
   }
 
   async function saveRow(originalName: string) {
-    await onUpdateProperty(originalName, drafts[originalName] || {});
+    await onUpdateProperty(originalName, propertyPayload(drafts[originalName] || {}));
   }
 
   async function archiveRow(name: string) {
@@ -809,6 +829,18 @@ function PropertyEditor({
             </label>
             <input value={asString(newField.description)} onChange={(event) => setNewField({ ...newField, description: event.target.value })} placeholder="Description" />
             <button onClick={addField}>Add field</button>
+            <details className="property-advanced">
+              <summary>Constraints, indexing, and display</summary>
+              <div className="property-advanced-grid">
+                <label><span>Display name</span><input value={asString(newField.display_name)} onChange={(event) => setNewField({ ...newField, display_name: event.target.value })} placeholder="Human-readable label" /></label>
+                <label><span>Unit</span><input value={asString(newField.unit)} onChange={(event) => setNewField({ ...newField, unit: event.target.value })} placeholder="psi, deg C, km/h" /></label>
+                <label><span>Minimum</span><input type="number" value={asString(newField.minimum)} onChange={(event) => setNewField({ ...newField, minimum: event.target.value })} /></label>
+                <label><span>Maximum</span><input type="number" value={asString(newField.maximum)} onChange={(event) => setNewField({ ...newField, maximum: event.target.value })} /></label>
+                <label><span>Enum values</span><input value={asString(newField.enum_text)} onChange={(event) => setNewField({ ...newField, enum_text: event.target.value })} placeholder="RUNNING, DEGRADED, OFFLINE" /></label>
+                <label className="checkbox-field"><input type="checkbox" checked={Boolean(newField.indexed)} onChange={(event) => setNewField({ ...newField, indexed: event.target.checked })} />Indexed</label>
+                <label className="checkbox-field"><input type="checkbox" checked={Boolean(newField.sensitive)} onChange={(event) => setNewField({ ...newField, sensitive: event.target.checked })} />Sensitive / masked</label>
+              </div>
+            </details>
           </div>
           <div className="property-field-list">
             {rows.map((row) => {
@@ -842,6 +874,19 @@ function PropertyEditor({
                   <button disabled={row.can_delete === false} onClick={() => archiveRow(name)}>
                     {confirmArchive === name ? "Confirm archive" : "Archive"}
                   </button>
+                  <details className="property-advanced">
+                    <summary>Constraints, indexing, and display</summary>
+                    <div className="property-advanced-grid">
+                      <label><span>Display name</span><input value={asString(draft.display_name)} onChange={(event) => updateDraft(name, { display_name: event.target.value })} /></label>
+                      <label><span>Unit</span><input value={asString(draft.unit)} onChange={(event) => updateDraft(name, { unit: event.target.value })} placeholder="Optional unit" /></label>
+                      <label><span>Minimum</span><input type="number" value={asString(draft.minimum)} onChange={(event) => updateDraft(name, { minimum: event.target.value })} /></label>
+                      <label><span>Maximum</span><input type="number" value={asString(draft.maximum)} onChange={(event) => updateDraft(name, { maximum: event.target.value })} /></label>
+                      <label><span>Enum values</span><input value={asString(draft.enum_text)} onChange={(event) => updateDraft(name, { enum_text: event.target.value })} placeholder="Comma-separated" /></label>
+                      <label><span>Pattern</span><input value={asString(draft.pattern)} onChange={(event) => updateDraft(name, { pattern: event.target.value })} placeholder="Optional regex" /></label>
+                      <label className="checkbox-field"><input type="checkbox" checked={Boolean(draft.indexed)} onChange={(event) => updateDraft(name, { indexed: event.target.checked })} />Indexed</label>
+                      <label className="checkbox-field"><input type="checkbox" checked={Boolean(draft.sensitive)} onChange={(event) => updateDraft(name, { sensitive: event.target.checked })} />Sensitive / masked</label>
+                    </div>
+                  </details>
                 </article>
               );
             })}

@@ -15,7 +15,7 @@ output_dir = root / output_name
 log_path = work / "docker-calls.jsonl"
 passed = 0
 
-assert "varchar(32)" in rehearsal_source and "0025_ontology_schema_registry" in rehearsal_source
+assert "varchar(32)" in rehearsal_source and "0037_cross_stream_joins" in rehearsal_source
 passed += 1
 
 fake = work / "fake_docker.py"
@@ -33,6 +33,8 @@ if ' cp ' in f' {joined} ':
     source, target = args[-2], args[-1]
     if source.startswith('postgres:'):
         pathlib.Path(target).write_bytes(b'portable fake postgres archive')
+    if source.startswith('oms-api:'):
+        pathlib.Path(target).write_bytes(b'portable fake dataset snapshot archive')
 if os.environ.get('FAKE_DOCKER_FAIL_PROMOTE') == '1' and 'ALTER DATABASE' in joined and '_restore_' in joined and 'RENAME TO' in joined:
     sys.exit(71)
 sys.exit(0)
@@ -56,7 +58,7 @@ def run_ps(script: str, *args: str, fail: bool = False, extra_env=None):
 
 
 try:
-    backup = run_ps("backup.ps1", "-OutputDirectory", output_name, "-DatabaseUser", "ontology", "-DatabaseName", "ontology")
+    backup = run_ps("backup.ps1", "-OutputDirectory", output_name, "-DatabaseUser", "ontology", "-DatabaseName", "ontology", "-IncludeSnapshots", "-IncludePlugins")
     dumps = list(output_dir.glob("*.dump"))
     assert len(dumps) == 1, (backup.stdout, list(output_dir.iterdir()))
     dump = dumps[0]
@@ -66,11 +68,17 @@ try:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     assert manifest["format"] == "postgres-custom" and manifest["size_bytes"] == dump.stat().st_size
     assert manifest["sha256"] in checksum.read_text(encoding="ascii")
-    passed += 4
+    snapshot_archive = Path(f"{dump}.snapshots.tar.gz")
+    assert snapshot_archive.exists() and Path(f"{snapshot_archive}.sha256").exists()
+    assert manifest["snapshot_archive"] == snapshot_archive.name and manifest["snapshot_sha256"]
+    plugin_archive = Path(f"{dump}.plugins.tar.gz")
+    assert plugin_archive.exists() and Path(f"{plugin_archive}.sha256").exists()
+    assert manifest["plugin_archive"] == plugin_archive.name and manifest["plugin_sha256"]
+    passed += 8
 
     run_ps(
         "restore.ps1", "-BackupPath", str(dump), "-ConfirmRestore", "-KeepPreviousDatabase",
-        "-DatabaseUser", "ontology", "-DatabaseName", "ontology",
+        "-DatabaseUser", "ontology", "-DatabaseName", "ontology", "-RestoreSnapshots", "-RestorePlugins",
     )
     calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     joined = [" ".join(call) for call in calls]
@@ -80,7 +88,9 @@ try:
     assert any("stop oms-api oms-worker" in call for call in joined)
     assert any("ALTER DATABASE" in call and "_previous_" in call for call in joined)
     assert any("start oms-api oms-worker" in call for call in joined)
-    passed += 6
+    assert any("tar -xzf" in call and "/var/lib/ontology/snapshots" in call for call in joined)
+    assert any("tar -xzf" in call and "/var/lib/ontology/plugins" in call for call in joined)
+    passed += 8
 
     before_failure = len(calls)
     run_ps(

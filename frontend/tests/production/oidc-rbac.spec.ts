@@ -296,25 +296,24 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   await page.evaluate(({ artifactId, cursor }) => {
     const holder = window as unknown as {
       crossReplicaEvent?: Promise<Record<string, unknown>>;
-      crossReplicaStream?: EventSource;
+      crossReplicaSocket?: WebSocket;
     };
     holder.crossReplicaEvent = new Promise((resolve, reject) => {
-      const stream = new EventSource(`/artifacts/${artifactId}/collaboration/stream?after=${cursor}`);
-      holder.crossReplicaStream = stream;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(`${protocol}//${window.location.host}/artifacts/${artifactId}/collaboration/ws?after=${cursor}`);
+      holder.crossReplicaSocket = socket;
       const timeout = window.setTimeout(() => {
-        stream.close();
+        socket.close();
         reject(new Error("Timed out waiting for a cross-replica collaboration event"));
       }, 15_000);
-      stream.addEventListener("artifact.commands", (raw) => {
+      socket.onmessage = (raw) => {
+        const envelope = JSON.parse(String(raw.data)) as { type: string; event?: Record<string, unknown> };
+        if (envelope.type !== "event" || envelope.event?.event_type !== "artifact.commands") return;
         window.clearTimeout(timeout);
-        stream.close();
-        resolve(JSON.parse((raw as MessageEvent<string>).data));
-      });
-      stream.onerror = () => {
-        window.clearTimeout(timeout);
-        stream.close();
-        reject(new Error("Cross-replica collaboration stream disconnected"));
+        socket.close();
+        resolve(envelope.event);
       };
+      socket.onerror = () => reject(new Error("Cross-replica collaboration WebSocket disconnected"));
     });
   }, { artifactId: sharedArtifact.id, cursor: joinedPrimary.event_cursor });
 
@@ -607,6 +606,10 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ project_id: "default", grader: "not_null", actual: "value" })
     });
+    const scenarioTriage = await fetch("/scenarios/asset-reliability/run-triage", {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}"
+    });
+    const scenarioReport = await fetch("/scenarios/asset-reliability/report");
     return {
       read: read.status,
       edit: edit.status,
@@ -624,7 +627,9 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       modelListStatus: modelList.status,
       evalListStatus: evalList.status,
       evalRunStatus: evalRun.status,
-      aipGradeStatus: aipGrade.status
+      aipGradeStatus: aipGrade.status,
+      scenarioTriageStatus: scenarioTriage.status,
+      scenarioReportStatus: scenarioReport.status
     };
   }, {
     graphId: onboarding.applied.body.pipeline_graph_id,
@@ -650,5 +655,7 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(viewerAccess.evalListStatus).toBe(200);
   expect(viewerAccess.evalRunStatus).toBe(403);
   expect(viewerAccess.aipGradeStatus).toBe(403);
+  expect(viewerAccess.scenarioTriageStatus).toBe(403);
+  expect(viewerAccess.scenarioReportStatus).toBe(403);
   expect(viewerAccess.detail.detail).toContain("Permission 'edit' is required");
 });
