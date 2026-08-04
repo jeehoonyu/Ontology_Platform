@@ -168,11 +168,10 @@ with ExitStack() as stack:
     ]
     latencies = [latency for _, _, latency in edits]
     acknowledgement_p95_ms = percentile(latencies, 0.95)
-    assert acknowledgement_p95_ms < ACK_P95_LIMIT_MS, {
-        "p95_ms": round(acknowledgement_p95_ms, 3),
-        "limit_ms": ACK_P95_LIMIT_MS,
-        "latencies_ms": [round(value, 3) for value in sorted(latencies)],
-    }
+    # Latency is a threshold, not a correctness invariant. Asserting here would
+    # abort before the run is recorded, and the measurement contract requires a
+    # breaching run to be evidence rather than a gap. The verdict is derived
+    # from the thresholds at the end and sets the exit status.
 
     revisions = sorted(result["collaboration_receipt"]["revision"] for _, result, _ in edits)
     assert revisions == list(range(2, EDITOR_COUNT + 2)), revisions
@@ -195,9 +194,7 @@ with ExitStack() as stack:
         reads = list(pool.map(read, range(READER_COUNT)))
     read_seconds = time.perf_counter() - read_started
     assert reads == [(200, EDITOR_COUNT + 1, EDITOR_COUNT)] * READER_COUNT, reads
-    assert read_seconds < READ_BATCH_LIMIT_SECONDS, {
-        "elapsed_seconds": round(read_seconds, 3), "limit_seconds": READ_BATCH_LIMIT_SECONDS,
-    }
+    # Read batch duration is likewise a threshold, judged with the rest below.
 
     status, events = request(
         replicas[0], "GET", f"/artifacts/{ARTIFACT_ID}/collaboration/events?after=0&limit=500",
@@ -220,5 +217,34 @@ with ExitStack() as stack:
         "final_revision": committed["current_revision"],
         "lost_updates": 0,
     }
-    print("PostgreSQL collaboration scale rehearsal passed:")
+    print("PostgreSQL collaboration scale rehearsal measurements:")
     print(json.dumps(evidence, indent=2, sort_keys=True))
+
+    from tier_b_evidence import write_evidence
+
+    path, status, breaches = write_evidence(
+        "collaboration",
+        thresholds={
+            "ack_p95_ms_max": ACK_P95_LIMIT_MS,
+            "editors_min": EDITOR_COUNT,
+            "replicas_min": 2,
+            "lost_updates_max": 0,
+            "reader_batch_seconds_max": READ_BATCH_LIMIT_SECONDS,
+            "unique_revisions_min": EDITOR_COUNT,
+        },
+        measurements={
+            "ack_p95_ms": evidence["acknowledgement_p95_ms"],
+            "editors": evidence["editors"],
+            "replicas": evidence["replicas"],
+            "lost_updates": evidence["lost_updates"],
+            "reader_batch_seconds": evidence["reader_batch_seconds"],
+            "unique_revisions": len({event["lock_version"] for event in command_events}),
+        },
+        harness="oms/verify_collaboration_scale_postgres.py",
+    )
+    print(f"Tier B evidence {status}: {path.name}")
+    if breaches:
+        print("  breaches: " + "; ".join(breaches))
+        print("  latencies_ms: " + ", ".join(str(round(value, 3)) for value in sorted(latencies)))
+        raise SystemExit(1)
+    print("PostgreSQL collaboration scale rehearsal passed.")
