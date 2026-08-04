@@ -83,9 +83,38 @@ by running the harness until a green number appears.
   has current, provenanced, threshold-checked evidence at the current migration head.
   It reports `MISSING`, `INVALID`, `STALE`, `FAIL`, or `PASS` per gate.
 
-Baseline on 2026-08-03: **0 of 10 gates satisfied** — 1 FAIL, 9 MISSING. Eleven of the
+- `oms/availability_probe.py` implements the availability gate: an append-only probe and
+  an aggregator that derives uptime, opens outages by the two-failure rule, and emits gate
+  evidence. `oms/test_availability_probe.py` covers the accounting.
+
+Baseline on 2026-08-03: **0 of 10 gates satisfied** — 2 FAIL, 8 MISSING. Eleven of the
 thirteen pre-contract evidence files record no migration head, so they cannot be shown to
 be current and are retained as prior art rather than counted.
+
+### Chaos gate covers half its scope
+
+The Tier B chaos gate names collaboration **and** cross-stream processing. Only the
+former has a harness. `verify_collaboration_websocket_chaos_postgres.py` now reports
+`cross_stream_partition_rehearsals: 0` against a minimum of 1, so the gate reads FAIL
+rather than appearing satisfied by the half it does cover. Collaboration itself is clean:
+123.405 ms maximum reconnect against a 5,000 ms limit, zero duplicated and zero missed
+events across a replica termination and restart.
+
+Writing a cross-stream network-partition harness is the remaining work for this gate.
+
+### Starting the availability clock
+
+The availability gate cannot pass in less than 7 days, and the clock has not started.
+Nothing else in Tier B is on a longer lead time, so starting it is the schedule-critical
+action:
+
+```bash
+python oms/availability_probe.py probe --target https://<pilot-host>
+```
+
+Aggregate at any point to see budget burn; the aggregator reports how much window
+remains and refuses to pass a short window however clean it is. The error budget at
+99.9% over 7 days is 604.8 seconds.
 
 ## Exit criteria
 

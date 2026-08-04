@@ -83,11 +83,17 @@ def write_evidence(
     measurements: Dict[str, Any],
     harness: str,
     notes: str = "",
+    output_dir: Path | None = None,
 ) -> Tuple[Path, str, List[str]]:
-    """Write docs/tier-b-<gate_id>-evidence.json and return (path, status, breaches).
+    """Write tier-b-<gate_id>-evidence.json and return (path, status, breaches).
 
     status is PASS only when every threshold is satisfied. A harness cannot
     record PASS by asserting it; the verdict is derived from the numbers.
+
+    output_dir exists so tests can exercise emission without writing into
+    docs/. Gate evidence must come from a real run, and a test writing a file
+    the auditor would count is indistinguishable from evidence until someone
+    reads the provenance.
     """
     breaches = compare(thresholds, measurements)
     status = "PASS" if not breaches else "FAIL"
@@ -115,7 +121,8 @@ def write_evidence(
     if notes:
         payload["notes"] = notes
 
-    DOCS.mkdir(parents=True, exist_ok=True)
-    path = DOCS / f"tier-b-{gate_id.replace('_', '-')}-evidence.json"
+    destination = DOCS if output_dir is None else Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / f"tier-b-{gate_id.replace('_', '-')}-evidence.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path, status, breaches
