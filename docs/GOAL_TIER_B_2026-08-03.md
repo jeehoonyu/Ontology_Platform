@@ -29,7 +29,7 @@ what makes Tier B look closer than it is.
 | Ontology scale | >= 10M objects / 50M links, bounded p95 | lookup 8.718 ms, range 11.830 ms, two-hop 13.721 ms p95 | Re-run at current head |
 | Mixed workload | Concurrent reads during bounded writes, rollback atomicity, retained plans | 88,980 samples at 53.635 ms p95, 213.932 writes/s | Re-run at current head |
 | Pipeline scale | >= 10M partitioned rows in and out | preview 3,663.405 ms, delivery 4,046.026 ms p95 | Re-run at current head |
-| Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **241.605 ms on 2026-08-03 at head 0037** | Met, but see the margin note below |
+| Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **FAIL: 241.605, 253.002, 219.812 ms across three runs at head 0037** | Resolve GOAL2-004 before re-measuring |
 | Identity | 200 distinct PKCE identities under login p95 gate | 4,582.792 ms against a 15,000 ms gate | Re-run; needs Keycloak |
 | Durability | Fresh-volume backup/restore and replica failover, zero committed-record loss | 36.59 GB basebackup in 50.917 s, promote in 0.686 s | Re-run at current head |
 | Chaos | Partition and process-loss recovery, zero missed or duplicated events | 209.067 ms max reconnect, 3 ordered events | Re-run at current head |
@@ -58,14 +58,34 @@ Group 2 is the critical path. It cannot be compressed by running existing script
 4. **Re-run Group 1** while Group 2 accumulates. These are independent.
 5. **Assemble the acceptance record** only when every gate has a current evidence file.
 
-## Margin note
+## Margin note, now a finding
 
-The collaboration gate cleared at 241.605 ms against a 250 ms threshold on 2026-08-03, a
-margin of 8.4 ms. Earlier runs measured 206.458 ms and 224.866 ms. The trend across hosts
-is toward the limit, so this gate is passing but not safe. Before Tier B is assembled,
-either establish headroom or record an explicit, justified threshold decision. Do not let
-a gate that drifts past its limit be rescued by re-running until it passes; that converts
-a measurement into a lottery.
+This section originally warned that the collaboration gate was passing but not safe at
+241.605 ms against 250 ms. Measuring it three times at the same head on the same host
+produced 241.605, 253.002, and 219.812 ms — the gate breaches roughly one run in three.
+
+That is recorded as GOAL2-004 in [`GOAL_2026-08-03.md`](GOAL_2026-08-03.md). The cause is
+that a p95 over 20 samples is a single observation. The gate is not measuring sustained
+acknowledgement latency; it is sampling one request and comparing it to a threshold.
+
+Resolve it before re-measuring, and resolve it by deciding — widen the estimator or
+re-decide the threshold, recorded with an owner and rationale. The warning above was
+written before the breach and the breach confirmed it; do not now discharge the finding
+by running the harness until a green number appears.
+
+## Tooling landed for this tier
+
+- [`TIER_B_MEASUREMENT_CONTRACT.md`](TIER_B_MEASUREMENT_CONTRACT.md) fixes the evidence
+  envelope and defines availability, RPO, and RTO, which had no definitions anywhere.
+- `oms/tier_b_evidence.py` emits the envelope and derives `status` from the thresholds,
+  so a harness cannot assert its own pass.
+- `oms/validate_tier_b_evidence.py` audits all ten gates and exits non-zero unless each
+  has current, provenanced, threshold-checked evidence at the current migration head.
+  It reports `MISSING`, `INVALID`, `STALE`, `FAIL`, or `PASS` per gate.
+
+Baseline on 2026-08-03: **0 of 10 gates satisfied** — 1 FAIL, 9 MISSING. Eleven of the
+thirteen pre-contract evidence files record no migration head, so they cannot be shown to
+be current and are retained as prior art rather than counted.
 
 ## Exit criteria
 
