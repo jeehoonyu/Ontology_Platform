@@ -1,0 +1,38 @@
+{
+  "cache_metrics": {
+    "downloaded_bytes": 935552,
+    "evicted_bytes": 467776,
+    "evictions": 1,
+    "hits": 128,
+    "integrity_failures": 0,
+    "misses": 16
+  },
+  "cold_pipeline_limit_ms": 30000.0,
+  "cold_pipeline_ms": 351.269,
+  "cold_query_limit_ms": 30000.0,
+  "cold_query_ms": 128.102,
+  "generate_and_upload_ms": 467.135,
+  "host": {
+    "duckdb": "1.5.5",
+    "endpoint": "http://127.0.0.1:9000",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "network_scope": "local-docker-loopback",
+  "partitions": 8,
+  "plan_id": "pipeline_plan_436327ab2b134e98846792d276768643",
+  "profile": "reference",
+  "reference_scale_achieved": true,
+  "registration_limit_ms": 120000.0,
+  "registration_ms": 281.585,
+  "rows": 1000000,
+  "snapshot_id": "dataset_snapshot_1f61901b8f71493395aba652bb7d974c",
+  "uploaded_bytes": 467776,
+  "warm_pipeline_p50_ms": 44.021,
+  "warm_pipeline_p95_limit_ms": 10000.0,
+  "warm_pipeline_p95_ms": 49.161,
+  "warm_query_p50_ms": 76.26,
+  "warm_query_p95_limit_ms": 5000.0,
+  "warm_query_p95_ms": 87.243
+}

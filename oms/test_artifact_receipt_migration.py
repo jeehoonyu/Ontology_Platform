@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             "SELECT * FROM platform_artifact_command_receipts ORDER BY command_scope"
         ).fetchall()
 
-    assert version == "0025_ontology_schema_registry", version
+    assert version == "0037_cross_stream_joins", version
     assert len(receipts) == 2, [dict(row) for row in receipts]
     builder, collaboration = receipts
     assert builder["command_scope"] == "builder" and builder["project_id"] == "legacy-project"

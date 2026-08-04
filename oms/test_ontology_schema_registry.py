@@ -1,6 +1,11 @@
 """Published ontology registry, compatibility, JSON Schema, and typed SDK contracts."""
 import os
 import tempfile
+import hashlib
+import io
+import json
+import tarfile
+import zipfile
 
 tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'ontology_schema_registry.db')}"
@@ -79,6 +84,33 @@ py_source = python_sdk["files"]["ontology_client.py"]
 assert "class RegistryAsset" in py_source and "risk: Optional[float] = None" in py_source
 assert "class OntologyClient" in py_source
 compile(py_source, "ontology_client.py", "exec")
+
+packages = ok(client.get(f"/ontology/registry/{entry_id}/packages"), "list installable SDK packages")
+assert {item["ecosystem"] for item in packages["packages"]} == {"npm", "pypi"}
+assert all(len(item["sha256"]) == 64 and item["byte_size"] > 0 for item in packages["packages"])
+
+npm_meta = next(item for item in packages["packages"] if item["ecosystem"] == "npm")
+npm_download = client.get(npm_meta["download_url"])
+assert npm_download.status_code == 200 and npm_download.headers["x-content-sha256"] == npm_meta["sha256"]
+assert hashlib.sha256(npm_download.content).hexdigest() == npm_meta["sha256"]
+with tarfile.open(fileobj=io.BytesIO(npm_download.content), mode="r:gz") as package:
+    names = set(package.getnames())
+    assert {"package/package.json", "package/index.js", "package/index.d.ts", "package/ontology.schema.json"} <= names
+    package_json = json.loads(package.extractfile("package/package.json").read())
+    assert package_json["name"] == "@ontologyos/default-production" and package_json["version"] == "1.0.0"
+
+wheel_meta = next(item for item in packages["packages"] if item["ecosystem"] == "pypi")
+wheel_download = client.get(wheel_meta["download_url"])
+assert wheel_download.status_code == 200 and wheel_download.headers["x-content-sha256"] == wheel_meta["sha256"]
+assert hashlib.sha256(wheel_download.content).hexdigest() == wheel_meta["sha256"]
+with zipfile.ZipFile(io.BytesIO(wheel_download.content)) as wheel:
+    names = set(wheel.namelist())
+    assert "ontologyos_default_production/__init__.py" in names
+    assert any(name.endswith(".dist-info/RECORD") for name in names)
+
+# Package bytes are reproducible and therefore safe to address by checksum.
+assert client.get(npm_meta["download_url"]).content == npm_download.content
+assert client.get(wheel_meta["download_url"]).content == wheel_download.content
 
 breaking = ok(client.post("/ontology/change-sets", json={
     "project_id": "default", "title": "Archive required registry name",

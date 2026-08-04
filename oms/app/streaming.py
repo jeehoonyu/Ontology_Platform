@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean
+from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, update
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from .database import Base, get_db
@@ -26,6 +26,7 @@ class Stream(Base):
     # Auto-archive policy: {"max_age_seconds": int|None, "max_records": int|None}.
     # Empty dict means no policy configured (default for existing rows).
     archive_policy: Mapped[dict] = mapped_column(JSON, default=dict)
+    next_sequence: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[int] = mapped_column(Integer)
 
     records: Mapped[list] = relationship("StreamRecord", back_populates="stream", cascade="all, delete-orphan")
@@ -36,6 +37,7 @@ class StreamRecord(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
     stream_id: Mapped[str] = mapped_column(String, ForeignKey("streams.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     ts: Mapped[int] = mapped_column(Integer)
     # Set when an auto-archive policy moves the record out of the live window.
@@ -86,6 +88,7 @@ class StreamRead(BaseModel):
 class StreamRecordRead(BaseModel):
     id: str
     stream_id: str
+    sequence: int
     payload: Dict[str, Any]
     ts: int
     created_at: int
@@ -173,6 +176,22 @@ def _get_stream_or_404(stream_id: str, db: Session, principal: Optional[Principa
     return stream
 
 
+def allocate_sequences(db: Session, stream_id: str, count: int) -> List[int]:
+    """Reserve a contiguous arrival-order range for one stream."""
+    if count <= 0:
+        return []
+    last = db.execute(
+        update(Stream)
+        .where(Stream.id == stream_id)
+        .values(next_sequence=Stream.next_sequence + count)
+        .returning(Stream.next_sequence)
+    ).scalar_one_or_none()
+    if last is None:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
+    first = int(last) - count + 1
+    return list(range(first, first + count))
+
+
 # POST /streams - create a stream
 @router.post("/streams", response_model=StreamRead)
 def create_stream(body: StreamCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
@@ -189,6 +208,7 @@ def create_stream(body: StreamCreate, principal: Principal = Depends(require_per
         display_name=body.display_name,
         schema_=body.schema_,
         retention_seconds=body.retention_seconds,
+        next_sequence=0,
         created_at=now,
     )
     db.add(db_stream)
@@ -228,12 +248,16 @@ def publish_to_stream(
     db: Session = Depends(get_db),
 ):
     _get_stream_or_404(stream_id, db, principal, "execute")
+    from . import stream_processing
+    stream_processing.enforce_publish_capacity(db, stream_id, len(body.records))
 
     now = _now()
-    for record_payload in body.records:
+    sequences = allocate_sequences(db, stream_id, len(body.records))
+    for record_payload, sequence in zip(body.records, sequences):
         db.add(StreamRecord(
             id=uuid.uuid4().hex,
             stream_id=stream_id,
+            sequence=sequence,
             payload=record_payload,
             ts=now,
             created_at=now,
@@ -256,7 +280,7 @@ def get_stream_records(
     rows = (
         db.query(StreamRecord)
         .filter(StreamRecord.stream_id == stream_id)
-        .order_by(StreamRecord.ts.desc(), StreamRecord.created_at.desc())
+        .order_by(StreamRecord.sequence.desc())
         .limit(limit)
         .all()
     )
@@ -284,7 +308,7 @@ def archive_stream(
     rows = (
         db.query(StreamRecord)
         .filter(StreamRecord.stream_id == stream_id)
-        .order_by(StreamRecord.ts.asc())
+        .order_by(StreamRecord.sequence.asc())
         .all()
     )
 
@@ -332,9 +356,12 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, principal: Principa
         records = [dict(row) for row in cfg_records if isinstance(row, dict)]
     if not records:
         raise HTTPException(status_code=400, detail="Replay requires records or stream schema sample_records")
+    from . import stream_processing
+    stream_processing.enforce_publish_capacity(db, stream_id, len(records))
 
     created_records: List[StreamRecord] = []
-    for index, payload in enumerate(records):
+    sequences = allocate_sequences(db, stream_id, len(records))
+    for index, (payload, sequence) in enumerate(zip(records, sequences)):
         ts = now + (index * body.interval_seconds)
         if body.timestamp_field and payload.get(body.timestamp_field) not in (None, ""):
             try:
@@ -344,6 +371,7 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, principal: Principa
         row = StreamRecord(
             id=uuid.uuid4().hex,
             stream_id=stream_id,
+            sequence=sequence,
             payload=payload,
             ts=ts,
             created_at=now,
@@ -486,7 +514,7 @@ def apply_archive_policy(
     live = (
         db.query(StreamRecord)
         .filter(StreamRecord.stream_id == stream_id, StreamRecord.archived == False)  # noqa: E712
-        .order_by(StreamRecord.ts.asc(), StreamRecord.created_at.asc())
+        .order_by(StreamRecord.sequence.asc())
         .all()
     )
 
@@ -501,7 +529,7 @@ def apply_archive_policy(
     max_records = policy.get("max_records")
     if max_records is not None:
         # Keep the newest max_records live records; archive older overflow.
-        ordered = sorted(live, key=lambda r: (r.ts, r.created_at))
+        ordered = sorted(live, key=lambda r: r.sequence)
         overflow = len(ordered) - int(max_records)
         if overflow > 0:
             for r in ordered[:overflow]:

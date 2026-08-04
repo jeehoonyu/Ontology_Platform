@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import gzip
+import io
 import json
 import keyword
 import re
+import tarfile
 import time
 import uuid
+import zipfile
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import JSON, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -271,6 +276,137 @@ def _python_sdk(entry: OntologyRegistryEntry) -> Dict[str, str]:
     return {"ontology_client.py": "\n".join(lines) + "\n"}
 
 
+def _package_slug(value: str, *, separator: str = "-") -> str:
+    result = re.sub(r"[^a-z0-9]+", separator, value.lower()).strip(separator)
+    return result or "default"
+
+
+def _npm_runtime(entry: OntologyRegistryEntry) -> str:
+    lines = [
+        f"// Generated from ontology registry {entry.id}; checksum {entry.checksum}",
+        "export class OntologyClient {",
+        "  constructor(baseUrl, headers = {}) { this.baseUrl = baseUrl.replace(/\\/$/, ''); this.headers = headers; }",
+        "  async request(path, init = {}) {",
+        "    const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...this.headers, ...(init.headers || {}) } });",
+        "    if (!response.ok) throw new Error(`Ontology request failed: ${response.status}`);",
+        "    return response.json();",
+        "  }",
+    ]
+    for object_type in (entry.manifest or {}).get("object_types") or []:
+        object_id = str(object_type["id"])
+        name = _pascal(object_id)
+        method = name[:1].lower() + name[1:]
+        lines.append(f"  get{name}(id) {{ return this.request('/objects/{object_id}/' + encodeURIComponent(id)); }}")
+        lines.append(f"  search{name}(filters = {{}}) {{ return this.request('/object-sets/search', {{ method: 'POST', body: JSON.stringify({{ object_type_id: '{object_id}', filters }}) }}); }}")
+        lines.append(f"  get {method}() {{ return {{ get: this.get{name}.bind(this), search: this.search{name}.bind(this) }}; }}")
+    for action in (entry.manifest or {}).get("action_types") or []:
+        action_id = str(action["id"])
+        action_name = _pascal(action_id)
+        lines.append(f"  execute{action_name}(parameters) {{ return this.request('/actions/execute', {{ method: 'POST', body: JSON.stringify({{ action_type_id: '{action_id}', parameters }}) }}); }}")
+    lines.extend(["}", ""])
+    return "\n".join(lines)
+
+
+def _deterministic_tgz(files: Dict[str, bytes]) -> bytes:
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for path, payload in sorted(files.items()):
+            info = tarfile.TarInfo(name=f"package/{path}")
+            info.size = len(payload)
+            info.mtime = 0
+            info.mode = 0o644
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            archive.addfile(info, io.BytesIO(payload))
+    output = io.BytesIO()
+    with gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as compressed:
+        compressed.write(tar_buffer.getvalue())
+    return output.getvalue()
+
+
+def _typescript_package(entry: OntologyRegistryEntry) -> Dict[str, Any]:
+    project = _package_slug(entry.project_id)
+    channel = _package_slug(entry.channel)
+    package_name = f"@ontologyos/{project}-{channel}"
+    filename = f"ontologyos-{project}-{channel}-{entry.version}.tgz"
+    declaration = _typescript_sdk(entry)["ontology.ts"]
+    package_json = {
+        "name": package_name,
+        "version": entry.version,
+        "description": f"Typed OntologyOS contract for {entry.project_id}/{entry.channel}",
+        "type": "module",
+        "main": "./index.js",
+        "types": "./index.d.ts",
+        "exports": {".": {"types": "./index.d.ts", "import": "./index.js", "default": "./index.js"}},
+        "files": ["index.js", "index.d.ts", "ontology.schema.json", "README.md"],
+        "sideEffects": False,
+        "ontologyRegistry": {"id": entry.id, "checksum": entry.checksum, "revisionId": entry.revision_id},
+    }
+    readme = (
+        f"# {package_name}\n\nGenerated from OntologyOS registry `{entry.id}` at version `{entry.version}`.\n\n"
+        "```ts\nimport { OntologyClient } from '" + package_name + "';\nconst client = new OntologyClient('https://ontology.example');\n```\n"
+    )
+    files = {
+        "package.json": json.dumps(package_json, indent=2, sort_keys=True).encode(),
+        "index.js": _npm_runtime(entry).encode(),
+        "index.d.ts": declaration.encode(),
+        "ontology.schema.json": json.dumps(entry.contract_schema or {}, indent=2, sort_keys=True).encode(),
+        "README.md": readme.encode(),
+    }
+    payload = _deterministic_tgz(files)
+    return {"language": "typescript", "ecosystem": "npm", "package_name": package_name, "filename": filename, "content_type": "application/gzip", "payload": payload, "sha256": hashlib.sha256(payload).hexdigest(), "byte_size": len(payload)}
+
+
+def _wheel_hash(payload: bytes) -> str:
+    return "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
+
+
+def _python_package(entry: OntologyRegistryEntry) -> Dict[str, Any]:
+    project = _package_slug(entry.project_id, separator="_")
+    channel = _package_slug(entry.channel, separator="_")
+    module = f"ontologyos_{project}_{channel}"
+    distribution = module.replace("_", "-")
+    wheel_distribution = module
+    filename = f"{wheel_distribution}-{entry.version}-py3-none-any.whl"
+    dist_info = f"{wheel_distribution}-{entry.version}.dist-info"
+    generated = _python_sdk(entry)["ontology_client.py"]
+    files: Dict[str, bytes] = {
+        f"{module}/__init__.py": (generated + "\n__all__ = ['OntologyClient']\n").encode(),
+        f"{module}/py.typed": b"",
+        f"{module}/ontology.schema.json": json.dumps(entry.contract_schema or {}, indent=2, sort_keys=True).encode(),
+        f"{dist_info}/METADATA": (f"Metadata-Version: 2.1\nName: {distribution}\nVersion: {entry.version}\nSummary: Typed OntologyOS contract for {entry.project_id}/{entry.channel}\nRequires-Python: >=3.10\n\n").encode(),
+        f"{dist_info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: OntologyOS\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        f"{dist_info}/top_level.txt": f"{module}\n".encode(),
+    }
+    records = [f"{path},{_wheel_hash(payload)},{len(payload)}" for path, payload in sorted(files.items())]
+    records.append(f"{dist_info}/RECORD,,")
+    files[f"{dist_info}/RECORD"] = ("\n".join(records) + "\n").encode()
+    output = io.BytesIO()
+    timestamp = (1980, 1, 1, 0, 0, 0)
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as wheel:
+        for path, payload in sorted(files.items()):
+            info = zipfile.ZipInfo(path, date_time=timestamp)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            wheel.writestr(info, payload)
+    payload = output.getvalue()
+    return {"language": "python", "ecosystem": "pypi", "package_name": distribution, "module_name": module, "filename": filename, "content_type": "application/zip", "payload": payload, "sha256": hashlib.sha256(payload).hexdigest(), "byte_size": len(payload)}
+
+
+def _package(entry: OntologyRegistryEntry, language: str) -> Dict[str, Any]:
+    normalized = language.lower()
+    if normalized in {"typescript", "npm"}:
+        return _typescript_package(entry)
+    if normalized in {"python", "pypi", "wheel"}:
+        return _python_package(entry)
+    raise HTTPException(status_code=422, detail="language must be typescript/npm or python/pypi")
+
+
+def _package_metadata(entry: OntologyRegistryEntry, language: str) -> Dict[str, Any]:
+    package = _package(entry, language)
+    return {key: value for key, value in package.items() if key != "payload"}
+
+
 def _entry_dict(row: OntologyRegistryEntry, include_contract: bool = False) -> Dict[str, Any]:
     result = {
         "id": row.id, "project_id": row.project_id, "channel": row.channel, "version": row.version,
@@ -410,6 +546,48 @@ def generate_registry_sdk(entry_id: str, language: str, principal: Principal = D
     return {"registry_id": row.id, "language": language, "version": row.version, "checksum": row.checksum, "files": files}
 
 
+@router.get("/ontology/registry/{entry_id}/packages")
+def list_registry_packages(entry_id: str, principal: Principal = Depends(require_permission("export")), db: Session = Depends(get_db)):
+    row = db.get(OntologyRegistryEntry, entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Ontology registry entry not found")
+    tenancy.assert_project_permission(db, principal, row.project_id, "export")
+    packages = [_package_metadata(row, language) for language in ("typescript", "python")]
+    for package in packages:
+        package["download_url"] = f"/ontology/registry/{row.id}/packages/{package['language']}/download"
+    return {
+        "registry_id": row.id,
+        "registry_checksum": row.checksum,
+        "version": row.version,
+        "channel": row.channel,
+        "packages": packages,
+    }
+
+
+@router.get("/ontology/registry/{entry_id}/packages/{language}/download")
+def download_registry_package(entry_id: str, language: str, principal: Principal = Depends(require_permission("export")), db: Session = Depends(get_db)):
+    row = db.get(OntologyRegistryEntry, entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Ontology registry entry not found")
+    tenancy.assert_project_permission(db, principal, row.project_id, "export")
+    package = _package(row, language)
+    db.add(models_action.AuditLog(
+        id=f"audit_{uuid.uuid4().hex}", actor=principal.id, event_type="ontology.registry.package.downloaded",
+        subject_type="ontology_registry_entry", subject_id=row.id,
+        payload={"project_id": row.project_id, "language": package["language"], "package_name": package["package_name"], "sha256": package["sha256"], "byte_size": package["byte_size"]},
+    ))
+    db.commit()
+    return Response(
+        content=package["payload"], media_type=package["content_type"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{package["filename"]}"',
+            "Digest": f'sha-256={base64.b64encode(hashlib.sha256(package["payload"]).digest()).decode()}',
+            "X-Content-SHA256": package["sha256"],
+            "X-Ontology-Registry-ID": row.id,
+        },
+    )
+
+
 @router.get("/ui-state/ontology/registry")
 def ontology_registry_ui_state(project_id: str = "default", channel: str = "production", principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     tenancy.assert_project_permission(db, principal, project_id, "view")
@@ -419,7 +597,10 @@ def ontology_registry_ui_state(project_id: str = "default", channel: str = "prod
         "summary": {"status": "PUBLISHED" if current else "NOT_PUBLISHED", "entries": len(rows), "channel": channel, "current_version": current.version if current else None},
         "primary_actions": [{"id": "publish", "label": "Publish registry version", "method": "POST", "path": "/ontology/registry/publish"}],
         "sections": {"current": _entry_dict(current) if current else None, "entries": [_entry_dict(row) for row in rows]},
-        "evidence_links": ([{"label": f"Schema {current.version}", "href": f"/ontology/registry/{current.id}/schema", "kind": "schema_registry"}] if current else []),
+        "evidence_links": ([
+            {"label": f"Schema {current.version}", "href": f"/ontology/registry/{current.id}/schema", "kind": "schema_registry"},
+            {"label": f"Installable SDKs {current.version}", "href": f"/ontology/registry/{current.id}/packages", "kind": "sdk_packages"},
+        ] if current else []),
         "warnings": [] if current else [{"code": "REGISTRY_EMPTY", "message": "Publish an approved ontology revision before generating client contracts."}],
         "permissions": sorted(tenancy.project_permissions(db, principal, project_id)),
         "last_updated": current.created_at if current else 0,

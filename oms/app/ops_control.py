@@ -8,6 +8,7 @@ staged as approvals instead of mutating objects directly.
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -396,6 +397,8 @@ def _notification_dict(notification: OpsNotification) -> Dict[str, Any]:
 
 
 def _ensure_tables(db: Session) -> None:
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     for table in (
         OpsEvent.__table__,
         AlertRule.__table__,
@@ -763,7 +766,13 @@ def execute_runbook_inline(
                 object_id = _resolve(step.get("object_id"), context)
                 if not object_id and isinstance(context.get("objects"), dict):
                     object_id = (context["objects"].get("objects") or [{}])[0].get("id")
-                result = decision_intelligence.score_object_by_id(db, str(object_type_id), str(object_id), step.get("scorecard_ids") or [])
+                result = decision_intelligence.score_object_by_id(
+                    db,
+                    str(object_type_id),
+                    str(object_id),
+                    step.get("scorecard_ids") or [],
+                    project_id=runbook.project_id,
+                )
             elif step_type == "run_model_monitor":
                 from . import modelops
                 monitor_id = _resolve(step.get("monitor_id"), context)

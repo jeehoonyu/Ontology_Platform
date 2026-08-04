@@ -46,5 +46,12 @@ def downgrade() -> None:
             continue
         columns = {column["name"] for column in sa.inspect(bind).get_columns(table_name)}
         if "project_id" in columns:
+            # Drop the index first. SQLite rebuilds the table for a column drop
+            # and recreates reflected indexes, so an index still referencing
+            # project_id fails the rebuild. PostgreSQL drops it by cascade.
+            indexes = {index["name"] for index in sa.inspect(bind).get_indexes(table_name)}
+            index_name = f"ix_{table_name}_project_id"
+            if index_name in indexes:
+                op.drop_index(index_name, table_name=table_name)
             with op.batch_alter_table(table_name) as batch:
                 batch.drop_column("project_id")

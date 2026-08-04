@@ -7,6 +7,11 @@ const routes = [
   "imports",
   "ontology",
   "pipeline",
+  "object-explorer",
+  "map",
+  "models",
+  "decision",
+  "ops",
   "workshop",
   "aip",
   "investigations",
@@ -31,11 +36,165 @@ for (const route of routes) {
     const blocking = accessibility.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
     expect(blocking, blocking.map((item) => `${item.id}: ${item.help}`).join("\n")).toEqual([]);
 
-    if (["pipeline", "ontology", "workshop", "command-center"].includes(route)) {
+    if (["pipeline", "ontology", "object-explorer", "map", "models", "decision", "ops", "workshop", "command-center"].includes(route)) {
       await page.screenshot({ path: `test-results/screenshots/${testInfo.project.name}-${route}.png`, fullPage: true });
     }
   });
 }
+
+test("Object Explorer queries bootstrapped ontology objects and opens a typed profile", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful explorer workflow once on desktop.");
+  expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+  await page.goto("/workspace/object-explorer?type=asset");
+  await expect(page.getByRole("heading", { name: "Object Explorer" })).toBeVisible();
+  const table = page.locator(".explorer-table");
+  await expect(table).toBeVisible();
+  await expect(table).toContainText("asset_pump_4");
+  await table.getByRole("button", { name: "asset_pump_4" }).click();
+  const preview = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Object Preview" }) });
+  await expect(preview).toContainText("Line 4 Pump");
+  await expect(preview).toContainText(/inbound|outbound/);
+  await page.getByLabel("Search objects").fill("Chiller");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect(table).toContainText("asset_chiller_2");
+  await expect(table).not.toContainText("asset_pump_4");
+});
+
+test("Operational Map renders ontology features and supports selection and MGRS", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful GIS workflow once on desktop.");
+  expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+  await page.goto("/workspace/map");
+  await expect(page.getByRole("heading", { name: "Operational Map" })).toBeVisible();
+  const map = page.getByLabel("Operational GIS map");
+  await expect(map.locator(".leaflet-container")).toBeVisible();
+  await expect(map.locator(".leaflet-interactive").first()).toBeVisible();
+  await page.locator(".map-feature-list").getByRole("button", { name: /Line 4 Pump/ }).click();
+  const selection = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Selection" }) });
+  await expect(selection).not.toContainText("Select a feature");
+  await page.getByRole("button", { name: "Encode point" }).click();
+  await expect(page.getByLabel("MGRS coordinate")).not.toHaveValue("");
+});
+
+test("ModelOps completes objective-to-monitor lifecycle through structured controls", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ModelOps lifecycle once on desktop.");
+  const suffix = Date.now();
+  const baselineId = `browser_model_baseline_${suffix}`;
+  const currentId = `browser_model_current_${suffix}`;
+  const objectiveName = `Browser Asset Risk ${suffix}`;
+  for (const asset of [
+    { id: baselineId, display_name: "Browser model baseline", records: [{ temperature: 10, pressure: 20, risk_score: 15 }, { temperature: 12, pressure: 22, risk_score: 17 }] },
+    { id: currentId, display_name: "Browser model current", records: [{ temperature: 32, pressure: 60, risk_score: 46 }, { temperature: 34, pressure: 64, risk_score: 49 }] }
+  ]) {
+    expect((await page.request.post("/data-assets", { data: { ...asset, kind: "dataset", asset_schema: {} } })).ok()).toBeTruthy();
+  }
+
+  await page.goto("/workspace/models");
+  await page.getByLabel("Objective name").fill(objectiveName);
+  await page.getByLabel("Target field").fill("risk_score");
+  await page.getByLabel("Feature fields").fill("temperature, pressure");
+  await page.getByLabel("Objective input dataset").selectOption(baselineId);
+  await page.getByRole("button", { name: "Create objective" }).click();
+  await expect(page.getByRole("status")).toContainText("Objective created");
+  await expect(page.getByLabel("Selected objective")).toHaveValue(/.+/);
+
+  await page.getByRole("button", { name: "Training", exact: true }).click();
+  await page.getByLabel("Training dataset").selectOption(baselineId);
+  await page.getByRole("button", { name: "Train model" }).click();
+  await expect(page.getByRole("status")).toContainText("Training completed");
+  await expect(page.getByLabel("Selected submission")).toHaveValue(/.+/);
+
+  await page.getByRole("button", { name: "Evaluation Gates", exact: true }).click();
+  await page.getByLabel("Gate name").fill("mae_gate");
+  await page.getByLabel("Gate metric").fill("mae");
+  await page.getByLabel("Gate threshold").fill("10");
+  await page.getByRole("button", { name: "Add gate" }).click();
+  await expect(page.getByRole("status")).toContainText("Evaluation gate created");
+  await page.getByRole("button", { name: "Evaluate all gates" }).click();
+  await expect(page.getByRole("status")).toContainText("Evaluation gates executed");
+  await expect(page.locator(".modelops-gate-list")).toContainText("approved");
+
+  await page.getByRole("button", { name: "Releases & Deployments", exact: true }).click();
+  await page.getByRole("button", { name: "Create release" }).click();
+  await expect(page.getByRole("status")).toContainText("Release created");
+  await page.getByRole("button", { name: "Start deployment" }).click();
+  await expect(page.getByRole("status")).toContainText("Deployment started");
+  await expect(page.getByLabel("Selected deployment")).toHaveValue(/.+/);
+
+  await page.getByRole("button", { name: "Monitoring", exact: true }).click();
+  await page.getByLabel("Monitor deployment").selectOption({ index: 1 });
+  await page.getByLabel("Baseline dataset").selectOption(baselineId);
+  await page.getByRole("button", { name: "Create monitor" }).click();
+  await expect(page.getByRole("status")).toContainText("Monitor created");
+  await page.getByLabel("Current monitor dataset").selectOption(currentId);
+  await page.getByRole("button", { name: "Run drift check" }).click();
+  await expect(page.getByRole("status")).toContainText("Monitor run completed");
+  await expect(page.getByRole("heading", { name: "Latest Drift Evidence" }).locator("xpath=..")).toContainText("FAIL");
+
+  await page.getByRole("button", { name: "Inference Playground", exact: true }).click();
+  await page.getByLabel("Record 1 temperature").fill("20");
+  await page.getByLabel("Record 1 pressure").fill("30");
+  await page.getByRole("button", { name: "Run inference" }).click();
+  await expect(page.getByRole("status")).toContainText("Inference completed");
+  await expect(page.locator(".modelops-inference-layout")).toContainText("25");
+  await expect(page.locator(".modelops-run-history")).toContainText("1 predictions");
+});
+
+test("Decision Intelligence evaluates, explains, traces, and simulates ontology objects", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful decision workflow once on desktop.");
+  expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+  await page.goto("/workspace/decision");
+  await expect(page.getByRole("heading", { name: "Decision Intelligence" })).toBeVisible();
+  await page.getByLabel("Decision object type").selectOption("asset");
+  await page.getByRole("button", { name: "Bootstrap rules" }).click();
+  await expect(page.getByRole("status")).toContainText("Decision defaults created");
+  await page.getByRole("button", { name: "Evaluate risk" }).click();
+  await expect(page.getByRole("status")).toContainText("Risk evaluation completed");
+  await expect(page.getByText("Line 4 Pump", { exact: true })).toBeVisible();
+  await page.getByText("Line 4 Pump", { exact: true }).click();
+  await page.getByRole("button", { name: "Explain selected object" }).click();
+  await expect(page.getByRole("status")).toContainText("Explanation loaded");
+  await expect(page.locator(".decision-narrative")).not.toBeEmpty();
+  await page.getByRole("button", { name: "Timeline", exact: true }).click();
+  await page.getByRole("button", { name: "Load timeline" }).click();
+  await expect(page.getByRole("status")).toContainText("Timeline loaded");
+  await expect(page.locator(".decision-timeline article").first()).toBeVisible();
+  await page.getByRole("button", { name: "Scenario Simulator", exact: true }).click();
+  await page.getByRole("button", { name: "Run impact scenario" }).click();
+  await expect(page.getByRole("status")).toContainText("Scenario completed");
+  await expect(page.getByRole("heading", { name: "Before / After Impact" }).locator("xpath=..")).toContainText("changed");
+});
+
+test("Operational Control promotes events through alerts, incidents, runbooks, and inbox", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful Ops workflow once on desktop.");
+  await page.goto("/workspace/ops");
+  await expect(page.getByRole("heading", { name: "Operational Control Plane" })).toBeVisible();
+  await page.getByRole("button", { name: "Alerts", exact: true }).click();
+  await page.getByLabel("Alert rule name").fill(`Browser critical rule ${Date.now()}`);
+  await page.getByRole("button", { name: "Create rule" }).click();
+  await expect(page.getByRole("status")).toContainText("Alert rule created");
+  await page.getByLabel("Operational event title").fill("Browser reliability threshold exceeded");
+  await page.getByRole("button", { name: "Ingest event" }).click();
+  await expect(page.getByRole("status")).toContainText("Operational event ingested");
+  await page.getByRole("button", { name: "Evaluate alerts" }).click();
+  await expect(page.getByRole("status")).toContainText("Alert rules evaluated");
+  await expect(page.locator(".ops-alert-list")).toContainText("Browser reliability threshold exceeded");
+  await page.getByRole("button", { name: "Incidents", exact: true }).click();
+  await page.getByLabel("Incident name").fill("Browser asset reliability incident");
+  await page.getByRole("button", { name: "Open incident" }).click();
+  await expect(page.getByRole("status")).toContainText("Incident opened");
+  await expect(page.locator(".ops-incident-list")).toContainText("Browser asset reliability incident");
+  await page.getByRole("button", { name: "Runbooks", exact: true }).click();
+  await page.getByLabel("Runbook name").fill("Browser owner notification");
+  await page.getByRole("button", { name: "Create runbook" }).click();
+  await expect(page.getByRole("status")).toContainText("Runbook created");
+  await page.getByLabel("Runbook incident").selectOption({ label: "Browser asset reliability incident" });
+  await page.getByRole("button", { name: "Execute" }).click();
+  await expect(page.getByRole("status")).toContainText("Runbook execution completed");
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await expect(page.locator(".ops-inbox-list")).toContainText("Reliability review required");
+  await page.locator(".ops-inbox-list article").filter({ hasText: "Reliability review required" }).getByRole("button", { name: "Acknowledge" }).click();
+  await expect(page.getByRole("status")).toContainText("Notification acknowledged");
+});
 
 test("command palette supports keyboard navigation", async ({ page }) => {
   await page.goto("/workspace/command-center");
@@ -45,6 +204,126 @@ test("command palette supports keyboard navigation", async ({ page }) => {
   await palette.getByPlaceholder("Find a workspace or capability").fill("entity resolution");
   await palette.getByRole("button", { name: /Entity Resolution/ }).click();
   await expect(page).toHaveURL(/\/workspace\/entity-resolution$/);
+});
+
+test("command center completes governed triage, approval, action, and report through visible controls", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful no-code operational workflow once on desktop.");
+  test.setTimeout(90_000);
+  await page.goto("/workspace/command-center");
+  await page.locator(".top-actions").getByRole("button", { name: "Start with sample data" }).click();
+  const riskPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "High-Risk Assets" }) });
+  await expect(riskPanel).toContainText("Line 4 Pump", { timeout: 30_000 });
+  await page.locator(".top-actions").getByRole("button", { name: "Run reliability triage" }).click();
+
+  const governance = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Governed Approval and Action" }) });
+  await expect(governance).toContainText("PENDING");
+  await governance.getByLabel("Decision reason").fill("Browser evaluator reviewed the reliability evidence.");
+  await governance.getByRole("button", { name: "Approve action" }).click();
+  await expect(governance).toContainText("APPROVED");
+  await governance.getByRole("button", { name: "Execute approved action" }).click();
+  await expect(governance.getByLabel("Governed action evidence")).toContainText("SUCCESS");
+  await expect(page.locator(".stepper button").filter({ hasText: "Execute governed action" })).toContainText("complete");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator(".top-actions").getByRole("button", { name: "Export proof report" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("asset-reliability-report.md");
+  await expect(page.locator(".stepper button").filter({ hasText: "Export proof report" })).toContainText("complete");
+});
+
+test("command center completes Connect-to-Report with a promoted project dataset", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the project-owned Connect-to-Report workflow once on desktop.");
+  test.setTimeout(90_000);
+  const assetId = `evaluator_industrial_assets_${Date.now()}`;
+  const created = await page.request.post("/data-assets", { data: {
+    id: assetId,
+    project_id: "default",
+    display_name: "Evaluator industrial assets",
+    kind: "dataset",
+    asset_schema: {
+      id: "string", name: "string", status: "string", criticality: "string",
+      predicted_failure_probability: "number", latitude: "number", longitude: "number"
+    },
+    records: [
+      { id: "evaluator-pump", name: "Evaluator Pump", status: "DEGRADED", criticality: "high", predicted_failure_probability: 0.91, latitude: 37.7924, longitude: -122.4012 },
+      { id: "evaluator-chiller", name: "Evaluator Chiller", status: "RUNNING", criticality: "medium", predicted_failure_probability: 0.22, latitude: 37.7893, longitude: -122.4072 }
+    ]
+  } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+
+  await page.goto("/workspace/command-center");
+  const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Use your promoted dataset" }) });
+  await panel.getByLabel("Promoted dataset ID").fill(assetId);
+  await panel.getByRole("button", { name: "Compile and run workflow" }).click();
+  await expect(page.getByText("Your dataset is connected to a project-owned ontology, hydration pipeline, and explainable risk scorecard.")).toBeVisible();
+  await expect(panel.locator(".industrial-result-summary")).toContainText("READY");
+  await expect(panel.locator(".industrial-result-summary")).toContainText(/1\.\d+\.0/);
+  await expect(panel.locator(".industrial-result-summary")).toContainText("2");
+  await expect(panel.locator(".industrial-result-summary")).toContainText("1");
+  await expect(panel.locator(".industrial-result-summary")).toContainText("Immutable source");
+  await expect(panel.locator(".industrial-result-summary")).toContainText(/dataset_snapshot_/);
+  await expect(panel.locator(".industrial-result-summary")).toContainText("Execution plan");
+  await expect(panel.locator(".industrial-result-summary")).toContainText(/pipeline_plan_/);
+  await expect(page.locator(".stepper button").filter({ hasText: "Analyze" })).toContainText("available");
+
+  await page.locator(".top-actions").getByRole("button", { name: "Analyze your highest-risk asset" }).click();
+  const governance = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Governed Approval and Action" }) });
+  await expect(governance).toContainText("PENDING");
+  await expect(governance).toContainText("default__request_asset_inspection");
+  await governance.getByLabel("Decision reason").fill("Evaluator reviewed the imported asset evidence.");
+  await governance.getByRole("button", { name: "Approve action" }).click();
+  await expect(governance).toContainText("APPROVED");
+  await governance.getByRole("button", { name: "Execute approved action" }).click();
+  await expect(governance.getByLabel("Governed action evidence")).toContainText("SUCCESS");
+  await expect(page.locator(".stepper button").filter({ hasText: "Act" })).toContainText("complete");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator(".top-actions").getByRole("button", { name: "Export proof report" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("default-asset-reliability-report.md");
+  await page.screenshot({ path: `test-results/screenshots/${testInfo.project.name}-industrial-connect-to-report.png`, fullPage: true });
+});
+
+test("command center monitors background snapshot onboarding", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the background worker workflow once on desktop.");
+  test.setTimeout(90_000);
+  const assetId = `evaluator_background_assets_${Date.now()}`;
+  const created = await page.request.post("/data-assets", { data: {
+    id: assetId, project_id: "default", display_name: "Background evaluator assets", kind: "dataset",
+    asset_schema: {
+      id: "string", name: "string", status: "string", criticality: "string",
+      predicted_failure_probability: "number", latitude: "number", longitude: "number"
+    },
+    records: [
+      { id: "background-pump", name: "Background Pump", status: "DEGRADED", criticality: "high", predicted_failure_probability: 0.93, latitude: 37.78, longitude: -122.41 },
+      { id: "background-chiller", name: "Background Chiller", status: "RUNNING", criticality: "medium", predicted_failure_probability: 0.18, latitude: 37.79, longitude: -122.40 }
+    ]
+  } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+
+  await page.goto("/workspace/command-center");
+  const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Use your promoted dataset" }) });
+  await panel.getByLabel("Promoted dataset ID").fill(assetId);
+  await panel.getByLabel("Execution mode").selectOption("background");
+  const responsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/industrial/workflows/asset-reliability/onboard") && response.request().method() === "POST"
+  );
+  await panel.getByRole("button", { name: "Compile and run workflow" }).click();
+  const queuedResponse = await responsePromise;
+  expect(queuedResponse.status()).toBe(202);
+  const queued = await queuedResponse.json() as { resources: { execution_job: string } };
+  await expect(panel.getByLabel("Background onboarding status")).toContainText("QUEUED");
+
+  await page.reload();
+  await expect(panel.getByLabel("Background onboarding status")).toContainText("QUEUED");
+
+  const worker = await page.request.post("/pipeline-builder/workers/run-next", { data: {
+    worker_id: "evaluator-background-worker", job_id: queued.resources.execution_job, lease_seconds: 120
+  } });
+  expect(worker.ok(), await worker.text()).toBeTruthy();
+  await expect(panel.getByLabel("Background onboarding status")).toContainText("SUCCEEDED", { timeout: 15_000 });
+  await expect(panel.locator(".industrial-result-summary")).toContainText("2");
+  await expect(page.getByText("Background onboarding completed. Snapshot, ontology, risk, and execution evidence are ready.")).toBeVisible();
 });
 
 test("responsive workspace navigation stays compact and keyboard operable", async ({ page }, testInfo) => {
@@ -90,6 +369,48 @@ test("builder route transitions release collaboration stream database sessions",
   await page.goto("/workspace/command-center");
   const probes = await Promise.all(Array.from({ length: 20 }, () => page.request.get("/jobs/summary")));
   expect(probes.every((response) => response.ok())).toBeTruthy();
+});
+
+test("visual builder reviews and applies a governed change proposal", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful review workflow once on desktop.");
+  const suffix = Date.now();
+  const artifactId = `browser_review_workshop_${suffix}`;
+  const displayName = `Reviewed workshop ${suffix}`;
+  const createResponse = await page.request.post("/artifacts", { data: {
+    id: artifactId,
+    artifact_type: "workshop",
+    display_name: displayName,
+    state: { nodes: [{
+      id: "risk_metric",
+      position: { x: 120, y: 100 },
+      data: { label: "Risk metric", nodeType: "metric", fields: [] }
+    }], edges: [], widgets: [] }
+  } });
+  expect(createResponse.status()).toBe(201);
+  const artifact = await createResponse.json() as { lock_version: number };
+  const proposalResponse = await page.request.post(`/api/v1/artifacts/${artifactId}/proposals`, { data: {
+    title: "Clarify the risk metric",
+    expected_lock_version: artifact.lock_version,
+    commands: [{
+      command_id: `browser-review-${suffix}`,
+      command: "update_node",
+      payload: { node_id: "risk_metric", changes: { data: {
+        label: "Critical asset risk", nodeType: "metric", fields: []
+      } } }
+    }]
+  } });
+  expect(proposalResponse.status()).toBe(201);
+
+  await page.goto("/workspace/workshop");
+  await page.getByLabel("Workshop artifact").selectOption({ label: displayName });
+  await page.getByRole("tab", { name: /Proposals/ }).click();
+  await expect(page.getByText("Clarify the risk metric", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("APPROVED", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByText("APPLIED", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Applied reviewed proposal as revision 2/)).toBeVisible();
+  await expect(page.getByText("Critical asset risk", { exact: true })).toBeVisible();
 });
 
 test("data onboarding previews a live connector with write-only credentials and fetch evidence", async ({ page }, testInfo) => {
@@ -286,6 +607,21 @@ test("control panel validates, dry-runs, and restores an integrity-protected sna
   await expect(controls).toContainText("IMPORTED");
 });
 
+test("control panel exposes human signed-extension onboarding and evidence", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the extension administration acceptance once on desktop.");
+  await page.goto("/workspace/control-panel");
+  await page.getByRole("button", { name: "Extensions", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Extension Scope" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vendor Trust Key" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Signed Package" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Active Extensions" })).toBeVisible();
+  await expect(page.getByText("signed_sandbox_v1", { exact: true })).toBeVisible();
+  await expect(page.getByText("v1", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Register key" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Verify package" })).toBeDisabled();
+  await expect(page.locator("body")).not.toContainText("bundle_base64");
+});
+
 test("visual builder supports typed configuration, preview, save, and publish", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful builder workflow once on desktop.");
   await page.goto("/workspace/workshop");
@@ -465,7 +801,7 @@ test("ontology health center evaluates, remediates, and simulates policy", async
   await expect(center.locator(".policy-decision-card")).toContainText("Denied by policy rule");
 });
 
-test("ontology schema registry publishes a revision and downloads a typed client", async ({ page }, testInfo) => {
+test("ontology schema registry publishes a revision and downloads source and an installable package", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful schema registry workflow once on desktop.");
   const suffix = Date.now();
   const objectTypeId = `registry_browser_asset_${suffix}`;
@@ -503,10 +839,19 @@ test("ontology schema registry publishes a revision and downloads a typed client
   await registry.getByRole("button", { name: "Publish registry" }).click();
   await expect(registry.getByRole("status")).toContainText(`Published production registry version ${version}`);
   await expect(registry.getByRole("button", { name: new RegExp(`${version} production`) })).toBeVisible();
-  const downloadPromise = page.waitForEvent("download");
-  await registry.getByRole("button", { name: "TypeScript client" }).click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("ontology.ts");
+  const sourceDownloadPromise = page.waitForEvent("download");
+  await registry.getByRole("button", { name: "TypeScript source" }).click();
+  const sourceDownload = await sourceDownloadPromise;
+  expect(sourceDownload.suggestedFilename()).toBe("ontology.ts");
+
+  const packageButton = registry.getByRole("button", { name: "Download .tgz" });
+  await expect(packageButton).toBeVisible();
+  await expect(registry.getByText(/@ontologyos\/default-production/)).toBeVisible();
+  const packageDownloadPromise = page.waitForEvent("download");
+  await packageButton.click();
+  const packageDownload = await packageDownloadPromise;
+  expect(packageDownload.suggestedFilename()).toBe(`ontologyos-default-production-${version}.tgz`);
+  await expect(registry.getByRole("status")).toContainText("Downloaded installable @ontologyos/default-production");
 });
 
 test("pipeline creates a graph and accepts a dragged node", async ({ page }, testInfo) => {

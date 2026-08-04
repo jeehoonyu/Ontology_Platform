@@ -290,21 +290,30 @@ def _execute_replay(db: Session, run: IngestionRun, payload: Dict[str, Any]) -> 
         raise HTTPException(status_code=404, detail="Project-scoped stream not found")
     records = list(payload.get("records") or (stream.schema_ or {}).get("sample_records") or [])
     records, rejected = _valid_records(db, run, records)
+    from . import stream_processing
+    stream_processing.enforce_publish_capacity(db, stream.id, len(records))
     payload_bytes = _payload_size(records)
     budget_checks = _budget_check(db, run.project_id, len(records), payload_bytes)
     start_ts = payload.get("start_ts") if payload.get("start_ts") is not None else _now()
     interval = int(payload.get("interval_seconds", 1))
     timestamp_field = payload.get("timestamp_field")
-    for index, record in enumerate(records):
+    pending_records = [
+        (index, record, f"streamrec_{run.id}_{index}")
+        for index, record in enumerate(records)
+        if not db.get(streaming.StreamRecord, f"streamrec_{run.id}_{index}")
+    ]
+    sequences = iter(streaming.allocate_sequences(db, stream.id, len(pending_records)))
+    for index, record, record_id in pending_records:
         ts = start_ts + index * interval
         if timestamp_field and record.get(timestamp_field) is not None:
             try:
                 ts = int(record[timestamp_field])
             except (TypeError, ValueError):
                 pass
-        record_id = f"streamrec_{run.id}_{index}"
-        if not db.get(streaming.StreamRecord, record_id):
-            db.add(streaming.StreamRecord(id=record_id, stream_id=stream.id, payload=record, ts=ts, archived=False, archived_at=None, created_at=_now()))
+        db.add(streaming.StreamRecord(
+            id=record_id, stream_id=stream.id, sequence=next(sequences), payload=record,
+            ts=ts, archived=False, archived_at=None, created_at=_now(),
+        ))
     target_asset_id = payload.get("target_asset_id")
     if payload.get("archive_to_dataset") and target_asset_id:
         asset = db.get(models.DataAsset, target_asset_id)

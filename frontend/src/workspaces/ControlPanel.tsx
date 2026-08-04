@@ -22,6 +22,7 @@ const SECTIONS = [
   { id: "auth", label: "Auth" },
   { id: "usage", label: "Usage" },
   { id: "recovery", label: "Recovery" },
+  { id: "extensions", label: "Extensions" },
   { id: "operations", label: "Runtime" }
 ];
 
@@ -79,6 +80,7 @@ export function ControlPanel() {
       {section === "auth" && <AuthSection />}
       {section === "usage" && <UsageSection />}
       {section === "recovery" && <RecoverySection />}
+      {section === "extensions" && <ExtensionsSection />}
       {section === "operations" && <RuntimeOperationsSection />}
     </Page>
   );
@@ -906,6 +908,16 @@ function UsageSection() {
   );
 }
 
+async function fileBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+  return btoa(binary);
+}
+
 function RecoverySection() {
   const [snapshot, setSnapshot] = useState<admin.PortableSnapshot | null>(null);
   const [validation, setValidation] = useState<admin.SnapshotValidation | null>(null);
@@ -1014,6 +1026,214 @@ function RecoverySection() {
           {result ? <StatusBadge value={result.status} /> : null}
         </div>
       </Panel>
+    </>
+  );
+}
+
+function ExtensionsSection() {
+  const [projectId, setProjectId] = useState("default");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const catalog = useAsyncState(() => admin.getPluginCatalog(projectId), [projectId, refreshKey]);
+  const [selected, setSelected] = useState<admin.PluginVersion | null>(null);
+  const [executions, setExecutions] = useState<admin.PluginExecution[]>([]);
+  const [keyForm, setKeyForm] = useState({ id: "", organization_id: "local", display_name: "" });
+  const [publicKeyFile, setPublicKeyFile] = useState<File | null>(null);
+  const [packageForm, setPackageForm] = useState({ signer_key_id: "" });
+  const [manifestFile, setManifestFile] = useState<File | null>(null);
+  const [bundleFile, setBundleFile] = useState<File | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [registered, setRegistered] = useState<admin.PluginVersion | null>(null);
+  const [operation, setOperation] = useState("");
+  const [operationInput, setOperationInput] = useState<Record<string, string>>({});
+  const [invoking, setInvoking] = useState(false);
+
+  function reload() {
+    setRefreshKey((value) => value + 1);
+  }
+
+  async function encodedKey(file: File, expectedBytes: number): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.length === expectedBytes) return fileBase64(file);
+    return new TextDecoder().decode(bytes).trim();
+  }
+
+  async function saveTrustKey() {
+    if (!publicKeyFile) return;
+    try {
+      await admin.createPluginTrustKey({
+        id: keyForm.id.trim() || undefined,
+        organization_id: keyForm.organization_id.trim(),
+        display_name: keyForm.display_name.trim(),
+        public_key: await encodedKey(publicKeyFile, 32)
+      });
+      setError("");
+      setNotice("Trust key registered. Signed packages from this vendor can now be verified.");
+      setPackageForm({ signer_key_id: keyForm.id.trim() });
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function registerPackage() {
+    if (!manifestFile || !bundleFile || !signatureFile) return;
+    try {
+      const manifest = JSON.parse(await manifestFile.text()) as Record<string, unknown>;
+      const next = await admin.registerPlugin({
+        project_id: projectId,
+        manifest,
+        bundle_base64: await fileBase64(bundleFile),
+        signer_key_id: packageForm.signer_key_id.trim(),
+        signature: await encodedKey(signatureFile, 64)
+      });
+      setRegistered(next);
+      setError("");
+      setNotice(`${next.plugin_id} ${next.version} passed signature and bundle verification.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function activate(version: admin.PluginVersion) {
+    try {
+      const next = await admin.activatePlugin(version.id);
+      setRegistered(next);
+      setError("");
+      setNotice(`${next.plugin_id} ${next.version} is active.`);
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function inspect(version: admin.PluginVersion) {
+    try {
+      const result = await admin.listPluginExecutions(version.id);
+      setSelected(version);
+      setExecutions(result.executions);
+      setOperation(Object.keys(version.operations)[0] || "");
+      setOperationInput({});
+      setError("");
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  const operationDefinition = selected && operation
+    ? (selected.operations[operation] as Record<string, unknown> | undefined)
+    : undefined;
+  const inputSchema = operationDefinition?.input_schema as Record<string, unknown> | undefined;
+  const inputProperties = (inputSchema?.properties as Record<string, Record<string, unknown>> | undefined) || {};
+  const requiredInput = new Set(Array.isArray(inputSchema?.required) ? inputSchema.required.map(String) : []);
+
+  async function invokeSelected() {
+    if (!selected || !operation) return;
+    const input = Object.fromEntries(Object.entries(inputProperties).filter(([name, spec]) => (
+      requiredInput.has(name) || spec.type === "boolean" || Boolean(operationInput[name])
+    )).map(([name, spec]) => {
+      const value = operationInput[name] || "";
+      if (spec.type === "integer") return [name, Number.parseInt(value, 10)];
+      if (spec.type === "number") return [name, Number(value)];
+      if (spec.type === "boolean") return [name, value === "true"];
+      return [name, value];
+    }));
+    try {
+      setInvoking(true);
+      const run = await admin.invokePluginAsync(selected.id, {
+        operation,
+        input,
+        idempotency_key: crypto.randomUUID(),
+        priority: 50,
+        max_attempts: 3
+      });
+      setExecutions((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      setError("");
+      setNotice(`${selected.plugin_id} queued as ${run.job_id || run.id}.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setInvoking(false);
+    }
+  }
+
+  const activeRows = (catalog.value?.plugins || []).map((plugin) => ({
+    id: plugin.id,
+    plugin: plugin.plugin_id,
+    version: plugin.version,
+    kind: plugin.kind,
+    capabilities: plugin.capabilities.join(", ") || "isolated",
+    operations: Object.keys(plugin.operations).join(", "),
+    status: plugin.status,
+    signer: plugin.signer_key_id
+  }));
+
+  return (
+    <>
+      <ErrorBanner message={error || catalog.error} />
+      {notice ? <div className="inline-success" role="status">{notice}</div> : null}
+      {catalog.loading ? <LoadingState label="Loading signed extensions..." /> : null}
+      <Panel title="Extension Scope" action={<button onClick={reload}>Refresh</button>}>
+        <div className="metadata-edit-grid">
+          <TextField label="Project" value={projectId} onChange={setProjectId} placeholder="default" />
+          <div className="key-value"><span>Execution boundary</span><strong>{catalog.value?.runtime || "signed_sandbox_v1"}</strong></div>
+          <div className="key-value"><span>SDK API</span><strong>v{catalog.value?.sdk_api_version || 1}</strong></div>
+        </div>
+      </Panel>
+      <div className="two-col">
+        <Panel title="Vendor Trust Key" action={<button onClick={saveTrustKey} disabled={!keyForm.organization_id.trim() || !keyForm.display_name.trim() || !publicKeyFile}>Register key</button>}>
+          <p className="panel-description">Add an organization-approved Ed25519 public key. Private signing material never enters OntologyOS.</p>
+          <div className="metadata-edit-grid">
+            <TextField label="Key ID (optional)" value={keyForm.id} onChange={(value) => setKeyForm({ ...keyForm, id: value })} placeholder="vendor-production-2026" />
+            <TextField label="Organization" value={keyForm.organization_id} onChange={(value) => setKeyForm({ ...keyForm, organization_id: value })} />
+            <TextField label="Vendor" value={keyForm.display_name} onChange={(value) => setKeyForm({ ...keyForm, display_name: value })} />
+            <label><span>Ed25519 public key</span><input type="file" accept=".pub,.key,text/plain,application/octet-stream" onChange={(event) => setPublicKeyFile(event.target.files?.[0] || null)} /></label>
+          </div>
+        </Panel>
+        <Panel title="Signed Package" action={<button onClick={registerPackage} disabled={!packageForm.signer_key_id.trim() || !manifestFile || !bundleFile || !signatureFile}>Verify package</button>}>
+          <p className="panel-description">The manifest signature and exact bundle digest are checked before an immutable version is registered.</p>
+          <div className="metadata-edit-grid">
+            <TextField label="Signer key ID" value={packageForm.signer_key_id} onChange={(value) => setPackageForm({ signer_key_id: value })} />
+            <label><span>Manifest</span><input type="file" accept="application/json,.json" onChange={(event) => setManifestFile(event.target.files?.[0] || null)} /></label>
+            <label><span>Plugin bundle</span><input type="file" accept="application/zip,.zip" onChange={(event) => setBundleFile(event.target.files?.[0] || null)} /></label>
+            <label><span>Ed25519 signature</span><input type="file" accept=".sig,text/plain,application/octet-stream" onChange={(event) => setSignatureFile(event.target.files?.[0] || null)} /></label>
+          </div>
+          {registered ? (
+            <div className="runtime-slo-row">
+              <span><strong>{registered.plugin_id} {registered.version}</strong><small>{registered.kind} · {registered.status}</small></span>
+              <StatusBadge value={registered.status} />
+              {registered.status === "VERIFIED" ? <button onClick={() => activate(registered)}>Activate</button> : null}
+            </div>
+          ) : null}
+        </Panel>
+      </div>
+      <Panel title="Active Extensions" action={<StatusBadge value={`${activeRows.length} active`} />}>
+        {activeRows.length ? <DataTable rows={activeRows} empty="No active extensions." /> : <EmptyState title="No active extensions" description="Register a vendor trust key, verify a signed package, then activate its immutable version." />}
+        {(catalog.value?.plugins || []).length ? (
+          <div className="button-row extension-inspect-actions">
+            {(catalog.value?.plugins || []).map((plugin) => <button key={plugin.id} onClick={() => inspect(plugin)}>Runs: {plugin.plugin_id}</button>)}
+          </div>
+        ) : null}
+      </Panel>
+      {selected ? (
+        <>
+          <Panel title={`Run ${selected.plugin_id}`} action={<button onClick={invokeSelected} disabled={!operation || invoking || Object.entries(inputProperties).some(([name, spec]) => requiredInput.has(name) && spec.type !== "boolean" && !operationInput[name])}>{invoking ? "Queueing..." : "Run extension"}</button>}>
+            <p className="panel-description">Inputs are generated from the signed operation contract. Execution is queued to the isolated plugin worker and remains recoverable by job ID.</p>
+            <div className="metadata-edit-grid">
+              <SelectField label="Operation" value={operation} onChange={(value) => { setOperation(value); setOperationInput({}); }} options={toOptions(Object.keys(selected.operations))} />
+              {Object.entries(inputProperties).map(([name, spec]) => spec.type === "boolean" ? (
+                <SelectField key={name} label={`${name}${requiredInput.has(name) ? " (required)" : ""}`} value={operationInput[name] || "false"} onChange={(value) => setOperationInput({ ...operationInput, [name]: value })} options={toOptions(["false", "true"])} />
+              ) : (
+                <TextField key={name} label={`${name}${requiredInput.has(name) ? " (required)" : ""}`} value={operationInput[name] || ""} onChange={(value) => setOperationInput({ ...operationInput, [name]: value })} type={spec.type === "integer" || spec.type === "number" ? "number" : "text"} />
+              ))}
+            </div>
+            {!Object.keys(inputProperties).length ? <p className="muted-copy">This operation has no declared input fields.</p> : null}
+          </Panel>
+          <Panel title={`${selected.plugin_id} execution evidence`} action={<div className="button-row"><StatusBadge value={selected.status} /><button onClick={() => inspect(selected)}>Refresh runs</button></div>}>
+            <DataTable rows={executions.map((run) => ({ id: run.id, job_id: run.job_id || "direct", operation: run.operation, status: run.status, duration_ms: run.duration_ms, sandbox: String(run.sandbox.mode || (run.status === "QUEUED" ? "pending" : "unknown")), error: run.error || "", actor: run.actor, created_at: run.created_at }))} empty="This extension has not run yet." />
+          </Panel>
+        </>
+      ) : null}
     </>
   );
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import os
 import re
 import time
 import uuid
@@ -18,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, production_auth, tenancy
 from .database import Base, get_db
 
 router = APIRouter(tags=["decision_intelligence"])
@@ -34,6 +35,8 @@ def _new_id(prefix: str) -> str:
 
 def _ensure_object_snapshot_table(db: Session) -> None:
     """Support legacy standalone callers that create Base tables before this module is imported."""
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     ObjectSnapshot.__table__.create(bind=db.get_bind(), checkfirst=True)
 
 
@@ -41,6 +44,7 @@ class DecisionRule(Base):
     __tablename__ = "decision_rules"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
@@ -57,6 +61,7 @@ class DecisionScorecard(Base):
     __tablename__ = "decision_scorecards"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
@@ -72,6 +77,7 @@ class DecisionRun(Base):
     __tablename__ = "decision_runs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     scope: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String, default="RUNNING")
     object_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -84,6 +90,7 @@ class ObjectSnapshot(Base):
     __tablename__ = "object_snapshots"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_id: Mapped[str] = mapped_column(String, index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     properties: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -100,6 +107,7 @@ class EntityResolutionJob(Base):
     __tablename__ = "entity_resolution_jobs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     fields: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String, default="RUNNING")
@@ -112,6 +120,7 @@ class EntityCandidate(Base):
     __tablename__ = "entity_candidates"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     job_id: Mapped[str] = mapped_column(String, index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     object_ids: Mapped[list] = mapped_column(JSON, default=list)
@@ -127,6 +136,7 @@ class DecisionScenario(Base):
     __tablename__ = "decision_scenarios"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     seed_object_ids: Mapped[list] = mapped_column(JSON, default=list)
@@ -141,6 +151,7 @@ class DecisionScenario(Base):
 
 class DecisionRuleCreate(BaseModel):
     id: Optional[str] = None
+    project_id: Optional[str] = None
     display_name: str
     description: Optional[str] = None
     object_type_id: str
@@ -153,6 +164,7 @@ class DecisionRuleCreate(BaseModel):
 
 class DecisionScorecardCreate(BaseModel):
     id: Optional[str] = None
+    project_id: Optional[str] = None
     display_name: str
     description: Optional[str] = None
     object_type_id: str
@@ -163,6 +175,7 @@ class DecisionScorecardCreate(BaseModel):
 
 
 class DecisionEvaluateRequest(BaseModel):
+    project_id: Optional[str] = None
     object_type_id: str
     filters: Any = Field(default_factory=dict)
     object_ids: List[str] = Field(default_factory=list)
@@ -170,9 +183,11 @@ class DecisionEvaluateRequest(BaseModel):
     scorecard_ids: List[str] = Field(default_factory=list)
     limit: int = 100
     persist_run: bool = True
+    include_inactive: bool = False
 
 
 class EntityResolutionJobRequest(BaseModel):
+    project_id: Optional[str] = None
     object_type_id: str
     fields: List[str] = Field(default_factory=list)
     threshold: int = 70
@@ -196,6 +211,7 @@ class EntitySplitRequest(BaseModel):
 
 class DecisionScenarioRequest(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str = "Decision Scenario"
     description: Optional[str] = None
     seed_object_ids: List[str] = Field(default_factory=list)
@@ -205,6 +221,7 @@ class DecisionScenarioRequest(BaseModel):
 
 class DecisionBootstrapRequest(BaseModel):
     object_type_id: Optional[str] = None
+    project_id: str = "default"
 
 
 def _object_dict(obj: models.ObjectInstance) -> Dict[str, Any]:
@@ -214,6 +231,9 @@ def _object_dict(obj: models.ObjectInstance) -> Dict[str, Any]:
         "properties": obj.properties or {},
         "lineage": obj.lineage or {},
         "source_asset_id": obj.source_asset_id,
+        "materialization_id": obj.materialization_id,
+        "is_active": obj.is_active,
+        "retired_at": obj.retired_at,
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
     }
@@ -222,6 +242,7 @@ def _object_dict(obj: models.ObjectInstance) -> Dict[str, Any]:
 def _rule_dict(rule: DecisionRule) -> Dict[str, Any]:
     return {
         "id": rule.id,
+        "project_id": rule.project_id,
         "display_name": rule.display_name,
         "description": rule.description,
         "object_type_id": rule.object_type_id,
@@ -238,6 +259,7 @@ def _rule_dict(rule: DecisionRule) -> Dict[str, Any]:
 def _scorecard_dict(scorecard: DecisionScorecard) -> Dict[str, Any]:
     return {
         "id": scorecard.id,
+        "project_id": scorecard.project_id,
         "display_name": scorecard.display_name,
         "description": scorecard.description,
         "object_type_id": scorecard.object_type_id,
@@ -253,6 +275,7 @@ def _scorecard_dict(scorecard: DecisionScorecard) -> Dict[str, Any]:
 def _snapshot_dict(snapshot: ObjectSnapshot) -> Dict[str, Any]:
     return {
         "id": snapshot.id,
+        "project_id": snapshot.project_id,
         "object_id": snapshot.object_id,
         "object_type_id": snapshot.object_type_id,
         "properties": snapshot.properties or {},
@@ -269,6 +292,7 @@ def _snapshot_dict(snapshot: ObjectSnapshot) -> Dict[str, Any]:
 def _candidate_dict(candidate: EntityCandidate, db: Optional[Session] = None) -> Dict[str, Any]:
     payload = {
         "id": candidate.id,
+        "project_id": candidate.project_id,
         "job_id": candidate.job_id,
         "object_type_id": candidate.object_type_id,
         "object_ids": candidate.object_ids or [],
@@ -283,7 +307,7 @@ def _candidate_dict(candidate: EntityCandidate, db: Optional[Session] = None) ->
         objects = []
         for object_id in candidate.object_ids or []:
             obj = db.get(models.ObjectInstance, object_id)
-            if obj:
+            if obj and obj.project_id == candidate.project_id:
                 objects.append(_object_dict(obj))
         payload["objects"] = objects
     return payload
@@ -292,6 +316,7 @@ def _candidate_dict(candidate: EntityCandidate, db: Optional[Session] = None) ->
 def _job_dict(job: EntityResolutionJob) -> Dict[str, Any]:
     return {
         "id": job.id,
+        "project_id": job.project_id,
         "object_type_id": job.object_type_id,
         "fields": job.fields or [],
         "status": job.status,
@@ -304,6 +329,7 @@ def _job_dict(job: EntityResolutionJob) -> Dict[str, Any]:
 def _scenario_dict(scenario: DecisionScenario) -> Dict[str, Any]:
     return {
         "id": scenario.id,
+        "project_id": scenario.project_id,
         "display_name": scenario.display_name,
         "description": scenario.description,
         "seed_object_ids": scenario.seed_object_ids or [],
@@ -328,12 +354,36 @@ def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, pay
     ))
 
 
-def _get_object(db: Session, object_type_id: str, object_id: str) -> models.ObjectInstance:
+def _object_type_project(db: Session, object_type_id: str) -> str:
+    object_type = db.get(models.ObjectType, object_type_id)
+    if not object_type:
+        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    return object_type.project_id
+
+
+def _request_project(db: Session, object_type_id: str, requested: Optional[str] = None) -> str:
+    project_id = _object_type_project(db, object_type_id)
+    if requested and requested != project_id:
+        raise HTTPException(status_code=422, detail=f"ObjectType '{object_type_id}' is not in project '{requested}'")
+    return project_id
+
+
+def _scoped_query(db: Session, principal: production_auth.Principal, model: Any, permission: str = "view"):
+    query = db.query(model)
+    project_ids = tenancy.accessible_project_ids(db, principal, permission)
+    if project_ids is not None:
+        query = query.filter(model.project_id.in_(project_ids)) if project_ids else query.filter(model.project_id == "__none__")
+    return query
+
+
+def _get_object(db: Session, object_type_id: str, object_id: str, project_id: Optional[str] = None) -> models.ObjectInstance:
     obj = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.id == object_id,
         models.ObjectInstance.object_type_id == object_type_id,
     ).first()
     if not obj:
+        raise HTTPException(status_code=404, detail=f"ObjectInstance '{object_id}' not found")
+    if project_id and obj.project_id != project_id:
         raise HTTPException(status_code=404, detail=f"ObjectInstance '{object_id}' not found")
     return obj
 
@@ -396,7 +446,7 @@ def _compare(left: Any, op: str, right: Any) -> bool:
 def _linked_count(db: Session, obj: models.ObjectInstance, expression: Dict[str, Any]) -> int:
     direction = str(expression.get("direction", "both")).lower()
     link_type_id = expression.get("link_type_id")
-    query = db.query(models.LinkInstance)
+    query = db.query(models.LinkInstance).filter(models.LinkInstance.project_id == obj.project_id)
     if link_type_id:
         query = query.filter(models.LinkInstance.link_type_id == link_type_id)
     if direction == "outgoing":
@@ -451,24 +501,36 @@ def _matching_filters(db: Session, obj: models.ObjectInstance, filters: Any) -> 
 
 
 def _objects_for_scope(db: Session, body: DecisionEvaluateRequest) -> List[models.ObjectInstance]:
-    query = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == body.object_type_id)
+    project_id = body.project_id or _object_type_project(db, body.object_type_id)
+    query = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.project_id == project_id,
+        models.ObjectInstance.object_type_id == body.object_type_id,
+    )
     if body.object_ids:
         query = query.filter(models.ObjectInstance.id.in_(body.object_ids))
-    rows = query.all()
+    if not body.include_inactive:
+        query = query.filter(models.ObjectInstance.is_active.is_(True))
+    limit = max(0, min(int(body.limit or 100), 10000))
+    if not body.filters:
+        return query.order_by(models.ObjectInstance.id.asc()).limit(limit).all()
+    rows = query.order_by(models.ObjectInstance.id.asc()).all()
     if body.filters:
         rows = [row for row in rows if _matching_filters(db, row, body.filters)]
-    return rows[: max(0, min(int(body.limit or 100), 10000))]
+    return rows[:limit]
 
 
-def _rules_for_object(db: Session, object_type_id: str, rule_ids: Optional[List[str]] = None) -> List[DecisionRule]:
-    query = db.query(DecisionRule).filter(DecisionRule.object_type_id == object_type_id, DecisionRule.active == True)  # noqa: E712
+def _rules_for_object(db: Session, object_type_id: str, rule_ids: Optional[List[str]] = None, project_id: Optional[str] = None) -> List[DecisionRule]:
+    effective_project = project_id or _object_type_project(db, object_type_id)
+    query = db.query(DecisionRule).filter(DecisionRule.project_id == effective_project, DecisionRule.object_type_id == object_type_id, DecisionRule.active == True)  # noqa: E712
     if rule_ids:
         query = query.filter(DecisionRule.id.in_(rule_ids))
     return query.order_by(DecisionRule.updated_at.desc()).all()
 
 
-def _scorecards_for_object(db: Session, object_type_id: str, scorecard_ids: Optional[List[str]] = None) -> List[DecisionScorecard]:
+def _scorecards_for_object(db: Session, object_type_id: str, scorecard_ids: Optional[List[str]] = None, project_id: Optional[str] = None) -> List[DecisionScorecard]:
+    effective_project = project_id or _object_type_project(db, object_type_id)
     query = db.query(DecisionScorecard).filter(
+        DecisionScorecard.project_id == effective_project,
         DecisionScorecard.object_type_id == object_type_id,
         DecisionScorecard.active == True,  # noqa: E712
     )
@@ -534,9 +596,11 @@ def score_object(
     *,
     rule_ids: Optional[List[str]] = None,
     scorecard_ids: Optional[List[str]] = None,
+    rule_catalog: Optional[List[DecisionRule]] = None,
+    scorecard_catalog: Optional[List[DecisionScorecard]] = None,
 ) -> Dict[str, Any]:
-    rules = _rules_for_object(db, obj.object_type_id, rule_ids)
-    scorecards = _scorecards_for_object(db, obj.object_type_id, scorecard_ids)
+    rules = rule_catalog if rule_catalog is not None else _rules_for_object(db, obj.object_type_id, rule_ids, obj.project_id)
+    scorecards = scorecard_catalog if scorecard_catalog is not None else _scorecards_for_object(db, obj.object_type_id, scorecard_ids, obj.project_id)
     rules_by_id = {rule.id: rule for rule in rules}
     drivers: List[Dict[str, Any]] = []
     recommended_actions: List[Any] = []
@@ -598,12 +662,45 @@ def score_object(
     }
 
 
-def rule_results_for_object(db: Session, obj: models.ObjectInstance, rule_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    return [evaluate_rule(db, rule, obj) for rule in _rules_for_object(db, obj.object_type_id, rule_ids)]
+def rule_results_for_object(
+    db: Session,
+    obj: models.ObjectInstance,
+    rule_ids: Optional[List[str]] = None,
+    rule_catalog: Optional[List[DecisionRule]] = None,
+) -> List[Dict[str, Any]]:
+    rules = rule_catalog if rule_catalog is not None else _rules_for_object(db, obj.object_type_id, rule_ids, obj.project_id)
+    return [evaluate_rule(db, rule, obj) for rule in rules]
 
 
-def _pending_duplicate_warnings(db: Session, object_id: str) -> List[Dict[str, Any]]:
-    candidates = db.query(EntityCandidate).filter(EntityCandidate.status == "PENDING").all()
+def evaluate_object_rows_inline(
+    db: Session,
+    rows: List[models.ObjectInstance],
+    *,
+    rule_ids: Optional[List[str]] = None,
+    scorecard_ids: Optional[List[str]] = None,
+    rule_catalog: Optional[List[DecisionRule]] = None,
+    scorecard_catalog: Optional[List[DecisionScorecard]] = None,
+) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
+    object_type_id = rows[0].object_type_id
+    project_id = rows[0].project_id
+    rules = rule_catalog if rule_catalog is not None else _rules_for_object(db, object_type_id, rule_ids, project_id)
+    scorecards = scorecard_catalog if scorecard_catalog is not None else _scorecards_for_object(db, object_type_id, scorecard_ids, project_id)
+    return [{
+        "object": _object_dict(obj),
+        "object_id": obj.id,
+        "object_type_id": obj.object_type_id,
+        "rule_results": rule_results_for_object(db, obj, rule_ids, rules),
+        "risk": score_object(
+            db, obj, rule_ids=rule_ids, scorecard_ids=scorecard_ids,
+            rule_catalog=rules, scorecard_catalog=scorecards,
+        ),
+    } for obj in rows]
+
+
+def _pending_duplicate_warnings(db: Session, object_id: str, project_id: str) -> List[Dict[str, Any]]:
+    candidates = db.query(EntityCandidate).filter(EntityCandidate.project_id == project_id, EntityCandidate.status == "PENDING").all()
     return [
         _candidate_dict(candidate)
         for candidate in candidates
@@ -618,11 +715,13 @@ def explain_object_by_id(
     *,
     rule_ids: Optional[List[str]] = None,
     scorecard_ids: Optional[List[str]] = None,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    obj = _get_object(db, object_type_id, object_id)
+    obj = _get_object(db, object_type_id, object_id, project_id)
     risk = score_object(db, obj, rule_ids=rule_ids, scorecard_ids=scorecard_ids)
     rule_results = rule_results_for_object(db, obj, rule_ids)
     snapshots = db.query(ObjectSnapshot).filter(
+        ObjectSnapshot.project_id == obj.project_id,
         ObjectSnapshot.object_id == object_id,
         ObjectSnapshot.object_type_id == object_type_id,
     ).order_by(ObjectSnapshot.seq.asc()).all()
@@ -637,14 +736,14 @@ def explain_object_by_id(
         "risk": risk,
         "rule_results": rule_results,
         "temporal_summary": temporal_summary,
-        "duplicate_warnings": _pending_duplicate_warnings(db, object_id),
+        "duplicate_warnings": _pending_duplicate_warnings(db, object_id, obj.project_id),
         "recommended_actions": risk["recommended_actions"],
         "explanation": risk["explanation"],
     }
 
 
-def score_object_by_id(db: Session, object_type_id: str, object_id: str, scorecard_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    obj = _get_object(db, object_type_id, object_id)
+def score_object_by_id(db: Session, object_type_id: str, object_id: str, scorecard_ids: Optional[List[str]] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
+    obj = _get_object(db, object_type_id, object_id, project_id)
     return score_object(db, obj, scorecard_ids=scorecard_ids)
 
 
@@ -660,6 +759,7 @@ def record_object_snapshot(
 ) -> ObjectSnapshot:
     _ensure_object_snapshot_table(db)
     last = db.query(ObjectSnapshot).filter(
+        ObjectSnapshot.project_id == obj.project_id,
         ObjectSnapshot.object_id == obj.id,
         ObjectSnapshot.object_type_id == obj.object_type_id,
     ).order_by(ObjectSnapshot.seq.desc()).first()
@@ -668,6 +768,7 @@ def record_object_snapshot(
         lineage.update(extra_lineage)
     snapshot = ObjectSnapshot(
         id=_new_id("snapshot"),
+        project_id=obj.project_id,
         object_id=obj.id,
         object_type_id=obj.object_type_id,
         properties=copy.deepcopy(obj.properties or {}),
@@ -694,6 +795,7 @@ def _dict_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Dict[
 def _timeline(db: Session, object_type_id: str, object_id: str) -> List[Dict[str, Any]]:
     obj = _get_object(db, object_type_id, object_id)
     snapshots = db.query(ObjectSnapshot).filter(
+        ObjectSnapshot.project_id == obj.project_id,
         ObjectSnapshot.object_id == object_id,
         ObjectSnapshot.object_type_id == object_type_id,
     ).order_by(ObjectSnapshot.seq.asc()).all()
@@ -747,6 +849,7 @@ def _build_entity_candidates(
     limit: int,
 ) -> List[EntityCandidate]:
     rows = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.project_id == job.project_id,
         models.ObjectInstance.object_type_id == job.object_type_id
     ).limit(max(2, min(limit, 5000))).all()
     fields = job.fields or _default_resolution_fields(db, job.object_type_id)
@@ -772,6 +875,7 @@ def _build_entity_candidates(
                 continue
             candidate = EntityCandidate(
                 id=_new_id("candidate"),
+                project_id=job.project_id,
                 job_id=job.id,
                 object_type_id=job.object_type_id,
                 object_ids=[left.id, right.id],
@@ -785,11 +889,11 @@ def _build_entity_candidates(
     return candidates
 
 
-def _scenario_baseline(db: Session, seed_object_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+def _scenario_baseline(db: Session, seed_object_ids: List[str], project_id: str) -> Dict[str, Dict[str, Any]]:
     baseline = {}
     for object_id in seed_object_ids:
         obj = db.get(models.ObjectInstance, object_id)
-        if obj:
+        if obj and obj.project_id == project_id:
             baseline[obj.id] = _object_dict(obj)
     return baseline
 
@@ -800,14 +904,15 @@ def run_scenario_inline(
     seed_object_ids: List[str],
     overrides: Dict[str, Dict[str, Any]],
     propagation_rules: Optional[List[Dict[str, Any]]] = None,
+    project_id: str = "default",
 ) -> Dict[str, Any]:
     propagation_rules = propagation_rules or []
-    baseline = _scenario_baseline(db, seed_object_ids)
+    baseline = _scenario_baseline(db, seed_object_ids, project_id)
     scenario_output = copy.deepcopy(baseline)
 
     for object_id, patch in (overrides or {}).items():
         obj = db.get(models.ObjectInstance, object_id)
-        if not obj:
+        if not obj or obj.project_id != project_id:
             continue
         if object_id not in scenario_output:
             scenario_output[object_id] = _object_dict(obj)
@@ -822,7 +927,7 @@ def run_scenario_inline(
         direction = str(rule.get("direction", "both")).lower()
         set_values = rule.get("set") or {}
         impacted_ids = set(seed_object_ids) | set((overrides or {}).keys())
-        query = db.query(models.LinkInstance)
+        query = db.query(models.LinkInstance).filter(models.LinkInstance.project_id == project_id)
         if link_type_id:
             query = query.filter(models.LinkInstance.link_type_id == link_type_id)
         for link in query.all():
@@ -833,7 +938,7 @@ def run_scenario_inline(
                 targets.append(link.source_object_id)
             for target_id in targets:
                 obj = db.get(models.ObjectInstance, target_id)
-                if not obj:
+                if not obj or obj.project_id != project_id:
                     continue
                 if target_id not in scenario_output:
                     baseline[target_id] = _object_dict(obj)
@@ -863,7 +968,7 @@ def run_scenario_inline(
     }
 
 
-def build_decision_context(db: Session, context: Dict[str, Any]) -> Dict[str, Any]:
+def build_decision_context(db: Session, context: Dict[str, Any], project_id: Optional[str] = None) -> Dict[str, Any]:
     object_risk = []
     duplicate_warnings = []
     for pack in context.get("packs", []):
@@ -873,7 +978,7 @@ def build_decision_context(db: Session, context: Dict[str, Any]) -> Dict[str, An
             if not object_id:
                 continue
             try:
-                explanation = explain_object_by_id(db, object_type_id, object_id)
+                explanation = explain_object_by_id(db, object_type_id, object_id, project_id=project_id)
             except HTTPException:
                 continue
             object_risk.append({
@@ -894,15 +999,15 @@ def build_decision_context(db: Session, context: Dict[str, Any]) -> Dict[str, An
 
 
 @router.post("/decision/bootstrap")
-def bootstrap_decision_layer(body: DecisionBootstrapRequest = DecisionBootstrapRequest(), db: Session = Depends(get_db)):
+def bootstrap_decision_layer(body: DecisionBootstrapRequest = DecisionBootstrapRequest(), principal: production_auth.Principal = Depends(production_auth.require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     object_type_id = body.object_type_id
     if not object_type_id:
-        object_type = db.query(models.ObjectType).first()
+        object_type = db.query(models.ObjectType).filter(models.ObjectType.project_id == body.project_id).first()
         if not object_type:
-            raise HTTPException(status_code=404, detail="No object types available")
+            raise HTTPException(status_code=404, detail=f"No object types available in project '{body.project_id}'")
         object_type_id = object_type.id
-    if not db.get(models.ObjectType, object_type_id):
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    project_id = _request_project(db, object_type_id, body.project_id)
 
     now = _now()
     created = []
@@ -927,6 +1032,7 @@ def bootstrap_decision_layer(body: DecisionBootstrapRequest = DecisionBootstrapR
             continue
         rule = DecisionRule(
             id=spec["id"],
+            project_id=project_id,
             display_name=spec["display_name"],
             description="Default local decision intelligence rule.",
             object_type_id=object_type_id,
@@ -944,6 +1050,7 @@ def bootstrap_decision_layer(body: DecisionBootstrapRequest = DecisionBootstrapR
     if not db.get(DecisionScorecard, scorecard_id):
         scorecard = DecisionScorecard(
             id=scorecard_id,
+            project_id=project_id,
             display_name="Default Risk Scorecard",
             description="Default local scorecard for operational risk.",
             object_type_id=object_type_id,
@@ -959,21 +1066,22 @@ def bootstrap_decision_layer(body: DecisionBootstrapRequest = DecisionBootstrapR
         )
         db.add(scorecard)
         created.append(scorecard.id)
-    _audit(db, "decision.bootstrap", "object_type", object_type_id, {"created": created})
+    _audit(db, "decision.bootstrap", "object_type", object_type_id, {"project_id": project_id, "created": created}, actor=principal.id)
     db.commit()
     return {"object_type_id": object_type_id, "created": created}
 
 
 @router.post("/decision/rules")
-def create_decision_rule(body: DecisionRuleCreate, db: Session = Depends(get_db)):
-    if not db.get(models.ObjectType, body.object_type_id):
-        raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+def create_decision_rule(body: DecisionRuleCreate, principal: production_auth.Principal = Depends(production_auth.require_permission("edit")), db: Session = Depends(get_db)):
+    project_id = _request_project(db, body.object_type_id, body.project_id)
+    tenancy.assert_project_permission(db, principal, project_id, "edit")
     rule_id = body.id or _new_id("rule")
     if db.get(DecisionRule, rule_id):
         raise HTTPException(status_code=400, detail="DecisionRule already exists")
     now = _now()
     rule = DecisionRule(
         id=rule_id,
+        project_id=project_id,
         display_name=body.display_name,
         description=body.description,
         object_type_id=body.object_type_id,
@@ -986,7 +1094,7 @@ def create_decision_rule(body: DecisionRuleCreate, db: Session = Depends(get_db)
         updated_at=now,
     )
     db.add(rule)
-    _audit(db, "decision.rule.created", "decision_rule", rule.id, _rule_dict(rule))
+    _audit(db, "decision.rule.created", "decision_rule", rule.id, _rule_dict(rule), actor=principal.id)
     db.commit()
     db.refresh(rule)
     return _rule_dict(rule)
@@ -995,11 +1103,18 @@ def create_decision_rule(body: DecisionRuleCreate, db: Session = Depends(get_db)
 @router.get("/decision/rules")
 def list_decision_rules(
     object_type_id: Optional[str] = None,
+    project_id: Optional[str] = None,
     active_only: bool = True,
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
     db: Session = Depends(get_db),
 ):
-    query = db.query(DecisionRule)
+    query = _scoped_query(db, principal, DecisionRule)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(DecisionRule.project_id == project_id)
     if object_type_id:
+        object_project = _request_project(db, object_type_id, project_id)
+        tenancy.assert_project_permission(db, principal, object_project, "view")
         query = query.filter(DecisionRule.object_type_id == object_type_id)
     if active_only:
         query = query.filter(DecisionRule.active == True)  # noqa: E712
@@ -1007,15 +1122,16 @@ def list_decision_rules(
 
 
 @router.post("/decision/scorecards")
-def create_decision_scorecard(body: DecisionScorecardCreate, db: Session = Depends(get_db)):
-    if not db.get(models.ObjectType, body.object_type_id):
-        raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+def create_decision_scorecard(body: DecisionScorecardCreate, principal: production_auth.Principal = Depends(production_auth.require_permission("edit")), db: Session = Depends(get_db)):
+    project_id = _request_project(db, body.object_type_id, body.project_id)
+    tenancy.assert_project_permission(db, principal, project_id, "edit")
     scorecard_id = body.id or _new_id("scorecard")
     if db.get(DecisionScorecard, scorecard_id):
         raise HTTPException(status_code=400, detail="DecisionScorecard already exists")
     now = _now()
     scorecard = DecisionScorecard(
         id=scorecard_id,
+        project_id=project_id,
         display_name=body.display_name,
         description=body.description,
         object_type_id=body.object_type_id,
@@ -1027,7 +1143,7 @@ def create_decision_scorecard(body: DecisionScorecardCreate, db: Session = Depen
         updated_at=now,
     )
     db.add(scorecard)
-    _audit(db, "decision.scorecard.created", "decision_scorecard", scorecard.id, _scorecard_dict(scorecard))
+    _audit(db, "decision.scorecard.created", "decision_scorecard", scorecard.id, _scorecard_dict(scorecard), actor=principal.id)
     db.commit()
     db.refresh(scorecard)
     return _scorecard_dict(scorecard)
@@ -1036,33 +1152,34 @@ def create_decision_scorecard(body: DecisionScorecardCreate, db: Session = Depen
 @router.get("/decision/scorecards")
 def list_decision_scorecards(
     object_type_id: Optional[str] = None,
+    project_id: Optional[str] = None,
     active_only: bool = True,
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
     db: Session = Depends(get_db),
 ):
-    query = db.query(DecisionScorecard)
+    query = _scoped_query(db, principal, DecisionScorecard)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(DecisionScorecard.project_id == project_id)
     if object_type_id:
+        object_project = _request_project(db, object_type_id, project_id)
+        tenancy.assert_project_permission(db, principal, object_project, "view")
         query = query.filter(DecisionScorecard.object_type_id == object_type_id)
     if active_only:
         query = query.filter(DecisionScorecard.active == True)  # noqa: E712
     return [_scorecard_dict(scorecard) for scorecard in query.order_by(DecisionScorecard.updated_at.desc()).all()]
 
 
-@router.post("/decision/evaluate")
-def evaluate_decision_scope(body: DecisionEvaluateRequest, db: Session = Depends(get_db)):
-    if not db.get(models.ObjectType, body.object_type_id):
-        raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+def evaluate_decision_scope_inline(body: DecisionEvaluateRequest, db: Session) -> Dict[str, Any]:
+    project_id = _request_project(db, body.object_type_id, body.project_id)
+    body = body.model_copy(update={"project_id": project_id})
     rows = _objects_for_scope(db, body)
-    findings = []
-    for obj in rows:
-        findings.append({
-            "object": _object_dict(obj),
-            "object_id": obj.id,
-            "object_type_id": obj.object_type_id,
-            "rule_results": rule_results_for_object(db, obj, body.rule_ids),
-            "risk": score_object(db, obj, rule_ids=body.rule_ids, scorecard_ids=body.scorecard_ids),
-        })
+    findings = evaluate_object_rows_inline(
+        db, rows, rule_ids=body.rule_ids, scorecard_ids=body.scorecard_ids,
+    )
     payload = {
         "id": _new_id("decision_run"),
+        "project_id": project_id,
         "scope": body.model_dump(),
         "status": "SUCCESS",
         "object_count": len(rows),
@@ -1080,6 +1197,7 @@ def evaluate_decision_scope(body: DecisionEvaluateRequest, db: Session = Depends
             severity = "critical" if "critical" in bands else "high" if "high" in bands else "medium" if "medium" in bands else "info"
             ops_control.record_ops_event(
                 db,
+                project_id=project_id,
                 source="decision",
                 event_type="decision.evaluate",
                 severity=severity,
@@ -1097,13 +1215,24 @@ def evaluate_decision_scope(body: DecisionEvaluateRequest, db: Session = Depends
     return payload
 
 
+@router.post("/decision/evaluate")
+def evaluate_decision_scope(body: DecisionEvaluateRequest, principal: production_auth.Principal = Depends(production_auth.require_permission("execute")), db: Session = Depends(get_db)):
+    project_id = _request_project(db, body.object_type_id, body.project_id)
+    tenancy.assert_project_permission(db, principal, project_id, "execute")
+    return evaluate_decision_scope_inline(body.model_copy(update={"project_id": project_id}), db)
+
+
 @router.get("/decision/objects/{object_type_id}/{object_id}/explain")
-def explain_decision_object(object_type_id: str, object_id: str, db: Session = Depends(get_db)):
+def explain_decision_object(object_type_id: str, object_id: str, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
+    obj = _get_object(db, object_type_id, object_id)
+    tenancy.assert_project_permission(db, principal, obj.project_id, "view")
     return explain_object_by_id(db, object_type_id, object_id)
 
 
 @router.get("/temporal/objects/{object_type_id}/{object_id}/timeline")
-def object_timeline(object_type_id: str, object_id: str, db: Session = Depends(get_db)):
+def object_timeline(object_type_id: str, object_id: str, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
+    obj = _get_object(db, object_type_id, object_id)
+    tenancy.assert_project_permission(db, principal, obj.project_id, "view")
     return {
         "object_type_id": object_type_id,
         "object_id": object_id,
@@ -1117,8 +1246,11 @@ def object_diff(
     object_id: str,
     from_seq: Optional[int] = Query(default=None),
     to_seq: Optional[int] = Query(default=None),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
     db: Session = Depends(get_db),
 ):
+    obj = _get_object(db, object_type_id, object_id)
+    tenancy.assert_project_permission(db, principal, obj.project_id, "view")
     timeline = _timeline(db, object_type_id, object_id)
     if not timeline:
         raise HTTPException(status_code=404, detail="No timeline available")
@@ -1151,12 +1283,13 @@ def object_diff(
 
 
 @router.post("/entity-resolution/jobs")
-def create_entity_resolution_job(body: EntityResolutionJobRequest, db: Session = Depends(get_db)):
-    if not db.get(models.ObjectType, body.object_type_id):
-        raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+def create_entity_resolution_job(body: EntityResolutionJobRequest, principal: production_auth.Principal = Depends(production_auth.require_permission("edit")), db: Session = Depends(get_db)):
+    project_id = _request_project(db, body.object_type_id, body.project_id)
+    tenancy.assert_project_permission(db, principal, project_id, "edit")
     now = _now()
     job = EntityResolutionJob(
         id=_new_id("er_job"),
+        project_id=project_id,
         object_type_id=body.object_type_id,
         fields=body.fields or _default_resolution_fields(db, body.object_type_id),
         status="RUNNING",
@@ -1167,23 +1300,28 @@ def create_entity_resolution_job(body: EntityResolutionJobRequest, db: Session =
     job.status = "COMPLETED"
     job.completed_at = _now()
     job.candidate_count = len(candidates)
-    _audit(db, "entity_resolution.job.completed", "entity_resolution_job", job.id, {"candidate_count": len(candidates)})
+    _audit(db, "entity_resolution.job.completed", "entity_resolution_job", job.id, {"project_id": project_id, "candidate_count": len(candidates)}, actor=principal.id)
     db.commit()
     db.refresh(job)
     return {**_job_dict(job), "candidates": [_candidate_dict(candidate, db) for candidate in candidates]}
 
 
 @router.get("/entity-resolution/jobs")
-def list_entity_resolution_jobs(db: Session = Depends(get_db)):
-    return [_job_dict(job) for job in db.query(EntityResolutionJob).order_by(EntityResolutionJob.created_at.desc()).all()]
+def list_entity_resolution_jobs(project_id: Optional[str] = None, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
+    query = _scoped_query(db, principal, EntityResolutionJob)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(EntityResolutionJob.project_id == project_id)
+    return [_job_dict(job) for job in query.order_by(EntityResolutionJob.created_at.desc()).all()]
 
 
 @router.get("/entity-resolution/jobs/{job_id}/candidates")
-def list_entity_resolution_candidates(job_id: str, db: Session = Depends(get_db)):
+def list_entity_resolution_candidates(job_id: str, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
     job = db.get(EntityResolutionJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"EntityResolutionJob '{job_id}' not found")
-    candidates = db.query(EntityCandidate).filter(EntityCandidate.job_id == job_id).order_by(EntityCandidate.score.desc()).all()
+    tenancy.assert_project_permission(db, principal, job.project_id, "view")
+    candidates = db.query(EntityCandidate).filter(EntityCandidate.project_id == job.project_id, EntityCandidate.job_id == job_id).order_by(EntityCandidate.score.desc()).all()
     return {
         "job": _job_dict(job),
         "candidates": [_candidate_dict(candidate, db) for candidate in candidates],
@@ -1191,10 +1329,11 @@ def list_entity_resolution_candidates(job_id: str, db: Session = Depends(get_db)
 
 
 @router.post("/entity-resolution/candidates/{candidate_id}/accept")
-def accept_entity_candidate(candidate_id: str, body: EntityAcceptRequest = EntityAcceptRequest(), db: Session = Depends(get_db)):
+def accept_entity_candidate(candidate_id: str, body: EntityAcceptRequest = EntityAcceptRequest(), principal: production_auth.Principal = Depends(production_auth.require_permission("execute")), db: Session = Depends(get_db)):
     candidate = db.get(EntityCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail=f"EntityCandidate '{candidate_id}' not found")
+    tenancy.assert_project_permission(db, principal, candidate.project_id, "execute")
     if candidate.status != "PENDING":
         raise HTTPException(status_code=409, detail=f"Candidate is already {candidate.status}")
     object_ids = candidate.object_ids or []
@@ -1202,14 +1341,14 @@ def accept_entity_candidate(candidate_id: str, body: EntityAcceptRequest = Entit
         raise HTTPException(status_code=422, detail="Candidate must contain at least two objects")
     canonical_id = body.merged_object_id or object_ids[0]
     canonical = db.get(models.ObjectInstance, canonical_id)
-    if not canonical:
+    if not canonical or canonical.project_id != candidate.project_id:
         raise HTTPException(status_code=404, detail=f"ObjectInstance '{canonical_id}' not found")
     conflicts = {}
     for object_id in object_ids:
         if object_id == canonical_id:
             continue
         duplicate = db.get(models.ObjectInstance, object_id)
-        if not duplicate:
+        if not duplicate or duplicate.project_id != candidate.project_id:
             continue
         for key, value in (duplicate.properties or {}).items():
             if key not in (canonical.properties or {}) or (canonical.properties or {}).get(key) in {None, ""}:
@@ -1227,7 +1366,7 @@ def accept_entity_candidate(candidate_id: str, body: EntityAcceptRequest = Entit
             db,
             duplicate,
             event_type="entity_resolution.merged_into",
-            actor=body.actor,
+            actor=principal.id,
             source_type="entity_candidate",
             source_id=candidate.id,
         )
@@ -1242,39 +1381,41 @@ def accept_entity_candidate(candidate_id: str, body: EntityAcceptRequest = Entit
         db,
         canonical,
         event_type="entity_resolution.merged",
-        actor=body.actor,
+        actor=principal.id,
         source_type="entity_candidate",
         source_id=candidate.id,
     )
     candidate.status = "ACCEPTED"
     candidate.merged_object_id = canonical_id
     candidate.decided_at = _now()
-    _audit(db, "entity_resolution.candidate.accepted", "entity_candidate", candidate.id, {"merged_object_id": canonical_id}, actor=body.actor)
+    _audit(db, "entity_resolution.candidate.accepted", "entity_candidate", candidate.id, {"project_id": candidate.project_id, "merged_object_id": canonical_id}, actor=principal.id)
     db.commit()
     db.refresh(candidate)
     return _candidate_dict(candidate, db)
 
 
 @router.post("/entity-resolution/candidates/{candidate_id}/reject")
-def reject_entity_candidate(candidate_id: str, body: EntityRejectRequest = EntityRejectRequest(), db: Session = Depends(get_db)):
+def reject_entity_candidate(candidate_id: str, body: EntityRejectRequest = EntityRejectRequest(), principal: production_auth.Principal = Depends(production_auth.require_permission("execute")), db: Session = Depends(get_db)):
     candidate = db.get(EntityCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail=f"EntityCandidate '{candidate_id}' not found")
+    tenancy.assert_project_permission(db, principal, candidate.project_id, "execute")
     if candidate.status != "PENDING":
         raise HTTPException(status_code=409, detail=f"Candidate is already {candidate.status}")
     candidate.status = "REJECTED"
     candidate.decided_at = _now()
-    _audit(db, "entity_resolution.candidate.rejected", "entity_candidate", candidate.id, {"reason": body.reason}, actor=body.actor)
+    _audit(db, "entity_resolution.candidate.rejected", "entity_candidate", candidate.id, {"project_id": candidate.project_id, "reason": body.reason}, actor=principal.id)
     db.commit()
     db.refresh(candidate)
     return _candidate_dict(candidate, db)
 
 
 @router.post("/entity-resolution/objects/{object_id}/split")
-def split_entity_object(object_id: str, body: EntitySplitRequest = EntitySplitRequest(), db: Session = Depends(get_db)):
+def split_entity_object(object_id: str, body: EntitySplitRequest = EntitySplitRequest(), principal: production_auth.Principal = Depends(production_auth.require_permission("execute")), db: Session = Depends(get_db)):
     obj = db.get(models.ObjectInstance, object_id)
     if not obj:
         raise HTTPException(status_code=404, detail=f"ObjectInstance '{object_id}' not found")
+    tenancy.assert_project_permission(db, principal, obj.project_id, "execute")
     lineage = dict(obj.lineage or {})
     lineage.pop("merged_into", None)
     lineage.pop("merge_conflicts", None)
@@ -1286,18 +1427,24 @@ def split_entity_object(object_id: str, body: EntitySplitRequest = EntitySplitRe
         db,
         obj,
         event_type="entity_resolution.split",
-        actor=body.actor,
+        actor=principal.id,
         source_type="entity_resolution",
         source_id=object_id,
     )
-    _audit(db, "entity_resolution.object.split", "object_instance", object_id, {"reason": body.reason}, actor=body.actor)
+    _audit(db, "entity_resolution.object.split", "object_instance", object_id, {"project_id": obj.project_id, "reason": body.reason}, actor=principal.id)
     db.commit()
     db.refresh(obj)
     return _object_dict(obj)
 
 
 @router.post("/decision/scenarios")
-def create_decision_scenario(body: DecisionScenarioRequest, db: Session = Depends(get_db)):
+def create_decision_scenario(body: DecisionScenarioRequest, principal: production_auth.Principal = Depends(production_auth.require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
+    referenced_ids = set(body.seed_object_ids) | set(body.overrides.keys())
+    for object_id in referenced_ids:
+        obj = db.get(models.ObjectInstance, object_id)
+        if not obj or obj.project_id != body.project_id:
+            raise HTTPException(status_code=422, detail=f"ObjectInstance '{object_id}' is not in project '{body.project_id}'")
     scenario_id = body.id or _new_id("scenario")
     if db.get(DecisionScenario, scenario_id):
         raise HTTPException(status_code=400, detail="DecisionScenario already exists")
@@ -1306,10 +1453,12 @@ def create_decision_scenario(body: DecisionScenarioRequest, db: Session = Depend
         seed_object_ids=body.seed_object_ids,
         overrides=body.overrides,
         propagation_rules=body.propagation_rules,
+        project_id=body.project_id,
     )
     now = _now()
     scenario = DecisionScenario(
         id=scenario_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         description=body.description,
         seed_object_ids=body.seed_object_ids,
@@ -1322,12 +1471,13 @@ def create_decision_scenario(body: DecisionScenarioRequest, db: Session = Depend
         updated_at=now,
     )
     db.add(scenario)
-    _audit(db, "decision.scenario.created", "decision_scenario", scenario.id, {"changed_object_count": result["impact"]["changed_object_count"]})
+    _audit(db, "decision.scenario.created", "decision_scenario", scenario.id, {"project_id": body.project_id, "changed_object_count": result["impact"]["changed_object_count"]}, actor=principal.id)
     try:
         from . import ops_control
         changed = int(result["impact"].get("changed_object_count") or 0)
         ops_control.record_ops_event(
             db,
+            project_id=body.project_id,
             source="decision",
             event_type="decision.scenario.created",
             severity="high" if changed else "info",
@@ -1344,34 +1494,38 @@ def create_decision_scenario(body: DecisionScenarioRequest, db: Session = Depend
 
 
 @router.get("/decision/scenarios/{scenario_id}")
-def get_decision_scenario(scenario_id: str, db: Session = Depends(get_db)):
+def get_decision_scenario(scenario_id: str, principal: production_auth.Principal = Depends(production_auth.require_permission("view")), db: Session = Depends(get_db)):
     scenario = db.get(DecisionScenario, scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"DecisionScenario '{scenario_id}' not found")
+    tenancy.assert_project_permission(db, principal, scenario.project_id, "view")
     return _scenario_dict(scenario)
 
 
 @router.post("/decision/scenarios/{scenario_id}/run")
-def run_decision_scenario(scenario_id: str, db: Session = Depends(get_db)):
+def run_decision_scenario(scenario_id: str, principal: production_auth.Principal = Depends(production_auth.require_permission("execute")), db: Session = Depends(get_db)):
     scenario = db.get(DecisionScenario, scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"DecisionScenario '{scenario_id}' not found")
+    tenancy.assert_project_permission(db, principal, scenario.project_id, "execute")
     result = run_scenario_inline(
         db,
         seed_object_ids=scenario.seed_object_ids or [],
         overrides=scenario.overrides or {},
         propagation_rules=scenario.propagation_rules or [],
+        project_id=scenario.project_id,
     )
     scenario.baseline = result["baseline"]
     scenario.scenario_output = result["scenario_output"]
     scenario.impact = result["impact"]
     scenario.updated_at = _now()
-    _audit(db, "decision.scenario.ran", "decision_scenario", scenario.id, {"changed_object_count": result["impact"]["changed_object_count"]})
+    _audit(db, "decision.scenario.ran", "decision_scenario", scenario.id, {"project_id": scenario.project_id, "changed_object_count": result["impact"]["changed_object_count"]}, actor=principal.id)
     try:
         from . import ops_control
         changed = int(result["impact"].get("changed_object_count") or 0)
         ops_control.record_ops_event(
             db,
+            project_id=scenario.project_id,
             source="decision",
             event_type="decision.scenario.ran",
             severity="high" if changed else "info",

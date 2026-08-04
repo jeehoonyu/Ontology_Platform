@@ -64,6 +64,11 @@ def validate_auth_configuration() -> None:
         missing = [name for name in ("OIDC_ISSUER", "OIDC_CLIENT_ID") if not os.getenv(name)]
         if missing:
             raise RuntimeError(f"OIDC authentication is missing required settings: {', '.join(missing)}")
+        backchannel = os.getenv("OIDC_BACKCHANNEL_BASE_URL", "").strip()
+        if backchannel:
+            parsed = urllib.parse.urlsplit(backchannel)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+                raise RuntimeError("OIDC_BACKCHANNEL_BASE_URL must be an absolute HTTP(S) URL without credentials")
 
 
 class AuthSession(Base):
@@ -232,9 +237,19 @@ def require_detached_permission(permission: str):
     return dependency
 
 
+def _backchannel_url(url: str) -> str:
+    """Route server-side OIDC traffic over a private service address when configured."""
+    backchannel = os.getenv("OIDC_BACKCHANNEL_BASE_URL", "").strip().rstrip("/")
+    if not backchannel:
+        return url
+    public = urllib.parse.urlsplit(url)
+    private = urllib.parse.urlsplit(backchannel)
+    return urllib.parse.urlunsplit((private.scheme, private.netloc, public.path, public.query, public.fragment))
+
+
 def _discovery() -> Dict[str, Any]:
     issuer = os.environ["OIDC_ISSUER"].rstrip("/")
-    url = f"{issuer}/.well-known/openid-configuration"
+    url = _backchannel_url(f"{issuer}/.well-known/openid-configuration")
     with urllib.request.urlopen(url, timeout=10) as response:  # nosec - administrator-configured OIDC endpoint
         return json.loads(response.read().decode("utf-8"))
 
@@ -255,7 +270,7 @@ def _validate_id_token(id_token: str, discovery: Dict[str, Any], nonce: str) -> 
         from authlib.jose import JsonWebToken
     except ImportError as exc:  # pragma: no cover - configuration guard
         raise HTTPException(status_code=503, detail="OIDC dependencies are not installed") from exc
-    with urllib.request.urlopen(discovery["jwks_uri"], timeout=10) as response:  # nosec - discovered OIDC endpoint
+    with urllib.request.urlopen(_backchannel_url(discovery["jwks_uri"]), timeout=10) as response:  # nosec - configured OIDC endpoint
         jwks = json.loads(response.read().decode("utf-8"))
     jwt = JsonWebToken(["RS256", "RS384", "RS512", "ES256", "ES384"])
     claims = jwt.decode(
@@ -339,7 +354,7 @@ def oidc_callback(request: Request, code: str, state: str, db: Session = Depends
     }
     if os.getenv("OIDC_CLIENT_SECRET"):
         payload["client_secret"] = os.environ["OIDC_CLIENT_SECRET"]
-    token = _post_form(discovery["token_endpoint"], payload)
+    token = _post_form(_backchannel_url(discovery["token_endpoint"]), payload)
     if not token.get("id_token"):
         raise HTTPException(status_code=400, detail="OIDC provider did not return an ID token")
     claims = _validate_id_token(token["id_token"], discovery, flow.nonce)
@@ -413,6 +428,8 @@ def _permission_for_request(method: str, path: str) -> str:
     lowered = path.lower()
     if (
         lowered.startswith("/runtime/workers/")
+        or lowered == "/jobs/claim"
+        or lowered.startswith("/api/v1/plugins/workers/")
         or lowered.endswith("/workers/run-next")
         or (lowered.startswith("/jobs/") and any(part in lowered for part in ("/heartbeat", "/complete", "/fail")))
     ):

@@ -1,0 +1,66 @@
+{
+  "database_restart_recovery_seconds": 2.714,
+  "fixture_state_preserved": true,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "indexed_plan_after_restart": true,
+  "links": 50000000,
+  "maintenance_after": [
+    {
+      "analyze_count": 3,
+      "autoanalyze_count": 12,
+      "autovacuum_count": 9,
+      "last_autovacuum": "2026-08-01 00:02:20.869649+00:00",
+      "last_vacuum": "2026-08-01 00:04:46.904177+00:00",
+      "n_dead_tup": 2,
+      "n_live_tup": 200000,
+      "relname": "object_change_events",
+      "vacuum_count": 1
+    },
+    {
+      "analyze_count": 6,
+      "autoanalyze_count": 0,
+      "autovacuum_count": 1,
+      "last_autovacuum": "2026-07-31 23:47:39.604177+00:00",
+      "last_vacuum": "2026-08-01 00:04:46.646905+00:00",
+      "n_dead_tup": 204401,
+      "n_live_tup": 9995365,
+      "relname": "object_instances",
+      "vacuum_count": 1
+    }
+  ],
+  "maintenance_before": [
+    {
+      "analyze_count": 2,
+      "autoanalyze_count": 12,
+      "autovacuum_count": 9,
+      "last_autovacuum": "2026-08-01 00:02:20.869649+00:00",
+      "last_vacuum": null,
+      "n_dead_tup": 3,
+      "n_live_tup": 200000,
+      "relname": "object_change_events",
+      "vacuum_count": 0
+    },
+    {
+      "analyze_count": 5,
+      "autoanalyze_count": 0,
+      "autovacuum_count": 1,
+      "last_autovacuum": "2026-07-31 23:47:39.604177+00:00",
+      "last_vacuum": null,
+      "n_dead_tup": 219015,
+      "n_live_tup": 9981493,
+      "relname": "object_instances",
+      "vacuum_count": 0
+    }
+  ],
+  "mixed_events": 200000,
+  "objects": 10000000,
+  "rto_limit_seconds": 1800.0,
+  "status": "PASS",
+  "vacuum_analyze_seconds": 0.939,
+  "verified_run_events": 100000,
+  "verified_run_id": "mixed_f539dc1f2fb5453da9ee427b4d3c00c5"
+}

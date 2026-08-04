@@ -17,13 +17,14 @@ their tests untouched. Link cardinality is already enforced by the core
 `/links` endpoint, so it is not duplicated here. Everything is deterministic and
 local.
 """
+import json
 import re
 import time
 import uuid
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import String, Integer, JSON
+from sqlalchemy import String, Integer, JSON, inspect
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,6 +45,19 @@ def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_
         id=uuid.uuid4().hex, actor=actor or "system", event_type=event_type,
         subject_type=subject_type, subject_id=subject_id, payload=payload,
     ))
+
+
+def _sync_semantic_contract(db: Session, obj_type: models.ObjectType, actor: str) -> None:
+    from . import ontology_runtime_v1
+    bind = db.get_bind()
+    if bind is None or not inspect(bind).has_table(ontology_runtime_v1.OntologyPropertyDefinition.__tablename__):
+        return
+    ontology_runtime_v1.materialize_semantic_definitions(
+        db,
+        project_id=obj_type.project_id,
+        actor=actor,
+        object_type_ids=[obj_type.id],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +157,20 @@ class PropertySpec(BaseModel):
     base_type: str
     status: str = "active"
     required: bool = False
+    display_name: Optional[str] = None
+    indexed: bool = False
+    sensitive: bool = False
     shared_property_type_id: Optional[str] = None
     render_hint: Optional[str] = None
     description: Optional[str] = None
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    min_length: Optional[int] = Field(default=None, ge=0)
+    max_length: Optional[int] = Field(default=None, ge=0)
+    pattern: Optional[str] = None
+    enum: List[Any] = Field(default_factory=list)
+    unit: Optional[str] = None
+    geometry_type: Optional[str] = None
 
 
 class ProfileUpsert(BaseModel):
@@ -219,9 +244,20 @@ class ObjectTypePropertyCreate(BaseModel):
     base_type: str = "string"
     status: str = "active"
     required: bool = False
+    display_name: Optional[str] = None
+    indexed: bool = False
+    sensitive: bool = False
     description: Optional[str] = None
     render_hint: Optional[str] = None
     shared_property_type_id: Optional[str] = None
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    min_length: Optional[int] = Field(default=None, ge=0)
+    max_length: Optional[int] = Field(default=None, ge=0)
+    pattern: Optional[str] = None
+    enum: List[Any] = Field(default_factory=list)
+    unit: Optional[str] = None
+    geometry_type: Optional[str] = None
     actor: str = "ontology_manager"
 
 
@@ -230,9 +266,20 @@ class ObjectTypePropertyPatch(BaseModel):
     base_type: Optional[str] = None
     status: Optional[str] = None
     required: Optional[bool] = None
+    display_name: Optional[str] = None
+    indexed: Optional[bool] = None
+    sensitive: Optional[bool] = None
     description: Optional[str] = None
     render_hint: Optional[str] = None
     shared_property_type_id: Optional[str] = None
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    min_length: Optional[int] = Field(default=None, ge=0)
+    max_length: Optional[int] = Field(default=None, ge=0)
+    pattern: Optional[str] = None
+    enum: Optional[List[Any]] = None
+    unit: Optional[str] = None
+    geometry_type: Optional[str] = None
     actor: str = "ontology_manager"
 
 
@@ -314,6 +361,12 @@ def upsert_profile(object_type_id: str, body: ProfileUpsert, db: Session = Depen
             errors.append(f"Property '{pname}' has unknown base type '{spec.base_type}'")
         if spec.status not in PROPERTY_STATUSES:
             errors.append(f"Property '{pname}' has invalid status '{spec.status}'")
+        if spec.minimum is not None and spec.maximum is not None and spec.minimum > spec.maximum:
+            errors.append(f"Property '{pname}' minimum cannot exceed maximum")
+        if spec.min_length is not None and spec.max_length is not None and spec.min_length > spec.max_length:
+            errors.append(f"Property '{pname}' min_length cannot exceed max_length")
+        if spec.enum and len({json.dumps(value, sort_keys=True, default=str) for value in spec.enum}) != len(spec.enum):
+            errors.append(f"Property '{pname}' enum values must be unique")
     # Primary key
     if body.primary_key is not None:
         if body.primary_key not in body.properties:
@@ -351,6 +404,7 @@ def upsert_profile(object_type_id: str, body: ProfileUpsert, db: Session = Depen
         db.add(profile)
     _audit(db, semantic_scope.principal_id(principal), "ontology.object_type.profile_set", "object_type", object_type_id,
            {"api_name": body.api_name, "primary_key": body.primary_key})
+    _sync_semantic_contract(db, obj_type, semantic_scope.principal_id(principal))
     db.commit(); db.refresh(profile)
     return profile
 
@@ -413,7 +467,18 @@ def _property_rows(obj_type: models.ObjectType, profile: Optional[ObjectTypeProf
                 "base_type": spec.get("base_type", "string") if isinstance(spec, dict) else "string",
                 "status": spec.get("status", "active") if isinstance(spec, dict) else "active",
                 "required": bool(spec.get("required")) if isinstance(spec, dict) else False,
+                "display_name": spec.get("display_name", name) if isinstance(spec, dict) else name,
+                "indexed": bool(spec.get("indexed")) if isinstance(spec, dict) else False,
+                "sensitive": bool(spec.get("sensitive")) if isinstance(spec, dict) else False,
                 "description": spec.get("description") if isinstance(spec, dict) else None,
+                "minimum": spec.get("minimum") if isinstance(spec, dict) else None,
+                "maximum": spec.get("maximum") if isinstance(spec, dict) else None,
+                "min_length": spec.get("min_length") if isinstance(spec, dict) else None,
+                "max_length": spec.get("max_length") if isinstance(spec, dict) else None,
+                "pattern": spec.get("pattern") if isinstance(spec, dict) else None,
+                "enum": spec.get("enum", []) if isinstance(spec, dict) else [],
+                "unit": spec.get("unit") if isinstance(spec, dict) else None,
+                "geometry_type": spec.get("geometry_type") if isinstance(spec, dict) else None,
                 "source": "profile",
                 "can_edit": True,
                 "can_delete": name != profile.primary_key,
@@ -429,7 +494,18 @@ def _property_rows(obj_type: models.ObjectType, profile: Optional[ObjectTypeProf
             "base_type": ((spec or {}).get("base_type") or (spec or {}).get("type") or "string") if isinstance(spec, dict) else "string",
             "status": (spec or {}).get("status", "active") if isinstance(spec, dict) else "active",
             "required": bool((spec or {}).get("required")) if isinstance(spec, dict) else False,
+            "display_name": (spec or {}).get("display_name", name) if isinstance(spec, dict) else name,
+            "indexed": bool((spec or {}).get("indexed")) if isinstance(spec, dict) else False,
+            "sensitive": bool((spec or {}).get("sensitive")) if isinstance(spec, dict) else False,
             "description": (spec or {}).get("description") if isinstance(spec, dict) else None,
+            "minimum": (spec or {}).get("minimum") if isinstance(spec, dict) else None,
+            "maximum": (spec or {}).get("maximum") if isinstance(spec, dict) else None,
+            "min_length": (spec or {}).get("min_length") if isinstance(spec, dict) else None,
+            "max_length": (spec or {}).get("max_length") if isinstance(spec, dict) else None,
+            "pattern": (spec or {}).get("pattern") if isinstance(spec, dict) else None,
+            "enum": (spec or {}).get("enum", []) if isinstance(spec, dict) else [],
+            "unit": (spec or {}).get("unit") if isinstance(spec, dict) else None,
+            "geometry_type": (spec or {}).get("geometry_type") if isinstance(spec, dict) else None,
             "source": "object_type",
             "can_edit": True,
             "can_delete": True,
@@ -474,24 +550,35 @@ def _stored_property_spec(
     base_type: str,
     status: str,
     required: bool,
+    display_name: Optional[str],
+    indexed: bool,
+    sensitive: bool,
     description: Optional[str],
     render_hint: Optional[str],
     shared_property_type_id: Optional[str],
+    constraints: Optional[Dict[str, Any]],
     profile_backed: bool,
 ) -> Dict[str, Any]:
     spec: Dict[str, Any] = {
         "base_type": base_type,
         "status": status,
         "required": bool(required),
+        "indexed": bool(indexed),
+        "sensitive": bool(sensitive),
     }
     if not profile_backed:
         spec["type"] = _runtime_schema_type(base_type)
     if description is not None:
         spec["description"] = description
+    if display_name is not None:
+        spec["display_name"] = display_name
     if render_hint is not None:
         spec["render_hint"] = render_hint
     if shared_property_type_id is not None:
         spec["shared_property_type_id"] = shared_property_type_id
+    for key, value in (constraints or {}).items():
+        if value not in (None, [], ""):
+            spec[key] = value
     return spec
 
 
@@ -546,6 +633,19 @@ def _validate_property_spec(name: str, base_type: str, status: str, existing_nam
         errors.append(f"Property '{name}' has unsupported base type '{base_type}'")
     if status not in PROPERTY_STATUSES:
         errors.append(f"Property '{name}' has invalid status '{status}'")
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+
+def _validate_property_constraints(name: str, spec: Dict[str, Any]) -> None:
+    errors: List[str] = []
+    if spec.get("minimum") is not None and spec.get("maximum") is not None and spec["minimum"] > spec["maximum"]:
+        errors.append(f"Property '{name}' minimum cannot exceed maximum")
+    if spec.get("min_length") is not None and spec.get("max_length") is not None and spec["min_length"] > spec["max_length"]:
+        errors.append(f"Property '{name}' min_length cannot exceed max_length")
+    enum_values = spec.get("enum") or []
+    if len({json.dumps(value, sort_keys=True, default=str) for value in enum_values}) != len(enum_values):
+        errors.append(f"Property '{name}' enum values must be unique")
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
@@ -1020,13 +1120,22 @@ def add_object_type_property(object_type_id: str, body: ObjectTypePropertyCreate
     properties, profile_backed = _property_store(obj_type, profile)
     name = str(body.name).strip()
     _validate_property_spec(name, body.base_type, body.status, set(properties.keys()))
+    _validate_property_constraints(name, body.model_dump())
     properties[name] = _stored_property_spec(
         base_type=body.base_type,
         status=body.status,
         required=body.required,
+        display_name=body.display_name,
+        indexed=body.indexed,
+        sensitive=body.sensitive,
         description=body.description,
         render_hint=body.render_hint,
         shared_property_type_id=body.shared_property_type_id,
+        constraints={
+            "minimum": body.minimum, "maximum": body.maximum, "min_length": body.min_length,
+            "max_length": body.max_length, "pattern": body.pattern, "enum": body.enum,
+            "unit": body.unit, "geometry_type": body.geometry_type,
+        },
         profile_backed=profile_backed,
     )
     _write_property_store(obj_type, profile, properties, profile_backed=profile_backed)
@@ -1035,6 +1144,7 @@ def add_object_type_property(object_type_id: str, body: ObjectTypePropertyCreate
         "base_type": body.base_type,
         "profile_backed": profile_backed,
     })
+    _sync_semantic_contract(db, obj_type, body.actor)
     db.commit()
     return _object_type_manager_state(db, object_type_id)
 
@@ -1056,6 +1166,7 @@ def reorder_object_type_properties(object_type_id: str, body: ObjectTypeProperty
         "order": ordered_names,
         "profile_backed": profile_backed,
     })
+    _sync_semantic_contract(db, obj_type, body.actor)
     db.commit()
     return _object_type_manager_state(db, object_type_id)
 
@@ -1077,7 +1188,11 @@ def update_object_type_property(object_type_id: str, property_name: str, body: O
     base_type = str(patch.get("base_type") or existing.get("base_type") or existing.get("type") or "string")
     status = str(patch.get("status") or existing.get("status") or "active")
     _validate_property_spec(next_name, base_type, status, set(properties.keys()), original_name=property_name)
+    _validate_property_constraints(next_name, {**existing, **patch})
     required = bool(patch["required"]) if "required" in patch else bool(existing.get("required"))
+    display_name = patch["display_name"] if "display_name" in patch else existing.get("display_name")
+    indexed = bool(patch["indexed"]) if "indexed" in patch else bool(existing.get("indexed"))
+    sensitive = bool(patch["sensitive"]) if "sensitive" in patch else bool(existing.get("sensitive"))
     description = patch["description"] if "description" in patch else existing.get("description")
     render_hint = patch["render_hint"] if "render_hint" in patch else existing.get("render_hint")
     shared_property_type_id = patch["shared_property_type_id"] if "shared_property_type_id" in patch else existing.get("shared_property_type_id")
@@ -1085,9 +1200,16 @@ def update_object_type_property(object_type_id: str, property_name: str, body: O
         base_type=base_type,
         status=status,
         required=required,
+        display_name=display_name,
+        indexed=indexed,
+        sensitive=sensitive,
         description=description,
         render_hint=render_hint,
         shared_property_type_id=shared_property_type_id,
+        constraints={
+            key: patch[key] if key in patch else existing.get(key)
+            for key in ("minimum", "maximum", "min_length", "max_length", "pattern", "enum", "unit", "geometry_type")
+        },
         profile_backed=profile_backed,
     )
     next_properties: Dict[str, Any] = {}
@@ -1104,6 +1226,7 @@ def update_object_type_property(object_type_id: str, property_name: str, body: O
         "next_property_name": next_name,
         "profile_backed": profile_backed,
     })
+    _sync_semantic_contract(db, obj_type, body.actor)
     db.commit()
     return _object_type_manager_state(db, object_type_id)
 
@@ -1139,6 +1262,7 @@ def archive_object_type_property(object_type_id: str, property_name: str, db: Se
         "profile_backed": profile_backed,
         "values_preserved": True,
     })
+    _sync_semantic_contract(db, obj_type, "ontology_manager")
     db.commit()
     return _object_type_manager_state(db, object_type_id)
 

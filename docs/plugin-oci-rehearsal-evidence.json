@@ -1,0 +1,48 @@
+{
+  "executed_at": "2026-08-01T02:21:20.954463+00:00",
+  "image": "sha256:ed323ca9498ae36736a604ee3782133ce000230d4a22a8e3bb7185bae1758ecc",
+  "output": {
+    "metrics": {
+      "rows": 1
+    },
+    "records": [
+      {
+        "asset_name": "Pump 4",
+        "criticality": "high"
+      }
+    ],
+    "schema": [
+      {
+        "name": "asset_name",
+        "type": "string"
+      },
+      {
+        "name": "criticality",
+        "type": "string"
+      }
+    ],
+    "warnings": []
+  },
+  "sandbox": {
+    "capabilities_dropped": true,
+    "cpus": 1,
+    "image": "sha256:ed323ca9498ae36736a604ee3782133ce000230d4a22a8e3bb7185bae1758ecc",
+    "memory_mb": 128,
+    "mode": "oci",
+    "network": "none",
+    "no_new_privileges": true,
+    "non_root": true,
+    "pids": 64,
+    "read_only": true,
+    "runner": "/app/app/plugin_sandbox_runner.py",
+    "sdk_api_version": 1
+  },
+  "sdk_api_version": 1,
+  "sdk_version_denial": true,
+  "status": "PASS",
+  "verified_denials": [
+    "filesystem",
+    "network",
+    "subprocess"
+  ]
+}

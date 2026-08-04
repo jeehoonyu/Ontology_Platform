@@ -1,5 +1,5 @@
 import { api, postJson } from "../api";
-import type { TableRow } from "../types";
+import type { JsonObject, TableRow } from "../types";
 
 // ---------------------------------------------------------------------------
 // Organizations / directory
@@ -200,6 +200,76 @@ export interface ApiToken extends TableRow {
   expires_at: number | null;
   created_at: number;
   last_used_at: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Signed extensions
+// ---------------------------------------------------------------------------
+export interface PluginVersion extends TableRow {
+  id: string;
+  project_id: string;
+  plugin_id: string;
+  version: string;
+  kind: string;
+  runtime: string;
+  manifest_sha256: string;
+  bundle_sha256: string;
+  signer_key_id: string;
+  capabilities: string[];
+  operations: JsonObject;
+  status: string;
+  activated_at: number | null;
+}
+
+export interface PluginCatalog {
+  project_id: string;
+  plugins: PluginVersion[];
+  kinds: string[];
+  runtime: string;
+  sdk_api_version: number;
+}
+
+export interface PluginExecution extends TableRow {
+  id: string;
+  job_id: string | null;
+  plugin_id: string;
+  operation: string;
+  status: string;
+  duration_ms: number;
+  sandbox: JsonObject;
+  output: JsonObject;
+  evidence: JsonObject;
+  error: string | null;
+  actor: string;
+  created_at: number;
+  completed_at: number | null;
+}
+
+export function getPluginCatalog(projectId: string): Promise<PluginCatalog> {
+  return api<PluginCatalog>(`/api/v1/plugins/catalog?project_id=${encodeURIComponent(projectId)}`);
+}
+
+export function createPluginTrustKey(body: { id?: string; organization_id: string; display_name: string; public_key: string }): Promise<TableRow> {
+  return postJson<TableRow>("/api/v1/plugins/trust-keys", body);
+}
+
+export function registerPlugin(body: { project_id: string; manifest: Record<string, unknown>; bundle_base64: string; signer_key_id: string; signature: string }): Promise<PluginVersion> {
+  return postJson<PluginVersion>("/api/v1/plugins/register", body);
+}
+
+export function activatePlugin(versionId: string): Promise<PluginVersion> {
+  return postJson<PluginVersion>(`/api/v1/plugins/${encodeURIComponent(versionId)}/activate`, {});
+}
+
+export function listPluginExecutions(versionId: string): Promise<{ plugin_version_id: string; executions: PluginExecution[] }> {
+  return api<{ plugin_version_id: string; executions: PluginExecution[] }>(`/api/v1/plugins/${encodeURIComponent(versionId)}/executions`);
+}
+
+export function invokePluginAsync(
+  versionId: string,
+  body: { operation: string; input: JsonObject; idempotency_key: string; priority?: number; max_attempts?: number }
+): Promise<PluginExecution> {
+  return postJson<PluginExecution>(`/api/v1/plugins/${encodeURIComponent(versionId)}/invoke-async`, body);
 }
 
 export interface IssuedApiToken {

@@ -13,10 +13,27 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      DATA_SNAPSHOT_BACKEND: ${DATA_SNAPSHOT_BACKEND:-local}
+      DATA_SNAPSHOT_ROOT: ${DATA_SNAPSHOT_ROOT:-/var/lib/ontology/snapshots}
+      DATA_SNAPSHOT_BUCKET: ${DATA_SNAPSHOT_BUCKET:-}
+      DATA_SNAPSHOT_S3_ENDPOINT: ${DATA_SNAPSHOT_S3_ENDPOINT:-}
+      DATA_SNAPSHOT_S3_REGION: ${DATA_SNAPSHOT_S3_REGION:-us-east-1}
+      DATA_SNAPSHOT_S3_ADDRESSING_STYLE: ${DATA_SNAPSHOT_S3_ADDRESSING_STYLE:-path}
+      DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: ${DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET:-false}
+      DATA_SNAPSHOT_CACHE_ROOT: ${DATA_SNAPSHOT_CACHE_ROOT:-/var/cache/ontology/snapshots}
+      DATA_SNAPSHOT_CACHE_MAX_BYTES: ${DATA_SNAPSHOT_CACHE_MAX_BYTES:-21474836480}
+      DATA_SNAPSHOT_CACHE_LEASE_SECONDS: ${DATA_SNAPSHOT_CACHE_LEASE_SECONDS:-3600}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      MODEL_GATEWAY_ALLOWED_HOSTS: ${MODEL_GATEWAY_ALLOWED_HOSTS:-}
+      MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS: ${MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS:-false}
     ports:
       - "8000:8000"
     depends_on:
       - postgres
+    volumes:
+      - ontology_snapshots:/var/lib/ontology/snapshots
+      - ontology_snapshot_cache:/var/cache/ontology/snapshots
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()"]
       interval: 10s
@@ -138,3 +155,27 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["object-storage"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ontology}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ontology-development-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ontology_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ontology_snapshots:
+  ontology_snapshot_cache:
+  ontology_plugin_bundles:
+  ontology_minio:

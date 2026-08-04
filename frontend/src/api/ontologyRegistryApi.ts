@@ -50,6 +50,26 @@ export type RegistryCompatibility = OntologyRegistryEntry["compatibility"] & {
   revision_id: string;
 };
 
+export interface OntologySdkPackage {
+  language: "typescript" | "python";
+  ecosystem: "npm" | "pypi";
+  package_name: string;
+  module_name?: string;
+  filename: string;
+  content_type: string;
+  sha256: string;
+  byte_size: number;
+  download_url: string;
+}
+
+export interface OntologySdkPackageManifest {
+  registry_id: string;
+  registry_checksum: string;
+  version: string;
+  channel: string;
+  packages: OntologySdkPackage[];
+}
+
 export function getOntologyRegistryState(projectId = "default", channel = "production"): Promise<OntologyRegistryState> {
   return api(`/ui-state/ontology/registry?project_id=${encodeURIComponent(projectId)}&channel=${encodeURIComponent(channel)}`);
 }
@@ -74,4 +94,19 @@ export function getRegistrySchema(entryId: string): Promise<{ registry_id: strin
 
 export function getRegistrySdk(entryId: string, language: "typescript" | "python"): Promise<{ registry_id: string; checksum: string; files: Record<string, string> }> {
   return api(`/ontology/registry/${encodeURIComponent(entryId)}/sdk/${language}`);
+}
+
+export function getRegistryPackages(entryId: string): Promise<OntologySdkPackageManifest> {
+  return api(`/ontology/registry/${encodeURIComponent(entryId)}/packages`);
+}
+
+export async function downloadRegistryPackage(packageInfo: OntologySdkPackage): Promise<void> {
+  const response = await fetch(packageInfo.download_url, { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`Package download failed: ${response.status} ${response.statusText}`);
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = packageInfo.filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
