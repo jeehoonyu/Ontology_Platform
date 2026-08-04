@@ -181,7 +181,9 @@ with ExitStack() as stack:
         cursor = int(envelope["cursor"])
         received_ids.append(cursor)
 
-    assert max(reconnect_seconds) < RECONNECT_LIMIT_SECONDS, reconnect_seconds
+    # Reconnect time is a threshold and is judged with the evidence below, so a
+    # breaching run is recorded rather than lost. Event loss, duplication, and
+    # ordering are correctness and still abort here.
     assert len(received_ids) == len(set(received_ids)) == 3, received_ids
     assert received_ids == sorted(received_ids), received_ids
     status, committed = request(restarted_primary, "GET", f"/artifacts/{ARTIFACT_ID}")
@@ -189,7 +191,6 @@ with ExitStack() as stack:
     assert len((committed.get("state") or {}).get("nodes") or []) == 3, committed
 
     evidence = {
-        "status": "PASS",
         "transport": "authenticated_resumable_websocket",
         "replicas": 2,
         "replica_terminations": 1,
@@ -209,5 +210,44 @@ with ExitStack() as stack:
             path = (ROOT.parent / path).resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print("PostgreSQL collaboration WebSocket chaos rehearsal passed:")
+    print("PostgreSQL collaboration WebSocket chaos rehearsal measurements:")
     print(json.dumps(evidence, indent=2, sort_keys=True))
+
+    from tier_b_evidence import write_evidence
+
+    # The Tier B chaos gate names collaboration *and* cross-stream processing.
+    # This harness rehearses replica process loss for collaboration only, so the
+    # cross-stream partition count is reported as zero rather than omitted. A
+    # gate that covers half its scope must not read as satisfied.
+    tier_b_path, tier_b_status, breaches = write_evidence(
+        "chaos",
+        thresholds={
+            "reconnect_max_ms_max": round(RECONNECT_LIMIT_SECONDS * 1000, 3),
+            "duplicate_events_max": 0,
+            "missed_events_max": 0,
+            "replica_terminations_min": 1,
+            "replica_restarts_min": 1,
+            "collaboration_partition_rehearsals_min": 1,
+            "cross_stream_partition_rehearsals_min": 1,
+        },
+        measurements={
+            "reconnect_max_ms": evidence["reconnect_max_ms"],
+            "duplicate_events": evidence["duplicate_events"],
+            "missed_events": evidence["missed_events"],
+            "replica_terminations": evidence["replica_terminations"],
+            "replica_restarts": evidence["replica_restarts"],
+            "collaboration_partition_rehearsals": 1,
+            "cross_stream_partition_rehearsals": 0,
+        },
+        harness="oms/verify_collaboration_websocket_chaos_postgres.py",
+        notes=(
+            "Covers collaboration replica process loss and cursor-resumed reconnect. "
+            "Cross-stream network-partition recovery has no harness yet, so it is "
+            "reported as zero rehearsals rather than left out of the gate."
+        ),
+    )
+    print(f"Tier B evidence {tier_b_status}: {tier_b_path.name}")
+    if breaches:
+        print("  breaches: " + "; ".join(breaches))
+        raise SystemExit(1)
+    print("PostgreSQL collaboration WebSocket chaos rehearsal passed.")
