@@ -4,7 +4,13 @@ param(
     [string]$ProjectName,
     [string]$DatabaseService = "postgres",
     [string]$DatabaseUser,
-    [string]$DatabaseName
+    [string]$DatabaseName,
+    [switch]$IncludeSnapshots,
+    [string]$SnapshotService = "oms-api",
+    [string]$SnapshotDirectory = "/var/lib/ontology/snapshots",
+    [switch]$IncludePlugins,
+    [string]$PluginService = "oms-api",
+    [string]$PluginDirectory = "/var/lib/ontology/plugins"
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +52,37 @@ $manifest = [ordered]@{
     sha256 = $checksum
     size_bytes = (Get-Item -LiteralPath $targetFile).Length
     backup_file = [System.IO.Path]::GetFileName($targetFile)
+    snapshot_archive = $null
+    snapshot_sha256 = $null
+    plugin_archive = $null
+    plugin_sha256 = $null
+}
+
+if ($IncludeSnapshots) {
+    $snapshotContainerFile = "/tmp/ontology-snapshots-$stamp.tar.gz"
+    $snapshotTarget = "$targetFile.snapshots.tar.gz"
+    & docker @composeArguments exec -T $SnapshotService sh -c "mkdir -p '$SnapshotDirectory' && tar -czf '$snapshotContainerFile' -C '$SnapshotDirectory' ."
+    if ($LASTEXITCODE -ne 0) { throw "Dataset snapshot archive failed." }
+    & docker @composeArguments cp "${SnapshotService}:$snapshotContainerFile" $snapshotTarget
+    if ($LASTEXITCODE -ne 0) { throw "Could not copy dataset snapshot archive from the API container." }
+    & docker @composeArguments exec -T $SnapshotService rm -f $snapshotContainerFile
+    $snapshotChecksum = (Get-FileHash -LiteralPath $snapshotTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath "$snapshotTarget.sha256" -Value "$snapshotChecksum  $([System.IO.Path]::GetFileName($snapshotTarget))" -Encoding ascii
+    $manifest.snapshot_archive = [System.IO.Path]::GetFileName($snapshotTarget)
+    $manifest.snapshot_sha256 = $snapshotChecksum
+}
+if ($IncludePlugins) {
+    $pluginContainerFile = "/tmp/ontology-plugins-$stamp.tar.gz"
+    $pluginTarget = "$targetFile.plugins.tar.gz"
+    & docker @composeArguments exec -T $PluginService sh -c "mkdir -p '$PluginDirectory' && tar -czf '$pluginContainerFile' -C '$PluginDirectory' ."
+    if ($LASTEXITCODE -ne 0) { throw "Plugin bundle archive failed." }
+    & docker @composeArguments cp "${PluginService}:$pluginContainerFile" $pluginTarget
+    if ($LASTEXITCODE -ne 0) { throw "Could not copy plugin bundle archive from the API container." }
+    & docker @composeArguments exec -T $PluginService rm -f $pluginContainerFile
+    $pluginChecksum = (Get-FileHash -LiteralPath $pluginTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath "$pluginTarget.sha256" -Value "$pluginChecksum  $([System.IO.Path]::GetFileName($pluginTarget))" -Encoding ascii
+    $manifest.plugin_archive = [System.IO.Path]::GetFileName($pluginTarget)
+    $manifest.plugin_sha256 = $pluginChecksum
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath "$targetFile.json" -Encoding utf8
 

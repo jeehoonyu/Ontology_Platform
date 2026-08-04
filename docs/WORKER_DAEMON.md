@@ -28,7 +28,7 @@ Required settings:
 - `WORKER_TOKEN`: one-time-issued service token.
 - `WORKER_NAME`: stable unique fleet identity.
 - `WORKER_PROJECT_ID`: optional hard project boundary.
-- `WORKER_JOB_TYPES`: comma-separated capability allowlist.
+- `WORKER_JOB_TYPES`: comma-separated capability allowlist. Production defaults include snapshot preview/delivery, resumable `industrial.ontology_hydrate`, ingestion, stream processing, event-to-stream routing, AIP agents, and `event.dispatch`. Add `event.kafka.dispatch` only after the API has valid `EVENT_KAFKA_*` broker configuration.
 - `WORKER_CONCURRENCY`: maximum concurrent execution requests.
 - `WORKER_LEASE_SECONDS`: durable lease interval accepted by the API.
 
@@ -38,6 +38,6 @@ The daemon exposes `/health/live`, `/health/ready`, and `/metrics` on `WORKER_HE
 
 SIGTERM and Ctrl+C stop new polling, wait for in-flight execution requests, call the fleet drain endpoint, and then exit. Operators can drain before replacement through `POST /runtime/workers/{name}/drain` and inspect active leases in the Control Panel.
 
-If a process is killed before graceful drain, lease expiry returns unfinished jobs to the queue. The replacement worker receives a new lease token; stale completion attempts are fenced. Pipeline delivery, agent invocation, and ingestion commits use the platform job ID and active lease as their idempotency boundary.
+If a process is killed before graceful drain, lease expiry returns unfinished jobs to the queue. The replacement worker receives a new lease token; stale completion attempts are fenced. Pipeline delivery, agent invocation, ingestion commits, and event transport receipts use durable IDs and active leases as their idempotency boundary. Kafka consumers should deduplicate the stable `ontologyos-event-id` header because a broker acknowledgement followed by a database interruption can cause a safe at-least-once replay.
 
 Do not share a worker token across organizations, store it in source control, expose the worker health port publicly, or run multiple replicas with the same worker name.

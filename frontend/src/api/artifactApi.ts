@@ -43,6 +43,10 @@ export interface PlatformArtifact {
     active_participants: number;
     event_cursor: number;
     stream_href: string;
+    open_comments?: number;
+    open_proposals?: number;
+    comments_href?: string;
+    proposals_href?: string;
   };
   created_at: number;
   updated_at: number;
@@ -161,6 +165,47 @@ export interface ArtifactVersion {
   created_at: number;
 }
 
+export interface ArtifactReviewComment {
+  id: string;
+  artifact_id: string;
+  revision: number;
+  target: string;
+  thread_id: string;
+  parent_id?: string | null;
+  body: string;
+  status: "OPEN" | "RESOLVED";
+  author: string;
+  resolved_by?: string | null;
+  resolved_at?: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ArtifactChangeProposal {
+  id: string;
+  artifact_id: string;
+  base_revision: number;
+  base_lock_version: number;
+  version: number;
+  title: string;
+  description?: string | null;
+  commands: BuilderCommand[];
+  targets: string[];
+  validation: { status?: string; errors?: Array<Record<string, unknown>>; warnings?: Array<Record<string, unknown>> };
+  status: "OPEN" | "APPROVED" | "REJECTED" | "CONFLICT" | "APPLIED";
+  author: string;
+  reviewer?: string | null;
+  review_note?: string | null;
+  applied_revision?: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ArtifactProposalApplyResult extends ArtifactChangeProposal {
+  artifact: PlatformArtifact;
+  idempotent_replay: boolean;
+}
+
 export function listArtifacts(artifactType: ArtifactType): Promise<PlatformArtifact[]> {
   return api<PlatformArtifact[]>(`/artifacts?artifact_type=${encodeURIComponent(artifactType)}`);
 }
@@ -265,6 +310,11 @@ export function artifactCollaborationStreamUrl(artifactId: string, after = 0): s
   return `/artifacts/${encodeURIComponent(artifactId)}/collaboration/stream?after=${after}`;
 }
 
+export function artifactCollaborationWebSocketUrl(artifactId: string, after = 0): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/artifacts/${encodeURIComponent(artifactId)}/collaboration/ws?after=${after}`;
+}
+
 export function previewArtifact(artifactId: string, sampleLimit = 20): Promise<ArtifactPreview> {
   return postJson<ArtifactPreview>(`/artifacts/${encodeURIComponent(artifactId)}/preview`, {
     sample_limit: sampleLimit,
@@ -285,4 +335,56 @@ export function listArtifactVersions(artifactId: string): Promise<ArtifactVersio
 
 export function restoreArtifactVersion(artifactId: string, revision: number): Promise<PlatformArtifact> {
   return postJson<PlatformArtifact>(`/artifacts/${encodeURIComponent(artifactId)}/versions/${revision}/restore`, {});
+}
+
+export function listArtifactComments(artifactId: string): Promise<{ comments: ArtifactReviewComment[]; count: number }> {
+  return api(`/api/v1/artifacts/${encodeURIComponent(artifactId)}/comments`);
+}
+
+export function createArtifactComment(artifactId: string, target: string, body: string): Promise<ArtifactReviewComment> {
+  return postJson(`/api/v1/artifacts/${encodeURIComponent(artifactId)}/comments`, { target, body });
+}
+
+export function setArtifactCommentStatus(
+  artifactId: string,
+  commentId: string,
+  status: "OPEN" | "RESOLVED"
+): Promise<ArtifactReviewComment> {
+  return api(`/api/v1/artifacts/${encodeURIComponent(artifactId)}/comments/${encodeURIComponent(commentId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status })
+  });
+}
+
+export function listArtifactProposals(artifactId: string): Promise<{ proposals: ArtifactChangeProposal[]; count: number }> {
+  return api(`/api/v1/artifacts/${encodeURIComponent(artifactId)}/proposals`);
+}
+
+export function createArtifactProposal(
+  artifact: PlatformArtifact,
+  title: string,
+  commands: BuilderCommand[]
+): Promise<ArtifactChangeProposal> {
+  return postJson(`/api/v1/artifacts/${encodeURIComponent(artifact.id)}/proposals`, {
+    title,
+    expected_lock_version: artifact.lock_version,
+    commands
+  });
+}
+
+export function reviewArtifactProposal(
+  artifactId: string,
+  proposal: ArtifactChangeProposal,
+  decision: "APPROVE" | "REJECT"
+): Promise<ArtifactChangeProposal> {
+  return postJson(`/api/v1/artifacts/${encodeURIComponent(artifactId)}/proposals/${encodeURIComponent(proposal.id)}/review`, {
+    expected_version: proposal.version,
+    decision
+  });
+}
+
+export function applyArtifactProposal(artifactId: string, proposal: ArtifactChangeProposal): Promise<ArtifactProposalApplyResult> {
+  return postJson(`/api/v1/artifacts/${encodeURIComponent(artifactId)}/proposals/${encodeURIComponent(proposal.id)}/apply`, {
+    expected_version: proposal.version
+  });
 }

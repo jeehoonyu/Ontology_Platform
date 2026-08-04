@@ -53,6 +53,10 @@ listed = ok(client.get("/admin/tokens?principal_id=worker-service"), "list safe 
 assert listed[0]["token_prefix"] == secret[:12] and "token" not in listed[0] and "token_hash" not in listed[0], listed
 passed += 1
 
+queued = ok(client.post("/jobs", json={
+    "project_id": "worker-prod", "job_type": "pipeline.preview", "payload": {"probe": True},
+}), "queue worker-token claim probe", 201)
+
 os.environ["AUTH_MODE"] = "oidc"
 headers = {"Authorization": f"Bearer {secret}"}
 registered = ok(client.put("/runtime/workers/prod-worker", headers=headers, json={
@@ -62,6 +66,19 @@ registered = ok(client.put("/runtime/workers/prod-worker", headers=headers, json
 assert registered["principal_id"] == "worker-service" and registered["project_id"] == "worker-prod", registered
 passed += 1
 ok(client.post("/runtime/workers/prod-worker/heartbeat", headers=headers, json={}), "heartbeat through execute-only token")
+claimed = ok(client.post("/jobs/claim", headers=headers, json={
+    "worker_id": "prod-worker", "supported_job_types": ["pipeline.preview"], "project_id": "worker-prod",
+}), "claim through execute-only token")["job"]
+assert claimed["id"] == queued["id"], claimed
+passed += 1
+ok(client.post(f"/jobs/{claimed['id']}/complete", headers=headers, json={
+    "lease_token": claimed["lease_token"], "result": {"probe": "complete"},
+}), "complete through execute-only token")
+plugin_callback = client.post("/api/v1/plugins/workers/work", headers=headers, json={
+    "job_id": "missing-plugin-job", "lease_token": "missing-lease",
+})
+assert plugin_callback.status_code == 404, plugin_callback.text
+passed += 1
 ok(client.get("/runtime/workers", headers=headers), "execute-only worker token cannot list fleet", 403)
 os.environ["AUTH_MODE"] = "local"
 

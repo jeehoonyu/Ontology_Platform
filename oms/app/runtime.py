@@ -1465,7 +1465,7 @@ def hydrate_objects(
     hydrated_records: List[Dict[str, Any]] = []
     materialized = 0
     updated = 0
-    from . import decision_intelligence
+    from . import decision_intelligence, ontology_runtime_v1
 
     for record in records:
         if object_id_expr is not None:
@@ -1481,6 +1481,8 @@ def hydrate_objects(
             target: resolve_value(source_expr, record)
             for target, source_expr in property_map.items()
         } if property_map else dict(record)
+        if step.get("omit_nulls"):
+            properties = {key: value for key, value in properties.items() if value is not None}
 
         errors = validate_object_properties(object_type, properties)
         if errors:
@@ -1728,6 +1730,22 @@ def execute_pipeline_steps(
                 {**record, target_field: resolve_value(step.get("value"), record)}
                 for record in records
             ]
+        elif operation == "namespace_id":
+            source_field = str(step.get("source_field") or "id")
+            target_field = str(step.get("target_field") or "_ontology_id")
+            prefix = str(step.get("prefix") or "")
+            separator = str(step.get("separator") or ":")
+            strict = bool(step.get("strict", True))
+            namespaced = []
+            for record in records:
+                source_value = record.get(source_field)
+                if source_value in {None, ""}:
+                    if strict:
+                        raise ValueError(f"namespace_id could not resolve field '{source_field}'")
+                    namespaced.append(dict(record))
+                    continue
+                namespaced.append({**record, target_field: f"{prefix}{separator if prefix else ''}{source_value}"})
+            records = namespaced
         elif operation == "derive_geo_point":
             records, metrics = _derive_geo_points(records, step)
         elif operation == "derive_mgrs":
@@ -2365,7 +2383,7 @@ def apply_action_mutations(
     rules = action_type.rules or {}
     mutations = rules.get("object_mutations", [])
     mutated_ids: List[str] = []
-    from . import decision_intelligence
+    from . import decision_intelligence, ontology_runtime_v1
 
     for mutation in mutations:
         object_type_id = mutation["object_type_id"]
@@ -2380,6 +2398,7 @@ def apply_action_mutations(
             raise ValueError("Action mutation could not resolve object id")
 
         existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == str(object_id)).first()
+        before_state = dict(existing.properties or {}) if existing else {}
         if not existing:
             if not mutation.get("create_if_missing"):
                 raise ValueError(f"ObjectInstance '{object_id}' not found")
@@ -2421,6 +2440,16 @@ def apply_action_mutations(
             source_type="action_type",
             source_id=action_type.id,
         )
+        ontology_runtime_v1.record_object_change(
+            db,
+            existing,
+            before_state=before_state,
+            event_type="action.object.mutated",
+            actor=actor,
+            source_type="action_type",
+            source_id=action_type.id,
+            evidence={"action_type_id": action_type.id},
+        )
         mutated_ids.append(existing.id)
 
     return mutated_ids
@@ -2432,17 +2461,22 @@ def build_context_pack(
     allowed_object_types: List[str],
     filters: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     filters = filters or {}
     object_type_ids = allowed_object_types
     if not object_type_ids:
-        object_type_ids = [row.id for row in db.query(models.ObjectType).all()]
+        type_query = db.query(models.ObjectType)
+        if project_id is not None:
+            type_query = type_query.filter(models.ObjectType.project_id == project_id)
+        object_type_ids = [row.id for row in type_query.all()]
 
     packs = []
     for object_type_id in object_type_ids:
-        objects = db.query(models.ObjectInstance).filter(
-            models.ObjectInstance.object_type_id == object_type_id
-        ).all()
+        object_query = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id)
+        if project_id is not None:
+            object_query = object_query.filter(models.ObjectInstance.project_id == project_id)
+        objects = object_query.all()
 
         object_filters = filters.get(object_type_id, {}) if isinstance(filters.get(object_type_id), dict) else {}
         if object_filters:
@@ -2463,7 +2497,7 @@ def build_context_pack(
             ],
         })
 
-    return {"packs": packs, "filters": filters, "limit": limit}
+    return {"packs": packs, "filters": filters, "limit": limit, "project_id": project_id}
 
 
 def plan_agent_session(
@@ -2479,10 +2513,11 @@ def plan_agent_session(
         allowed_object_types=agent.allowed_object_types or [],
         filters=filters,
         limit=max_context_objects,
+        project_id=agent.project_id,
     )
     try:
         from . import decision_intelligence
-        context["decision_intelligence"] = decision_intelligence.build_decision_context(db, context)
+        context["decision_intelligence"] = decision_intelligence.build_decision_context(db, context, project_id=agent.project_id)
     except Exception as exc:
         context["decision_intelligence"] = {"error": str(exc), "object_risk": [], "duplicate_warnings": []}
     prompt = user_prompt.lower()
@@ -3107,6 +3142,7 @@ def _exec_logic_block_list(
                 allowed_object_types=block.get("object_types", []),
                 filters=block.get("filters", {}),
                 limit=int(block.get("limit", 5)),
+                project_id=logic_function.project_id,
             )
             outputs[block.get("output", "context")] = result
         elif block_type == "assist":
@@ -3198,7 +3234,7 @@ def _exec_logic_block_list(
             object_id = resolve_value(block.get("object_id"), scope) or block.get("object_id")
             if not object_type_id or not object_id:
                 raise ValueError("explain_object requires object_type_id and object_id")
-            result = decision_intelligence.explain_object_by_id(db, str(object_type_id), str(object_id))
+            result = decision_intelligence.explain_object_by_id(db, str(object_type_id), str(object_id), project_id=logic_function.project_id)
             outputs[block.get("output", "explanation")] = result
         elif block_type == "score_risk":
             from . import decision_intelligence
@@ -3209,7 +3245,7 @@ def _exec_logic_block_list(
                 scorecard_ids = [item.strip() for item in scorecard_ids.split(",") if item.strip()]
             if not object_type_id or not object_id:
                 raise ValueError("score_risk requires object_type_id and object_id")
-            result = decision_intelligence.score_object_by_id(db, str(object_type_id), str(object_id), scorecard_ids=scorecard_ids)
+            result = decision_intelligence.score_object_by_id(db, str(object_type_id), str(object_id), scorecard_ids=scorecard_ids, project_id=logic_function.project_id)
             outputs[block.get("output", "risk")] = result
         elif block_type == "run_scenario":
             from . import decision_intelligence
@@ -3223,6 +3259,7 @@ def _exec_logic_block_list(
                 seed_object_ids=seed_object_ids,
                 overrides=overrides,
                 propagation_rules=propagation_rules,
+                project_id=logic_function.project_id,
             )
             outputs[block.get("output", "scenario")] = result
         elif block_type == "create_incident":
@@ -3240,6 +3277,7 @@ def _exec_logic_block_list(
                 alert_ids=block.get("alert_ids") or [],
                 approval_ids=block.get("approval_ids") or [],
                 actor=block.get("actor", "logic"),
+                project_id=logic_function.project_id,
             )
             result = ops_control._incident_dict(incident)
             outputs[block.get("output", "incident")] = result
@@ -3373,6 +3411,27 @@ def _compare_count(count: int, operator: str, threshold: int) -> bool:
     return False
 
 
+def _legacy_automation_project_id(db: Session, automation: models.AutomationDefinition) -> str:
+    project_ids = set()
+    condition = automation.condition or {}
+    effect = automation.effect or {}
+    references = [
+        (models.ObjectType, condition.get("object_type_id")),
+        (models.ActionType, effect.get("action_type_id")),
+        (models.PipelineDefinition, effect.get("pipeline_id")),
+        (models.LogicFunction, effect.get("logic_function_id")),
+    ]
+    for model, resource_id in references:
+        if not resource_id:
+            continue
+        resource = db.get(model, str(resource_id))
+        if resource is not None and getattr(resource, "project_id", None):
+            project_ids.add(str(resource.project_id))
+    if len(project_ids) > 1:
+        raise ValueError(f"Automation '{automation.id}' references resources from multiple projects")
+    return next(iter(project_ids), "default")
+
+
 def evaluate_automation(
     db: Session,
     *,
@@ -3381,6 +3440,7 @@ def evaluate_automation(
 ) -> Dict[str, Any]:
     condition = automation.condition or {}
     effect = automation.effect or {}
+    project_id = _legacy_automation_project_id(db, automation)
     condition_result = False
     effect_result: Dict[str, Any] = {"status": "SKIPPED"}
 
@@ -3394,6 +3454,7 @@ def evaluate_automation(
             allowed_object_types=[object_type_id],
             filters={object_type_id: condition.get("filters", {})},
             limit=100000,
+            project_id=project_id,
         )
         count = len(context["packs"][0]["objects"]) if context["packs"] else 0
         condition_result = _compare_count(count, condition.get("operator", ">"), int(condition.get("threshold", 0)))

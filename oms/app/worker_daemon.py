@@ -16,9 +16,13 @@ from typing import Any, Dict, List, Optional
 
 
 JOB_ENDPOINTS = {
-    "pipeline": ("pipeline.preview", "pipeline.deliver", "/pipeline-builder/workers/run-next"),
+    "pipeline": ("pipeline.preview", "pipeline.deliver", "pipeline.duckdb.preview", "pipeline.duckdb.deliver", "industrial.ontology_hydrate", "/pipeline-builder/workers/run-next"),
     "aip": ("aip.agent.invoke", "/aip/agents/workers/run-next"),
     "ingestion": ("ingestion.connector_sync", "ingestion.stream_replay", "/ingestion/workers/run-next"),
+    "events": ("event.dispatch", "/api/v1/outbox/workers/run-next"),
+    "events-kafka": ("event.kafka.dispatch", "/api/v1/outbox/kafka/workers/run-next"),
+    "event-routing": ("event.stream.route", "/api/v1/event-stream-bindings/workers/run-next"),
+    "stream-processing": ("stream.process", "/api/v1/streams/processors/workers/run-next"),
 }
 KNOWN_JOB_TYPES = {job_type for values in JOB_ENDPOINTS.values() for job_type in values[:-1]}
 
@@ -194,14 +198,14 @@ class WorkerDaemon:
         except Exception as exc:
             self._record(api_errors_increment=1, last_error=f"Worker execution request failed ({type(exc).__name__})")
             return False
-        job = response.get("job")
+        job = response.get("job") or response.get("delivery") or response.get("outbox")
         if not isinstance(job, dict):
             return False
         status = str(job.get("status") or "")
         self._record(
             jobs_seen_increment=1,
-            jobs_succeeded_increment=1 if status == "SUCCEEDED" else 0,
-            jobs_failed_increment=1 if status in {"FAILED", "CANCELLED"} else 0,
+            jobs_succeeded_increment=1 if status in {"SUCCEEDED", "PUBLISHED", "DELIVERED"} else 0,
+            jobs_failed_increment=1 if status in {"FAILED", "CANCELLED", "DEAD_LETTER"} else 0,
             last_job_id=job.get("id"),
             last_error=job.get("error") if status == "FAILED" else None,
         )

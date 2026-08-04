@@ -10,6 +10,7 @@ global search.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from collections import Counter
@@ -183,6 +184,8 @@ class SearchRequest(BaseModel):
 
 
 def _ensure_tables(db: Session) -> None:
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     ops_control._ensure_tables(db)
     for table in (EventSubscription.__table__, PolicyRule.__table__, PolicyDecisionLog.__table__):
         table.create(bind=db.get_bind(), checkfirst=True)

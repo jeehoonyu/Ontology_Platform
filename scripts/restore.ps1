@@ -8,7 +8,13 @@ param(
     [string]$DatabaseService = "postgres",
     [string]$DatabaseUser,
     [string]$DatabaseName,
-    [string[]]$ApplicationServices = @("oms-api", "oms-worker")
+    [string[]]$ApplicationServices = @("oms-api", "oms-worker"),
+    [switch]$RestoreSnapshots,
+    [string]$SnapshotService = "oms-api",
+    [string]$SnapshotDirectory = "/var/lib/ontology/snapshots",
+    [switch]$RestorePlugins,
+    [string]$PluginService = "oms-api",
+    [string]$PluginDirectory = "/var/lib/ontology/plugins"
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,6 +94,41 @@ try {
     $swapCompleted = $true
 
     if ($writersStopped) {
+        if ($RestoreSnapshots) {
+            $snapshotArchive = "$resolvedBackup.snapshots.tar.gz"
+            if (-not (Test-Path -LiteralPath $snapshotArchive -PathType Leaf)) {
+                throw "Dataset snapshot archive is missing: $snapshotArchive"
+            }
+            $snapshotChecksumPath = "$snapshotArchive.sha256"
+            if (Test-Path -LiteralPath $snapshotChecksumPath) {
+                $expectedSnapshotChecksum = ((Get-Content -LiteralPath $snapshotChecksumPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+                $actualSnapshotChecksum = (Get-FileHash -LiteralPath $snapshotArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actualSnapshotChecksum -ne $expectedSnapshotChecksum) {
+                    throw "Dataset snapshot archive checksum mismatch."
+                }
+            }
+            $snapshotContainerFile = "/tmp/ontology-snapshots-restore-$stamp.tar.gz"
+            Invoke-Compose @("cp", $snapshotArchive, "${SnapshotService}:$snapshotContainerFile") "Could not copy dataset snapshot archive into the API container."
+            Invoke-Compose @("exec", "-T", $SnapshotService, "sh", "-c", "mkdir -p '$SnapshotDirectory' && find '$SnapshotDirectory' -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf '$snapshotContainerFile' -C '$SnapshotDirectory' && rm -f '$snapshotContainerFile'") "Dataset snapshot restore failed."
+        }
+        if ($RestorePlugins) {
+            $pluginArchive = "$resolvedBackup.plugins.tar.gz"
+            if (-not (Test-Path -LiteralPath $pluginArchive -PathType Leaf)) {
+                throw "Plugin bundle archive is missing: $pluginArchive"
+            }
+            $pluginChecksumPath = "$pluginArchive.sha256"
+            if (-not (Test-Path -LiteralPath $pluginChecksumPath -PathType Leaf)) {
+                throw "Plugin bundle checksum is missing: $pluginChecksumPath"
+            }
+            $expectedPluginChecksum = ((Get-Content -LiteralPath $pluginChecksumPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+            $actualPluginChecksum = (Get-FileHash -LiteralPath $pluginArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualPluginChecksum -ne $expectedPluginChecksum) {
+                throw "Plugin bundle archive checksum mismatch."
+            }
+            $pluginContainerFile = "/tmp/ontology-plugins-restore-$stamp.tar.gz"
+            Invoke-Compose @("cp", $pluginArchive, "${PluginService}:$pluginContainerFile") "Could not copy plugin archive into the API container."
+            Invoke-Compose @("exec", "-T", $PluginService, "sh", "-c", "tar -tzf '$pluginContainerFile' | while IFS= read -r entry; do case `"`$entry`" in /*|../*|*/../*|*/..) exit 41;; esac; done && mkdir -p '$PluginDirectory' && find '$PluginDirectory' -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf '$pluginContainerFile' -C '$PluginDirectory' && rm -f '$pluginContainerFile'") "Plugin bundle restore failed."
+        }
         Invoke-Compose (@("start") + $servicesToStop) "Database was restored, but application services could not be restarted."
         $writersStopped = $false
     }

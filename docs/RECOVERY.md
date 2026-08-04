@@ -4,10 +4,10 @@ The platform has two recovery mechanisms with different purposes.
 
 ## Portable snapshot
 
-Use **Control Panel -> Recovery** or `GET /project/export` to transfer governed platform resources between compatible installations. Version 2 snapshots include:
+Use **Control Panel -> Recovery** or `GET /project/export` to transfer governed platform resources between compatible installations. Version 3 snapshots include:
 
 - a deterministic SHA-256 checksum and resource-count manifest;
-- ontology, data, artifacts, revisions, durable command receipts, collaboration events, jobs, ingestion evidence, monitors, incidents, investigations, packages, workers, and queue policies;
+- ontology, data, artifacts, revisions, durable command receipts, collaboration events, jobs, ingestion evidence, monitors, incidents, investigations, packages, workers, queue policies, signed plugin manifests, exact bundles, and plugin execution evidence;
 - explicit credential-rebind records.
 
 Portable snapshots never contain connector credentials, service tokens, login sessions, or webhook listener secrets. Source configuration keys that can contain credentials are redacted. Only installation administrators can export, validate, or import a snapshot because several legacy resources do not yet carry project ownership.
@@ -26,7 +26,7 @@ POST /project/import
 {"snapshot": { ... }, "mode": "merge", "dry_run": true}
 ```
 
-An import validates the complete manifest before mutation and commits as one database transaction. A constraint failure rolls back every imported row. Existing separately stored credentials are preserved during a merge; resources created in a fresh installation remain unbound until an administrator supplies new credentials.
+An import validates the complete manifest before mutation and commits as one database transaction. Signed plugin bundles receive an additional Ed25519 signature, manifest digest, bundle digest, and archive-safety check before restoration. A constraint failure rolls back every database row. Existing separately stored credentials are preserved during a merge; resources created in a fresh installation remain unbound until an administrator supplies new credentials.
 
 Version 1 snapshots do not have integrity manifests and are rejected by default. Use `allow_legacy: true` only for a controlled one-time migration after independently verifying the file, then immediately export a version 2 snapshot.
 
@@ -35,10 +35,10 @@ Version 1 snapshots do not have integrity manifests and are rejected by default.
 Database backup is the disaster-recovery source of truth because it preserves encrypted credentials, audit history, identity configuration, and every runtime table.
 
 ```powershell
-./scripts/backup.ps1
+./scripts/backup.ps1 -IncludeSnapshots -IncludePlugins
 ```
 
-The command creates a Postgres custom archive, validates its table of contents, and writes adjacent `.sha256` and `.json` manifest files. Store all three files in protected backup storage and test restoration regularly.
+The command creates a Postgres custom archive, validates its table of contents, and writes adjacent `.sha256` and `.json` manifest files. Dataset snapshots and signed plugin bundles are separate checksummed archives. Store the complete archive set in protected backup storage and test restoration regularly.
 
 ## Staged restore
 
@@ -46,6 +46,8 @@ The command creates a Postgres custom archive, validates its table of contents, 
 ./scripts/restore.ps1 `
   -BackupPath ./backups/ontology-YYYYMMDD-HHMMSS.dump `
   -ConfirmRestore `
+  -RestoreSnapshots `
+  -RestorePlugins `
   -KeepPreviousDatabase
 ```
 

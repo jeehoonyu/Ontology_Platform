@@ -63,8 +63,10 @@ db = SessionLocal()
 import uuid as _uuid
 for i, ts in enumerate([100, 200, 300, 400, 500]):
     db.add(STREAM.StreamRecord(
-        id=_uuid.uuid4().hex, stream_id="s1", payload={"v": i}, ts=ts, archived=False, created_at=ts,
+        id=_uuid.uuid4().hex, stream_id="s1", sequence=i + 1,
+        payload={"v": i}, ts=ts, archived=False, created_at=ts,
     ))
+db.get(STREAM.Stream, "s1").next_sequence = 5
 db.commit()
 db.close()
 
@@ -91,8 +93,10 @@ ok(client.post("/streams", json={"id": "s2", "display_name": "S2"}), "create str
 db = SessionLocal()
 for i, ts in enumerate([10, 20, 30, 40]):
     db.add(STREAM.StreamRecord(
-        id=_uuid.uuid4().hex, stream_id="s2", payload={"v": i}, ts=ts, archived=False, created_at=ts,
+        id=_uuid.uuid4().hex, stream_id="s2", sequence=i + 1,
+        payload={"v": i}, ts=ts, archived=False, created_at=ts,
     ))
+db.get(STREAM.Stream, "s2").next_sequence = 4
 db.commit()
 db.close()
 ok(client.post("/streams/s2/archive-policy", json={"max_records": 2}), "set count policy")

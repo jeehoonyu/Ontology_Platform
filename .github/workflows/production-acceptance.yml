@@ -9,7 +9,7 @@ permissions:
 jobs:
   oidc-load-recovery:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,3 +34,11 @@ jobs:
             frontend/test-results
             frontend/playwright-production-report
           if-no-files-found: ignore
+      - name: Upload signed plugin recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-plugin-executor-evidence
+          path: docs/plugin-executor-production-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30

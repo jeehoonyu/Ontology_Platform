@@ -1,0 +1,33 @@
+{
+  "graph_edges": 100,
+  "graph_index_names": [
+    "ix_link_instances_source_object_id",
+    "ix_link_instances_target_object_id"
+  ],
+  "graph_nodes": 77,
+  "graph_query_limit_ms": 2000.0,
+  "graph_two_hop_p50_ms": 12.394,
+  "graph_two_hop_p95_ms": 13.721,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "link_relation_bytes": 28925435904,
+  "links": 50000000,
+  "object_index_names": [
+    "ix_oi_property_e18d75eec8db1d235039"
+  ],
+  "object_lookup_p50_ms": 7.736,
+  "object_lookup_p95_ms": 8.718,
+  "object_query_limit_ms": 300.0,
+  "object_range_p50_ms": 10.285,
+  "object_range_p95_ms": 11.83,
+  "object_relation_bytes": 7254966272,
+  "objects": 10000000,
+  "profile": "reference",
+  "reference_scale_achieved": true,
+  "reused_existing_fixture": false,
+  "samples": 20,
+  "seed_seconds": 2897.105
+}
