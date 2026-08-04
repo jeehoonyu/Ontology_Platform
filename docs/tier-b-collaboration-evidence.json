@@ -1,0 +1,35 @@
+{
+  "breaches": [
+    "ack_p95_ms=253.002 vs ack_p95_ms_max=250.0"
+  ],
+  "gate_id": "collaboration",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "ack_p95_ms": 253.002,
+    "editors": 20,
+    "lost_updates": 0,
+    "replicas": 2,
+    "unique_revisions": 20
+  },
+  "notes": "Worst of three consecutive runs at this head on one host: 241.605 ms, 253.002 ms, 219.812 ms. Correctness held in every run (20 unique contiguous revisions, zero lost updates); only the latency threshold breached. The p95 is taken over 20 samples, so it is the 19th value and moves with a single slow request. The gate is not accepted until the estimator is widened or the threshold is re-decided on the record.",
+  "provenance": {
+    "captured_at": 1785826428,
+    "git_commit": "86d4481",
+    "harness": "oms/verify_collaboration_scale_postgres.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0037_cross_stream_joins"
+  },
+  "status": "FAIL",
+  "thresholds": {
+    "ack_p95_ms_max": 250.0,
+    "editors_min": 20,
+    "lost_updates_max": 0,
+    "replicas_min": 2,
+    "unique_revisions_min": 20
+  },
+  "tier": "B"
+}
