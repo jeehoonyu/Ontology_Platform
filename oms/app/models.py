@@ -1,5 +1,6 @@
 from typing import Optional
-from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, Index
+from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, Index, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -52,6 +53,9 @@ class ActionType(Base):
     rules: Mapped[dict] = mapped_column(JSON) # Validation and execution logic / side-effects
 
 
+OBJECT_STATE_JSON = JSON().with_variant(JSONB(), "postgresql")
+
+
 class ObjectInstance(Base):
     """
     Runtime object in the operational twin. Object types define the schema; instances
@@ -59,14 +63,25 @@ class ObjectInstance(Base):
     """
     __tablename__ = "object_instances"
     # Composite index for the common type-scoped + ordered/paginated scan.
-    __table_args__ = (Index("ix_object_instances_type_created", "object_type_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_object_instances_type_created", "object_type_id", "created_at"),
+        Index(
+            "ix_object_instances_materialized_active",
+            "project_id", "object_type_id", "source_asset_id", "is_active", "id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
-    properties: Mapped[dict] = mapped_column(JSON)
+    properties: Mapped[dict] = mapped_column(OBJECT_STATE_JSON)
     source_asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    lineage: Mapped[dict] = mapped_column(JSON, default=dict)
+    materialization_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False,
+    )
+    retired_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    lineage: Mapped[dict] = mapped_column(OBJECT_STATE_JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[int] = mapped_column(Integer)
 

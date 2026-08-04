@@ -6,9 +6,12 @@ services:
       AUTH_MODE: oidc
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
       OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER}
+      OIDC_BACKCHANNEL_BASE_URL: ${OIDC_BACKCHANNEL_BASE_URL:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_REDIRECT_URI: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}/auth/callback
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+      WEBSOCKET_ALLOWED_ORIGINS: ${WEBSOCKET_ALLOWED_ORIGINS:-}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.16.0.0/12}
       CONNECTOR_SECRET_KEY: ${CONNECTOR_SECRET_KEY:?set CONNECTOR_SECRET_KEY}
@@ -16,9 +19,39 @@ services:
       CONNECTOR_ALLOWED_HOSTS: ${CONNECTOR_ALLOWED_HOSTS:-}
       CONNECTOR_ALLOW_PRIVATE_NETWORKS: ${CONNECTOR_ALLOW_PRIVATE_NETWORKS:-false}
       CONNECTOR_KAFKA_ALLOW_PLAINTEXT: ${CONNECTOR_KAFKA_ALLOW_PLAINTEXT:-false}
+      DATA_SNAPSHOT_BACKEND: ${DATA_SNAPSHOT_BACKEND:-local}
+      DATA_SNAPSHOT_ROOT: ${DATA_SNAPSHOT_ROOT:-/var/lib/ontology/snapshots}
+      DATA_SNAPSHOT_BUCKET: ${DATA_SNAPSHOT_BUCKET:-}
+      DATA_SNAPSHOT_S3_ENDPOINT: ${DATA_SNAPSHOT_S3_ENDPOINT:-}
+      DATA_SNAPSHOT_S3_REGION: ${DATA_SNAPSHOT_S3_REGION:-us-east-1}
+      DATA_SNAPSHOT_S3_ADDRESSING_STYLE: ${DATA_SNAPSHOT_S3_ADDRESSING_STYLE:-auto}
+      DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: ${DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET:-false}
+      DATA_SNAPSHOT_CACHE_ROOT: ${DATA_SNAPSHOT_CACHE_ROOT:-/var/cache/ontology/snapshots}
+      DATA_SNAPSHOT_CACHE_MAX_BYTES: ${DATA_SNAPSHOT_CACHE_MAX_BYTES:-21474836480}
+      DATA_SNAPSHOT_CACHE_LEASE_SECONDS: ${DATA_SNAPSHOT_CACHE_LEASE_SECONDS:-3600}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      MODEL_GATEWAY_ALLOWED_HOSTS: ${MODEL_GATEWAY_ALLOWED_HOSTS:-}
+      MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS: ${MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS:-false}
+      PLUGIN_BUNDLE_ROOT: ${PLUGIN_BUNDLE_ROOT:-/var/lib/ontology/plugins}
+      PLUGIN_BUNDLE_MAX_BYTES: ${PLUGIN_BUNDLE_MAX_BYTES:-10485760}
+      PLUGIN_EXECUTION_MODE: ${PLUGIN_EXECUTION_MODE:-worker}
+      EVENT_KAFKA_BOOTSTRAP_SERVERS: ${EVENT_KAFKA_BOOTSTRAP_SERVERS:-}
+      EVENT_KAFKA_SECURITY_PROTOCOL: ${EVENT_KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      EVENT_KAFKA_SASL_MECHANISM: ${EVENT_KAFKA_SASL_MECHANISM:-PLAIN}
+      EVENT_KAFKA_SASL_USERNAME: ${EVENT_KAFKA_SASL_USERNAME:-}
+      EVENT_KAFKA_SASL_PASSWORD: ${EVENT_KAFKA_SASL_PASSWORD:-}
+      EVENT_KAFKA_TOPIC_PREFIX: ${EVENT_KAFKA_TOPIC_PREFIX:-ontologyos}
+      EVENT_KAFKA_ALLOW_PLAINTEXT: ${EVENT_KAFKA_ALLOW_PLAINTEXT:-false}
+      EVENT_KAFKA_REQUEST_TIMEOUT_MS: ${EVENT_KAFKA_REQUEST_TIMEOUT_MS:-30000}
+      EVENT_KAFKA_MAX_BLOCK_MS: ${EVENT_KAFKA_MAX_BLOCK_MS:-10000}
     ports: []
     expose:
       - "8000"
+    volumes:
+      - ontology_snapshots:/var/lib/ontology/snapshots
+      - ontology_snapshot_cache:/var/cache/ontology/snapshots
+      - ontology_plugin_bundles:/var/lib/ontology/plugins
     deploy:
       resources:
         limits:
@@ -52,7 +85,7 @@ services:
       WORKER_TOKEN: ${WORKER_TOKEN:-}
       WORKER_NAME: ${WORKER_NAME:-ontology-worker-1}
       WORKER_PROJECT_ID: ${WORKER_PROJECT_ID:-default}
-      WORKER_JOB_TYPES: ${WORKER_JOB_TYPES:-pipeline.preview,pipeline.deliver,aip.agent.invoke,ingestion.connector_sync,ingestion.stream_replay}
+      WORKER_JOB_TYPES: ${WORKER_JOB_TYPES:-pipeline.preview,pipeline.deliver,pipeline.duckdb.preview,pipeline.duckdb.deliver,industrial.ontology_hydrate,aip.agent.invoke,ingestion.connector_sync,ingestion.stream_replay,stream.process,event.dispatch,event.stream.route}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
       WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-120}
       WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
@@ -76,6 +109,80 @@ services:
           memory: 2G
         reservations:
           memory: 256M
+
+  plugin-oci-daemon:
+    profiles: ["plugin-execution"]
+    image: docker:27-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+    command: ["--host=tcp://0.0.0.0:2375", "--tls=false"]
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - plugin_oci_data:/var/lib/docker
+    networks:
+      - plugin_runtime
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  plugin-executor:
+    profiles: ["plugin-execution"]
+    build:
+      context: .
+      dockerfile: oms/plugin-executor.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PLUGIN_EXECUTOR_API_URL: http://oms-api:8000
+      PLUGIN_EXECUTOR_TOKEN: ${PLUGIN_EXECUTOR_TOKEN:-${WORKER_TOKEN:-}}
+      PLUGIN_EXECUTOR_NAME: ${PLUGIN_EXECUTOR_NAME:-ontology-plugin-executor-1}
+      PLUGIN_EXECUTOR_PROJECT_ID: ${PLUGIN_EXECUTOR_PROJECT_ID:-default}
+      PLUGIN_EXECUTOR_LEASE_SECONDS: ${PLUGIN_EXECUTOR_LEASE_SECONDS:-600}
+      PLUGIN_EXECUTOR_HEARTBEAT_SECONDS: ${PLUGIN_EXECUTOR_HEARTBEAT_SECONDS:-20}
+      PLUGIN_EXECUTOR_POLL_SECONDS: ${PLUGIN_EXECUTOR_POLL_SECONDS:-1}
+      PLUGIN_EXECUTOR_HEALTH_PORT: "8092"
+      PLUGIN_OCI_EXECUTABLE: docker
+      PLUGIN_SANDBOX_IMAGE: ${PLUGIN_SANDBOX_IMAGE:-}
+      PLUGIN_SANDBOX_RUNNER_PATH: ${PLUGIN_SANDBOX_RUNNER_PATH:-/app/app/plugin_sandbox_runner.py}
+      PLUGIN_SANDBOX_NETWORK: ${PLUGIN_SANDBOX_NETWORK:-ontology-plugin-egress}
+      PLUGIN_EGRESS_PROXY_URL: ${PLUGIN_EGRESS_PROXY_URL:-http://plugin-egress-proxy:8080}
+      PLUGIN_EGRESS_PROXY_IMAGE: ${PLUGIN_EGRESS_PROXY_IMAGE:-}
+      PLUGIN_EGRESS_PROXY_NAME: ${PLUGIN_EGRESS_PROXY_NAME:-plugin-egress-proxy}
+      PLUGIN_EGRESS_TOKEN_SECRET: ${PLUGIN_EGRESS_TOKEN_SECRET:-}
+      PLUGIN_EGRESS_ALLOW_PRIVATE: "false"
+      DOCKER_HOST: tcp://plugin-oci-daemon:2375
+      HOME: /tmp
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    expose:
+      - "8092"
+    networks:
+      - default
+      - plugin_runtime
+    depends_on:
+      oms-api:
+        condition: service_healthy
+      plugin-oci-daemon:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health/ready', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          memory: 128M
 
   caddy:
     image: caddy:2.8-alpine
@@ -109,3 +216,9 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  ontology_snapshots:
+  ontology_snapshot_cache:
+  plugin_oci_data:
+
+networks:
+  plugin_runtime:

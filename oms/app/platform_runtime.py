@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, text
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import models_action, ops_control, tenancy
 from .database import Base, SessionLocal, get_db
+from . import production_auth
 from .production_auth import Principal, require_detached_permission, require_permission
 
 router = APIRouter(tags=["platform_runtime"])
@@ -44,7 +46,12 @@ def _locked_artifact_for(
         db.rollback()
         db.execute(text("BEGIN IMMEDIATE"))
         return _artifact_for(db, artifact_id, principal, permission)
-    row = db.query(PlatformArtifact).filter(PlatformArtifact.id == artifact_id).with_for_update().first()
+    # The artifact may already be present in this Session from authorization.
+    # Refresh it after waiting for the row lock or a concurrent replica can
+    # allocate a revision from stale identity-map state.
+    row = db.query(PlatformArtifact).filter(
+        PlatformArtifact.id == artifact_id
+    ).with_for_update().populate_existing().first()
     if not row:
         raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
     return row
@@ -147,6 +154,50 @@ class ArtifactCommandReceipt(Base):
     command_ids: Mapped[list] = mapped_column(JSON, default=list)
     rebased_from_lock_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer, index=True)
+
+
+class ArtifactReviewComment(Base):
+    __tablename__ = "platform_artifact_review_comments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    artifact_id: Mapped[str] = mapped_column(String, index=True)
+    project_id: Mapped[str] = mapped_column(String, index=True)
+    revision: Mapped[int] = mapped_column(Integer, index=True)
+    target: Mapped[str] = mapped_column(String, index=True)
+    thread_id: Mapped[str] = mapped_column(String, index=True)
+    parent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    body: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="OPEN", index=True)
+    author: Mapped[str] = mapped_column(String, index=True)
+    resolved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    resolved_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, index=True)
+    updated_at: Mapped[int] = mapped_column(Integer)
+
+
+class ArtifactChangeProposal(Base):
+    __tablename__ = "platform_artifact_change_proposals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    artifact_id: Mapped[str] = mapped_column(String, index=True)
+    project_id: Mapped[str] = mapped_column(String, index=True)
+    base_revision: Mapped[int] = mapped_column(Integer)
+    base_lock_version: Mapped[int] = mapped_column(Integer, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    commands: Mapped[list] = mapped_column(JSON, default=list)
+    targets: Mapped[list] = mapped_column(JSON, default=list)
+    validation: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="OPEN", index=True)
+    author: Mapped[str] = mapped_column(String, index=True)
+    reviewer: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    review_note: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    applied_revision: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, index=True)
+    updated_at: Mapped[int] = mapped_column(Integer)
+    reviewed_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    applied_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class PlatformJob(Base):
@@ -333,6 +384,42 @@ class CollaborationCommandBatch(BaseModel):
     message: Optional[str] = "Collaborative visual edit"
 
 
+class ReviewCommentCreate(BaseModel):
+    target: str = Field(default="artifact:*", min_length=1, max_length=300)
+    revision: Optional[int] = Field(default=None, ge=1)
+    parent_id: Optional[str] = None
+    body: str = Field(min_length=1, max_length=8000)
+
+
+class ReviewCommentPatch(BaseModel):
+    body: Optional[str] = Field(default=None, min_length=1, max_length=8000)
+    status: Optional[str] = Field(default=None, pattern="^(OPEN|RESOLVED)$")
+
+
+class ChangeProposalCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    description: Optional[str] = Field(default=None, max_length=8000)
+    expected_lock_version: int = Field(ge=1)
+    commands: List[BuilderCommand] = Field(min_length=1, max_length=100)
+
+
+class ChangeProposalPatch(BaseModel):
+    expected_version: int = Field(ge=1)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=240)
+    description: Optional[str] = Field(default=None, max_length=8000)
+    commands: Optional[List[BuilderCommand]] = Field(default=None, min_length=1, max_length=100)
+
+
+class ChangeProposalReview(BaseModel):
+    expected_version: int = Field(ge=1)
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    note: Optional[str] = Field(default=None, max_length=8000)
+
+
+class ChangeProposalApply(BaseModel):
+    expected_version: int = Field(ge=1)
+
+
 class ArtifactPreviewRequest(BaseModel):
     sample_limit: int = Field(default=20, ge=1, le=200)
     inputs: Dict[str, Any] = Field(default_factory=dict)
@@ -476,7 +563,16 @@ def _catalog(artifact_type: str) -> Dict[str, Any]:
     return {"artifact_type": artifact_type, "categories": raw["categories"], "nodes": nodes, "commands": raw["commands"], "version": 1}
 
 
-def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_id: str, payload: Dict[str, Any]) -> None:
+def _audit(
+    db: Session,
+    actor: str,
+    event_type: str,
+    subject_type: str,
+    subject_id: str,
+    payload: Dict[str, Any],
+    *,
+    emit_ops: bool = True,
+) -> None:
     db.add(models_action.AuditLog(
         id=uuid.uuid4().hex,
         actor=actor,
@@ -485,18 +581,19 @@ def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_
         subject_id=subject_id,
         payload=payload,
     ))
-    db.add(ops_control.OpsEvent(
-        id=_id("event"),
-        source="platform_runtime",
-        event_type=event_type,
-        severity="info",
-        status="OPEN",
-        title=event_type.replace(".", " ").title(),
-        subject_type=subject_type,
-        subject_id=subject_id,
-        payload=payload,
-        created_at=_now(),
-    ))
+    if emit_ops:
+        db.add(ops_control.OpsEvent(
+            id=_id("event"),
+            source="platform_runtime",
+            event_type=event_type,
+            severity="info",
+            status="OPEN",
+            title=event_type.replace(".", " ").title(),
+            subject_type=subject_type,
+            subject_id=subject_id,
+            payload=payload,
+            created_at=_now(),
+        ))
 
 
 def _artifact(db: Session, artifact_id: str) -> PlatformArtifact:
@@ -661,6 +758,70 @@ def _targets_conflict(incoming: set[str], concurrent: set[str]) -> bool:
     )
 
 
+def _review_target_exists(state: Dict[str, Any], target: str) -> bool:
+    if target == "artifact:*":
+        return True
+    nodes = {str(row.get("id")): row for row in (state.get("nodes") or []) if isinstance(row, dict)}
+    edges = {
+        str(row.get("id") or f"{row.get('source')}:{row.get('target')}")
+        for row in (state.get("edges") or []) if isinstance(row, dict)
+    }
+    if target.startswith("node:"):
+        return target.split(":", 1)[1] in nodes
+    if target.startswith("edge:"):
+        return target.split(":", 1)[1] in edges
+    if target.startswith("field:"):
+        parts = target.split(":", 2)
+        if len(parts) != 3 or parts[1] not in nodes:
+            return False
+        fields = (nodes[parts[1]].get("data") or {}).get("fields") or []
+        return any(str(field.get("id") or field.get("name")) == parts[2] for field in fields if isinstance(field, dict))
+    return False
+
+
+def _comment_dict(row: ArtifactReviewComment) -> Dict[str, Any]:
+    return {
+        "id": row.id, "artifact_id": row.artifact_id, "project_id": row.project_id,
+        "revision": row.revision, "target": row.target, "thread_id": row.thread_id,
+        "parent_id": row.parent_id, "body": row.body, "status": row.status,
+        "author": row.author, "resolved_by": row.resolved_by, "resolved_at": row.resolved_at,
+        "created_at": row.created_at, "updated_at": row.updated_at,
+    }
+
+
+def _proposal_dict(row: ArtifactChangeProposal) -> Dict[str, Any]:
+    return {
+        "id": row.id, "artifact_id": row.artifact_id, "project_id": row.project_id,
+        "base_revision": row.base_revision, "base_lock_version": row.base_lock_version,
+        "version": row.version, "title": row.title, "description": row.description,
+        "commands": row.commands or [], "targets": row.targets or [],
+        "validation": row.validation or {}, "status": row.status, "author": row.author,
+        "reviewer": row.reviewer, "review_note": row.review_note,
+        "applied_revision": row.applied_revision, "created_at": row.created_at,
+        "updated_at": row.updated_at, "reviewed_at": row.reviewed_at,
+        "applied_at": row.applied_at,
+    }
+
+
+def _proposal_for(
+    db: Session,
+    artifact_id: str,
+    proposal_id: str,
+    *,
+    lock: bool = False,
+) -> ArtifactChangeProposal:
+    query = db.query(ArtifactChangeProposal).filter(
+        ArtifactChangeProposal.id == proposal_id,
+        ArtifactChangeProposal.artifact_id == artifact_id,
+    )
+    if lock and db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    row = query.first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found")
+    return row
+
+
 def _revision(db: Session, artifact_id: str, revision: int) -> ArtifactRevision:
     row = db.query(ArtifactRevision).filter(
         ArtifactRevision.artifact_id == artifact_id,
@@ -669,6 +830,54 @@ def _revision(db: Session, artifact_id: str, revision: int) -> ArtifactRevision:
     if not row:
         raise HTTPException(status_code=404, detail=f"Revision {revision} not found")
     return row
+
+
+def _collaboration_revision_context(
+    db: Session,
+    artifact_id: str,
+    revision_number: int,
+    expected_lock_version: int,
+) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+    """Load the current state and stale-base events with one locked-path query."""
+    event_types = (
+        "artifact.commands", "artifact.revision", "artifact.published", "artifact.restored",
+    )
+    if db.get_bind().dialect.name == "postgresql":
+        result = db.execute(text("""
+            SELECT revision.state, revision.layout,
+                   COALESCE(events.concurrent_events, '[]'::jsonb) AS concurrent_events
+            FROM platform_artifact_revisions AS revision
+            LEFT JOIN LATERAL (
+                SELECT jsonb_agg(
+                    jsonb_build_object('id', event.id, 'payload', event.payload)
+                    ORDER BY event.id
+                ) AS concurrent_events
+                FROM platform_artifact_collaboration_events AS event
+                WHERE event.artifact_id = revision.artifact_id
+                  AND event.lock_version > :expected_lock_version
+                  AND event.event_type IN (
+                      'artifact.commands', 'artifact.revision', 'artifact.published', 'artifact.restored'
+                  )
+            ) AS events ON TRUE
+            WHERE revision.artifact_id = :artifact_id
+              AND revision.revision = :revision_number
+        """), {
+            "artifact_id": artifact_id,
+            "revision_number": revision_number,
+            "expected_lock_version": expected_lock_version,
+        }).mappings().first()
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Revision {revision_number} not found")
+        return result["state"] or {}, result["layout"] or {}, list(result["concurrent_events"] or [])
+    revision = _revision(db, artifact_id, revision_number)
+    events = db.query(ArtifactCollaborationEvent).filter(
+        ArtifactCollaborationEvent.artifact_id == artifact_id,
+        ArtifactCollaborationEvent.lock_version > expected_lock_version,
+        ArtifactCollaborationEvent.event_type.in_(event_types),
+    ).order_by(ArtifactCollaborationEvent.id).all()
+    return revision.state or {}, revision.layout or {}, [
+        {"id": event.id, "payload": event.payload or {}} for event in events
+    ]
 
 
 def _validate_state(artifact_type: str, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -719,8 +928,20 @@ def _validate_state(artifact_type: str, state: Dict[str, Any]) -> Dict[str, Any]
     return {"status": "FAIL" if errors else ("WARN" if warnings else "PASS"), "errors": errors, "warnings": warnings, "targets": targets}
 
 
-def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Principal] = None) -> Dict[str, Any]:
-    revision = _revision(db, row.id, row.current_revision)
+def _artifact_dict(
+    db: Session,
+    row: PlatformArtifact,
+    principal: Optional[Principal] = None,
+    pinned_revision: Optional[int] = None,
+    pinned_lock_version: Optional[int] = None,
+) -> Dict[str, Any]:
+    # A writer that already committed must describe the revision it allocated.
+    # Committing expires the ORM row, so reading row.current_revision here would
+    # re-select the artifact head and can report a concurrent writer's revision
+    # and state back to this caller. Callers that allocated a revision pin it.
+    revision_number = row.current_revision if pinned_revision is None else pinned_revision
+    lock_version = row.lock_version if pinned_lock_version is None else pinned_lock_version
+    revision = _revision(db, row.id, revision_number)
     lease = db.query(ArtifactLease).filter(ArtifactLease.artifact_id == row.id).first()
     if lease and lease.expires_at <= _now():
         db.delete(lease)
@@ -735,6 +956,14 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
     latest_collaboration_event = db.query(ArtifactCollaborationEvent.id).filter(
         ArtifactCollaborationEvent.artifact_id == row.id,
     ).order_by(ArtifactCollaborationEvent.id.desc()).first()
+    open_comments = db.query(ArtifactReviewComment).filter(
+        ArtifactReviewComment.artifact_id == row.id,
+        ArtifactReviewComment.status == "OPEN",
+    ).count()
+    open_proposals = db.query(ArtifactChangeProposal).filter(
+        ArtifactChangeProposal.artifact_id == row.id,
+        ArtifactChangeProposal.status.in_(["OPEN", "APPROVED", "CONFLICT"]),
+    ).count()
     project_allowed = tenancy.project_permissions(db, principal, row.project_id) if principal else {"*"}
     allowed = [
         name for name in ("view", "edit", "publish", "deploy", "execute", "approve", "export", "restore", "administer")
@@ -748,9 +977,9 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
         "display_name": row.display_name,
         "description": row.description,
         "status": row.status,
-        "current_revision": row.current_revision,
+        "current_revision": revision_number,
         "published_revision": row.published_revision,
-        "lock_version": row.lock_version,
+        "lock_version": lock_version,
         "owner": row.owner,
         "metadata": row.metadata_ or {},
         "state": revision.state or {},
@@ -759,12 +988,16 @@ def _artifact_dict(db: Session, row: PlatformArtifact, principal: Optional[Princ
         "validation_targets": validation.get("targets", []),
         "lease": None if not lease else {"holder": lease.holder, "expires_at": lease.expires_at},
         "permissions": allowed,
-        "dirty_revision": row.current_revision if row.current_revision != row.published_revision else None,
+        "dirty_revision": revision_number if revision_number != row.published_revision else None,
         "execution": None if not last_job else _job_dict(last_job),
         "collaboration": {
             "active_participants": active_collaborators,
+            "open_comments": open_comments,
+            "open_proposals": open_proposals,
             "event_cursor": latest_collaboration_event[0] if latest_collaboration_event else 0,
             "stream_href": f"/artifacts/{row.id}/collaboration/stream",
+            "comments_href": f"/api/v1/artifacts/{row.id}/comments",
+            "proposals_href": f"/api/v1/artifacts/{row.id}/proposals",
         },
         "evidence_links": [
             {"type": "revision", "label": f"Revision {row.current_revision}", "href": f"/artifacts/{row.id}/versions"},
@@ -944,9 +1177,30 @@ def create_artifact(body: ArtifactCreate, principal: Principal = Depends(require
 
 
 @router.get("/builder/catalogs/{artifact_type}")
-def builder_catalog(artifact_type: str, principal: Principal = Depends(require_permission("view"))):
+def builder_catalog(
+    artifact_type: str,
+    project_id: str = Query(default="default"),
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    from . import plugin_runtime
+
+    tenancy.assert_project_permission(db, principal, project_id, "view")
     result = _catalog(artifact_type)
     result["permissions"] = [name for name in ("view", "edit", "publish", "execute", "restore") if principal.allows(name)]
+    accepted_kinds = {
+        "pipeline": {"connector", "transform", "model_provider"},
+        "ontology": {"ontology_package"},
+        "workshop": {"widget"},
+        "aip_logic": {"transform", "model_provider"},
+    }.get(artifact_type, set())
+    plugins = db.query(plugin_runtime.PluginVersion).filter(
+        plugin_runtime.PluginVersion.project_id == project_id,
+        plugin_runtime.PluginVersion.status == "ACTIVE",
+    ).order_by(plugin_runtime.PluginVersion.kind, plugin_runtime.PluginVersion.plugin_id).all()
+    result["plugins"] = [plugin_runtime._plugin_dict(row) for row in plugins if row.kind in accepted_kinds]
+    result["plugin_runtime"] = "signed_sandbox_v1"
+    result["plugin_sdk_api_version"] = plugin_runtime.PLUGIN_SDK_API_VERSION
     return result
 
 
@@ -1218,8 +1472,10 @@ def update_artifact(artifact_id: str, body: ArtifactPatch, principal: Principal 
     ))
     _audit(db, principal.id, "artifact.revision.created", "artifact", row.id, {"revision": row.current_revision, "lock_version": row.lock_version})
     _collaboration_event(db, row, "artifact.revision", actor=principal.id, payload={"targets": ["artifact:*"], "message": body.message or "Autosaved change"})
+    allocated_revision = row.current_revision
+    allocated_lock_version = row.lock_version
     db.commit()
-    return _artifact_dict(db, row, principal)
+    return _artifact_dict(db, row, principal, allocated_revision, allocated_lock_version)
 
 
 @router.post("/artifacts/{artifact_id}/commands")
@@ -1274,8 +1530,10 @@ def apply_artifact_commands(artifact_id: str, body: BuilderCommandBatch, princip
         "commands": [{"command_id": item.command_id, "command": item.command} for item in body.commands],
         "message": body.message,
     })
+    allocated_revision = row.current_revision
+    allocated_lock_version = row.lock_version
     db.commit()
-    result = _artifact_dict(db, row, principal)
+    result = _artifact_dict(db, row, principal, allocated_revision, allocated_lock_version)
     result["command_receipt"] = _command_receipt_dict(receipt)
     result["idempotent_replay"] = False
     return result
@@ -1580,29 +1838,47 @@ def apply_collaborative_commands(
     principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
-    row = _locked_artifact_for(db, artifact_id, principal, "edit")
-    participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
     request_hash = _command_request_hash(body.commands)
-    prior = _find_command_receipt(db, row, "collaboration", body.idempotency_key, request_hash)
-    if prior:
-        db.commit()
-        result = _artifact_dict(db, row, principal)
-        result["collaboration_receipt"] = _command_receipt_dict(prior)
-        result["idempotent_replay"] = True
-        return result
+    incoming_targets = {target for command in body.commands for target in _command_targets(command)}
+    prior = None
+    # PostgreSQL can authorize and validate the collaboration session before
+    # waiting for the artifact row. Only revision allocation and mutation need
+    # to be serialized. SQLite retains BEGIN IMMEDIATE semantics.
+    if db.get_bind().dialect.name == "postgresql":
+        authorized = _artifact_for(db, artifact_id, principal, "edit")
+        participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
+        prior = _find_command_receipt(db, authorized, "collaboration", body.idempotency_key, request_hash)
+        if prior:
+            db.commit()
+            result = _artifact_dict(db, authorized, principal)
+            result["collaboration_receipt"] = _command_receipt_dict(prior)
+            result["idempotent_replay"] = True
+            return result
+        row = db.query(PlatformArtifact).filter(
+            PlatformArtifact.id == authorized.id
+        ).with_for_update().populate_existing().first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
+    else:
+        row = _locked_artifact_for(db, artifact_id, principal, "edit")
+        participant = _require_collaborator(db, artifact_id, body.participant_token, principal)
+        prior = _find_command_receipt(db, row, "collaboration", body.idempotency_key, request_hash)
+        if prior:
+            db.commit()
+            result = _artifact_dict(db, row, principal)
+            result["collaboration_receipt"] = _command_receipt_dict(prior)
+            result["idempotent_replay"] = True
+            return result
     if body.expected_lock_version > row.lock_version:
         raise HTTPException(status_code=409, detail={"message": "Client revision is newer than the artifact", "current_lock_version": row.lock_version})
 
-    incoming_targets = {target for command in body.commands for target in _command_targets(command)}
-    concurrent_events = db.query(ArtifactCollaborationEvent).filter(
-        ArtifactCollaborationEvent.artifact_id == artifact_id,
-        ArtifactCollaborationEvent.lock_version > body.expected_lock_version,
-        ArtifactCollaborationEvent.event_type.in_(["artifact.commands", "artifact.revision", "artifact.published", "artifact.restored"]),
-    ).order_by(ArtifactCollaborationEvent.id).all()
+    current_state, current_layout, concurrent_events = _collaboration_revision_context(
+        db, artifact_id, row.current_revision, body.expected_lock_version,
+    )
     concurrent_targets = {
         str(target)
         for event in concurrent_events
-        for target in (event.payload or {}).get("targets", ["artifact:*"])
+        for target in (event.get("payload") or {}).get("targets", ["artifact:*"])
     }
     if _targets_conflict(incoming_targets, concurrent_targets):
         conflict_payload = {
@@ -1611,7 +1887,7 @@ def apply_collaborative_commands(
             "expected_lock_version": body.expected_lock_version,
             "incoming_targets": sorted(incoming_targets),
             "concurrent_targets": sorted(concurrent_targets),
-            "conflicting_event_ids": [event.id for event in concurrent_events],
+            "conflicting_event_ids": [event["id"] for event in concurrent_events],
         }
         _collaboration_event(
             db,
@@ -1624,12 +1900,13 @@ def apply_collaborative_commands(
         db.commit()
         raise HTTPException(status_code=409, detail=conflict_payload)
 
-    current = _revision(db, artifact_id, row.current_revision)
-    state, layout, applied = _apply_builder_commands(current.state or {}, current.layout or {}, body.commands)
+    state, layout, applied = _apply_builder_commands(current_state, current_layout, body.commands)
     validation = _validate_state(row.artifact_type, state)
     rebased_from = body.expected_lock_version if body.expected_lock_version < row.lock_version else None
     row.current_revision += 1
     row.lock_version += 1
+    allocated_revision = row.current_revision
+    allocated_lock_version = row.lock_version
     row.updated_at = _now()
     row.status = "DRAFT"
     receipt = ArtifactCommandReceipt(
@@ -1647,8 +1924,9 @@ def apply_collaborative_commands(
         created_at=row.updated_at,
     )
     db.add(receipt)
-    participant.heartbeat_at = row.updated_at
-    participant.expires_at = max(participant.expires_at, row.updated_at + 60)
+    participant_id_for_heartbeat = participant.id
+    heartbeat_at = row.updated_at
+    heartbeat_expires_at = max(participant.expires_at, row.updated_at + 60)
     db.add(ArtifactRevision(
         id=_id("revision"),
         artifact_id=row.id,
@@ -1661,13 +1939,13 @@ def apply_collaborative_commands(
         published=False,
         created_at=row.updated_at,
     ))
-    _audit(db, principal.id, "artifact.collaboration.commands_applied", "artifact", row.id, {
+    audit_payload = {
         "revision": row.current_revision,
         "lock_version": row.lock_version,
         "participant_id": participant.id,
         "rebased_from_lock_version": rebased_from,
         "commands": [{"command_id": item["command_id"], "command": item["command"]} for item in applied],
-    })
+    }
     _collaboration_event(
         db,
         row,
@@ -1681,11 +1959,380 @@ def apply_collaborative_commands(
             "message": body.message,
         },
     )
+    artifact_id_for_audit = row.id
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        current = _artifact_for(db, artifact_id, principal, "edit")
+        concurrent_receipt = _find_command_receipt(
+            db, current, "collaboration", body.idempotency_key, request_hash,
+        )
+        if not concurrent_receipt:
+            raise
+        db.commit()
+        result = _artifact_dict(db, current, principal)
+        result["collaboration_receipt"] = _command_receipt_dict(concurrent_receipt)
+        result["idempotent_replay"] = True
+        return result
+    # The receipt and collaboration event are the transactional command log.
+    # Materialize the global audit/outbox record after releasing the artifact
+    # row so other editors do not wait on secondary evidence fan-out.
+    db.query(ArtifactCollaborationParticipant).filter(
+        ArtifactCollaborationParticipant.id == participant_id_for_heartbeat,
+    ).update({
+        ArtifactCollaborationParticipant.heartbeat_at: heartbeat_at,
+        ArtifactCollaborationParticipant.expires_at: heartbeat_expires_at,
+    }, synchronize_session=False)
+    _audit(
+        db, principal.id, "artifact.collaboration.commands_applied", "artifact",
+        artifact_id_for_audit, audit_payload, emit_ops=False,
+    )
     db.commit()
-    result = _artifact_dict(db, row, principal)
+    result = _artifact_dict(db, row, principal, allocated_revision, allocated_lock_version)
     result["collaboration_receipt"] = _command_receipt_dict(receipt)
     result["idempotent_replay"] = False
     return result
+
+
+@router.post("/artifacts/{artifact_id}/comments", status_code=201)
+@router.post("/api/v1/artifacts/{artifact_id}/comments", status_code=201)
+def create_artifact_comment(
+    artifact_id: str,
+    body: ReviewCommentCreate,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    artifact = _artifact_for(db, artifact_id, principal, "edit")
+    revision_number = body.revision or artifact.current_revision
+    revision = _revision(db, artifact_id, revision_number)
+    if not _review_target_exists(revision.state or {}, body.target):
+        raise HTTPException(status_code=422, detail={
+            "message": "Comment target does not exist in the selected revision",
+            "target": body.target, "revision": revision_number,
+        })
+    parent = None
+    if body.parent_id:
+        parent = db.query(ArtifactReviewComment).filter(
+            ArtifactReviewComment.id == body.parent_id,
+            ArtifactReviewComment.artifact_id == artifact_id,
+        ).first()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent comment not found")
+        if parent.target != body.target:
+            raise HTTPException(status_code=409, detail="Replies must use the parent comment target")
+    now = _now()
+    comment_id = _id("comment")
+    comment = ArtifactReviewComment(
+        id=comment_id, artifact_id=artifact_id, project_id=artifact.project_id,
+        revision=revision_number, target=body.target,
+        thread_id=parent.thread_id if parent else comment_id,
+        parent_id=parent.id if parent else None, body=body.body.strip(), status="OPEN",
+        author=principal.id, resolved_by=None, resolved_at=None, created_at=now, updated_at=now,
+    )
+    db.add(comment)
+    _audit(db, principal.id, "artifact.comment.created", "artifact", artifact_id, {
+        "comment_id": comment.id, "revision": revision_number, "target": body.target,
+    })
+    _collaboration_event(db, artifact, "comment.created", actor=principal.id, payload={
+        "comment_id": comment.id, "thread_id": comment.thread_id,
+        "revision": revision_number, "target": body.target,
+    })
+    db.commit()
+    return _comment_dict(comment)
+
+
+@router.get("/artifacts/{artifact_id}/comments")
+@router.get("/api/v1/artifacts/{artifact_id}/comments")
+def list_artifact_comments(
+    artifact_id: str,
+    target: Optional[str] = None,
+    status: Optional[str] = Query(default=None, pattern="^(OPEN|RESOLVED)$"),
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    _artifact_for(db, artifact_id, principal, "view")
+    query = db.query(ArtifactReviewComment).filter(ArtifactReviewComment.artifact_id == artifact_id)
+    if target:
+        query = query.filter(ArtifactReviewComment.target == target)
+    if status:
+        query = query.filter(ArtifactReviewComment.status == status)
+    rows = query.order_by(ArtifactReviewComment.created_at, ArtifactReviewComment.id).all()
+    return {"comments": [_comment_dict(row) for row in rows], "count": len(rows)}
+
+
+@router.patch("/artifacts/{artifact_id}/comments/{comment_id}")
+@router.patch("/api/v1/artifacts/{artifact_id}/comments/{comment_id}")
+def update_artifact_comment(
+    artifact_id: str,
+    comment_id: str,
+    body: ReviewCommentPatch,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    artifact = _artifact_for(db, artifact_id, principal, "edit")
+    comment = db.query(ArtifactReviewComment).filter(
+        ArtifactReviewComment.id == comment_id,
+        ArtifactReviewComment.artifact_id == artifact_id,
+    ).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if body.body is not None and comment.author != principal.id and not principal.allows("administer"):
+        raise HTTPException(status_code=403, detail="Only the comment author can edit its text")
+    now = _now()
+    event_type = "comment.updated"
+    if body.body is not None:
+        comment.body = body.body.strip()
+    if body.status is not None and body.status != comment.status:
+        comment.status = body.status
+        event_type = "comment.resolved" if body.status == "RESOLVED" else "comment.reopened"
+        comment.resolved_by = principal.id if body.status == "RESOLVED" else None
+        comment.resolved_at = now if body.status == "RESOLVED" else None
+    comment.updated_at = now
+    _audit(db, principal.id, f"artifact.{event_type}", "artifact", artifact_id, {
+        "comment_id": comment.id, "status": comment.status, "target": comment.target,
+    })
+    _collaboration_event(db, artifact, event_type, actor=principal.id, payload={
+        "comment_id": comment.id, "thread_id": comment.thread_id,
+        "status": comment.status, "target": comment.target,
+    })
+    db.commit()
+    return _comment_dict(comment)
+
+
+@router.post("/artifacts/{artifact_id}/proposals", status_code=201)
+@router.post("/api/v1/artifacts/{artifact_id}/proposals", status_code=201)
+def create_artifact_proposal(
+    artifact_id: str,
+    body: ChangeProposalCreate,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    artifact = _locked_artifact_for(db, artifact_id, principal, "edit")
+    if body.expected_lock_version != artifact.lock_version:
+        raise HTTPException(status_code=409, detail={
+            "message": "Artifact changed since the proposal was prepared",
+            "current_lock_version": artifact.lock_version,
+        })
+    current = _revision(db, artifact_id, artifact.current_revision)
+    proposed_state, _, _ = _apply_builder_commands(current.state or {}, current.layout or {}, body.commands)
+    validation = _validate_state(artifact.artifact_type, proposed_state)
+    targets = sorted({target for command in body.commands for target in _command_targets(command)})
+    now = _now()
+    proposal = ArtifactChangeProposal(
+        id=_id("proposal"), artifact_id=artifact_id, project_id=artifact.project_id,
+        base_revision=artifact.current_revision, base_lock_version=artifact.lock_version, version=1,
+        title=body.title.strip(), description=body.description,
+        commands=[command.model_dump() for command in body.commands], targets=targets,
+        validation=validation, status="OPEN", author=principal.id, reviewer=None,
+        review_note=None, applied_revision=None, created_at=now, updated_at=now,
+        reviewed_at=None, applied_at=None,
+    )
+    db.add(proposal)
+    _audit(db, principal.id, "artifact.proposal.created", "artifact", artifact_id, {
+        "proposal_id": proposal.id, "base_revision": proposal.base_revision, "targets": targets,
+    })
+    _collaboration_event(db, artifact, "proposal.created", actor=principal.id, payload={
+        "proposal_id": proposal.id, "title": proposal.title,
+        "base_revision": proposal.base_revision, "targets": targets,
+    })
+    db.commit()
+    return _proposal_dict(proposal)
+
+
+@router.get("/artifacts/{artifact_id}/proposals")
+@router.get("/api/v1/artifacts/{artifact_id}/proposals")
+def list_artifact_proposals(
+    artifact_id: str,
+    status: Optional[str] = None,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    _artifact_for(db, artifact_id, principal, "view")
+    query = db.query(ArtifactChangeProposal).filter(ArtifactChangeProposal.artifact_id == artifact_id)
+    if status:
+        query = query.filter(ArtifactChangeProposal.status == status.upper())
+    rows = query.order_by(ArtifactChangeProposal.updated_at.desc(), ArtifactChangeProposal.id).all()
+    return {"proposals": [_proposal_dict(row) for row in rows], "count": len(rows)}
+
+
+@router.get("/artifacts/{artifact_id}/proposals/{proposal_id}")
+@router.get("/api/v1/artifacts/{artifact_id}/proposals/{proposal_id}")
+def get_artifact_proposal(
+    artifact_id: str,
+    proposal_id: str,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    _artifact_for(db, artifact_id, principal, "view")
+    return _proposal_dict(_proposal_for(db, artifact_id, proposal_id))
+
+
+@router.patch("/artifacts/{artifact_id}/proposals/{proposal_id}")
+@router.patch("/api/v1/artifacts/{artifact_id}/proposals/{proposal_id}")
+def update_artifact_proposal(
+    artifact_id: str,
+    proposal_id: str,
+    body: ChangeProposalPatch,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    artifact = _locked_artifact_for(db, artifact_id, principal, "edit")
+    proposal = _proposal_for(db, artifact_id, proposal_id, lock=True)
+    if proposal.author != principal.id and not principal.allows("administer"):
+        raise HTTPException(status_code=403, detail="Only the proposal author can update it")
+    if proposal.status not in {"OPEN", "CONFLICT"}:
+        raise HTTPException(status_code=409, detail=f"Proposal in {proposal.status} state cannot be updated")
+    if proposal.version != body.expected_version:
+        raise HTTPException(status_code=409, detail={"message": "Proposal changed", "current_version": proposal.version})
+    commands = body.commands or [BuilderCommand.model_validate(command) for command in (proposal.commands or [])]
+    current = _revision(db, artifact_id, artifact.current_revision)
+    proposed_state, _, _ = _apply_builder_commands(current.state or {}, current.layout or {}, commands)
+    proposal.validation = _validate_state(artifact.artifact_type, proposed_state)
+    proposal.commands = [command.model_dump() for command in commands]
+    proposal.targets = sorted({target for command in commands for target in _command_targets(command)})
+    proposal.title = body.title.strip() if body.title is not None else proposal.title
+    proposal.description = body.description if body.description is not None else proposal.description
+    proposal.base_revision = artifact.current_revision
+    proposal.base_lock_version = artifact.lock_version
+    proposal.status = "OPEN"
+    proposal.reviewer = None
+    proposal.review_note = None
+    proposal.reviewed_at = None
+    proposal.version += 1
+    proposal.updated_at = _now()
+    _collaboration_event(db, artifact, "proposal.updated", actor=principal.id, payload={
+        "proposal_id": proposal.id, "version": proposal.version,
+        "base_revision": proposal.base_revision, "targets": proposal.targets,
+    })
+    db.commit()
+    return _proposal_dict(proposal)
+
+
+@router.post("/artifacts/{artifact_id}/proposals/{proposal_id}/review")
+@router.post("/api/v1/artifacts/{artifact_id}/proposals/{proposal_id}/review")
+def review_artifact_proposal(
+    artifact_id: str,
+    proposal_id: str,
+    body: ChangeProposalReview,
+    principal: Principal = Depends(require_permission("approve")),
+    db: Session = Depends(get_db),
+):
+    artifact = _locked_artifact_for(db, artifact_id, principal, "approve")
+    proposal = _proposal_for(db, artifact_id, proposal_id, lock=True)
+    if proposal.status != "OPEN":
+        raise HTTPException(status_code=409, detail=f"Only an OPEN proposal can be reviewed; current state is {proposal.status}")
+    if proposal.version != body.expected_version:
+        raise HTTPException(status_code=409, detail={"message": "Proposal changed", "current_version": proposal.version})
+    self_review_allowed = os.getenv("ARTIFACT_ALLOW_SELF_REVIEW", "").lower() in {"1", "true", "yes"}
+    if os.getenv("APP_ENV", "development").lower() == "production" and proposal.author == principal.id and not self_review_allowed:
+        raise HTTPException(status_code=409, detail="Production proposals require an independent reviewer")
+    now = _now()
+    proposal.status = "APPROVED" if body.decision == "APPROVE" else "REJECTED"
+    proposal.reviewer = principal.id
+    proposal.review_note = body.note
+    proposal.reviewed_at = now
+    proposal.updated_at = now
+    proposal.version += 1
+    _audit(db, principal.id, "artifact.proposal.reviewed", "artifact", artifact_id, {
+        "proposal_id": proposal.id, "decision": body.decision, "version": proposal.version,
+    })
+    _collaboration_event(db, artifact, f"proposal.{proposal.status.lower()}", actor=principal.id, payload={
+        "proposal_id": proposal.id, "reviewer": principal.id, "version": proposal.version,
+    })
+    db.commit()
+    return _proposal_dict(proposal)
+
+
+@router.post("/artifacts/{artifact_id}/proposals/{proposal_id}/apply")
+@router.post("/api/v1/artifacts/{artifact_id}/proposals/{proposal_id}/apply")
+def apply_artifact_proposal(
+    artifact_id: str,
+    proposal_id: str,
+    body: ChangeProposalApply,
+    principal: Principal = Depends(require_permission("edit")),
+    db: Session = Depends(get_db),
+):
+    artifact = _locked_artifact_for(db, artifact_id, principal, "edit")
+    proposal = _proposal_for(db, artifact_id, proposal_id, lock=True)
+    if proposal.status == "APPLIED":
+        return {**_proposal_dict(proposal), "artifact": _artifact_dict(db, artifact, principal), "idempotent_replay": True}
+    if proposal.status != "APPROVED":
+        raise HTTPException(status_code=409, detail=f"Only an APPROVED proposal can be applied; current state is {proposal.status}")
+    if proposal.version != body.expected_version:
+        raise HTTPException(status_code=409, detail={"message": "Proposal changed", "current_version": proposal.version})
+    concurrent_events = db.query(ArtifactCollaborationEvent).filter(
+        ArtifactCollaborationEvent.artifact_id == artifact_id,
+        ArtifactCollaborationEvent.lock_version > proposal.base_lock_version,
+        ArtifactCollaborationEvent.event_type.in_([
+            "artifact.commands", "artifact.revision", "artifact.published",
+            "artifact.restored", "proposal.applied",
+        ]),
+    ).order_by(ArtifactCollaborationEvent.id).all()
+    concurrent_targets = {
+        str(target) for event in concurrent_events
+        for target in (event.payload or {}).get("targets", ["artifact:*"])
+    }
+    incoming_targets = set(proposal.targets or [])
+    if _targets_conflict(incoming_targets, concurrent_targets):
+        proposal.status = "CONFLICT"
+        proposal.version += 1
+        proposal.updated_at = _now()
+        conflict = {
+            "message": "Approved proposal overlaps with newer artifact changes",
+            "proposal_id": proposal.id, "current_lock_version": artifact.lock_version,
+            "base_lock_version": proposal.base_lock_version,
+            "incoming_targets": sorted(incoming_targets),
+            "concurrent_targets": sorted(concurrent_targets),
+            "conflicting_event_ids": [event.id for event in concurrent_events],
+            "proposal_version": proposal.version,
+        }
+        _audit(db, principal.id, "artifact.proposal.conflicted", "artifact", artifact_id, conflict)
+        _collaboration_event(db, artifact, "proposal.conflicted", actor=principal.id, payload=conflict)
+        db.commit()
+        raise HTTPException(status_code=409, detail=conflict)
+    commands = [BuilderCommand.model_validate(command) for command in (proposal.commands or [])]
+    current = _revision(db, artifact_id, artifact.current_revision)
+    state, layout, applied = _apply_builder_commands(current.state or {}, current.layout or {}, commands)
+    validation = _validate_state(artifact.artifact_type, state)
+    artifact.current_revision += 1
+    artifact.lock_version += 1
+    artifact.updated_at = _now()
+    artifact.status = "DRAFT"
+    db.add(ArtifactRevision(
+        id=_id("revision"), artifact_id=artifact.id, revision=artifact.current_revision,
+        state=state, layout=layout, validation=validation, author=principal.id,
+        message=f"Applied proposal: {proposal.title}", published=False, created_at=artifact.updated_at,
+    ))
+    receipt = ArtifactCommandReceipt(
+        id=_id("receipt"), artifact_id=artifact.id, project_id=artifact.project_id,
+        command_scope="proposal", idempotency_key=f"proposal:{proposal.id}:v{proposal.version}",
+        request_hash=_command_request_hash(commands), revision=artifact.current_revision,
+        lock_version=artifact.lock_version, participant_id=None,
+        command_ids=[command.command_id for command in commands],
+        rebased_from_lock_version=(proposal.base_lock_version if proposal.base_lock_version < artifact.lock_version - 1 else None),
+        created_at=artifact.updated_at,
+    )
+    db.add(receipt)
+    proposal.status = "APPLIED"
+    proposal.applied_revision = artifact.current_revision
+    proposal.applied_at = artifact.updated_at
+    proposal.updated_at = artifact.updated_at
+    proposal.version += 1
+    _audit(db, principal.id, "artifact.proposal.applied", "artifact", artifact_id, {
+        "proposal_id": proposal.id, "revision": artifact.current_revision,
+        "lock_version": artifact.lock_version, "reviewer": proposal.reviewer,
+        "commands": [{"command_id": item["command_id"], "command": item["command"]} for item in applied],
+    })
+    _collaboration_event(db, artifact, "proposal.applied", actor=principal.id, payload={
+        "proposal_id": proposal.id, "targets": sorted(incoming_targets),
+        "revision": artifact.current_revision, "reviewer": proposal.reviewer,
+    })
+    db.commit()
+    return {
+        **_proposal_dict(proposal), "artifact": _artifact_dict(db, artifact, principal),
+        "command_receipt": _command_receipt_dict(receipt), "idempotent_replay": False,
+    }
 
 
 @router.get("/artifacts/{artifact_id}/collaboration/events")
@@ -1758,6 +2405,102 @@ async def stream_artifact_collaboration_events(
             await asyncio.sleep(0.5)
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _websocket_origin_allowed(websocket: WebSocket) -> bool:
+    if not production_auth.is_production():
+        return True
+    origin = (websocket.headers.get("origin") or "").strip()
+    if not origin:
+        return False
+    configured = {
+        value.strip().rstrip("/")
+        for value in os.getenv("WEBSOCKET_ALLOWED_ORIGINS", "").split(",")
+        if value.strip()
+    }
+    public_base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public_base:
+        configured.add(public_base)
+    redirect_uri = os.getenv("OIDC_REDIRECT_URI", "").strip()
+    if redirect_uri:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(redirect_uri)
+        configured.add(f"{parsed.scheme}://{parsed.netloc}")
+    return origin.rstrip("/") in configured
+
+
+@router.websocket("/artifacts/{artifact_id}/collaboration/ws")
+async def websocket_artifact_collaboration_events(websocket: WebSocket, artifact_id: str, after: int = 0):
+    """Authenticated, resumable fanout over the authoritative collaboration event log."""
+    if not _websocket_origin_allowed(websocket):
+        await websocket.close(code=4403, reason="WebSocket origin is not allowed")
+        return
+
+    auth_db = SessionLocal()
+    try:
+        if production_auth.auth_mode() == "local":
+            principal = production_auth._local_principal()
+        else:
+            principal = production_auth._bearer_principal(auth_db, websocket.headers.get("authorization")) or production_auth._session_principal(
+                auth_db, websocket.cookies.get(production_auth.SESSION_COOKIE)
+            )
+        if not principal:
+            await websocket.close(code=4401, reason="Authentication required")
+            return
+        if not principal.allows("view"):
+            await websocket.close(code=4403, reason="View permission is required")
+            return
+        artifact = _artifact_for(auth_db, artifact_id, principal, "view")
+        auth_db.commit()
+        initial_revision = artifact.current_revision
+        initial_lock_version = artifact.lock_version
+    except HTTPException as exc:
+        auth_db.rollback()
+        await websocket.close(code=4404 if exc.status_code == 404 else 4403, reason=str(exc.detail)[:120])
+        return
+    finally:
+        auth_db.close()
+
+    cursor = max(0, after)
+    idle_cycles = 0
+    try:
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "connection.ready",
+            "artifact_id": artifact_id,
+            "cursor": cursor,
+            "revision": initial_revision,
+            "lock_version": initial_lock_version,
+        })
+        while True:
+            event_db = SessionLocal()
+            try:
+                events = event_db.query(ArtifactCollaborationEvent).filter(
+                    ArtifactCollaborationEvent.artifact_id == artifact_id,
+                    ArtifactCollaborationEvent.id > cursor,
+                ).order_by(ArtifactCollaborationEvent.id).limit(100).all()
+                serialized = [_event_dict(event) for event in events]
+            finally:
+                event_db.close()
+            for event in serialized:
+                cursor = int(event["id"])
+                await websocket.send_json({"type": "event", "cursor": cursor, "event": event})
+            idle_cycles = 0 if serialized else idle_cycles + 1
+            if idle_cycles >= 20:
+                await websocket.send_json({"type": "keepalive", "cursor": cursor})
+                idle_cycles = 0
+            try:
+                message = await asyncio.wait_for(websocket.receive_json(), timeout=0.5)
+                message_type = str(message.get("type") or "") if isinstance(message, dict) else ""
+                if message_type == "ping":
+                    await websocket.send_json({"type": "pong", "cursor": cursor})
+                elif message_type == "resume":
+                    requested = int(message.get("after", cursor))
+                    cursor = max(cursor, requested)
+            except asyncio.TimeoutError:
+                continue
+    except (WebSocketDisconnect, RuntimeError, ValueError):
+        return
 
 
 def _job_event(db: Session, row: PlatformJob, event_type: str, payload: Optional[Dict[str, Any]] = None) -> None:
@@ -1879,6 +2622,9 @@ def _reap_stale_jobs(db: Session) -> int:
                 "reason": reason, "attempt": row.attempt, "prior_worker_id": prior_worker_id,
                 "prior_lease_expires_at": prior_lease_expires_at,
             })
+        if row.job_type == "plugin.execute":
+            from . import plugin_runtime
+            plugin_runtime.sync_execution_from_job(db, row)
         from . import runtime_observability
         if row.status == "QUEUED":
             runtime_observability.record_job_recovery(db, row, reason, prior_worker_id)
@@ -2106,6 +2852,8 @@ def heartbeat_job(job_id: str, body: JobHeartbeatRequest, principal: Principal =
 @router.post("/jobs/{job_id}/complete")
 def complete_job(job_id: str, body: JobCompleteRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     row = _authorized_job(db, principal, job_id, "execute")
+    if row.job_type == "plugin.execute":
+        raise HTTPException(status_code=409, detail="Plugin jobs must use the signed plugin completion endpoint")
     if row.status != "RUNNING":
         raise HTTPException(status_code=409, detail="Job is not running")
     lease = _require_job_lease(db, row, body.lease_token)
@@ -2127,6 +2875,8 @@ def complete_job(job_id: str, body: JobCompleteRequest, principal: Principal = D
 @router.post("/jobs/{job_id}/fail")
 def fail_job(job_id: str, body: JobFailRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     row = _authorized_job(db, principal, job_id, "execute")
+    if row.job_type == "plugin.execute":
+        raise HTTPException(status_code=409, detail="Plugin jobs must use the signed plugin failure endpoint")
     if row.status != "RUNNING":
         raise HTTPException(status_code=409, detail="Job is not running")
     lease = _require_job_lease(db, row, body.lease_token)
@@ -2170,12 +2920,16 @@ def cancel_job(job_id: str, principal: Principal = Depends(require_permission("e
     if row.status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
         raise HTTPException(status_code=409, detail=f"Job is already {row.status}")
     row.status = "CANCELLED"
+    row.error = "Cancelled by user"
     row.updated_at = row.completed_at = _now()
     _release_job_lease(db, row.id)
     _job_event(db, row, "job.cancelled", {"actor": principal.id})
     from . import runtime_observability
     runtime_observability.record_job_terminal(db, row, "CANCELLED", {}, "Cancelled by user")
     _audit(db, principal.id, "job.cancelled", "platform_job", row.id, {})
+    if row.job_type == "plugin.execute":
+        from . import plugin_runtime
+        plugin_runtime.sync_execution_from_job(db, row)
     db.commit()
     return _job_dict(row, db)
 
@@ -2198,11 +2952,15 @@ def retry_job(job_id: str, principal: Principal = Depends(require_permission("ex
     from . import runtime_observability
     runtime_observability.record_job_progress(db, row, "Job manually retried", {"attempt": row.attempt})
     _audit(db, principal.id, "job.retried", "platform_job", row.id, {"attempt": row.attempt})
+    if row.job_type == "plugin.execute":
+        from . import plugin_runtime
+        plugin_runtime.sync_execution_from_job(db, row)
     db.commit()
     return _job_dict(row, db)
 
 
 @router.get("/events/stream")
+@router.get("/api/v1/events/stream")
 async def event_stream(request: Request, after: int = 0, job_id: Optional[str] = None, once: bool = False, principal: Principal = Depends(require_detached_permission("view"))):
     scope_db = SessionLocal()
     try:

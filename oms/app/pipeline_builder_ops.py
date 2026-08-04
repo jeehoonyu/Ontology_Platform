@@ -193,7 +193,10 @@ NODE_CONFIGURATION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         {"name": "prompt", "label": "Prompt", "type": "textarea", "required": True},
         {"name": "target_field", "label": "Output field", "type": "string", "required": True},
     ]},
-    "dataset_output": {"fields": [{"name": "asset_id", "label": "Output dataset", "type": "string", "required": True}]},
+    "dataset_output": {"fields": [
+        {"name": "asset_id", "label": "Output dataset", "type": "string", "required": True},
+        {"name": "partition_by", "label": "Partition fields", "type": "field_list", "maximum_items": 8},
+    ]},
     "ontology_output": {"fields": [
         {"name": "object_type_id", "label": "Object type", "type": "resource", "resource_type": "object_type", "required": True},
         {"name": "primary_key", "label": "Source primary key field", "type": "field", "required": True},
@@ -1059,7 +1062,12 @@ def _normalize_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[
             value = _value(row, field)
             if isinstance(value, str):
                 value = value.strip()
-                value = value.lower() if case == "lower" else value.upper() if case == "upper" else value
+                value = (
+                    value.lower() if case == "lower"
+                    else value.upper() if case == "upper"
+                    else value.title() if case == "title"
+                    else value
+                )
                 result[field] = value
         output.append(result)
     return output
@@ -1224,17 +1232,29 @@ def _derive_mgrs_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> Lis
     output = []
     for row in rows:
         lat, lon = _value(row, latitude), _value(row, longitude)
-        output.append({**row, **({target: encode_mgrs(float(lat), float(lon), precision)} if lat is not None and lon is not None else {})})
+        output.append({**row, **({target: encode_mgrs(float(lat), float(lon), precision)["mgrs"]} if lat is not None and lon is not None else {})})
     return output
 
 
 def _spatial_filter_rows(rows: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    mode = str(config.get("mode") or "radius").lower()
+    geometry_field = config.get("geometry_field") or "geometry"
+    if mode in {"geofence", "polygon"}:
+        from .runtime import point_in_polygon, validate_geojson_geometry
+        polygon = config.get("polygon") or config.get("geofence")
+        if not validate_geojson_geometry(polygon) or polygon.get("type") != "Polygon":
+            raise HTTPException(status_code=422, detail="Spatial geofence requires a GeoJSON Polygon")
+        return [
+            row for row in rows
+            if (point := _point(row, geometry_field)) and point_in_polygon((point[1], point[0]), polygon)
+        ]
+    if mode != "radius":
+        raise HTTPException(status_code=422, detail=f"Unsupported spatial filter mode '{mode}'")
     center = config.get("center") or {}
     center_point = (float(center.get("latitude")), float(center.get("longitude"))) if center.get("latitude") is not None and center.get("longitude") is not None else None
     radius = float(config.get("radius_meters", 0))
-    geometry_field = config.get("geometry_field") or "geometry"
     if not center_point or radius <= 0:
-        return rows
+        raise HTTPException(status_code=422, detail="Radius filter requires a center and positive radius_meters")
     return [row for row in rows if _point(row, geometry_field) and _distance_meters(_point(row, geometry_field), center_point) <= radius]
 
 
@@ -1527,30 +1547,68 @@ def _execute_ontology_contract(
         quarantine_asset_id = _quarantine_rows(db, graph, node_id, str(config.get("quarantine_asset_id") or f"{graph.id}_{node_id}_quarantine"), quarantine_records)
 
     if write_ontology:
-        from . import decision_intelligence
+        from . import decision_intelligence, ontology_runtime_v1
+        materialization_id = config.get("materialization_id")
         for _row_index, _row, object_id, mapped_properties, existing in accepted:
             if existing:
                 before = dict(existing.properties or {})
                 after = {**before, **mapped_properties}
-                if after == before:
+                lifecycle_changed = bool(
+                    materialization_id and (
+                        existing.materialization_id != materialization_id
+                        or not existing.is_active
+                        or existing.retired_at is not None
+                    )
+                )
+                if after == before and not lifecycle_changed:
                     unchanged_count += 1
                 else:
+                    was_active = existing.is_active
                     existing.properties = after
                     existing.source_asset_id = config.get("source_asset_id") or existing.source_asset_id
-                    existing.lineage = {**(existing.lineage or {}), "pipeline_builder_graph_id": graph.id, "node_id": node_id, "field_lineage": field_lineage}
+                    existing.materialization_id = materialization_id or existing.materialization_id
+                    existing.is_active = True
+                    existing.retired_at = None
+                    existing.lineage = {
+                        **(existing.lineage or {}), "pipeline_builder_graph_id": graph.id,
+                        "node_id": node_id, "field_lineage": field_lineage,
+                        **({
+                            "materialization_id": materialization_id,
+                            "materialization_active": True,
+                            "retired_by_materialization_id": None,
+                        } if materialization_id else {}),
+                    }
                     existing.updated_at = _now()
                     updated_count += 1
-                    decision_intelligence.record_object_snapshot(db, existing, event_type="pipeline_builder.object.updated", actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id)
+                    event_type = "pipeline_builder.object.reactivated" if not was_active else (
+                        "pipeline_builder.object.rematerialized" if after == before else "pipeline_builder.object.updated"
+                    )
+                    decision_intelligence.record_object_snapshot(db, existing, event_type=event_type, actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id)
+                    ontology_runtime_v1.record_object_change(
+                        db, existing, before_state=before, event_type=event_type,
+                        actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id,
+                        evidence={"node_id": node_id, "field_lineage": field_lineage, "materialization_id": materialization_id},
+                    )
             else:
                 created = models.ObjectInstance(
                     id=object_id, project_id=graph.project_id, object_type_id=object_type_id,
                     properties=mapped_properties, source_asset_id=config.get("source_asset_id"),
-                    lineage={"pipeline_builder_graph_id": graph.id, "node_id": node_id, "field_lineage": field_lineage},
+                    materialization_id=materialization_id, is_active=True, retired_at=None,
+                    lineage={
+                        "pipeline_builder_graph_id": graph.id, "node_id": node_id,
+                        "field_lineage": field_lineage,
+                        **({"materialization_id": materialization_id, "materialization_active": True} if materialization_id else {}),
+                    },
                     created_at=_now(), updated_at=_now(),
                 )
                 db.add(created)
                 created_count += 1
                 decision_intelligence.record_object_snapshot(db, created, event_type="pipeline_builder.object.created", actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id)
+                ontology_runtime_v1.record_object_change(
+                    db, created, before_state={}, event_type="pipeline_builder.object.created",
+                    actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id,
+                    evidence={"node_id": node_id, "field_lineage": field_lineage, "materialization_id": materialization_id},
+                )
     else:
         for _row_index, _row, _object_id, mapped_properties, existing in accepted:
             if not existing:
@@ -2093,7 +2151,11 @@ def enqueue_graph_delivery(graph_id: str, body: PipelineAsyncDeliverRequest = Pi
 def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     from . import worker_control
     supported_job_types = worker_control.effective_worker_job_types(
-        db, principal, body.worker_id, ["pipeline.preview", "pipeline.deliver"],
+        db, principal, body.worker_id, [
+            "pipeline.preview", "pipeline.deliver",
+            "pipeline.duckdb.preview", "pipeline.duckdb.deliver",
+            "industrial.ontology_hydrate",
+        ],
     )
     claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
         worker_id=body.worker_id,
@@ -2128,7 +2190,33 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
             lease_seconds=body.lease_seconds,
         ), principal, db)
 
-        if claimed["job_type"] == "pipeline.preview":
+        if claimed["job_type"] == "industrial.ontology_hydrate":
+            from . import industrial_workflow
+            industrial_lease_seconds = max(body.lease_seconds, 900)
+            platform_runtime.heartbeat_job(job_id, platform_runtime.JobHeartbeatRequest(
+                lease_token=lease_token, progress=20,
+                message="Industrial contract compiled; delivering immutable snapshot",
+                metrics={"source_snapshot_id": payload.get("source_snapshot_id")},
+                lease_seconds=industrial_lease_seconds,
+            ), principal, db)
+            result = industrial_workflow.execute_industrial_onboarding_job(
+                db, payload=payload, actor=principal.id, job_id=job_id,
+                lease_token=lease_token, lease_seconds=industrial_lease_seconds,
+                principal=principal,
+            )
+        elif claimed["job_type"].startswith("pipeline.duckdb."):
+            from . import data_plane
+            result = data_plane.execute_duckdb_snapshot_plan(
+                db,
+                str(payload.get("plan_id") or claimed.get("subject_id") or ""),
+                mode="deliver" if claimed["job_type"] == "pipeline.duckdb.deliver" else "preview",
+                limit=int(payload.get("limit") or 100),
+                output_asset_id=payload.get("output_asset_id"),
+                parameters=dict(payload.get("parameters") or {}),
+                actor=principal.id,
+                execution_job_id=job_id,
+            )
+        elif claimed["job_type"] == "pipeline.preview":
             result = preview_graph(graph_id, PipelinePreviewRequest(
                 limit=int(payload.get("limit") or 50),
                 parameters=dict(payload.get("parameters") or {}),

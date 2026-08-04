@@ -68,14 +68,73 @@ export interface WorkflowState {
   summary: CommandCenterSummary;
 }
 
+export interface IndustrialWorkflowState {
+  project_id: string;
+  status: string;
+  current_step: string;
+  completed_steps: string[];
+  next_action: string;
+  blocked_reason?: string | null;
+  steps: WorkflowStep[];
+  evidence_links: EvidenceLink[];
+  summary: {
+    object_count: number;
+    retired_object_count?: number;
+    latest_pipeline_status?: string | null;
+    ontology_revision_id?: string | null;
+    source_snapshot_id?: string | null;
+    output_snapshot_id?: string | null;
+    pipeline_plan_id?: string | null;
+    latest_execution_job?: PlatformJob | null;
+    latest_decision_run_id?: string | null;
+    risk_objects_evaluated?: number;
+    risk_band_counts?: Record<string, number>;
+    latest_approval?: ApprovalRequest | null;
+    latest_action?: GovernedActionEvidence | null;
+    latest_report_id?: string | null;
+  };
+}
+
 export interface CommandCenterSummary {
   scenario_id?: string;
   asset_id?: string;
   kpis?: StatusSummary;
   high_risk_assets?: Array<{ object_id?: string; object?: JsonObject; risk?: JsonObject }>;
   alerts?: TableRow[];
-  approvals?: TableRow[];
+  approvals?: ApprovalRequest[];
+  latest_approval?: ApprovalRequest | null;
+  latest_action?: GovernedActionEvidence | null;
   latest_report?: JsonObject | null;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  action_type_id: string;
+  requester: string;
+  parameters: JsonObject;
+  status: "PENDING" | "APPROVED" | "REJECTED" | string;
+  reason?: string | null;
+  created_at: number;
+  decided_at?: number | null;
+}
+
+export interface GovernedActionEvidence {
+  id?: string | null;
+  action_type_id?: string | null;
+  status: string;
+  outbox_status?: string | null;
+  approval_request_id?: string | null;
+  parameters?: JsonObject;
+  mutated_object_ids?: string[];
+  actor?: string | null;
+  created_at?: number | null;
+  message?: string;
+  outbox_event_id?: string | null;
+}
+
+export interface AssetReliabilityTriageResult {
+  status: string;
+  approval: ApprovalRequest;
 }
 
 export interface CommandCenterUiState extends HumanUiState {

@@ -1,0 +1,51 @@
+{
+  "deliver_limit_ms": 60000.0,
+  "deliver_ms": 4046.026,
+  "dimension_rows": 20,
+  "filtered_rows": 5000000,
+  "generate_seconds": 3.521,
+  "host": {
+    "duckdb": "1.5.5",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "input_parquet_bytes": 15572089,
+  "input_partitions": 8,
+  "input_rows": 10000000,
+  "materialized_python_rows": 20,
+  "operations": [
+    "input_dataset",
+    "filter",
+    "unique_id",
+    "derive_geo_point",
+    "spatial_filter",
+    "derive_mgrs",
+    "spatial_filter",
+    "input_dataset",
+    "join",
+    "window",
+    "derive",
+    "aggregate",
+    "sort",
+    "dataset_output"
+  ],
+  "output_parquet_bytes": 11200,
+  "output_partitions": 20,
+  "output_rows": 20,
+  "output_snapshot_id": "dataset_snapshot_16a5ef27f24cfff57d69559927b053db",
+  "plan_hash": "280bd7d060c7ef5b31b3e85ecd7ad44f8ff26cd8a967e9941a704d97bf46fa5c",
+  "plan_id": "pipeline_plan_5ab3898e170f40b08cdcee88ca3b92aa",
+  "preview_limit_ms": 30000.0,
+  "preview_p50_ms": 3073.799,
+  "preview_p95_ms": 3663.405,
+  "profile": "reference",
+  "reference_scale_achieved": true,
+  "samples": 5,
+  "scanned_rows": 10000020,
+  "source_snapshot_id": "dataset_snapshot_a93a2900d46540e68dd821151fe98ae5",
+  "source_snapshot_ids": [
+    "dataset_snapshot_a93a2900d46540e68dd821151fe98ae5",
+    "dataset_snapshot_4a82df3bc3b948cbad429784930194b1"
+  ]
+}

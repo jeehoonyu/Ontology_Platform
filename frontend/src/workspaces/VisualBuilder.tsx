@@ -37,7 +37,7 @@ import {
   acquireArtifactLease,
   applyArtifactCommands,
   applyCollaborativeCommands,
-  artifactCollaborationStreamUrl,
+  artifactCollaborationWebSocketUrl,
   createArtifact,
   getArtifactCollaboration,
   getBuilderCatalog,
@@ -59,6 +59,7 @@ import {
   type PlatformArtifact
 } from "../api/artifactApi";
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
+import { ArtifactReviewPanel } from "../components/workbench/ArtifactReviewPanel";
 import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 
@@ -261,10 +262,15 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
 
   useEffect(() => {
     if (!artifact || !collaboration) return;
-    const stream = new EventSource(artifactCollaborationStreamUrl(artifact.id, collaboration.event_cursor));
-    const receive = (raw: Event) => {
-      const event = JSON.parse((raw as MessageEvent<string>).data) as ArtifactCollaborationEvent;
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer = 0;
+    let reconnectAttempt = 0;
+    let cursor = collaboration.event_cursor;
+    const receive = (event: ArtifactCollaborationEvent) => {
       queryClient.invalidateQueries({ queryKey: ["artifact-collaboration", artifact.id] });
+      if (event.event_type.startsWith("comment.")) queryClient.invalidateQueries({ queryKey: ["artifact-comments", artifact.id] });
+      if (event.event_type.startsWith("proposal.")) queryClient.invalidateQueries({ queryKey: ["artifact-proposals", artifact.id] });
       if (event.participant_id === collaboration.participant.id) return;
       if (["artifact.commands", "artifact.revision", "artifact.published", "artifact.restored"].includes(event.event_type)) {
         if (dirtyRef.current) {
@@ -275,10 +281,36 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
         }
       }
     };
-    ["presence.joined", "presence.rejoined", "presence.updated", "presence.left", "artifact.commands", "artifact.revision", "artifact.published", "artifact.restored", "artifact.conflict"]
-      .forEach((name) => stream.addEventListener(name, receive));
-    stream.onerror = () => setMessage("Live updates disconnected. Reconnecting automatically...");
-    return () => stream.close();
+    const connect = () => {
+      if (!active) return;
+      socket = new WebSocket(artifactCollaborationWebSocketUrl(artifact.id, cursor));
+      socket.onopen = () => {
+        reconnectAttempt = 0;
+        setMessage("Live collaboration connected.");
+      };
+      socket.onmessage = (raw) => {
+        const envelope = JSON.parse(String(raw.data)) as {
+          type: string;
+          cursor?: number;
+          event?: ArtifactCollaborationEvent;
+        };
+        if (typeof envelope.cursor === "number") cursor = Math.max(cursor, envelope.cursor);
+        if (envelope.type === "event" && envelope.event) receive(envelope.event);
+      };
+      socket.onerror = () => setMessage("Live updates disconnected. Reconnecting automatically...");
+      socket.onclose = () => {
+        if (!active) return;
+        const delay = Math.min(5_000, 250 * (2 ** reconnectAttempt));
+        reconnectAttempt += 1;
+        reconnectTimer = window.setTimeout(connect, delay);
+      };
+    };
+    connect();
+    return () => {
+      active = false;
+      window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
   }, [artifact?.id, artifactType, collaboration?.participant.id, collaboration?.event_cursor, queryClient]);
 
   const createMutation = useMutation({
@@ -507,6 +539,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }, [nodes, edges, selectedNodeId]);
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+  const pendingCommands = artifact ? diffArtifactCommands(artifact.state, nodes, edges) : [];
 
   if (artifacts.isLoading) return <LoadingState label={`Loading ${title} artifacts...`} />;
   if (artifacts.error) return <ErrorBanner message={artifacts.error instanceof Error ? artifacts.error.message : String(artifacts.error)} />;
@@ -640,6 +673,22 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           ) : (
             <div className="inspector-empty"><Archive size={22} /><strong>Select a node</strong><p>Configure fields, bindings, behavior, and validation from this panel.</p></div>
           )}
+          <ArtifactReviewPanel
+            artifact={artifact}
+            selectedNodeId={selectedNodeId}
+            pendingCommands={pendingCommands}
+            onApplied={async (appliedArtifact) => {
+              setDirty(false);
+              dirtyRef.current = false;
+              setCollaborationConflict("");
+              hydratedArtifact.current = `${appliedArtifact.id}:${appliedArtifact.current_revision}`;
+              setNodes(stateNodes(appliedArtifact));
+              setEdges(stateEdges(appliedArtifact));
+              queryClient.setQueryData<PlatformArtifact[]>(["artifacts", artifactType], (items = []) => items.map((item) => item.id === appliedArtifact.id ? appliedArtifact : item));
+              await queryClient.invalidateQueries({ queryKey: ["artifact-versions", appliedArtifact.id] });
+              setMessage(`Applied reviewed proposal as revision ${appliedArtifact.current_revision}`);
+            }}
+          />
           <details className="version-history">
             <summary><History size={15} /> Version history</summary>
             {(versions.data || []).map((version) => (

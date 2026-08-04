@@ -28,6 +28,7 @@ ok(client.post("/data-assets", json={
         {"asset_id": "a1", "facility": " west ", "temperature": "91.5", "latitude": 37.7749, "longitude": -122.4194, "reading": 3},
         {"asset_id": "a1", "facility": " west ", "temperature": "91.5", "latitude": 37.7749, "longitude": -122.4194, "reading": 3},
         {"asset_id": "a2", "facility": None, "temperature": "70", "latitude": 37.7750, "longitude": -122.4195, "reading": 4},
+        {"asset_id": "a3", "facility": " east ", "temperature": "75", "latitude": 40.0, "longitude": -100.0, "reading": 8},
     ],
 }), "create transform input")
 
@@ -40,6 +41,14 @@ nodes = [
     {"id": "dedupe", "type": "deduplicate", "config": {"keys": ["asset_id"]}},
     {"id": "geo", "type": "derive_geo_point", "config": {}},
     {"id": "mgrs", "type": "derive_mgrs", "config": {"precision": 3}},
+    {"id": "geofence", "type": "spatial_filter", "config": {
+        "mode": "geofence", "geometry_field": "geometry", "polygon": {
+            "type": "Polygon", "coordinates": [[
+                [-122.421, 37.774], [-122.418, 37.774], [-122.418, 37.776],
+                [-122.421, 37.776], [-122.421, 37.774],
+            ]],
+        },
+    }},
     {"id": "window", "type": "window", "config": {"order_by": "asset_id", "operation": "running_sum", "field": "reading", "target_field": "running_reading"}},
     {"id": "validate", "type": "validate", "config": {"checks": [{"type": "range", "field": "temperature", "min": 60, "max": 100}]}},
     {"id": "output", "type": "dataset_output", "config": {"asset_id": "advanced_output"}},
@@ -55,8 +64,14 @@ rows = preview["rows"]
 assert len(rows) == 2, rows
 assert rows[0]["temperature"] == 91.5 and rows[0]["facility"] == "WEST", rows[0]
 assert rows[0]["label"] == "a1:WEST" and rows[1]["label"] == "a2:UNKNOWN", rows
-assert rows[0]["geometry"]["type"] == "Point" and rows[0]["mgrs"]["mgrs"], rows[0]
+assert rows[0]["geometry"]["type"] == "Point" and isinstance(rows[0]["mgrs"], str), rows[0]
 assert [row["running_reading"] for row in rows] == [3.0, 7.0], rows
+
+ok(client.patch("/pipeline-builder/graphs/advanced_graph/nodes/normalize", json={
+    "config": {"fields": ["facility"], "mode": "title"},
+}), "configure title normalization")
+title_preview = ok(client.post("/pipeline-builder/graphs/advanced_graph/preview", json={"limit": 20}), "preview title normalization")
+assert [row["facility"] for row in title_preview["rows"]] == ["West", "Unknown"], title_preview
 
 ok(client.post("/data-assets", json={
     "id": "pivot_input",

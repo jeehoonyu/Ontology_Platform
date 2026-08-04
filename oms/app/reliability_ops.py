@@ -6,6 +6,7 @@ top of existing DataAsset, PipelineDefinition, PipelineRun, and lineage APIs.
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections import Counter, deque
@@ -132,6 +133,8 @@ class BackfillRunRequest(BaseModel):
 
 
 def _ensure_tables(db: Session) -> None:
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     for table in (
         DataQualityContract.__table__,
         DataQualityRun.__table__,

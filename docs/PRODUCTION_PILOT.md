@@ -13,6 +13,7 @@ Worker deployment and queue recovery behavior is documented in [Asynchronous Exe
 4. Emit `organization_id` and a string-array `project_ids` claim. Effective access requires both a global role permission and project membership/claim. See [Project Tenancy And Ontology Packages](TENANCY_AND_PACKAGES.md).
 5. Point `PUBLIC_HOST` at the server. Caddy obtains and renews TLS certificates automatically for public DNS names.
 6. Generate a separate `CONNECTOR_SECRET_KEY`, configure `CONNECTOR_ALLOWED_HOSTS` (for AWS S3 this can include `s3.*.amazonaws.com`), and keep private-network connector access disabled unless the API runs in a controlled connector subnet. See [Durable Ingestion Runtime](DURABLE_INGESTION_RUNTIME.md).
+7. For S3-backed dataset snapshots, provision `DATA_SNAPSHOT_BUCKET`, configure endpoint/region/addressing style and standard AWS credentials, and mount persistent `DATA_SNAPSHOT_CACHE_ROOT` storage on every API/worker that executes DuckDB plans. Size `DATA_SNAPSHOT_CACHE_MAX_BYTES` for concurrent working sets and keep `DATA_SNAPSHOT_CACHE_LEASE_SECONDS` at least as long as the maximum pipeline execution timeout. Monitor `/api/v1/snapshot-cache/summary`. Keep `DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET=false` in production; it is only for controlled MinIO demonstrations.
 
 Production startup fails when `AUTH_MODE` is not `oidc` or required OIDC settings are missing. The local administrator bypass is therefore unavailable in the production profile.
 
@@ -25,7 +26,7 @@ docker compose --env-file .env.production -f docker-compose.yml -f docker-compos
 
 Verify `https://${PUBLIC_HOST}/health/live`, `/health/ready`, and then `/workspace/command-center`. API containers apply the Alembic schema baseline before accepting traffic. PostgreSQL deployments serialize concurrent migration startup with an advisory transaction lock, allowing multiple replicas to start against a fresh database without racing schema DDL.
 
-For an isolated OIDC demonstration, start the optional Keycloak service with `--profile demo-idp`, update `OIDC_ISSUER` to the reachable realm URL, and create at least one user with a supported realm role. Do not use the included development realm configuration as an internet-facing identity service.
+For an isolated OIDC demonstration, start the optional Keycloak service with `--profile demo-idp`, update `OIDC_ISSUER` to the reachable realm URL, and create at least one user with a supported realm role. When the identity provider has a private service address, set `OIDC_BACKCHANNEL_BASE_URL` so discovery, token, and JWKS requests avoid the public ingress path; ID-token issuer validation still uses `OIDC_ISSUER`. Do not use the included development realm configuration as an internet-facing identity service.
 
 ### Isolated production rehearsal
 
@@ -58,7 +59,9 @@ For the complete release gate, run the self-cleaning acceptance rehearsal instea
 ./scripts/rehearse-production-acceptance.ps1
 ```
 
-It generates temporary secrets; starts digest-pinned Keycloak, Postgres, and two API replicas; registers the declared `organization_id` and `project_ids` claims; and runs the production browser workflow. The workflow verifies PKCE-backed OIDC sessions, administrator/viewer RBAC, organization boundaries, and own-data onboarding through ontology and pipeline delivery. It also creates project-owned Workshop, Action Type, AIP Logic, Agent, model endpoint, and evaluation resources, queues an asynchronous agent invocation, rejects cross-project creation, and proves viewers cannot mutate, execute, evaluate, invoke, or publish. The remaining gate exercises 50 concurrent reads, Asset Reliability approval/reporting, cross-replica collaboration and job idempotency, abandoned-worker recovery with fencing, serialized Alembic startup, API restart, and fresh-volume backup/restore. Use `-KeepStack` only for troubleshooting and `-SkipRecovery` only when the separate recovery gate has already passed for the same build.
+It generates temporary secrets; starts digest-pinned Keycloak, Postgres, and two API replicas; registers the declared `organization_id` and `project_ids` claims; and runs the production browser workflow. The workflow verifies PKCE-backed OIDC sessions, administrator/viewer RBAC, organization boundaries, authenticated collaboration WebSockets, and own-data onboarding through ontology and pipeline delivery. It also creates project-owned Workshop, Action Type, AIP Logic, Agent, model endpoint, and evaluation resources, queues an asynchronous agent invocation, rejects cross-project creation, and proves viewers cannot mutate, execute, evaluate, invoke, publish, run Asset Reliability triage, or export its evidence report. The remaining gate exercises 50 concurrent reads, Asset Reliability approval/reporting, cross-replica collaboration and job idempotency, abandoned-worker recovery with fencing, serialized Alembic startup, API restart, and fresh-volume backup/restore. Use `-KeepStack` only for troubleshooting and `-SkipRecovery` only when the separate recovery gate has already passed for the same build; the success message explicitly records when recovery was skipped.
+
+For direct WebSocket process-loss evidence against a migrated PostgreSQL database, run `COLLABORATION_WS_EVIDENCE_PATH=docs/collaboration-websocket-chaos-evidence.json python oms/verify_collaboration_websocket_chaos_postgres.py`. Production WebSocket origins default to `PUBLIC_BASE_URL`; add trusted alternate ingress origins through the comma-separated `WEBSOCKET_ALLOWED_ORIGINS` setting.
 
 The complete containerized rehearsal remains available as the manually dispatched `Production acceptance` GitHub Actions workflow. Every pull request and push to `master` also runs the automatic `Continuous integration` workflow without duplicating feature-branch push runs. Its required jobs cover all backend scripts and docs conformance, SQLite and PostgreSQL migrations, frontend dependency audit/typecheck/build, the responsive WCAG browser suite, production Compose validation, and the multi-stage application image build. Protect `master` with these checks before accepting changes. The manual rehearsal remains the final OIDC, replica, load, chaos, and fresh-volume recovery gate for a release candidate.
 
@@ -66,10 +69,10 @@ The bundled Keycloak realm and user-profile files are demonstration fixtures. Th
 
 ## Back Up and Restore
 
-Create a database backup from the project root:
+Create a database backup from the project root. Include local dataset snapshot files for a complete local-data-plane backup:
 
 ```powershell
-./scripts/backup.ps1
+./scripts/backup.ps1 -IncludeSnapshots
 ```
 
 To target an isolated or non-default Compose project explicitly:
@@ -88,10 +91,12 @@ Restore requires explicit confirmation. The script validates the archive, restor
 ./scripts/restore.ps1 `
   -BackupPath ./backups/ontology-YYYYMMDD-HHMMSS.dump `
   -ConfirmRestore `
+  -RestoreSnapshots `
+  -RestorePlugins `
   -KeepPreviousDatabase
 ```
 
-Pass the same `ComposeFile`, `ProjectName`, `DatabaseUser`, and `DatabaseName` options to `restore.ps1` for non-default stacks. Backups include adjacent SHA-256 and JSON manifests. See `docs/RECOVERY.md` for staged swap, rollback, credential rebinding, and acceptance procedures.
+Pass the same `ComposeFile`, `ProjectName`, `DatabaseUser`, and `DatabaseName` options to `restore.ps1` for non-default stacks. Database, local snapshot, and signed-plugin archives have separate adjacent SHA-256 evidence and are recorded in the JSON manifest. Create them with `-IncludeSnapshots -IncludePlugins`. S3-backed snapshots require provider-native bucket backup/versioning. See `docs/RECOVERY.md` for staged swap, rollback, credential rebinding, and acceptance procedures.
 
 Rehearse backup and restore against a fresh isolated Postgres volume:
 
@@ -117,9 +122,22 @@ After restoration, verify `/health/ready`, sign in, inspect `/workspace/validati
 
 Database backup remains the authoritative disaster-recovery mechanism because it also preserves all audit, security, and runtime tables.
 
+Transactional outbox publication is local by default. To mirror published operational events into Kafka or Redpanda, configure the production `EVENT_KAFKA_*` settings and add `event.kafka.dispatch` to a dedicated worker capability list. Monitor transport receipts and dead letters through `/api/v1/outbox/summary` and `/api/v1/outbox/transport-receipts`; rehearse broker interruption and recovery using `docs/TRANSACTIONAL_EVENT_OUTBOX.md` before enabling downstream consumers.
+
 Connector syncs and stream replays should be submitted through the durable `/ingestion/*` APIs in production. Configure project budgets before enabling schedules, monitor `/ingestion/summary`, and drain pending `/ingestion/dead-letters` during incident recovery. See `docs/DURABLE_INGESTION_RUNTIME.md` for the worker and recovery contract.
 
 REST and JDBC source credentials are encrypted separately from source metadata and never appear in portable project exports. Database backups preserve the encrypted values, but a portable project import requires an administrator to bind fresh runtime credentials before live execution.
+
+Third-party plugin code is never imported into the API process. Configure the Ed25519 trust registry and the production OCI settings in `.env.production`; invocation fails closed without a digest-pinned sandbox image. Network-enabled manifests must sign exact hosts and ports. Configure a digest-pinned egress proxy image and a separate random HMAC secret; the executor provisions an internal-only sandbox network and the proxy enforces each short-lived grant. See `docs/SIGNED_PLUGIN_RUNTIME.md`.
+
+Build and verify the dedicated sandbox before enabling extensions:
+
+```powershell
+./scripts/rehearse-plugin-oci.ps1
+./scripts/rehearse-plugin-egress.ps1
+```
+
+The rehearsal executes the SDK example and confirms that filesystem, network, subprocess, and incompatible-SDK attempts fail under the real non-root, read-only OCI boundary. Its egress stage also verifies signed custom-CA HTTPS, rejection without the signed CA, destination denial, and direct-bypass denial. The complete `rehearse-production-acceptance.ps1` gate additionally mints an execute-only service token through a real OIDC administrator session, runs a signed plugin through the dedicated executor, force-stops that executor during work, and verifies lease-expiry recovery without duplicate terminal success. The main API never receives an OCI socket.
 
 Register every production worker, set project queue concurrency, and drain workers before replacement. Monitor `/ui-state/worker-fleet` together with runtime SLOs; restored worker registrations remain offline until an operator resumes them. See `docs/WORKER_FLEET_CONTROL.md`.
 

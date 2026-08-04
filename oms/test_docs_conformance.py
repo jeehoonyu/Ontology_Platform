@@ -12,6 +12,7 @@ Run:
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -55,10 +56,16 @@ assert_true(matrix.exists(), "validation matrix exists", matrix)
 assert_true(report.exists(), "validation report exists", report)
 matrix_text = matrix.read_text(encoding="utf-8")
 report_text = report.read_text(encoding="utf-8")
-for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export"):
+for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export", "Signed sandboxed extension runtime", "durable isolated execution"):
     assert_true(required in matrix_text, f"matrix includes {required}")
 assert_true("does not copy Palantir code" in report_text, "report states non-copying boundary")
 assert_true("not Palantir Foundry API compatibility" in report_text, "report states API boundary")
+assert_true((repo_root() / "docs" / "SIGNED_PLUGIN_RUNTIME.md").exists(), "signed plugin operations guide exists")
+assert_true((repo_root() / "oms" / "plugin-executor.Dockerfile").exists(), "isolated plugin executor image exists")
+plugin_oci_evidence = json.loads((repo_root() / "docs" / "plugin-oci-rehearsal-evidence.json").read_text(encoding="utf-8"))
+assert_true(plugin_oci_evidence["status"] == "PASS", "real plugin OCI rehearsal passed", plugin_oci_evidence)
+assert_true(plugin_oci_evidence["sandbox"]["non_root"] and plugin_oci_evidence["sandbox"]["read_only"], "plugin OCI rehearsal proves hardening", plugin_oci_evidence)
+assert_true(plugin_oci_evidence["verified_denials"] == ["filesystem", "network", "subprocess"], "plugin OCI rehearsal proves denied capabilities", plugin_oci_evidence)
 
 for route in (
     "/workspace/aip",
@@ -78,6 +85,13 @@ for route in (
 ):
     resp = client.get(route)
     assert_true(resp.status_code == 200, f"workspace route {route} loads", resp.status_code)
+
+plugin_catalog = ok(client.get("/api/v1/plugins/catalog?project_id=default"), "read signed plugin catalog")
+assert_true(plugin_catalog["runtime"] == "signed_sandbox_v1", "plugin catalog exposes governed runtime", plugin_catalog)
+assert_true(plugin_catalog["sdk_api_version"] == 1, "plugin catalog exposes compatible SDK API", plugin_catalog)
+pipeline_catalog = ok(client.get("/builder/catalogs/pipeline?project_id=default"), "read plugin-aware builder catalog")
+assert_true(pipeline_catalog["plugin_runtime"] == "signed_sandbox_v1", "builder catalog exposes plugin boundary", pipeline_catalog)
+assert_true(pipeline_catalog["plugin_sdk_api_version"] == 1, "builder catalog exposes plugin SDK compatibility", pipeline_catalog)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +333,55 @@ stream_replay = ok(client.post("/streams/docs_stream/replay", json={
     "records": [{"event_id": "docs_stream_1", "asset_id": "asset_pump_4", "ts": 1782684300}],
 }), "stream replay")
 assert_true(stream_replay["published"] == 1 and stream_replay["archived"] == 1, "stream replay publishes and archives", stream_replay)
+outbox_events = ok(client.get("/api/v1/outbox/events?project_id=default&limit=100"), "list durable outbox events")
+# The listing is ordered created_at DESC then id. These object changes are
+# enqueued within the same second, so the tie breaks on a random id and the
+# first row is not reliably the asset change. Select the object type that the
+# binding below filters on instead of trusting list order.
+object_change = next(
+    row for row in outbox_events["events"]
+    if row["topic"] == "ontologyos.object_change"
+    and (row.get("payload") or {}).get("object_type_id") == "asset"
+)
+ok(client.post("/api/v1/outbox/workers/run-next", json={
+    "worker_id": "docs-event-dispatcher", "event_id": object_change["id"],
+}), "dispatch ontology object change")
+ok(client.post("/streams", json={
+    "id": "docs_object_change_stream", "display_name": "Docs Object Changes",
+    "schema": {"event_id": "string", "event_type": "string", "payload": "object"},
+}), "create object-change stream")
+ok(client.post("/api/v1/event-stream-bindings", json={
+    "id": "docs_object_change_binding", "display_name": "Docs Object Change Binding",
+    "target_stream_id": "docs_object_change_stream", "topics": ["ontologyos.object_change"],
+    "object_type_ids": ["asset"],
+}), "bind object changes to stream", expect=201)
+routed_changes = ok(client.post("/api/v1/event-stream-bindings/docs_object_change_binding/route", json={
+    "max_events": 100,
+}), "route object changes to stream")
+assert_true(routed_changes["routed"] >= 1, "object changes route into project stream", routed_changes)
+routing_receipts = ok(client.get("/api/v1/event-stream-bindings/docs_object_change_binding/receipts"), "read event routing receipts")
+assert_true(routing_receipts["count"] == routed_changes["routed"], "each routed event has an exact receipt", routing_receipts)
+ok(client.post("/data-assets", json={
+    "id": "docs_stream_join_output", "display_name": "Docs Stream Join Output",
+    "kind": "dataset", "asset_schema": {}, "records": [],
+}), "create stream join output")
+ok(client.post("/streams", json={
+    "id": "docs_work_order_stream", "display_name": "Docs Work Orders",
+    "schema": {"ts": "number", "asset_id": "string"},
+}), "create join-side stream")
+ok(client.post("/api/v1/streams/processors", json={
+    "id": "docs_asset_work_order_join", "stream_id": "docs_stream",
+    "join_stream_id": "docs_work_order_stream", "display_name": "Docs Asset Work Order Join",
+    "timestamp_field": "ts", "join_left_key": "asset_id", "join_right_key": "asset_id",
+    "join_time_tolerance_seconds": 10, "target_asset_id": "docs_stream_join_output",
+}), "create interval join processor", expect=201)
+ok(client.post("/streams/docs_work_order_stream/publish", json={"records": [{
+    "event_id": "docs_wo_1", "asset_id": "asset_pump_4", "ts": 1782684305,
+}]}), "publish join-side record")
+joined = ok(client.post("/api/v1/streams/processors/docs_asset_work_order_join/process", json={}), "process cross-stream interval join")
+assert_true(joined["joins_emitted"] == 1, "cross-stream processor emits one exact pair", joined)
+joined_output = ok(client.get("/data-assets/docs_stream_join_output"), "read stream join output")
+assert_true(len(joined_output["records"]) == 1 and joined_output["records"][0]["join_key"] == "asset_pump_4", "stream join materializes correlated evidence", joined_output)
 schema_health = ok(client.get("/system/schema-health"), "system schema health")
 assert_true(schema_health["status"] == "PASS", "system schema health passes", schema_health)
 migrations = ok(client.get("/system/migrations"), "system migrations")
@@ -329,7 +392,7 @@ project_validation = ok(client.get("/project/validate"), "project validation")
 assert_true(project_validation["sections"]["snapshot_coverage"]["status"] == "PASS", "project validation includes snapshot coverage", project_validation)
 project_snapshot = ok(client.get("/project/export"), "project export snapshot")
 assert_true(project_snapshot["snapshot_version"] >= 2 and project_snapshot["integrity"]["checksum"] and project_snapshot["data_assets"], "project export includes integrity-protected datasets", project_snapshot)
-for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "connection_sources", "streams", "stream_records", "incidents", "investigation_reports"):
+for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "connection_sources", "streams", "stream_records", "stream_join_inputs", "stream_join_receipts", "incidents", "investigation_reports"):
     assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 
 
