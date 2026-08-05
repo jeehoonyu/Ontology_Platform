@@ -29,8 +29,8 @@ def current_head() -> str:
     revisions, parents = set(), set()
     for path in VERSIONS.glob("*.py"):
         text = path.read_text(encoding="utf-8")
-        found = re.search(r'^revision = "([^"]+)"', text, re.MULTILINE)
-        parent = re.search(r'^down_revision = "([^"]+)"', text, re.MULTILINE)
+        found = re.search(r'^revision(?::\s*[^=]+)?\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        parent = re.search(r'^down_revision(?::\s*[^=]+)?\s*=\s*"([^"]+)"', text, re.MULTILINE)
         if found:
             revisions.add(found.group(1))
         if parent:
