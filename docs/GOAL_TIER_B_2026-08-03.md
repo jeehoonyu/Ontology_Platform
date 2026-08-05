@@ -24,6 +24,15 @@ what makes Tier B look closer than it is.
 
 ### Group 1 — Re-execution at head `0037_cross_stream_joins`
 
+Gate evidence emission is wired into the ontology-scale and pipeline-scale harnesses, so
+a reference run now produces a correctly judged evidence file without anyone assembling
+one by hand. It is deliberately **reference-profile only**. CI runs the smoke profiles on
+every push at a hundredth and a tenth of the scale respectively; if those emitted, each
+push would overwrite a genuine reference PASS with a FAIL and the gate could never hold
+for longer than one commit. Both contract tests assert the guard is in place.
+
+What remains for these gates is machine time, not code.
+
 | Gate | Threshold | Prior measurement | Owed |
 | --- | --- | --- | --- |
 | Ontology scale | >= 10M objects / 50M links, bounded p95 | lookup 8.718 ms, range 11.830 ms, two-hop 13.721 ms p95 | Re-run at current head |

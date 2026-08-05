@@ -340,4 +340,40 @@ if EVIDENCE_PATH:
     Path(EVIDENCE_PATH).write_text(serialized + "\n", encoding="utf-8")
 print("PostgreSQL ontology scale benchmark passed:")
 print(serialized)
+
+# Tier B gate evidence is written only for the reference profile. The smoke
+# profile is a functional regression check at a hundredth of the scale, not an
+# attempt at the gate; letting it emit would overwrite a genuine reference PASS
+# with a FAIL every CI run and destroy the evidence it took hours to produce.
+if PROFILE == "reference":
+    from tier_b_evidence import write_evidence
+
+    gate_path, gate_status, gate_breaches = write_evidence(
+        "ontology_scale",
+        thresholds={
+            "objects_min": REFERENCE_OBJECTS,
+            "links_min": REFERENCE_LINKS,
+            "object_lookup_p95_ms_max": OBJECT_P95_LIMIT_MS,
+            "object_range_p95_ms_max": OBJECT_P95_LIMIT_MS,
+            "graph_two_hop_p95_ms_max": GRAPH_P95_LIMIT_MS,
+        },
+        measurements={
+            "objects": OBJECT_COUNT,
+            "links": LINK_COUNT,
+            "object_lookup_p95_ms": evidence["object_lookup_p95_ms"],
+            "object_range_p95_ms": evidence["object_range_p95_ms"],
+            "graph_two_hop_p95_ms": evidence["graph_two_hop_p95_ms"],
+        },
+        harness="oms/benchmark_ontology_scale_postgres.py",
+        notes=(
+            f"Reference profile over {OBJECT_COUNT} objects and {LINK_COUNT} links, "
+            f"{SAMPLES} samples per query shape, physical index plans verified."
+        ),
+    )
+    print(f"\nTier B evidence {gate_status}: {gate_path.name}")
+    for breach in gate_breaches:
+        print(f"  breach: {breach}")
+else:
+    print(f"\nProfile is '{PROFILE}'; no Tier B gate evidence written. "
+          "Run with ONTOLOGY_SCALE_PROFILE=reference to attempt the gate.")
 engine.dispose()
