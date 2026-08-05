@@ -38,11 +38,13 @@ what makes Tier B look closer than it is.
 
 | Gate | Threshold | What is missing |
 | --- | --- | --- |
-| Availability | Sustained 99.9% over a declared window | No measurement window is declared, no probe records uptime, and no artifact aggregates it. 99.9% requires a window long enough to be meaningful — over 7 days that is 10 minutes of budget |
-| RPO | <= 5 minutes, sampled repeatedly | Backup/restore is rehearsed as a single pass/fail, not sampled. Nothing measures the actual gap between last durable write and recovery point, and "repeatedly" has no defined cadence |
-| RTO | <= 30 minutes, rehearsed on schedule | Restore has been rehearsed on demand, never on a schedule, and elapsed time to a serving system is not recorded as a distribution |
+| Availability | Sustained 99.9% over a declared window | ~~No probe~~ **Harness built 2026-08-03.** Needs 7 days of wall clock against a pilot |
+| RPO | <= 5 minutes, sampled repeatedly | ~~Nothing measures the gap~~ **Harness built 2026-08-03.** Needs a running backup cycle to sample against |
+| RTO | <= 30 minutes, rehearsed on schedule | ~~Never scheduled~~ **Harness built 2026-08-03.** Needs four rehearsals, one timer-triggered |
 
-Group 2 is the critical path. It cannot be compressed by running existing scripts harder.
+Group 2 was the critical path and could not be compressed by running existing scripts
+harder. The tooling now exists; what remains is wall clock and a pilot deployment to
+measure. Availability still sets the floor at 7 days.
 
 ## Ordering
 
@@ -86,6 +88,23 @@ by running the harness until a green number appears.
 - `oms/availability_probe.py` implements the availability gate: an append-only probe and
   an aggregator that derives uptime, opens outages by the two-failure rule, and emits gate
   evidence. `oms/test_availability_probe.py` covers the accounting.
+- `oms/rto_rehearsal.py` times a recovery from the restore command to the first successful
+  authenticated write, so migration and readiness sit inside the measurement rather than
+  outside it. Requires four rehearsals with at least one unattended.
+- `oms/rpo_sampler.py` writes monotonic timestamped marks and, after a restore, computes
+  the gap between the last mark written and the highest mark surviving. Requires ten
+  samples including two taken immediately before a scheduled backup.
+
+All three report the **maximum**, never the mean. A mean lets one good sample bury one
+that breached, and an operator experiences the worst case, not the average one.
+
+All three also treat an empty record as a breach rather than a pass. A `_max` threshold
+with no data satisfies itself by having no maximum, which would let "we never measured"
+read as "we never exceeded". Each harness substitutes a breaching value when the record
+is empty, and each test asserts it.
+
+Group 2 is therefore no longer blocked on tooling. It is blocked on wall clock and on a
+pilot to point the harnesses at.
 
 Baseline on 2026-08-03: **0 of 10 gates satisfied** — 2 FAIL, 8 MISSING. Eleven of the
 thirteen pre-contract evidence files record no migration head, so they cannot be shown to
