@@ -35,7 +35,7 @@ from app import main  # noqa: E402,F401 - registers every model on Base.metadata
 
 # Recorded 2026-08-03. This is a ceiling, not a target. Lower it whenever an
 # explicit migration is added for one of these tables; never raise it.
-BASELINE_ONLY_CEILING = 215
+BASELINE_ONLY_CEILING = 0
 
 passed = 0
 

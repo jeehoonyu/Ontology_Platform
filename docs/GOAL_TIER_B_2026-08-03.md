@@ -22,7 +22,7 @@ This distinction is the whole plan. Seven gates have prior evidence and need
 Re-execution is scheduling; construction is engineering. Treating them as one backlog is
 what makes Tier B look closer than it is.
 
-### Group 1 — Re-execution at head `0037_cross_stream_joins`
+### Group 1 — Re-execution at head `0038_explicit_schema_baseline`
 
 Gate evidence emission is wired into the ontology-scale and pipeline-scale harnesses, so
 a reference run now produces a correctly judged evidence file without anyone assembling
@@ -41,7 +41,7 @@ What remains for these gates is machine time, not code.
 | Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **FAIL: 241.605, 253.002, 219.812 ms across three runs at head 0037** | Resolve GOAL2-004 before re-measuring |
 | Identity | 200 distinct PKCE identities under login p95 gate | 4,582.792 ms against a 15,000 ms gate | Re-run; needs Keycloak |
 | Durability | Fresh-volume backup/restore and replica failover, zero committed-record loss | 36.59 GB basebackup in 50.917 s, promote in 0.686 s | Re-run at current head |
-| Chaos | Partition and process-loss recovery, zero missed or duplicated events | **PASS at head 0037** — both subjects rehearsed, 0 duplicates, 0 misses, 128.852 ms max reconnect | Satisfied |
+| Chaos | Partition and process-loss recovery, zero missed or duplicated events | **STALE** — passed at head 0037 (both subjects, 0 duplicates, 0 misses, 128.852 ms reconnect); head advanced to 0038 | Re-run at current head |
 
 ### Group 2 — Construction, no evidence exists
 

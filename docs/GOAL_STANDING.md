@@ -108,8 +108,9 @@ never regress. A regression is a build failure, not a discussion.
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
 | Backend scripts passing in one sequential run | the suite | 185 of 185 in 1,008 s |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
-| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 1 (GOAL2-005) |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 1 of 10 |
+| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
+| Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 0 of 13, floor 0 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
@@ -176,3 +177,4 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-03 | Is the ontology's expressiveness reaching the product? | No. 21 base types declared, 0 of 13 semantic types rendered; `render_hint` written by the editor and read by nothing; interfaces a stub. The model knows more than the product shows | Second invariant and its ratchets established |
 | 2026-08-03 | Are interfaces really absent, as the audit implied? | No. They are implemented with cycle-safe `extends` resolution; the `configured: False` reading is a hardcoded UI placeholder. The real gaps are name-only conformance, inferred rather than declared implementers, and no `project_id` | Correction published |
 | 2026-08-03 | Does migration head identify the schema it names? | No. GOAL2-005 (P1) — 215 of 271 tables reach a database only through the baseline's `create_all`, so two deployments at the same head can differ, weakening the evidence provenance rule | Ratchet set at 215 |
+| 2026-08-04 | Can an old deployment actually converge? | Yes, once every table is stated explicitly. `0038` takes a database stamped at 0037 with zero tables to the full 272. Advancing the head then invalidated the one passing Tier B gate, and the auditor's head regex turned out not to match Alembic's own output | Baseline-only 215 -> 0; Tier B 1 -> 0 |

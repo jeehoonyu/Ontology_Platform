@@ -33,7 +33,7 @@ with engine.connect() as connection:
 
 command.upgrade(config, "head")
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0037_cross_stream_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0038_explicit_schema_baseline"
 
 engine.dispose()
 tmpdir.cleanup()
