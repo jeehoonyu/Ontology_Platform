@@ -62,9 +62,22 @@ units, and eight more semantic types. Every one of them reaches the user as gene
 because `render_hint` is written by the ontology editor and read by nothing. The model
 knows more than the product shows.
 
+Read `interfaces configured False` with the same care as the coupling number. It reflects
+a hardcoded placeholder in one UI-state handler, not the state of the ontology: interfaces
+are substantially implemented, with `extends` inheritance resolved breadth-first and
+cycle-safe in `ontology_interfaces_ops.py`. The instrument was measuring the product's
+awareness of interfaces, which is what this invariant is about, but the label invited the
+wrong conclusion and did in fact produce one — an earlier revision of
+[`ONTOLOGY_MODEL_DECISION.md`](ONTOLOGY_MODEL_DECISION.md) declared interfaces a stub on
+the strength of that string alone.
+
+That mistake is the argument for this invariant rather than against it. A reading that
+looks like a capability gap and is actually a consumption gap sends work to the wrong
+place, and only opening the implementation settles which one it is.
+
 The remedy is staged in [`ONTOLOGY_MODEL_DECISION.md`](ONTOLOGY_MODEL_DECISION.md):
-interfaces first, because polymorphism is what lets a view target a capability rather than
-a list of types; then semantic rendering; then interface-driven views and SDKs.
+harden interface conformance to check base types rather than property names, then semantic
+rendering, then interface-scoped queries, interface-driven views, and SDKs.
 
 ## What the cycle does
 
@@ -93,9 +106,9 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Reading on 2026-08-03 |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 182 of 182 in 738 s |
+| Backend scripts passing in one sequential run | the suite | 184 of 184 in 710 s |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
-| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
+| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 1 (GOAL2-005) |
 | Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 1 of 10 |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 0 of 13, floor 0 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
@@ -161,3 +174,5 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-03 | Tier B: does the collaboration gate hold on repetition? | GOAL2-004 (P2, open) — p95 over 20 samples is one observation | Gate recorded FAIL at worst run |
 | 2026-08-03 | Chaos: does the partition rehearsal actually partition? | Twice it did not. The first version severed a backend before any pairs existed; the second raced the processor and lost, so the pass completed untouched. Both reported success | Chaos 1 of 10, first gate satisfied |
 | 2026-08-03 | Is the ontology's expressiveness reaching the product? | No. 21 base types declared, 0 of 13 semantic types rendered; `render_hint` written by the editor and read by nothing; interfaces a stub. The model knows more than the product shows | Second invariant and its ratchets established |
+| 2026-08-03 | Are interfaces really absent, as the audit implied? | No. They are implemented with cycle-safe `extends` resolution; the `configured: False` reading is a hardcoded UI placeholder. The real gaps are name-only conformance, inferred rather than declared implementers, and no `project_id` | Correction published |
+| 2026-08-03 | Does migration head identify the schema it names? | No. GOAL2-005 (P1) — 215 of 271 tables reach a database only through the baseline's `create_all`, so two deployments at the same head can differ, weakening the evidence provenance rule | Ratchet set at 215 |
