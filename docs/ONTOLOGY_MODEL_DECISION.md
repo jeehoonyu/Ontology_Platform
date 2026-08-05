@@ -24,22 +24,35 @@ This is a sound foundation. The problem is not the model's expressiveness.
 
 ## The two real gaps
 
-### 1. Interfaces are a stub
+### 1. Interfaces exist and are not surfaced
 
-`ontology_core.py` reports `"interfaces": {"summary": {"configured": False}, "rows": []}`.
-The concept is named and unimplemented, so the ontology has **no polymorphism**.
+**Correction.** An earlier revision of this document said interfaces were a stub, on the
+strength of `ontology_core.py` reporting
+`"interfaces": {"summary": {"configured": False}, "rows": []}`. That reading was wrong.
+The string is a hardcoded placeholder in one UI-state section handler, sitting beside
+identical placeholders for `object_views` and `automations`. It reports `False`
+unconditionally and never consults interface data at all.
 
-Every view, function, and program must therefore target concrete object types. A map that
-should show "everything with a location" has to be told which types those are, and told
-again each time one is added.
+Interfaces are substantially implemented:
 
-Interfaces are the mechanism that removes this. An interface describes a shape and a set
-of capabilities; object types declare that they implement it; interfaces can extend other
-interfaces, and a type can implement several. Workflows then interact with every
-implementer "either in aggregate or independently, without needing to know specific
-details about those object types" ([Palantir, Interfaces overview](https://www.palantir.com/docs/foundry/interfaces/interface-overview)).
-A single application or function written against the interface picks up new implementing
-types with no refactor.
+- `oms/app/ontology_interfaces.py` defines `OntologyInterface` with properties and
+  `extends`, plus shared property types with apply and detach.
+- `oms/app/ontology_interfaces_ops.py` resolves inheritance by breadth-first traversal of
+  the `extends` chain, cycle-safe, with nearer declarations overriding inherited ones, and
+  resolves inherited link constraints as well.
+- Routes exist for interface CRUD, implementers, and object-type conformance checking, and
+  both routers are registered in `main.py`.
+- `oms/test_ontology_interfaces_inheritance.py` and `test_ontology_interfaces_ops.py`
+  cover them.
+
+So the ontology does have polymorphism. What it does not have is polymorphism the product
+uses. The Ontology Manager shows every object type as having no interfaces because that
+endpoint returns a constant. Nothing in the query layer accepts an interface where it
+accepts an object type, and the generated SDKs do not emit interface types.
+
+The correction matters for planning: the work is not building the construct, it is
+consuming it. That is a smaller and differently shaped job than a from-scratch model
+change, and it is the reason the staged plan below now starts at consumption.
 
 ### 2. The UI discards the semantics the ontology records
 
@@ -87,10 +100,14 @@ rendering layer consume the semantics already recorded.**
 
 Each stage is independently valuable and independently verifiable.
 
-**Stage 1 — Interfaces in the ontology.** Interface types with properties, `extends` for
-interface inheritance, and `implements` on object types. Validation that an implementer
-satisfies every inherited property with a compatible base type. Interfaces participate in
-revisions and breaking-change classification like any other ontology resource.
+**Stage 1 — Interfaces in the ontology. Largely done.** Interface types, `extends`
+inheritance with cycle-safe resolution, shared property types, and conformance checking
+already exist. What remains is narrower than it first appeared: conformance is checked by
+property *name* against the legacy `ObjectType.properties` bag rather than by base type
+against the normalized profile, so a `location` string would satisfy an interface asking
+for a `geopoint`; implementers are inferred by scanning every object type rather than
+declared and indexed; and `OntologyInterface` carries no `project_id`, unlike every other
+ontology resource. Close those three before building on top.
 
 **Stage 2 — Interface-scoped queries.** `/api/v1` object and graph queries accept an
 interface where they accept an object type, returning instances across every implementer
