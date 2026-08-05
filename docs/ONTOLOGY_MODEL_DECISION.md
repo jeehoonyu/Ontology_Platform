@@ -100,14 +100,37 @@ rendering layer consume the semantics already recorded.**
 
 Each stage is independently valuable and independently verifiable.
 
-**Stage 1 — Interfaces in the ontology. Largely done.** Interface types, `extends`
-inheritance with cycle-safe resolution, shared property types, and conformance checking
-already exist. What remains is narrower than it first appeared: conformance is checked by
-property *name* against the legacy `ObjectType.properties` bag rather than by base type
-against the normalized profile, so a `location` string would satisfy an interface asking
-for a `geopoint`; implementers are inferred by scanning every object type rather than
-declared and indexed; and `OntologyInterface` carries no `project_id`, unlike every other
-ontology resource. Close those three before building on top.
+**Stage 1 — Interfaces in the ontology. Type conformance closed 2026-08-03.**
+
+The root cause was narrower and stranger than "conformance checks names". Interfaces
+validated against a **seven-name vocabulary of their own** —
+`{string, integer, double, boolean, date, timestamp, geo}` — while object types use the
+21-type ontology vocabulary. `geo` is not an ontology base type at all; the ontology has
+`geopoint` and `geoshape`. An interface therefore **could not express a geometry
+requirement that any object type was able to satisfy**, which is why conformance compared
+property names and ignored types: with the two vocabularies disjoint, a type comparison
+would have rejected everything.
+
+Fixed by resolving interface base types against `FOUNDRY_BASE_TYPES`, retaining `geo` as an
+alias for `geoshape` so interfaces created under the old vocabulary keep validating, and
+comparing declared against required types through a widening table where `geopoint`
+satisfies `geoshape` but not the reverse and a `string` satisfies neither.
+
+Two limits worth stating rather than discovering later:
+
+- **Untyped properties are allowed, not refused.** Legacy property bags frequently omit a
+  type, and rejecting them would break implementations that already exist, which the
+  compatibility rule forbids. The guarantee is enforced wherever a type is declared and
+  unavailable where it is not. Normalizing an object type into a profile is what converts
+  an unjudged property into a checked one.
+- **The profile table's presence is checked, not assumed.** Partial schemas exist, and an
+  older deployment should keep judging conformance from the legacy bag rather than failing
+  the request.
+
+Still open at this stage: `OntologyInterface` carries no `project_id`, unlike every other
+ontology resource, and `ontology_interfaces.py` still infers implementers by scanning every
+object type while `ontology_interfaces_ops.py` records them explicitly in
+`iface_implementations`. Two mechanisms for one concept is a decay of its own.
 
 **Stage 2 — Interface-scoped queries.** `/api/v1` object and graph queries accept an
 interface where they accept an object type, returning instances across every implementer
