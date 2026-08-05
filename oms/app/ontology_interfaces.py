@@ -19,7 +19,51 @@ import time, uuid
 # SQLAlchemy models
 # ---------------------------------------------------------------------------
 
-VALID_BASE_TYPES = {"string", "integer", "double", "boolean", "date", "timestamp", "geo"}
+def _interface_base_types() -> set:
+    """Interfaces must speak the same type language as object types.
+
+    This set was previously seven names of its own, including "geo", which no
+    object type can declare -- the ontology vocabulary has geopoint and
+    geoshape. An interface therefore could not express a geometry requirement
+    that an object type could satisfy, which is why conformance compared
+    property names and ignored types entirely.
+
+    The legacy names are retained as aliases so interfaces created under the old
+    vocabulary keep validating.
+    """
+    from .ontology_core import FOUNDRY_BASE_TYPES
+
+    return set(FOUNDRY_BASE_TYPES) | LEGACY_BASE_TYPE_ALIASES.keys()
+
+
+# Old interface-only names -> the ontology base type they mean.
+LEGACY_BASE_TYPE_ALIASES = {"geo": "geoshape"}
+
+
+def normalize_base_type(base_type: str) -> str:
+    """Resolve a legacy interface type name onto the ontology vocabulary."""
+    return LEGACY_BASE_TYPE_ALIASES.get(base_type, base_type)
+
+
+class _ValidBaseTypes(frozenset):
+    """Membership is evaluated against the live ontology vocabulary.
+
+    Kept as a set-like object because callers do `x in VALID_BASE_TYPES` and
+    `sorted(VALID_BASE_TYPES)`; resolving lazily avoids an import cycle with
+    ontology_core at module load.
+    """
+
+    def __contains__(self, item):  # type: ignore[override]
+        return item in _interface_base_types()
+
+    def __iter__(self):
+        return iter(sorted(_interface_base_types()))
+
+    def __len__(self):
+        return len(_interface_base_types())
+
+
+VALID_BASE_TYPES = _ValidBaseTypes()
 
 
 class SharedPropertyType(Base):
