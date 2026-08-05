@@ -327,6 +327,44 @@ if EVIDENCE_PATH:
 print("Snapshot-native pipeline scale benchmark passed:")
 print(serialized)
 
+# Gate evidence only for the reference profile. The smoke profile runs a tenth
+# of the rows; letting it emit would overwrite a real reference PASS with a FAIL
+# on every CI run.
+if PROFILE == "reference":
+    from tier_b_evidence import write_evidence
+
+    gate_path, gate_status, gate_breaches = write_evidence(
+        "pipeline_scale",
+        thresholds={
+            "input_rows_min": REFERENCE_ROWS,
+            "output_partitions_min": 1,
+            "preview_p95_ms_max": PREVIEW_P95_LIMIT_MS,
+            "deliver_ms_max": DELIVER_LIMIT_MS,
+            # Bulk rows must stay in the engine. Hydrating them into Python is
+            # the failure this benchmark exists to catch, so it is a gate
+            # threshold rather than a note in the output.
+            "materialized_python_rows_max": 0,
+        },
+        measurements={
+            "input_rows": ROW_COUNT,
+            "output_partitions": evidence["output_partitions"],
+            "preview_p95_ms": evidence["preview_p95_ms"],
+            "deliver_ms": evidence["deliver_ms"],
+            "materialized_python_rows": evidence["materialized_python_rows"],
+        },
+        harness="oms/benchmark_pipeline_scale.py",
+        notes=(
+            f"Reference profile over {ROW_COUNT} rows in {PARTITION_COUNT} immutable "
+            f"partitions, delivered to {evidence['output_partitions']} output partitions."
+        ),
+    )
+    print(f"\nTier B evidence {gate_status}: {gate_path.name}")
+    for breach in gate_breaches:
+        print(f"  breach: {breach}")
+else:
+    print(f"\nProfile is '{PROFILE}'; no Tier B gate evidence written. "
+          "Run with PIPELINE_SCALE_PROFILE=reference to attempt the gate.")
+
 from app.database import engine  # noqa: E402
 engine.dispose()
 tmpdir.cleanup()

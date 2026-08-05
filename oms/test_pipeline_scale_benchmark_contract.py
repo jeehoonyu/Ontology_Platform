@@ -33,4 +33,18 @@ for required in (
     assert required in source, required
 
 assert "benchmark_pipeline_scale.py" in workflow
-print("Pipeline scale benchmark contract verified: 1M-row CI smoke and strict 10M-row reference profiles are wired.")
+
+# Tier B gate evidence must be emitted, and must be emitted only for the
+# reference profile. CI runs the smoke profile on every push; if that emitted,
+# it would overwrite a genuine reference PASS with a FAIL and the gate would
+# never hold for longer than one commit.
+assert 'if PROFILE == "reference":' in source, "gate evidence is not guarded by profile"
+assert 'write_evidence(' in source and '"pipeline_scale"' in source, "gate evidence is not emitted"
+gate_block = source.split('if PROFILE == "reference":', 1)[1]
+assert "write_evidence(" in gate_block, "write_evidence is outside the reference guard"
+for threshold in ("input_rows_min", "preview_p95_ms_max", "deliver_ms_max",
+                  "materialized_python_rows_max"):
+    assert threshold in gate_block, threshold
+
+print("Pipeline scale benchmark contract verified: 1M-row CI smoke and strict 10M-row "
+      "reference profiles are wired, and gate evidence is reference-only.")
