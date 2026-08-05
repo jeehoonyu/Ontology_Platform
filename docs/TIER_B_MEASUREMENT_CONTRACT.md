@@ -29,7 +29,7 @@ numbers live under `measurements`; the envelope around them is identical everywh
   "thresholds": { "ack_p95_ms_max": 250.0, "editors_min": 20, "lost_updates_max": 0 },
   "measurements": { "ack_p95_ms": 241.605, "editors": 20, "lost_updates": 0 },
   "provenance": {
-    "migration_head": "0037_cross_stream_joins",
+    "migration_head": "0038_explicit_schema_baseline",
     "git_commit": "86d4481",
     "captured_at": 1785822847,
     "harness": "oms/verify_collaboration_scale_postgres.py",

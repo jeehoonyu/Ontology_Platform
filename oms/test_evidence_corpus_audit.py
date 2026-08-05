@@ -9,7 +9,7 @@ import audit_evidence_corpus as audit  # noqa: E402
 from audit_evidence_corpus import CURRENT, STALE, UNPROVENANCED, head_of  # noqa: E402
 
 passed = 0
-HEAD = "0037_cross_stream_joins"
+HEAD = "0038_explicit_schema_baseline"
 
 
 def check(condition, label, payload=None):
