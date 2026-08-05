@@ -53,6 +53,10 @@ jobs:
           test "${count}" -ge 150
       - name: Validate docs conformance
         run: python oms/validate_docs_conformance.py
+      - name: Enforce the extensibility ratchets
+        # Fails when a new object type would cost more UI work than the last:
+        # native rendering coverage falling, or concrete type coupling rising.
+        run: python oms/audit_extensibility.py
       - name: Enforce the evidence provenance ratchet
         # Fails the build when evidence is added without a migration head. Such
         # a file cannot be shown to be stale, so nothing ever forces it to be

@@ -23,9 +23,9 @@ Three failures found on 2026-08-03, in one day, each of a different kind:
 None was found by adding a feature. Each was found by asking a claim to prove itself.
 That is the activity this goal institutionalizes.
 
-## The invariant
+## The invariants
 
-**No claim outlives its proof.**
+### 1. No claim outlives its proof
 
 A claim is any statement this repository makes about its own behavior: a matrix row, a
 threshold, an evidence file, a benchmark figure quoted in a document, an acceptance
@@ -35,11 +35,45 @@ judged against, and the migration head it ran at.
 The invariant is violated the moment a claim's proof cannot be located, cannot be re-run,
 or was produced against a system that no longer exists.
 
+### 2. The next object type must not cost more than the last
+
+Everything an operator sees or a program consumes is derived from the ontology, so adding
+an object type, a property type, or a view must not require editing the surfaces that
+display it. When it does, the ontology has stopped being the model and become
+documentation for hand-written code.
+
+This invariant exists because the first one cannot detect its failure. A platform can
+satisfy every evidence ratchet while quietly becoming impossible to extend: each release
+correct, each release more expensive than the last. Proof decay is visible in an audit;
+extensibility decay is only visible in how long the next feature takes, which no artifact
+records.
+
+Measured by `oms/audit_extensibility.py`. The reading on 2026-08-03 was poor and is
+recorded rather than softened:
+
+```
+declared property base types      21
+semantic types the UI can render  0 of 13
+interfaces configured             False
+```
+
+The ontology records `geopoint`, `geoshape`, `timeSeries`, `marking`, `decimal` with
+units, and eight more semantic types. Every one of them reaches the user as generic text,
+because `render_hint` is written by the ontology editor and read by nothing. The model
+knows more than the product shows.
+
+The remedy is staged in [`ONTOLOGY_MODEL_DECISION.md`](ONTOLOGY_MODEL_DECISION.md):
+interfaces first, because polymorphism is what lets a view target a capability rather than
+a list of types; then semantic rendering; then interface-driven views and SDKs.
+
 ## What the cycle does
 
 One iteration, run whenever the migration head advances or a release is contemplated,
 whichever is sooner:
 
+0. **Measure both drifts.** `python oms/audit_evidence_corpus.py` for proof decay and
+   `python oms/audit_extensibility.py` for extensibility decay. The second is the one that
+   will look fine while the platform ossifies, so it is not optional.
 1. **Measure the drift.** `python oms/audit_evidence_corpus.py` classifies every evidence
    file as CURRENT, STALE, UNPROVENANCED, or UNREADABLE.
 2. **Pick the single worst claim** — the one whose failure would be most expensive and
@@ -63,6 +97,15 @@ never regress. A regression is a build failure, not a discussion.
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
 | Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 1 of 10 |
+| Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 0 of 13, floor 0 |
+| Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
+
+Read the coupling number with care. It is near zero not because the UI is admirably
+generic but because it is type-blind: it never branches on object type because it never
+consults type at all. A hand-written per-type UI and a UI that discards type entirely
+produce the same coupling count, and only the renderable-types reading tells them apart.
+The floor of 0 is an admission, not an achievement, and it is the ratchet most worth
+moving.
 
 The unprovenanced ceiling is enforced mechanically: adding an evidence file with no
 migration head fails the audit on the commit that adds it. This is deliberately stricter
@@ -117,3 +160,4 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-03 | Tier B: is the evidence corpus current? | 11 of 13 files unprovenanced; the rule against inheriting evidence was unenforceable | Ratchet established at 11 |
 | 2026-08-03 | Tier B: does the collaboration gate hold on repetition? | GOAL2-004 (P2, open) — p95 over 20 samples is one observation | Gate recorded FAIL at worst run |
 | 2026-08-03 | Chaos: does the partition rehearsal actually partition? | Twice it did not. The first version severed a backend before any pairs existed; the second raced the processor and lost, so the pass completed untouched. Both reported success | Chaos 1 of 10, first gate satisfied |
+| 2026-08-03 | Is the ontology's expressiveness reaching the product? | No. 21 base types declared, 0 of 13 semantic types rendered; `render_hint` written by the editor and read by nothing; interfaces a stub. The model knows more than the product shows | Second invariant and its ratchets established |
