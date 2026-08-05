@@ -59,6 +59,13 @@ Based on modern ontology-driven principles, this backend separates the data plan
 
 ## Setup & Running Locally
 
+For what this project is trying to reach and how completion is judged, see the tiered
+[Goal](docs/GOAL_2026-08-03.md), its [Tier B execution plan](docs/GOAL_TIER_B_2026-08-03.md),
+and the [Measurement Contract](docs/TIER_B_MEASUREMENT_CONTRACT.md) that fixes what the
+gates mean. The [Standing Goal](docs/GOAL_STANDING.md) is the ongoing discipline that keeps
+those claims from outliving their proof; `python oms/audit_evidence_corpus.py` reports how
+far the evidence has drifted from the current migration head.
+
 For a self-hosted team pilot with OIDC, TLS, migrations, backup, restore, and upgrade procedures, see [Production Pilot Operations](docs/PRODUCTION_PILOT.md).
 
 For drag/drop editing, typed Pipeline transforms, ontology mappings, Workshop breakpoints, AIP traces, versioning, and recovery, see [Visual Builder Operations](docs/VISUAL_BUILDERS.md).
