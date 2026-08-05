@@ -59,10 +59,10 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Reading on 2026-08-03 |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 180 of 180 in 764 s |
+| Backend scripts passing in one sequential run | the suite | 182 of 182 in 738 s |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 1 of 10 |
 
 The unprovenanced ceiling is enforced mechanically: adding an evidence file with no
 migration head fails the audit on the commit that adds it. This is deliberately stricter
@@ -86,7 +86,17 @@ was taken.
   Every aggregator substitutes a breaching value for an empty record.
 - **Covering half a gate.** The chaos gate names collaboration *and* cross-stream
   processing. Only collaboration had a harness, and the gate read as satisfied on that
-  half until it was made to report the missing half as zero.
+  half until it was made to report the missing half as zero. The zero was then a hand-
+  maintained constant, which is its own decay: it had to be remembered on the day a
+  cross-stream harness appeared. The gate now derives coverage from recorded rehearsals,
+  so a missing subject fails without anyone remembering to check.
+- **A rehearsal that does not rehearse.** The cross-stream partition harness passed twice
+  before it measured anything. The first version severed a backend before any pairs had
+  been emitted, so recovery had nothing to resume from. The second severed once and lost
+  the race, so the processor completed untouched and the pool reconnected silently. Both
+  printed success. It now asserts that pairs existed before the cut and that the in-flight
+  processor was genuinely interrupted, because a chaos test that never induces chaos is
+  worse than none: it converts an unknown into a false assurance.
 - **Reclassifying to P2.** The severity gate blocks on P0 and P1, so the cheapest way past
   it is a downgrade. Downgrades require an owner, a date, and a rationale in the tier's
   acceptance record.
@@ -106,3 +116,4 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-03 | Tier A: has the downgrade chain ever been walked? | GOAL2-003 (P1) — six migrations could not downgrade on SQLite | Both dialects round-trip |
 | 2026-08-03 | Tier B: is the evidence corpus current? | 11 of 13 files unprovenanced; the rule against inheriting evidence was unenforceable | Ratchet established at 11 |
 | 2026-08-03 | Tier B: does the collaboration gate hold on repetition? | GOAL2-004 (P2, open) — p95 over 20 samples is one observation | Gate recorded FAIL at worst run |
+| 2026-08-03 | Chaos: does the partition rehearsal actually partition? | Twice it did not. The first version severed a backend before any pairs existed; the second raced the processor and lost, so the pass completed untouched. Both reported success | Chaos 1 of 10, first gate satisfied |
