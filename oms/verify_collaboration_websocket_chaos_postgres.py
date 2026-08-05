@@ -213,41 +213,20 @@ with ExitStack() as stack:
     print("PostgreSQL collaboration WebSocket chaos rehearsal measurements:")
     print(json.dumps(evidence, indent=2, sort_keys=True))
 
-    from tier_b_evidence import write_evidence
+    from chaos_rehearsals import record
 
-    # The Tier B chaos gate names collaboration *and* cross-stream processing.
-    # This harness rehearses replica process loss for collaboration only, so the
-    # cross-stream partition count is reported as zero rather than omitted. A
-    # gate that covers half its scope must not read as satisfied.
-    tier_b_path, tier_b_status, breaches = write_evidence(
-        "chaos",
-        thresholds={
-            "reconnect_max_ms_max": round(RECONNECT_LIMIT_SECONDS * 1000, 3),
-            "duplicate_events_max": 0,
-            "missed_events_max": 0,
-            "replica_terminations_min": 1,
-            "replica_restarts_min": 1,
-            "collaboration_partition_rehearsals_min": 1,
-            "cross_stream_partition_rehearsals_min": 1,
-        },
-        measurements={
-            "reconnect_max_ms": evidence["reconnect_max_ms"],
-            "duplicate_events": evidence["duplicate_events"],
-            "missed_events": evidence["missed_events"],
-            "replica_terminations": evidence["replica_terminations"],
-            "replica_restarts": evidence["replica_restarts"],
-            "collaboration_partition_rehearsals": 1,
-            "cross_stream_partition_rehearsals": 0,
-        },
-        harness="oms/verify_collaboration_websocket_chaos_postgres.py",
-        notes=(
-            "Covers collaboration replica process loss and cursor-resumed reconnect. "
-            "Cross-stream network-partition recovery has no harness yet, so it is "
-            "reported as zero rehearsals rather than left out of the gate."
-        ),
-    )
-    print(f"Tier B evidence {tier_b_status}: {tier_b_path.name}")
-    if breaches:
-        print("  breaches: " + "; ".join(breaches))
-        raise SystemExit(1)
+    # This harness covers the collaboration half of the chaos gate. It records a
+    # rehearsal rather than writing the gate verdict, because the gate also names
+    # cross-stream processing and no single harness can see both. The verdict
+    # comes from `python oms/chaos_rehearsals.py aggregate`, which fails while
+    # either subject has no rehearsal.
+    record("collaboration", {
+        "reconnect_max_ms": evidence["reconnect_max_ms"],
+        "duplicate_events": evidence["duplicate_events"],
+        "missed_events": evidence["missed_events"],
+        "replica_terminations": evidence["replica_terminations"],
+        "replica_restarts": evidence["replica_restarts"],
+        "command_events_received": evidence["command_events_received"],
+    }, harness="oms/verify_collaboration_websocket_chaos_postgres.py")
+    print("Recorded a collaboration chaos rehearsal.")
     print("PostgreSQL collaboration WebSocket chaos rehearsal passed.")
