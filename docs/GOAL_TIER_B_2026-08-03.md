@@ -37,7 +37,7 @@ What remains for these gates is machine time, not code.
 | --- | --- | --- | --- |
 | Ontology scale | >= 10M objects / 50M links, bounded p95 | lookup 8.718 ms, range 11.830 ms, two-hop 13.721 ms p95 | Re-run at current head |
 | Mixed workload | Concurrent reads during bounded writes, rollback atomicity, retained plans | **PASS at head 0038** — read p95 23.641 ms, write batch p95 615.358 ms, 392.003 writes/s, rollback clean, index plan retained; 100k/500k fixture, not the 10M of prior art | Satisfied as written; see the scale note |
-| Pipeline scale | >= 10M partitioned rows in and out | preview 3,663.405 ms, delivery 4,046.026 ms p95 | Re-run at current head |
+| Pipeline scale | >= 10M partitioned rows in and out | **PASS at head 0038 at full reference scale** — 10,000,000 input rows, 20 output partitions, preview p95 2,988.033 ms, delivery 3,360.618 ms, 20 rows materialized | Satisfied |
 | Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **FAIL: 241.605, 253.002, 219.812 ms across three runs at head 0037** | Resolve GOAL2-004 before re-measuring |
 | Identity | 200 distinct PKCE identities under login p95 gate | 4,582.792 ms against a 15,000 ms gate | Re-run; needs Keycloak |
 | Durability | Fresh-volume backup/restore and replica failover, zero committed-record loss | **PASS at head 0038** — restored state identical, standby promoted with the committed probe preserved at the same LSN; run at 100k objects / 500k links, not the 10M of prior art | Satisfied as written; see the scale note |
