@@ -41,7 +41,7 @@ What remains for these gates is machine time, not code.
 | Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **FAIL: 241.605, 253.002, 219.812 ms across three runs at head 0037** | Resolve GOAL2-004 before re-measuring |
 | Identity | 200 distinct PKCE identities under login p95 gate | 4,582.792 ms against a 15,000 ms gate | Re-run; needs Keycloak |
 | Durability | Fresh-volume backup/restore and replica failover, zero committed-record loss | 36.59 GB basebackup in 50.917 s, promote in 0.686 s | Re-run at current head |
-| Chaos | Partition and process-loss recovery, zero missed or duplicated events | **STALE** — passed at head 0037 (both subjects, 0 duplicates, 0 misses, 128.852 ms reconnect); head advanced to 0038 | Re-run at current head |
+| Chaos | Partition and process-loss recovery, zero missed or duplicated events | **PASS at head 0038** — both subjects re-rehearsed, 0 duplicate and 0 missed events, 0 duplicate and 0 missed pairs, 124.169 ms max reconnect | Satisfied |
 
 ### Group 2 — Construction, no evidence exists
 

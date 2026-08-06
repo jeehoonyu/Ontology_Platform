@@ -6,7 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from chaos_rehearsals import RECONNECT_LIMIT_MS, aggregate, load, record, summarize  # noqa: E402
+from chaos_rehearsals import (  # noqa: E402
+    RECONNECT_LIMIT_MS, aggregate, at_head, load, record, summarize,
+)
+from tier_b_evidence import current_head  # noqa: E402
+
+HEAD = current_head()
 
 passed = 0
 
@@ -18,14 +23,16 @@ def check(condition, label, payload=None):
 
 
 def collab(reconnect=120.0, duplicates=0, missed=0):
-    return {"subject": "collaboration", "at": 1, "harness": "x", "measurements": {
+    return {"subject": "collaboration", "at": 1, "harness": "x", "migration_head": HEAD,
+            "measurements": {
         "reconnect_max_ms": reconnect, "duplicate_events": duplicates,
         "missed_events": missed, "replica_terminations": 1, "replica_restarts": 1,
     }}
 
 
 def cross(duplicate_pairs=0, missed_pairs=0):
-    return {"subject": "cross_stream", "at": 2, "harness": "y", "measurements": {
+    return {"subject": "cross_stream", "at": 2, "harness": "y", "migration_head": HEAD,
+            "measurements": {
         "duplicate_pairs": duplicate_pairs, "missed_pairs": missed_pairs,
         "emitted_pairs": 60, "expected_pairs": 60,
     }}
@@ -105,5 +112,22 @@ existing = docs_dir / "tier-b-chaos-evidence.json"
 before = existing.read_text(encoding="utf-8") if existing.exists() else None
 check(before is None or json.loads(before)["gate_id"] == "chaos", "docs evidence untouched by tests")
 check(RECONNECT_LIMIT_MS == 5000.0, "reconnect limit matches the contract")
+
+# A rehearsal run before the head advanced describes a different schema. Counting
+# it would let the gate read as satisfied on work that was never repeated, which
+# is the non-completion rule violated from the inside rather than from outside.
+stale_collab = dict(collab(), migration_head="0001_runtime_baseline")
+stale_cross = dict(cross(), migration_head="0001_runtime_baseline")
+check(at_head([stale_collab], HEAD) == [], "a rehearsal from an older head is dropped")
+check(at_head([collab()], HEAD) != [], "a rehearsal at the current head is kept")
+check(at_head([{"subject": "collaboration", "at": 1, "measurements": {}}], HEAD) == [],
+      "a record predating the head field is dropped rather than assumed current")
+
+code, payload = evidence_for([stale_collab, stale_cross])
+check(code == 1, "both subjects rehearsed at an older head do not satisfy the gate", code)
+check(payload["measurements"]["rehearsals_ignored_at_other_heads"] == 2,
+      "the evidence records how many rehearsals were ignored", payload["measurements"])
+check(payload["measurements"]["subjects_covered"] == [],
+      "no subject is covered once stale rehearsals are dropped", payload["measurements"])
 
 print(f"\nChaos rehearsal aggregation verified: {passed} assertions passed.")
