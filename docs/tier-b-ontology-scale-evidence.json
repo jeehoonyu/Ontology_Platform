@@ -1,0 +1,32 @@
+{
+  "gate_id": "ontology_scale",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "graph_two_hop_p95_ms": 14.153,
+    "links": 50000000,
+    "object_lookup_p95_ms": 8.916,
+    "object_range_p95_ms": 12.248,
+    "objects": 10000000
+  },
+  "notes": "Reference profile over 10000000 objects and 50000000 links, 10 samples per query shape, physical index plans verified.",
+  "provenance": {
+    "captured_at": 1785985006,
+    "git_commit": "e2d813c",
+    "harness": "oms/benchmark_ontology_scale_postgres.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0038_explicit_schema_baseline"
+  },
+  "status": "PASS",
+  "thresholds": {
+    "graph_two_hop_p95_ms_max": 2000.0,
+    "links_min": 50000000,
+    "object_lookup_p95_ms_max": 300.0,
+    "object_range_p95_ms_max": 300.0,
+    "objects_min": 10000000
+  },
+  "tier": "B"
+}
