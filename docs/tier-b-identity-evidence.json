@@ -1,0 +1,35 @@
+{
+  "gate_id": "identity",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "concurrency": 20,
+    "elapsed_seconds": 38.914,
+    "identities": 200,
+    "login_p50_ms": 3122.733,
+    "login_p95_ms": 4244.765,
+    "mutation_denials": 200,
+    "replicas_verified": 2,
+    "unique_principals": 200
+  },
+  "notes": "Real Keycloak authorization-code PKCE against two API replicas. 200 distinct identities resolved to 200 unique principals carrying organization pilot and project default, each denied a mutation server-side as a viewer. The first run failed on a null organization claim: the rehearsal launcher aborted on a PowerShell stderr artifact after docker compose up, so the kcadm step registering organization_id and project_ids as tenant attributes never ran. The product behaved correctly throughout and the assertion caught a half-configured environment; both runs are part of this gate's record.",
+  "provenance": {
+    "captured_at": 1785981869,
+    "git_commit": "3b8f863",
+    "harness": "frontend/tests/production/oidc-scale.spec.ts + oms/provision_oidc_scale_users.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0038_explicit_schema_baseline"
+  },
+  "status": "PASS",
+  "thresholds": {
+    "identities_min": 200,
+    "login_p95_ms_max": 15000,
+    "mutation_denials_min": 200,
+    "replicas_verified_min": 2,
+    "unique_principals_min": 200
+  },
+  "tier": "B"
+}
