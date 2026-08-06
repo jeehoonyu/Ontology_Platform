@@ -79,6 +79,31 @@ The remedy is staged in [`ONTOLOGY_MODEL_DECISION.md`](ONTOLOGY_MODEL_DECISION.m
 harden interface conformance to check base types rather than property names, then semantic
 rendering, then interface-scoped queries, interface-driven views, and SDKs.
 
+### 3. A measurement is evidence only for the path it traverses
+
+Every gate names the entry point it enters through and the request shape it issues. A gate
+that enters below the product's own entry point states, in its evidence file, what it
+therefore does not cover.
+
+Added 2026-08-06, because the first two invariants both held while a claim was false.
+
+The Tier B ontology-scale gate passes at ten million objects with a bounded typed read.
+Its evidence is current at the head, so invariant 1 is satisfied. The extensibility
+ratchets are green, so invariant 2 is satisfied. And the claim a reader draws from it —
+that this platform's reads are bounded at ten million objects — is false, because the gate
+reads an object set with no residual filter and every surface a user touches sends one.
+Measured by `oms/measure_read_path_bounds.py`, the filtered read costs 2,235.1 ms and
+302.5 MB at 400,000 objects against 1.3 ms and 0.1 MB unfiltered, and heap grows x9.9 to
+x10.0 per 10x objects where the measured shape is flat at x1.0. That is GOAL2-007.
+
+The same shape produced GOAL2-008 independently on the same day: `renderable_base_types`
+reads 13 of 13, every match comes from the renderer's own source file, and one workspace
+of twenty-two consumes it.
+
+Neither instrument lied. Each measured a component correctly and said nothing about the
+composition that ships, and there was no invariant under which that was a failure. Now
+there is. The program that discharges it is [`GOAL_2026-08-06.md`](GOAL_2026-08-06.md).
+
 ## What the cycle does
 
 One iteration, run whenever the migration head advances or a release is contemplated,
@@ -103,12 +128,14 @@ whichever is sooner:
 Ratchets are what make a standing goal more than an intention. Each may improve and must
 never regress. A regression is a build failure, not a discussion.
 
-| Ratchet | Instrument | Reading on 2026-08-03 |
+| Ratchet | Instrument | Latest reading |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
 | Backend scripts passing in one sequential run | the suite | 186 of 186 in 809 s at head 0038 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
-| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
+| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 2 — GOAL2-007 (P0), GOAL2-008 (P1) |
+| Unbounded object-set materializations reachable from a route | `oms/audit_query_bounds.py` (owed) | 24, ceiling 24 |
+| Data surfaces receiving ontology specs | `oms/audit_extensibility.py` (extension owed) | 1 surface, floor 1; denominator owed |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
 | Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 7 of 10 at head 0038 |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
@@ -157,6 +184,11 @@ was taken.
   printed success. It now asserts that pairs existed before the cut and that the in-flight
   processor was genuinely interrupted, because a chaos test that never induces chaos is
   worse than none: it converts an unknown into a false assurance.
+- **Measuring the component instead of the composition.** The most durable version of
+  this, because nothing about it looks like cheating. Benchmark the read path below the
+  filter, count the renderer's vocabulary rather than its callers, and every instrument
+  is honest, current, and green while the product fails on the path a user takes. Both
+  defects found on 2026-08-06 are this. Invariant 3 exists for it.
 - **Reclassifying to P2.** The severity gate blocks on P0 and P1, so the cheapest way past
   it is a downgrade. Downgrades require an owner, a date, and a rationale in the tier's
   acceptance record.
@@ -183,3 +215,5 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-04 | Can an old deployment actually converge? | Yes, once every table is stated explicitly. `0038` takes a database stamped at 0037 with zero tables to the full 272. Advancing the head then invalidated the one passing Tier B gate, and the auditor's head regex turned out not to match Alembic's own output | Baseline-only 215 -> 0; Tier B 1 -> 0 |
 | 2026-08-04 | Is Tier A still met after all of today's changes? | Not as claimed. Frontend, browser matrix, Compose and image builds were being quoted from head 0037; the rule does not let them carry. Re-run at 0038 they pass, and a condition had been narrowed away in the write-up before being restored | Tier A met at 0038 |
 | 2026-08-05 | Interfaces carry no `project_id` — untidiness or a boundary? | A boundary. GOAL2-006 (P0): interface-scoped queries returned committed instance data from every project. Tier A had been claimed as met with this open, so the claim was retracted | Tier A retracted, then restored |
+| 2026-08-06 | Does the 10M ontology-scale gate measure a read the product issues? | No. GOAL2-007 (P0) — it measures the one shape with no residual filter. Filtered reads, facets and spatial queries each materialize the whole object type: 7,119.4 ms and 912.8 MB at 400k, heap growing x10.0 per 10x, on the favorable dialect. 24 such sites across 9 modules | Third invariant established; P0/P1 0 -> 2 |
+| 2026-08-06 | Does `renderable_base_types 13 of 13` mean the UI renders 13 types? | No. GOAL2-008 (P1) — all 13 matches are in the renderer's own file and 1 workspace of 22 imports it. The reading would be unchanged with no consumer at all | Reach ratchet established at 1 surface |
