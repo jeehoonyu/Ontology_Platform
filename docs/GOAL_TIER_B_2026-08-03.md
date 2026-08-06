@@ -56,9 +56,14 @@ correct measurement is not the remedy for a wrong inference drawn from it. What 
 that the row now states its scope, and that closing Tier B requires the gate to be
 re-scoped to enter through `/api/v1` with the shapes the product issues.
 
-Recorded as GOAL2-007 (P0) in [`GOAL_2026-08-03.md`](GOAL_2026-08-03.md); the program is
-[`GOAL_2026-08-06.md`](GOAL_2026-08-06.md), condition B7. Under the severity gate Tier B
-cannot be claimed while it is open.
+Measured at reference scale on PostgreSQL the same day, those shapes cost **21,940.6 MB
+and 157,654.5 ms** for a single filtered read at 10,000,000 objects. Repaired, on the same
+corpus, the filtered read is **8.2 ms and 1.6 MB** and no shape exceeds 6.8 MB. Facet and
+spatial latency remain linear in the object type and are tracked as conditions B3 and B4.
+
+Recorded as GOAL2-007 (P0) in [`GOAL_2026-08-03.md`](GOAL_2026-08-03.md), now FIXED; the
+program is [`GOAL_2026-08-06.md`](GOAL_2026-08-06.md). Condition B7 — re-scoping this gate
+to enter through the product's own door — is still owed, so the row's scope note stands.
 
 ### Group 2 — Construction, no evidence exists
 
