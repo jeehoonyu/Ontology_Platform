@@ -106,7 +106,7 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Reading on 2026-08-03 |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 185 of 185 in 1,034 s at head 0038 |
+| Backend scripts passing in one sequential run | the suite | 186 of 186 in 809 s at head 0038 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
