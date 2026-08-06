@@ -110,7 +110,7 @@ never regress. A regression is a build failure, not a discussion.
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 2 of 10 at head 0038 |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 3 of 10 at head 0038 |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 0 of 13, floor 0 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 

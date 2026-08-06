@@ -394,6 +394,54 @@ if EVIDENCE_PATH:
     Path(EVIDENCE_PATH).write_text(serialized + "\n", encoding="utf-8")
 print(f"PostgreSQL ontology mixed workload benchmark {evidence['status'].lower()}:")
 print(serialized)
+
+# The Tier B mixed-workload gate names concurrent reads during bounded writes,
+# rollback atomicity and retained index plans. It states no scale, so unlike
+# ontology_scale and pipeline_scale this gate is satisfiable below reference
+# size and evidence is emitted for either profile. The scale is recorded in the
+# measurements so a reader can judge rather than infer.
+from tier_b_evidence import write_evidence  # noqa: E402
+
+_gate_path, _gate_status, _gate_breaches = write_evidence(
+    "mixed_workload",
+    thresholds={
+        "concurrent_read_p95_ms_max": READ_P95_LIMIT_MS,
+        "write_batch_p95_ms_max": WRITE_P95_LIMIT_MS,
+        "writes_per_second_min": MIN_WRITE_THROUGHPUT,
+        "invalid_transitions_max": 0,
+        "rollback_probes_passed_min": 1,
+        "indexed_plans_after_mutation_min": 1,
+        "reader_workers_min": 2,
+        "performance_gate_failures_max": 0,
+    },
+    measurements={
+        "concurrent_read_p95_ms": evidence["concurrent_read_p95_ms"],
+        "write_batch_p95_ms": evidence["write_batch_p95_ms"],
+        "writes_per_second": evidence["writes_per_second"],
+        "invalid_transitions": evidence["invalid_transitions"],
+        "rollback_probes_passed": 1 if evidence["rollback_probe"] == "PASS" else 0,
+        "indexed_plans_after_mutation": 1 if evidence["indexed_plan_after_mutation"] else 0,
+        "reader_workers": evidence["reader_workers"],
+        "performance_gate_failures": len(gate_failures),
+        "objects": OBJECT_COUNT,
+        "links": LINK_COUNT,
+        "writes": WRITE_COUNT,
+        "read_samples": evidence["read_samples"],
+        "temporal_events": evidence["temporal_events"],
+    },
+    harness="oms/benchmark_ontology_mixed_workload_postgres.py",
+    notes=(
+        f"Profile '{PROFILE}' at {OBJECT_COUNT} objects and {LINK_COUNT} links with "
+        f"{WRITE_COUNT} writes across {evidence['write_transactions']} bounded transactions "
+        f"and {evidence['reader_workers']} concurrent readers. The gate states no scale; "
+        "reference-size behaviour belongs to the ontology_scale gate. Rollback atomicity "
+        "and the post-mutation index plan are verified in the same run."
+    ),
+)
+print(f"\nTier B evidence {_gate_status}: {_gate_path.name}")
+for _breach in _gate_breaches:
+    print(f"  breach: {_breach}")
+
 engine.dispose()
 if gate_failures:
     raise AssertionError({"performance_gate_failures": gate_failures})
