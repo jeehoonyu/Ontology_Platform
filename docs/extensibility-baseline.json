@@ -1,5 +1,5 @@
 {
   "note": "Ratchets. Renderable types may rise; coupling may fall. Never the reverse.",
   "ontology_type_coupling_ceiling": 1,
-  "renderable_base_types_floor": 0
+  "renderable_base_types_floor": 13
 }

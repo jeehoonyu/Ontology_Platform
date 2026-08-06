@@ -204,3 +204,57 @@ export function renderByBaseType(value: unknown, spec?: PropertySpec): ReactNode
 export function renderPropertyValue(value: unknown, spec?: PropertySpec): ReactNode {
   return renderByBaseType(value, spec) ?? formatValue(value);
 }
+
+/**
+ * Legacy JSON-schema type names mapped onto the ontology base vocabulary.
+ *
+ * Mirrors _LEGACY_TO_BASE in ontology_interfaces_ops.py. Object types that
+ * predate a normalized profile still carry a JSON-schema style type, and
+ * translating it here means those types render semantically too rather than
+ * waiting for every object type in a deployment to be normalized.
+ */
+const LEGACY_TYPE_TO_BASE: Record<string, string> = {
+  string: "string",
+  integer: "integer",
+  number: "double",
+  boolean: "boolean",
+  array: "array",
+  object: "struct",
+  json: "struct",
+  geometry: "geoshape",
+  geojson: "geoshape",
+};
+
+/**
+ * Build a property-name to spec map from whatever the caller has.
+ *
+ * The normalized profile is authoritative because it records real base types,
+ * units and render hints. The legacy bag is the fallback. Callers pass whichever
+ * they hold; a surface with neither renders exactly as it did before.
+ */
+export function propertySpecs(
+  legacyProperties?: Record<string, unknown> | null,
+  profileProperties?: Record<string, unknown> | null,
+): Record<string, PropertySpec> {
+  const specs: Record<string, PropertySpec> = {};
+  for (const [name, raw] of Object.entries(legacyProperties || {})) {
+    const declared = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const legacy = typeof declared.type === "string" ? declared.type.toLowerCase() : "";
+    const baseType = LEGACY_TYPE_TO_BASE[legacy];
+    if (baseType) {
+      specs[name] = { base_type: baseType, unit: typeof declared.unit === "string" ? declared.unit : undefined };
+    }
+  }
+  for (const [name, raw] of Object.entries(profileProperties || {})) {
+    const declared = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    if (typeof declared.base_type === "string" && declared.base_type) {
+      specs[name] = {
+        base_type: declared.base_type,
+        unit: typeof declared.unit === "string" ? declared.unit : undefined,
+        render_hint: typeof declared.render_hint === "string" ? declared.render_hint : undefined,
+        sensitive: declared.sensitive === true,
+      };
+    }
+  }
+  return specs;
+}

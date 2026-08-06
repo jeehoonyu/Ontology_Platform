@@ -111,15 +111,18 @@ never regress. A regression is a build failure, not a discussion.
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
 | Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 7 of 10 at head 0038 |
-| Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 0 of 13, floor 0 |
+| Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
 Read the coupling number with care. It is near zero not because the UI is admirably
-generic but because it is type-blind: it never branches on object type because it never
-consults type at all. A hand-written per-type UI and a UI that discards type entirely
+generic but because it was type-blind: it never branched on object type because it never
+consulted type at all. A hand-written per-type UI and a UI that discards type entirely
 produce the same coupling count, and only the renderable-types reading tells them apart.
-The floor of 0 is an admission, not an achievement, and it is the ratchet most worth
-moving.
+
+That reading moved from 0 of 13 to 13 of 13 on 2026-08-05. The UI now dispatches on the
+base type the ontology declares, so the pair of numbers finally means what it looks like:
+low coupling with full type coverage is a UI that reads the model rather than one that
+ignores it.
 
 The unprovenanced ceiling is enforced mechanically: adding an evidence file with no
 migration head fails the audit on the commit that adds it. This is deliberately stricter
