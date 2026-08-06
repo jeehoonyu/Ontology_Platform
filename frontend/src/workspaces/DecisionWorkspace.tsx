@@ -11,6 +11,7 @@ import {
   type DecisionScorecard, type EntityCandidate, type ObjectSnapshot
 } from "../api/decisionApi";
 import type { JsonValue, TableRow } from "../types";
+import { propertySpecs, type PropertySpec } from "../utils/semanticRender";
 
 type Tab = "risk" | "explain" | "timeline" | "entity" | "scenario" | "agent";
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -82,6 +83,13 @@ export function DecisionWorkspace() {
   };
   const highCount = evaluation?.findings.filter((item) => ["high", "critical"].includes(item.risk.band.toLowerCase())).length || 0;
   const averageRisk = evaluation?.findings.length ? Math.round(evaluation.findings.reduce((sum, item) => sum + item.risk.score, 0) / evaluation.findings.length) : 0;
+  // Timeline snapshots carry the object's own properties, so they render by the
+  // declared base type rather than stringified -- the same treatment the
+  // Explorer and the Map give the same object.
+  const specs = useMemo(
+    () => propertySpecs(objectTypes.find((type) => type.id === objectTypeId)?.properties as Record<string, unknown> | undefined),
+    [objectTypes, objectTypeId]
+  );
 
   if (loading) return <LoadingState label="Loading decision intelligence..." />;
   return <Page title="Decision Intelligence" subtitle="Explainable risk, temporal evidence, entity resolution, scenarios, and governed agent plans">
@@ -98,7 +106,7 @@ export function DecisionWorkspace() {
     <nav className="decision-tabs" aria-label="Decision intelligence views">{TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
     {tab === "risk" ? <RiskBoard evaluation={evaluation} rules={rules} scorecards={scorecards} onSelect={(id) => { setObjectId(id); setTab("explain"); }} /> : null}
     {tab === "explain" ? <ExplainPanel objectId={objectId} explanation={explanation} busy={busy} onExplain={() => void act("Explanation loaded", async () => setExplanation(await explainDecisionObject(objectTypeId, objectId)))} /> : null}
-    {tab === "timeline" ? <TimelinePanel objectId={objectId} timeline={timeline} busy={busy} onLoad={() => void act("Timeline loaded", async () => setTimeline((await getObjectTimeline(objectTypeId, objectId)).timeline))} /> : null}
+    {tab === "timeline" ? <TimelinePanel objectId={objectId} timeline={timeline} busy={busy} specs={specs} onLoad={() => void act("Timeline loaded", async () => setTimeline((await getObjectTimeline(objectTypeId, objectId)).timeline))} /> : null}
     {tab === "entity" ? <EntityPanel candidates={candidates} busy={busy} onRun={(resolutionFields, threshold) => void act("Entity review queue generated", async () => setCandidates((await createEntityJob(projectId, objectTypeId, resolutionFields, threshold)).candidates || []))} onAccept={(id) => void act("Candidate accepted", () => updateCandidate(id, true))} onReject={(id) => void act("Candidate rejected", () => updateCandidate(id, false))} /> : null}
     {tab === "scenario" ? <ScenarioPanel objectId={objectId} scenario={scenario} busy={busy} onRun={(property, value) => void act("Scenario completed", async () => setScenario(await createDecisionScenario({ project_id: projectId, display_name: `Impact scenario for ${objectId}`, seed_object_ids: [objectId], overrides: { [objectId]: { [property]: parsedValue(value) } } })))} /> : null}
     {tab === "agent" ? <div className="decision-agent-wrap"><AgentRuntimePanel /></div> : null}
@@ -115,8 +123,8 @@ function ExplainPanel({ objectId, explanation, busy, onExplain }: { objectId: st
   return <div className="decision-evidence-layout"><Panel title="Object Explanation" action={<button className="primary" disabled={!objectId || !!busy} onClick={onExplain}><Search size={14} />Explain selected object</button>}>{explanation ? <><div className="decision-explain-heading"><div><strong>{String(explanation.object.properties.name || explanation.object.id)}</strong><span>{explanation.object.id}</span></div><div className="decision-score"><b>{explanation.risk.score}</b><StatusBadge value={explanation.risk.band} /></div></div><p className="decision-narrative">{explanation.explanation || explanation.risk.explanation}</p><DataTable rows={rows} empty="No active risk drivers" /></> : <EmptyState title="Choose an object to explain" description="Select a finding from the Risk Board or enter an object ID above." />}</Panel><Panel title="Recommended Actions">{explanation?.recommended_actions?.length ? <ol className="decision-action-list">{explanation.recommended_actions.map((action) => <li key={action}><Check size={14} />{action.replace(/_/g, " ")}</li>)}</ol> : <div className="empty">No recommendation loaded.</div>}<h3>Temporal context</h3>{explanation ? <KeyValueGrid data={explanation.temporal_summary} /> : <div className="empty">Explain an object to load temporal evidence.</div>}<h3>Duplicate warnings</h3><StatusBadge value={explanation?.duplicate_warnings?.length ? `${explanation.duplicate_warnings.length} warnings` : "clear"} /></Panel></div>;
 }
 
-function TimelinePanel({ objectId, timeline, busy, onLoad }: { objectId: string; timeline: ObjectSnapshot[]; busy: string; onLoad: () => void }) {
-  return <Panel title="Object Activity Timeline" action={<button className="primary" disabled={!objectId || !!busy} onClick={onLoad}><Activity size={14} />Load timeline</button>}><div className="decision-timeline">{timeline.map((item) => <article key={item.id}><span className="decision-timeline-marker">{item.seq}</span><div><header><strong>{item.event_type.replace(/_/g, " ")}</strong><time>{new Date(item.created_at * 1000).toLocaleString()}</time></header><p>{item.actor} via {item.source_type || "platform"}{item.source_id ? ` · ${item.source_id}` : ""}</p><KeyValueGrid data={item.properties} /></div></article>)}</div>{!timeline.length ? <EmptyState title="No timeline loaded" description="Load append-only object snapshots for the selected object." /> : null}</Panel>;
+function TimelinePanel({ objectId, timeline, busy, specs, onLoad }: { objectId: string; timeline: ObjectSnapshot[]; busy: string; specs: Record<string, PropertySpec>; onLoad: () => void }) {
+  return <Panel title="Object Activity Timeline" action={<button className="primary" disabled={!objectId || !!busy} onClick={onLoad}><Activity size={14} />Load timeline</button>}><div className="decision-timeline">{timeline.map((item) => <article key={item.id}><span className="decision-timeline-marker">{item.seq}</span><div><header><strong>{item.event_type.replace(/_/g, " ")}</strong><time>{new Date(item.created_at * 1000).toLocaleString()}</time></header><p>{item.actor} via {item.source_type || "platform"}{item.source_id ? ` · ${item.source_id}` : ""}</p><KeyValueGrid data={item.properties} specs={specs} /></div></article>)}</div>{!timeline.length ? <EmptyState title="No timeline loaded" description="Load append-only object snapshots for the selected object." /> : null}</Panel>;
 }
 
 function EntityPanel({ candidates, busy, onRun, onAccept, onReject }: { candidates: EntityCandidate[]; busy: string; onRun: (fields: string[], threshold: number) => void; onAccept: (id: string) => void; onReject: (id: string) => void }) {

@@ -79,6 +79,82 @@ def renderable_base_types(sources: List[Path]) -> List[str]:
     return sorted(renderable)
 
 
+# Components that accept ontology property specs and dispatch on base type.
+SPEC_AWARE_COMPONENTS = ("KeyValueGrid", "DataTable")
+
+
+def _jsx_elements(text: str, component: str) -> List[str]:
+    """The attribute text of each `<Component ...>` occurrence.
+
+    Scans forward brace-aware rather than regex-matching to the first `>`,
+    because these call sites routinely embed object literals and arrow
+    functions containing `>`.
+    """
+    found: List[str] = []
+    needle = f"<{component}"
+    index = text.find(needle)
+    while index != -1:
+        after = index + len(needle)
+        if after < len(text) and (text[after].isalnum() or text[after] == "_"):
+            index = text.find(needle, after)  # a longer component name
+            continue
+        depth = 0
+        cursor = after
+        while cursor < len(text):
+            char = text[cursor]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            elif char == ">" and depth == 0:
+                break
+            cursor += 1
+        found.append(text[after:cursor])
+        index = text.find(needle, cursor)
+    return found
+
+
+def rendering_reach(sources: List[Path]) -> Dict[str, Any]:
+    """How far semantic rendering actually reaches, as opposed to how much of
+    the vocabulary exists.
+
+    ``renderable_base_types`` counts base types the UI dispatches on, and every
+    one of its matches can come from the renderer's own source file. It did:
+    the reading was 13 of 13 while exactly one workspace imported the renderer,
+    so the number described a module's vocabulary and was read as the product's
+    coverage. That was GOAL2-008.
+
+    This counts call sites instead. A surface that renders ontology object
+    properties and does not receive declared specs stringifies them, whatever
+    the renderer is capable of.
+    """
+    wired: List[str] = []
+    unwired: List[str] = []
+    for path in sources:
+        if path.suffix != ".tsx":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for component in SPEC_AWARE_COMPONENTS:
+            for attributes in _jsx_elements(text, component):
+                # `data={x.properties}` / `rows={x.objects}` mark a surface whose
+                # subject is ontology object state. A metrics or config dict is
+                # correctly served by the generic formatter and is not counted.
+                renders_object_properties = re.search(
+                    r"\bdata=\{[^}]*\bproperties\b|\brows=\{[^}]*\bobjects\b", attributes
+                ) is not None
+                if not renders_object_properties:
+                    continue
+                site = f"{path.relative_to(REPO_ROOT).as_posix()}:{component}"
+                (wired if "specs=" in attributes else unwired).append(site)
+    return {
+        "object_property_surfaces": len(wired) + len(unwired),
+        "surfaces_receiving_specs": len(wired),
+        "surfaces_receiving_specs_sites": sorted(wired),
+        "surfaces_missing_specs": len(unwired),
+        "surfaces_missing_specs_sites": sorted(unwired),
+    }
+
+
 def ontology_type_coupling(sources: List[Path]) -> Dict[str, int]:
     """Concrete object-type identifiers appearing in UI source.
 
@@ -111,6 +187,7 @@ def measure() -> Dict[str, Any]:
     declared = declared_base_types()
     renderable = renderable_base_types(sources)
     coupling = ontology_type_coupling(sources)
+    reach = rendering_reach(sources)
     return {
         "declared_base_types": len(declared),
         "semantic_base_types": len(SEMANTIC_BASE_TYPES),
@@ -121,6 +198,7 @@ def measure() -> Dict[str, Any]:
         "ontology_type_coupling_sites": sorted(coupling),
         "interfaces_configured": interfaces_configured(),
         "ui_source_files": len(sources),
+        **reach,
     }
 
 
@@ -132,11 +210,18 @@ def main() -> int:
     reading = measure()
     print("Extensibility audit\n")
     print(f"  declared property base types      {reading['declared_base_types']}")
-    print(f"  semantic types the UI can render  {reading['renderable_base_types']}"
-          f" of {reading['semantic_base_types']}")
+    print(f"  renderer vocabulary               {reading['renderable_base_types']}"
+          f" of {reading['semantic_base_types']} semantic base types")
+    print(f"  rendering reach                   {reading['surfaces_receiving_specs']}"
+          f" of {reading['object_property_surfaces']} object-property surfaces"
+          f" ({'/'.join(SPEC_AWARE_COMPONENTS)} only)")
     print(f"  interfaces configured             {reading['interfaces_configured']}")
     print(f"  concrete object-type couplings    {reading['ontology_type_coupling']}")
     print(f"  UI source files scanned           {reading['ui_source_files']}")
+    if reading["surfaces_missing_specs_sites"]:
+        print("\n  Surfaces showing object properties without declared types:")
+        for site in reading["surfaces_missing_specs_sites"]:
+            print(f"    - {site}")
     if reading["unrendered_semantic_types"]:
         print("\n  Types the ontology declares and the UI renders as plain text:")
         for name in reading["unrendered_semantic_types"]:
@@ -148,10 +233,15 @@ def main() -> int:
         BASELINE.write_text(json.dumps({
             "renderable_base_types_floor": reading["renderable_base_types"],
             "ontology_type_coupling_ceiling": reading["ontology_type_coupling"],
-            "note": "Ratchets. Renderable types may rise; coupling may fall. Never the reverse.",
+            "surfaces_missing_specs_ceiling": reading["surfaces_missing_specs"],
+            "surfaces_receiving_specs_floor": reading["surfaces_receiving_specs"],
+            "note": "Ratchets. Renderable types and wired surfaces may rise; "
+                    "coupling and unwired surfaces may fall. Never the reverse.",
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"\nBaseline set: renderable floor {reading['renderable_base_types']}, "
-              f"coupling ceiling {reading['ontology_type_coupling']}.")
+              f"coupling ceiling {reading['ontology_type_coupling']}, "
+              f"reach floor {reading['surfaces_receiving_specs']}, "
+              f"unwired ceiling {reading['surfaces_missing_specs']}.")
         return 0
 
     if not BASELINE.exists():
@@ -160,6 +250,12 @@ def main() -> int:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     floor = baseline["renderable_base_types_floor"]
     ceiling = baseline["ontology_type_coupling_ceiling"]
+    # Absent in baselines written before the reach ratchet existed. Defaulting
+    # the floor to 0 and the ceiling to the current reading would let the first
+    # run after an upgrade silently re-baseline, so the keys are required once
+    # present and treated as unset only when the file predates them entirely.
+    reach_floor = baseline.get("surfaces_receiving_specs_floor")
+    unwired_ceiling = baseline.get("surfaces_missing_specs_ceiling")
     broken = []
     if reading["renderable_base_types"] < floor:
         broken.append(f"renderable base types fell to {reading['renderable_base_types']} "
@@ -167,13 +263,21 @@ def main() -> int:
     if reading["ontology_type_coupling"] > ceiling:
         broken.append(f"object-type coupling rose to {reading['ontology_type_coupling']} "
                       f"above ceiling {ceiling}")
+    if reach_floor is not None and reading["surfaces_receiving_specs"] < reach_floor:
+        broken.append(f"surfaces receiving specs fell to "
+                      f"{reading['surfaces_receiving_specs']} below floor {reach_floor}")
+    if unwired_ceiling is not None and reading["surfaces_missing_specs"] > unwired_ceiling:
+        broken.append(f"surfaces showing untyped object properties rose to "
+                      f"{reading['surfaces_missing_specs']} above ceiling {unwired_ceiling}")
     if broken:
         print("\nRATCHET BROKEN:")
         for message in broken:
             print(f"  {message}")
         print("A new object type now costs more UI work than it did before.")
         return 1
-    print(f"\nRatchets held: renderable >= {floor}, coupling <= {ceiling}.")
+    print(f"\nRatchets held: renderable >= {floor}, coupling <= {ceiling}"
+          + (f", reach >= {reach_floor}, unwired <= {unwired_ceiling}"
+             if reach_floor is not None else "") + ".")
     return 0
 
 

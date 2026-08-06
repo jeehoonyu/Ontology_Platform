@@ -64,7 +64,13 @@ export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
   );
 }
 
-export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; empty?: string }) {
+/**
+ * `specs` is optional, so every existing caller keeps its current rendering.
+ * Supplied, cells are drawn by the base type the ontology declares rather than
+ * stringified -- the same dispatch `KeyValueGrid` uses, so a table and a detail
+ * pane of the same object agree on how its geometry or its timestamp reads.
+ */
+export function DataTable({ rows, specs, empty = "No records" }: { rows?: TableRow[]; specs?: Record<string, PropertySpec>; empty?: string }) {
   const safeRows = rows || [];
   const columns = useMemo(() => {
     const seen = new Set<string>();
@@ -81,8 +87,8 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
         <tbody>
           {safeRows.slice(0, 40).map((row, index) => (
             <tr key={index}>{columns.map((column) => {
-              const value = formatValue(row[column]);
-              return <td key={column} title={value}>{value}</td>;
+              const text = formatValue(row[column]);
+              return <td key={column} title={text}>{specs ? renderPropertyValue(row[column], specs[column]) : text}</td>;
             })}</tr>
           ))}
         </tbody>
