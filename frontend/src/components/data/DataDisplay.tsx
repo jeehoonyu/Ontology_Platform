@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
+import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
 
 export function Panel({ title, action, children, className }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
@@ -90,7 +91,13 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   );
 }
 
-export function KeyValueGrid({ data }: { data: JsonObject }) {
+/**
+ * `specs` is optional so every existing caller keeps its current rendering.
+ * When the ontology's declared types are supplied, values are drawn by type --
+ * a geopoint as a location, a timestamp in the viewer's zone, a decimal with
+ * its unit -- instead of being stringified.
+ */
+export function KeyValueGrid({ data, specs }: { data: JsonObject; specs?: Record<string, PropertySpec> }) {
   const entries = Object.entries(data || {});
   if (!entries.length) return <div className="empty">No details available.</div>;
   return (
@@ -98,7 +105,7 @@ export function KeyValueGrid({ data }: { data: JsonObject }) {
       {entries.map(([key, value]) => (
         <div key={key}>
           <dt>{key.replace(/_/g, " ")}</dt>
-          <dd>{formatValue(value)}</dd>
+          <dd>{specs ? renderPropertyValue(value, specs[key]) : formatValue(value)}</dd>
         </div>
       ))}
     </dl>
