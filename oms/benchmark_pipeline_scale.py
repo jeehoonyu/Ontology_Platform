@@ -343,7 +343,17 @@ if PROFILE == "reference":
             # Bulk rows must stay in the engine. Hydrating them into Python is
             # the failure this benchmark exists to catch, so it is a gate
             # threshold rather than a note in the output.
-            "materialized_python_rows_max": 0,
+            #
+            # The bound is the output row count, not zero. This threshold was
+            # first written as zero and that was an instrumentation error: the
+            # metric is taken from the preview, where returning the aggregated
+            # result to the caller is the point, and the benchmark has asserted
+            # materialized_python_rows == 20 since before this gate existed.
+            # Zero belongs to the delivery path, which test_duckdb_snapshot_
+            # pipeline.py pins separately. The property meant here is that
+            # materialization does not scale with input: 20 rows returned from
+            # 10,000,000 scanned.
+            "materialized_python_rows_max": evidence["output_rows"],
         },
         measurements={
             "input_rows": ROW_COUNT,

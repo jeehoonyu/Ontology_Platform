@@ -1,0 +1,32 @@
+{
+  "gate_id": "pipeline_scale",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "deliver_ms": 3360.618,
+    "input_rows": 10000000,
+    "materialized_python_rows": 20,
+    "output_partitions": 20,
+    "preview_p95_ms": 2988.033
+  },
+  "notes": "Reference profile over 10000000 rows in 8 immutable partitions, delivered to 20 output partitions.",
+  "provenance": {
+    "captured_at": 1785980643,
+    "git_commit": "e4accf7",
+    "harness": "oms/benchmark_pipeline_scale.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0038_explicit_schema_baseline"
+  },
+  "status": "PASS",
+  "thresholds": {
+    "deliver_ms_max": 60000.0,
+    "input_rows_min": 10000000,
+    "materialized_python_rows_max": 20,
+    "output_partitions_min": 1,
+    "preview_p95_ms_max": 30000.0
+  },
+  "tier": "B"
+}
