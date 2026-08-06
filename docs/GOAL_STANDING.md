@@ -110,7 +110,7 @@ never regress. A regression is a build failure, not a discussion.
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 1 of 10 at head 0038 |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 0 of 13, floor 0 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
@@ -179,3 +179,4 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-03 | Does migration head identify the schema it names? | No. GOAL2-005 (P1) — 215 of 271 tables reach a database only through the baseline's `create_all`, so two deployments at the same head can differ, weakening the evidence provenance rule | Ratchet set at 215 |
 | 2026-08-04 | Can an old deployment actually converge? | Yes, once every table is stated explicitly. `0038` takes a database stamped at 0037 with zero tables to the full 272. Advancing the head then invalidated the one passing Tier B gate, and the auditor's head regex turned out not to match Alembic's own output | Baseline-only 215 -> 0; Tier B 1 -> 0 |
 | 2026-08-04 | Is Tier A still met after all of today's changes? | Not as claimed. Frontend, browser matrix, Compose and image builds were being quoted from head 0037; the rule does not let them carry. Re-run at 0038 they pass, and a condition had been narrowed away in the write-up before being restored | Tier A met at 0038 |
+| 2026-08-05 | Interfaces carry no `project_id` — untidiness or a boundary? | A boundary. GOAL2-006 (P0): interface-scoped queries returned committed instance data from every project. Tier A had been claimed as met with this open, so the claim was retracted | Tier A retracted, then restored |
