@@ -1,0 +1,43 @@
+{
+  "gate_id": "mixed_workload",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "concurrent_read_p95_ms": 23.641,
+    "indexed_plans_after_mutation": 1,
+    "invalid_transitions": 0,
+    "links": 500000,
+    "objects": 100000,
+    "performance_gate_failures": 0,
+    "read_samples": 1073,
+    "reader_workers": 4,
+    "rollback_probes_passed": 1,
+    "temporal_events": 2000,
+    "write_batch_p95_ms": 615.358,
+    "writes": 2000,
+    "writes_per_second": 392.003
+  },
+  "notes": "Profile 'smoke' at 100000 objects and 500000 links with 2000 writes across 10 bounded transactions and 4 concurrent readers. The gate states no scale; reference-size behaviour belongs to the ontology_scale gate. Rollback atomicity and the post-mutation index plan are verified in the same run.",
+  "provenance": {
+    "captured_at": 1785979683,
+    "git_commit": "eb20ce8",
+    "harness": "oms/benchmark_ontology_mixed_workload_postgres.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0038_explicit_schema_baseline"
+  },
+  "status": "PASS",
+  "thresholds": {
+    "concurrent_read_p95_ms_max": 300.0,
+    "indexed_plans_after_mutation_min": 1,
+    "invalid_transitions_max": 0,
+    "performance_gate_failures_max": 0,
+    "reader_workers_min": 2,
+    "rollback_probes_passed_min": 1,
+    "write_batch_p95_ms_max": 2000.0,
+    "writes_per_second_min": 100.0
+  },
+  "tier": "B"
+}
