@@ -84,6 +84,7 @@ def write_evidence(
     harness: str,
     notes: str = "",
     output_dir: Path | None = None,
+    supersede: bool = False,
 ) -> Tuple[Path, str, List[str]]:
     """Write tier-b-<gate_id>-evidence.json and return (path, status, breaches).
 
@@ -124,5 +125,43 @@ def write_evidence(
     destination = DOCS if output_dir is None else Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / f"tier-b-{gate_id.replace('_', '-')}-evidence.json"
+
+    # A gate that passes only after repeated attempts has not passed. The
+    # measurement contract says so, and nothing enforced it: every harness
+    # rewrites its evidence file on every run, so re-running after a failure
+    # silently replaced the failure with the latest result. That is not a
+    # hypothetical -- a diagnostic run of the collaboration harness overwrote a
+    # recorded FAIL with a PASS while merely sampling the distribution.
+    #
+    # A recorded failure at the same head therefore stands. The later attempt is
+    # kept alongside it so the record shows what happened, and the caller still
+    # sees FAIL. Promoting a gate requires supersede=True, which is a deliberate
+    # statement that the cause was fixed rather than out-waited.
+    if not supersede and path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            previous = None
+        if (
+            isinstance(previous, dict)
+            and previous.get("status") == "FAIL"
+            and status == "PASS"
+            and (previous.get("provenance") or {}).get("migration_head")
+            == payload["provenance"]["migration_head"]
+        ):
+            attempts = list(previous.get("later_passing_attempts") or [])
+            attempts.append({
+                "captured_at": payload["provenance"]["captured_at"],
+                "measurements": measurements,
+            })
+            previous["later_passing_attempts"] = attempts
+            previous["note_on_later_attempts"] = (
+                "This gate failed at this head and later runs passed. The failure "
+                "stands: a gate that passes only after repeated attempts has not "
+                "passed. Re-emit with supersede=True once the cause is fixed."
+            )
+            path.write_text(json.dumps(previous, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            return path, "FAIL", list(previous.get("breaches") or [])
+
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path, status, breaches
