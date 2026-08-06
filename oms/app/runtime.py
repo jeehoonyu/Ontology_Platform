@@ -9,7 +9,8 @@ import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from sqlalchemy import func, not_ as sqlalchemy_not, or_ as sqlalchemy_or, type_coerce
+from sqlalchemy import (Float, and_, case, cast, func, null, or_, type_coerce,
+                        not_ as sqlalchemy_not, or_ as sqlalchemy_or)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -767,6 +768,105 @@ def _pushdown_conditions(db: Session, normalized_filters: List[Dict[str, Any]]):
 # as they go, so a scan costs a batch of memory rather than an object type of it.
 _STREAM_BATCH = 1_000
 
+_METRES_PER_DEGREE_LATITUDE = 111_320.0
+
+
+def _point_coordinate_expressions(dialect: str, geometry_field: str):
+    """(longitude, latitude) as SQL floats, NULL where the row cannot be judged.
+
+    Condition B4. Only point-shaped geometry is recognised, in the two forms the
+    fixture and the product actually store: a GeoJSON Point under the configured
+    geometry field, and bare ``longitude``/``latitude`` scalars.
+
+    The type checks are not decoration. A Polygon's ``coordinates[0]`` is an
+    array, and casting that to a float aborts the whole statement in Postgres --
+    so the cast only happens where the value is known to be a number. Every
+    other shape yields NULL, and the caller turns NULL into "cannot judge here",
+    which keeps the pre-filter a superset. ``extract_geometry`` also accepts
+    ``location``, ``geojson`` and ``lon``/``lng`` aliases; those are left to the
+    Python pass rather than enumerated here, on the same principle.
+    """
+    properties = models.ObjectInstance.properties
+
+    if dialect == "sqlite":
+        def coordinate(index: int, scalar: str):
+            geo_path = f"$.{geometry_field}.coordinates[{index}]"
+            scalar_path = f"$.{scalar}"
+            return case(
+                (func.json_type(properties, geo_path).in_(("integer", "real")),
+                 func.json_extract(properties, geo_path)),
+                (func.json_type(properties, scalar_path).in_(("integer", "real")),
+                 func.json_extract(properties, scalar_path)),
+                else_=null(),
+            )
+        return coordinate(0, "longitude"), coordinate(1, "latitude")
+
+    # `jsonb_extract_path_text` rather than `.astext` on the extracted value.
+    # This column is `JSON().with_variant(JSONB())`, so nothing SQLAlchemy hands
+    # back from it carries the JSONB comparator -- not the column, not an index
+    # expression, not a function result. Three separate attempts to use that API
+    # here failed, each only on Postgres. The explicit functions always work.
+    def coordinate(index: int, scalar: str):
+        geo = func.jsonb_extract_path(properties, geometry_field, "coordinates", str(index))
+        scalar_value = func.jsonb_extract_path(properties, scalar)
+        return case(
+            (func.jsonb_typeof(geo) == "number",
+             cast(func.jsonb_extract_path_text(
+                 properties, geometry_field, "coordinates", str(index)), Float)),
+            (func.jsonb_typeof(scalar_value) == "number",
+             cast(func.jsonb_extract_path_text(properties, scalar), Float)),
+            else_=null(),
+        )
+    return coordinate(0, "longitude"), coordinate(1, "latitude")
+
+
+def _bbox_prefilter(db: Session, geometry_field: str, bounds: Optional[List[float]]):
+    """A SQL condition selecting a superset of rows whose point lies in ``bounds``.
+
+    Returns None when no safe condition can be built, in which case the caller
+    scans as before. Refusing is always correct here; a pre-filter that is not a
+    superset silently loses rows.
+    """
+    if not bounds or len(bounds) != 4:
+        return None
+    dialect = _dialect_name(db)
+    if dialect not in {"sqlite", "postgresql"}:
+        return None
+    if not isinstance(geometry_field, str) or not _SAFE_FIELD.match(geometry_field):
+        return None
+
+    west, south, east, north = (float(value) for value in bounds)
+    if west > east:
+        return None  # crosses the antimeridian; two ranges, not one. Not worth the risk.
+
+    longitude, latitude = _point_coordinate_expressions(dialect, geometry_field)
+    inside = and_(longitude >= west, longitude <= east,
+                  latitude >= south, latitude <= north)
+    unjudgeable = or_(longitude.is_(None), latitude.is_(None))
+    return or_(inside, unjudgeable)
+
+
+def _radius_bounds(centre: Tuple[float, float], radius_meters: float) -> Optional[List[float]]:
+    """The bounding box enclosing a circle, or None where the box is unreliable.
+
+    Near the poles a metre of longitude spans an unbounded number of degrees, and
+    a box derived there can exclude points the haversine would accept. The
+    Python pass is correct without any of this, so the answer there is to
+    decline rather than approximate.
+    """
+    longitude, latitude = centre
+    if abs(latitude) > 85.0:
+        return None
+    delta_latitude = radius_meters / _METRES_PER_DEGREE_LATITUDE
+    cosine = math.cos(math.radians(latitude))
+    if cosine < 1e-6:
+        return None
+    delta_longitude = radius_meters / (_METRES_PER_DEGREE_LATITUDE * cosine)
+    west, east = longitude - delta_longitude, longitude + delta_longitude
+    if west < -180.0 or east > 180.0:
+        return None  # wraps; see the antimeridian note above
+    return [west, latitude - delta_latitude, east, latitude + delta_latitude]
+
 
 def _stream_object_rows(
     db: Session,
@@ -940,6 +1040,84 @@ def query_object_set(
     return response
 
 
+def _group_key_expressions(dialect: str, group_by: str):
+    """(json type, group value) for a top-level property, per dialect."""
+    properties = models.ObjectInstance.properties
+    if dialect == "sqlite":
+        path = "$." + group_by
+        return (func.json_type(properties, path), func.json_extract(properties, path))
+    return (
+        func.jsonb_typeof(func.jsonb_extract_path(properties, group_by)),
+        func.jsonb_extract_path_text(properties, group_by),
+    )
+
+
+# JSON types whose Python `str()` the database cannot reproduce. A dict grouped
+# in Python keys on its repr -- "{'a': 1}" -- and no dialect renders that, so a
+# group set containing one falls back to the streaming pass rather than
+# returning different keys.
+_UNGROUPABLE_JSON_TYPES = {"object", "array"}
+
+
+def _python_group_key(json_type: Optional[str], value: Any) -> Optional[str]:
+    """The key the Python pass would have produced, or None if it cannot be known."""
+    if json_type is None or json_type == "null":
+        return "null"
+    if json_type in _UNGROUPABLE_JSON_TYPES:
+        return None
+    if json_type in {"boolean", "true", "false"}:
+        # Python renders booleans "True"/"False"; every dialect renders them
+        # lowercase, and SQLite hands back 1/0 besides.
+        if json_type == "true":
+            return "True"
+        if json_type == "false":
+            return "False"
+        return "True" if value in (True, 1, "true") else "False"
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def _sql_group_counts(db: Session, query, group_by: Optional[str]) -> Optional[Dict[str, int]]:
+    """Group counts computed by the database, or None when it cannot be trusted to match.
+
+    This is condition B3. The Python pass below is correct and bounded, but it
+    still carries every row of the object type into Python to produce a handful
+    of numbers -- 138 seconds at ten million objects. A `GROUP BY` costs one
+    scan inside the database and returns as many rows as there are groups.
+
+    Deliberately narrow: counts only, no metrics, a single top-level property,
+    and no residual predicates. Each of those is a place where SQL and
+    `_compare_filter`/`str()` could disagree, and a faster aggregate that
+    returns different numbers is not an improvement. Anything outside the narrow
+    case returns None and the caller streams.
+    """
+    dialect = _dialect_name(db)
+    if dialect not in {"sqlite", "postgresql"}:
+        return None
+    if group_by is not None and (
+        not isinstance(group_by, str)
+        or not _SAFE_FIELD.match(group_by)
+        or group_by in _RESERVED_TOP
+    ):
+        return None
+
+    if group_by is None:
+        return {"all": query.count()}
+
+    type_expr, key_expr = _group_key_expressions(dialect, group_by)
+    rows = query.with_entities(type_expr, key_expr, func.count()).group_by(
+        type_expr, key_expr).all()
+
+    counts: Dict[str, int] = {}
+    for json_type, value, count in rows:
+        key = _python_group_key(json_type, value)
+        if key is None:
+            return None  # an object- or array-valued group; let Python decide
+        counts[key] = counts.get(key, 0) + int(count)
+    return counts
+
+
 def aggregate_object_set(
     db: Session,
     *,
@@ -950,6 +1128,20 @@ def aggregate_object_set(
     metrics: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     requested_metrics = [metric for metric in (metrics or []) if isinstance(metric, dict)]
+
+    if not requested_metrics:
+        query, residual, _ = _prepared_object_query(
+            db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+        if not residual:
+            counts = _sql_group_counts(db, query, group_by)
+            if counts is not None:
+                return {
+                    "object_type_id": object_type_id,
+                    "filters": filters or {},
+                    "group_by": group_by,
+                    "total": sum(counts.values()),
+                    "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+                }
 
     # Accumulators per group rather than the rows themselves. The previous
     # version kept every row of the object type in `grouped` purely to call
@@ -1129,8 +1321,26 @@ def spatial_query_objects(
     if polygon and (not normalized_polygon or normalized_polygon.get("type") != "Polygon"):
         raise ValueError("polygon must be a GeoJSON Polygon")
 
-    rows = iter_object_rows(
+    # Narrow to a bounding box in SQL before any geometry reaches Python. Without
+    # this the spatial query is the one shape streaming made slower, because it
+    # cannot stop early and every row pays the cost of an ORM instance, a
+    # geometry extraction and a haversine before being rejected.
+    #
+    # The box is derived from whichever predicate was given -- an explicit bbox,
+    # a polygon's own extent, or the square enclosing a radius -- and each is a
+    # superset of the eventual answer, so the Python pass below still decides.
+    prefilter_bounds = normalized_bbox
+    if prefilter_bounds is None and normalized_polygon:
+        prefilter_bounds = geometry_bbox(normalized_polygon)
+    if prefilter_bounds is None and near_point and radius_meters is not None:
+        prefilter_bounds = _radius_bounds(near_point, float(radius_meters))
+
+    query, residual, _ = _prepared_object_query(
         db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+    spatial_condition = _bbox_prefilter(db, geometry_field, prefilter_bounds)
+    if spatial_condition is not None:
+        query = query.filter(spatial_condition)
+    rows = _stream_object_rows(db, query, residual)
 
     # Only the page is retained. Previously every match became a full payload
     # dict, the whole list was sorted, and the first `limit` were returned: a
