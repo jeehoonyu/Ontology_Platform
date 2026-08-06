@@ -24,6 +24,7 @@ import {
   type MgrsCoordinate
 } from "../api/gisApi";
 import type { ObjectTypeSummary } from "../api/objectExplorerApi";
+import { propertySpecs } from "../utils/semanticRender";
 
 const DEFAULT_CENTER: LatLngExpression = [37.7915, -122.4012];
 
@@ -210,6 +211,14 @@ export function MapWorkspace() {
   const geofenceCollection = useMemo<LeafletFeatureCollection>(() => ({ type: "FeatureCollection", features: geofence ? [{ type: "Feature", properties: {}, geometry: geofence as unknown as Geometry }] : [] }), [geofence]);
   const layer = layers.find((item) => item.id === activeLayerId);
   const focus = featurePoint(selected) || pickedPoint;
+  // Feature properties are ontology object properties, so the inspector draws
+  // them by their declared base type like every other object surface. This is
+  // the panel where it matters most: without it a polygon arrives as GeoJSON
+  // text on the one screen whose subject is geometry.
+  const specs = useMemo(
+    () => propertySpecs(types.find((type) => type.id === objectTypeId)?.properties as Record<string, unknown> | undefined),
+    [types, objectTypeId]
+  );
   const geoJsonOptions: GeoJSONOptions = {
     style: (feature) => ({ color: riskColor((feature?.properties || {}) as Record<string, unknown>), weight: 2, fillOpacity: 0.28 }),
     pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 8, color: riskColor((feature.properties || {}) as Record<string, unknown>), fillOpacity: 0.85, weight: 2 }),
@@ -265,7 +274,7 @@ export function MapWorkspace() {
 
         <aside className="map-inspector">
           <Panel title="Selection" action={<MapPin size={15} />}>
-            {!selected ? <EmptyState title="Select a feature" description="Click an object on the map to inspect ontology properties and spatial state." /> : <><header className="map-selection-heading"><div><strong>{String(selected.properties.name || selected.properties.title || selected.id || "Selected feature")}</strong><small>{String(selected.id || selected.properties.id || "ontology object")}</small></div><StatusBadge value={String(selected.properties.risk_band || selected.properties.criticality || selected.properties.status || "active")} /></header><KeyValueGrid data={selected.properties} /></>}
+            {!selected ? <EmptyState title="Select a feature" description="Click an object on the map to inspect ontology properties and spatial state." /> : <><header className="map-selection-heading"><div><strong>{String(selected.properties.name || selected.properties.title || selected.id || "Selected feature")}</strong><small>{String(selected.id || selected.properties.id || "ontology object")}</small></div><StatusBadge value={String(selected.properties.risk_band || selected.properties.criticality || selected.properties.status || "active")} /></header><KeyValueGrid data={selected.properties} specs={specs} /></>}
           </Panel>
           <Panel title="Layer Evidence">
             <dl className="map-coordinate-summary"><div><dt>Layer</dt><dd>{layer?.display_name || "Ad hoc object view"}</dd></div><div><dt>Object type</dt><dd>{objectTypeId || "none"}</dd></div><div><dt>Geometry</dt><dd>{geometryField}</dd></div><div><dt>Geofence</dt><dd>{geofenceResult ? `${geofenceResult.summary.inside} matches` : "not evaluated"}</dd></div></dl>

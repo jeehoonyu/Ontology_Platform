@@ -131,11 +131,13 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Latest reading |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 186 of 186 in 809 s at head 0038 |
+| Backend scripts passing in one sequential run | the suite | 187 of 187 in 831 s at head 0038 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
-| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 2 — GOAL2-007 (P0), GOAL2-008 (P1) |
-| Unbounded object-set materializations reachable from a route | `oms/audit_query_bounds.py` (owed) | 24, ceiling 24 |
-| Data surfaces receiving ontology specs | `oms/audit_extensibility.py` (extension owed) | 1 surface, floor 1; denominator owed |
+| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 — GOAL2-007 and GOAL2-008 fixed 2026-08-06 |
+| Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
+| Call sites asking a primitive for everything | `oms/audit_query_bounds.py` | 14, ceiling 14 |
+| Peak memory, any read shape at 10M objects | `oms/measure_read_path_bounds.py` | 6.8 MB, ceiling 64 MB (was 21,940.6 MB) |
+| Data surfaces receiving ontology specs | `oms/audit_extensibility.py` | 3 of 3, floor 3, unwired ceiling 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
 | Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 7 of 10 at head 0038 |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
@@ -184,6 +186,12 @@ was taken.
   printed success. It now asserts that pairs existed before the cut and that the in-flight
   processor was genuinely interrupted, because a chaos test that never induces chaos is
   worse than none: it converts an unknown into a false assurance.
+- **Verifying on the dialect you do not ship.** Every backend script runs on SQLite. The
+  original defect was worst on Postgres, because the one optimization that existed was
+  written for SQLite and skipped everywhere else — and the repair then failed twice on
+  Postgres alone, after the SQLite suite was green. A suite that only ever exercises the
+  development dialect reports on a system nobody runs. Equivalence is now asserted against
+  both.
 - **Measuring the component instead of the composition.** The most durable version of
   this, because nothing about it looks like cheating. Benchmark the read path below the
   filter, count the renderer's vocabulary rather than its callers, and every instrument
@@ -217,3 +225,5 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-05 | Interfaces carry no `project_id` — untidiness or a boundary? | A boundary. GOAL2-006 (P0): interface-scoped queries returned committed instance data from every project. Tier A had been claimed as met with this open, so the claim was retracted | Tier A retracted, then restored |
 | 2026-08-06 | Does the 10M ontology-scale gate measure a read the product issues? | No. GOAL2-007 (P0) — it measures the one shape with no residual filter. Filtered reads, facets and spatial queries each materialize the whole object type: 7,119.4 ms and 912.8 MB at 400k, heap growing x10.0 per 10x, on the favorable dialect. 24 such sites across 9 modules | Third invariant established; P0/P1 0 -> 2 |
 | 2026-08-06 | Does `renderable_base_types 13 of 13` mean the UI renders 13 types? | No. GOAL2-008 (P1) — all 13 matches are in the renderer's own file and 1 workspace of 22 imports it. The reading would be unchanged with no consumer at all | Reach ratchet established at 1 surface |
+| 2026-08-06 | Was the extrapolation from 400k right at reference scale? | No, it understated. Postgres at 10M measured 21,940.6 MB and 157,654.5 ms for one filtered read against ~7.5 GB projected from SQLite, because the production dialect had no pushdown at all. Repaired to 8.2 ms / 1.6 MB on the same corpus | Materializations 24 -> 0; peak memory 21,940.6 MB -> 6.8 MB; P0/P1 2 -> 0 |
+| 2026-08-06 | Does a fix verified on SQLite work on the dialect we ship? | No, twice. `.contains()` on a `with_variant` JSON column resolved to string `LIKE`, and `.astext` did not exist — both on the Postgres branch SQLite never reaches, both after the SQLite suite was green | Equivalence now asserted on both dialects |

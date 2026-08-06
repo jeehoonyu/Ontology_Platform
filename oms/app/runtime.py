@@ -1,6 +1,7 @@
 import base64
 import copy
 import hashlib
+import heapq
 import json
 import math
 import re
@@ -8,7 +9,8 @@ import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, not_ as sqlalchemy_not, or_ as sqlalchemy_or, type_coerce
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from . import models, models_action
@@ -645,72 +647,148 @@ def _link_to_dict(link: models.LinkInstance) -> Dict[str, Any]:
 # and a conservative identifier pattern — used to decide which equality predicates
 # can be safely narrowed in SQL.
 _SAFE_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_RESERVED_TOP = {"id", "object_type_id", "source_asset_id", "created_at", "updated_at", "lineage", "properties"}
+# `project_id` belongs here because `_record_value` resolves a bare field name
+# against the record's top level first, and the record carries it. Without it a
+# filter named `project_id` is matched against the row's own column in Python
+# while the pushdown looks for it inside `properties`, and the two disagree.
+_RESERVED_TOP = {"id", "project_id", "object_type_id", "source_asset_id",
+                 "created_at", "updated_at", "lineage", "properties"}
 
 
-def _pushdown_equalities(db: Session, normalized_filters: List[Dict[str, Any]]):
-    """SQLAlchemy conditions that narrow the candidate set for simple top-level
-    equality predicates via SQLite ``json_extract``.
+def _equality_variants(value: Any) -> List[Any]:
+    """JSON scalars that Python's ``==`` cannot tell apart from ``value``.
 
-    This is ONLY a pre-filter: the Python pass in ``_query_object_rows`` re-checks
-    every candidate with ``_compare_filter``, so the returned rows are identical to a
-    pure-Python filter no matter what the pre-filter returns. Because a row that
-    matches in Python also satisfies these equality conditions (consistent scalar
-    semantics between Python ``==`` and SQLite ``json_extract`` equality), the
-    pre-filter is always a superset of the true matches. Non-SQLite dialects skip it
-    (correct, just unoptimized) — Postgres JSONB pushdown is a later hardening step.
+    Measured against PostgreSQL 15.8 rather than assumed: ``'true'::jsonb =
+    '1'::jsonb`` is false, while Python holds ``True == 1``. Pushing a bare
+    equality down would therefore drop rows whose property is stored in the
+    other form. Matching both forms restores agreement.
+
+    SQLite needs no expansion -- ``json_extract`` yields 1 for a stored ``true``
+    and Python binds ``True`` as 1, verified across the same cases -- but
+    emitting the same condition twice there is harmless and keeps one path.
     """
+    if isinstance(value, bool):
+        return [value, int(value)]
+    if isinstance(value, int) and value in (0, 1):
+        return [value, bool(value)]
+    return [value]
+
+
+def _dialect_name(db: Session) -> Optional[str]:
     try:
-        dialect = db.get_bind().dialect.name
+        return db.get_bind().dialect.name
     except Exception:
-        dialect = None
-    if dialect != "sqlite":
-        return []
-    conds = []
+        return None
+
+
+def _pushdown_conditions(db: Session, normalized_filters: List[Dict[str, Any]]):
+    """SQL conditions for the predicates that can be evaluated in the database.
+
+    Returns ``(conditions, exact)``. ``exact`` is True only when *every*
+    predicate was translated, which is what lets the caller push ``LIMIT`` down
+    and skip the Python pass entirely. When it is False the conditions are a
+    superset pre-filter and the Python pass stays authoritative, so the rows
+    returned are identical either way.
+
+    Only ``equals`` and ``exists`` are translated, and only for scalars. The
+    ordered comparisons look translatable and are not: ``_compare_filter``
+    coerces both sides with ``float()``, so the string ``"5"`` compares greater
+    than 3 in Python while no SQL dialect agrees. Translating them would change
+    which rows come back, and a read-path change that silently alters results is
+    worse than a slow read. They stay in the Python pass, which now streams.
+
+    Both dialects are covered. Postgres was previously skipped entirely with a
+    comment calling it a later hardening step, which meant the production
+    dialect was the unoptimized one -- and the one where the object type is
+    materialized in full for any filter at all.
+    """
+    dialect = _dialect_name(db)
+    if dialect not in {"sqlite", "postgresql"}:
+        return [], False
+
+    conditions = []
+    translated = 0
+    properties = models.ObjectInstance.properties
     for item in normalized_filters:
-        if item["op"] not in {"equals", "eq", "=="}:
-            continue
         field = item["field"]
         value = item.get("value")
+        op = item["op"]
         if not isinstance(field, str) or not _SAFE_FIELD.match(field) or field in _RESERVED_TOP:
             continue
-        if not isinstance(value, (str, int, float, bool)):  # excludes None / list / dict
-            continue
-        conds.append(func.json_extract(models.ObjectInstance.properties, "$." + field) == value)
-    return conds
+        if op in {"equals", "eq", "=="}:
+            if not isinstance(value, (str, int, float, bool)):  # excludes None/list/dict
+                continue
+            variants = _equality_variants(value)
+            if dialect == "sqlite":
+                column = func.json_extract(properties, "$." + field)
+                alternatives = [column == variant for variant in variants]
+            else:
+                # Containment, not `->>`. `->>` renders the value as text, so
+                # `('{"a":1}'::jsonb->>'a') = '1'` is true where Python holds
+                # `1 != "1"` -- it would match rows Python rejects. Containment
+                # compares JSON to JSON, is exact for a scalar member (verified:
+                # `{"a":[1,2]} @> {"a":1}` is false, so it does not reach into
+                # nested arrays), and can use a GIN index.
+                #
+                # `@>` is spelled out rather than reached through `.contains()`.
+                # The column is `JSON().with_variant(JSONB(), "postgresql")`, so
+                # its Python-side comparator is JSON, which has no containment
+                # operator -- `.contains()` silently resolves to the generic
+                # string LIKE and Postgres rejects the statement. It fails loudly
+                # here, but only on Postgres, because SQLite never reaches this
+                # branch.
+                alternatives = [
+                    properties.op("@>", is_comparison=True)(
+                        type_coerce({field: variant}, JSONB))
+                    for variant in variants
+                ]
+            conditions.append(sqlalchemy_or(*alternatives) if len(alternatives) > 1
+                              else alternatives[0])
+            translated += 1
+        elif op == "exists":
+            # `_compare_filter` treats a JSON null as absent, and both of these
+            # yield SQL NULL for a JSON null, so the semantics line up.
+            if dialect == "sqlite":
+                present = func.json_extract(properties, "$." + field).isnot(None)
+            else:
+                # Same reason as `@>` above: the column's Python-side type is
+                # JSON, so `properties[field].astext` does not exist. The jsonb
+                # function is explicit and returns NULL for both a missing key
+                # and a stored JSON null, which is exactly how `_compare_filter`
+                # treats them.
+                present = func.jsonb_extract_path_text(properties, field).isnot(None)
+            conditions.append(present if bool(value) else sqlalchemy_not(present))
+            translated += 1
+
+    return conditions, bool(normalized_filters) and translated == len(normalized_filters)
 
 
-def _query_object_rows(
+# Rows are pulled in batches and rejected rows are dropped from the identity map
+# as they go, so a scan costs a batch of memory rather than an object type of it.
+_STREAM_BATCH = 1_000
+
+
+def _stream_object_rows(
     db: Session,
-    *,
-    object_type_id: str,
-    project_id: Optional[str] = None,
-    filters: Optional[Any] = None,
-) -> List[models.ObjectInstance]:
-    object_type_query = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id)
-    if project_id is not None:
-        object_type_query = object_type_query.filter(models.ObjectType.project_id == project_id)
-    object_type = object_type_query.first()
-    if not object_type:
-        raise ValueError(f"ObjectType '{object_type_id}' not found")
+    query,
+    normalized_filters: List[Dict[str, Any]],
+) -> Iterable[models.ObjectInstance]:
+    """Yield rows satisfying the residual predicates without materializing the scan.
 
-    normalized_filters = _normalize_filters(filters)
+    ``query.all()`` was what made every filtered read cost the object type: it
+    built an ORM instance for every row before anything was filtered or limited.
+    Streaming keeps the same rows in the same order and the same Python
+    semantics, but the caller decides how many to hold.
 
-    query = db.query(models.ObjectInstance).filter(
-        models.ObjectInstance.object_type_id == object_type_id
-    )
-    if project_id is not None:
-        query = query.filter(models.ObjectInstance.project_id == project_id)
-    # Narrow candidates in SQL for simple equality predicates; Python confirms below.
-    for cond in _pushdown_equalities(db, normalized_filters):
-        query = query.filter(cond)
-    rows = query.all()
-
+    Rejected rows are expunged because ``yield_per`` still registers each
+    instance in the session's identity map, which would accumulate the whole
+    scan by a slower route.
+    """
+    source = query.execution_options(stream_results=True).yield_per(_STREAM_BATCH)
     if not normalized_filters:
-        return rows
-
-    matched = []
-    for row in rows:
+        yield from source
+        return
+    for row in source:
         record = _object_to_dict(row, include_lineage=True)
         if all(
             _compare_filter(
@@ -720,8 +798,66 @@ def _query_object_rows(
             )
             for item in normalized_filters
         ):
-            matched.append(row)
-    return matched
+            yield row
+        else:
+            db.expunge(row)
+
+
+def _object_base_query(db: Session, *, object_type_id: str, project_id: Optional[str] = None):
+    """The type-scoped query, after confirming the object type exists."""
+    type_query = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id)
+    if project_id is not None:
+        type_query = type_query.filter(models.ObjectType.project_id == project_id)
+    if not type_query.first():
+        raise ValueError(f"ObjectType '{object_type_id}' not found")
+    query = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.object_type_id == object_type_id
+    )
+    if project_id is not None:
+        query = query.filter(models.ObjectInstance.project_id == project_id)
+    return query
+
+
+def _prepared_object_query(
+    db: Session,
+    *,
+    object_type_id: str,
+    project_id: Optional[str] = None,
+    filters: Optional[Any] = None,
+):
+    """The type-scoped query with pushdown applied, plus the residual predicates.
+
+    Returns ``(query, residual, exact)``. When ``exact`` is True the residual is
+    empty and the query alone selects exactly the matching rows, so the caller
+    may apply ``LIMIT``/``OFFSET`` and ``count(*)`` in SQL. Otherwise the
+    residual must be applied in Python over a stream.
+    """
+    normalized = _normalize_filters(filters)
+    query = _object_base_query(db, object_type_id=object_type_id, project_id=project_id)
+    conditions, exact = _pushdown_conditions(db, normalized)
+    for condition in conditions:
+        query = query.filter(condition)
+    return query, ([] if exact else normalized), exact
+
+
+def iter_object_rows(
+    db: Session,
+    *,
+    object_type_id: str,
+    project_id: Optional[str] = None,
+    filters: Optional[Any] = None,
+) -> Iterable[models.ObjectInstance]:
+    """Stream matching object rows.
+
+    This replaces ``_query_object_rows``, which returned a list and so cost one
+    object type of memory per call however few rows the caller went on to use.
+    Every caller here consumes the stream without retaining it, which is what
+    makes a filtered read, a facet aggregation and a spatial query cost a batch
+    instead of a table.
+    """
+    query, residual, _ = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+    return _stream_object_rows(db, query, residual)
 
 
 def _encode_cursor(offset: int) -> str:
@@ -754,28 +890,37 @@ def query_object_set(
 ) -> Dict[str, Any]:
     start = _decode_cursor(cursor) if cursor else max(0, int(offset or 0))
     bounded_limit = max(0, min(int(limit), 10000))
-    normalized = _normalize_filters(filters)
+    query, residual, exact = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
 
-    if not normalized:
-        # No residual predicates -> paginate in SQL. Order-free offset/limit on SQLite
-        # returns rowid (insertion) order, matching the previous ``.all()[:limit]`` output
-        # for the default call, so results stay backward compatible.
-        type_query = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id)
-        if project_id is not None:
-            type_query = type_query.filter(models.ObjectType.project_id == project_id)
-        if not type_query.first():
-            raise ValueError(f"ObjectType '{object_type_id}' not found")
-        base = db.query(models.ObjectInstance).filter(
-            models.ObjectInstance.object_type_id == object_type_id
-        )
-        if project_id is not None:
-            base = base.filter(models.ObjectInstance.project_id == project_id)
-        total = base.count() if with_total else None
-        selected = base.offset(start).limit(bounded_limit).all() if bounded_limit else []
+    if not residual:
+        # Every predicate reached SQL (or there were none), so the page and the
+        # total come from the database. Order-free offset/limit returns
+        # insertion order on both dialects, matching the previous output.
+        total = query.count() if with_total else None
+        selected = query.offset(start).limit(bounded_limit).all() if bounded_limit else []
     else:
-        rows = _query_object_rows(db, object_type_id=object_type_id, project_id=project_id, filters=filters)
-        total = len(rows) if with_total else None
-        selected = rows[start:start + bounded_limit] if bounded_limit else []
+        # A predicate SQL cannot express exactly. The Python pass stays
+        # authoritative, but it runs over a stream and holds only the page, so
+        # the cost is the scan rather than the scan plus a copy of the type.
+        selected = []
+        matched = 0
+        window_end = start + bounded_limit
+        for row in _stream_object_rows(db, query, residual):
+            if bounded_limit and start <= matched < window_end:
+                selected.append(row)
+            else:
+                # A row that matched but sits outside the page is still holding
+                # a slot in the identity map. Left in, the scan costs one
+                # instance per *match* instead of per page -- smaller than
+                # materializing the type and still proportional to it.
+                db.expunge(row)
+            matched += 1
+            # The total is the only reason to keep reading past the page. Asked
+            # for one, this still walks every match; asked for none, it stops.
+            if not with_total and matched >= window_end:
+                break
+        total = matched if with_total else None
 
     next_cursor = (
         _encode_cursor(start + len(selected))
@@ -804,53 +949,71 @@ def aggregate_object_set(
     group_by: Optional[str] = None,
     metrics: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, project_id=project_id, filters=filters)
-    grouped: Dict[str, List[models.ObjectInstance]] = {}
+    requested_metrics = [metric for metric in (metrics or []) if isinstance(metric, dict)]
+
+    # Accumulators per group rather than the rows themselves. The previous
+    # version kept every row of the object type in `grouped` purely to call
+    # len() on the lists and re-read a few fields, so a facet count over ten
+    # million objects held ten million ORM instances to produce twenty numbers.
+    counts: Dict[str, int] = {}
+    tallies: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    total = 0
+
+    rows = iter_object_rows(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
     for row in rows:
         record = _object_to_dict(row, include_lineage=True)
         raw_key = _record_value(record, group_by) if group_by else "all"
         key = str(raw_key if raw_key is not None else "null")
-        grouped.setdefault(key, []).append(row)
+        counts[key] = counts.get(key, 0) + 1
+        total += 1
+        if requested_metrics:
+            group_tallies = tallies.setdefault(key, {})
+            for metric in requested_metrics:
+                field = metric.get("field")
+                alias = (metric.get("alias")
+                         or f"{str(metric.get('operation', 'count')).lower()}_{field or 'rows'}")
+                tally = group_tallies.setdefault(
+                    alias, {"present": 0, "n": 0, "sum": 0.0, "min": None, "max": None})
+                if not field:
+                    continue
+                value = _record_value(record, field)
+                if value is not None:
+                    tally["present"] += 1
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    number = float(value)
+                    tally["n"] += 1
+                    tally["sum"] += number
+                    tally["min"] = number if tally["min"] is None else min(tally["min"], number)
+                    tally["max"] = number if tally["max"] is None else max(tally["max"], number)
+        db.expunge(row)
 
-    requested_metrics = metrics or []
     groups: List[Dict[str, Any]] = []
-    for key, items in sorted(grouped.items(), key=lambda pair: pair[0]):
-        aggregate: Dict[str, Any] = {
-            "group": key,
-            "count": len(items),
-        }
+    for key in sorted(counts):
+        aggregate: Dict[str, Any] = {"group": key, "count": counts[key]}
         for metric in requested_metrics:
-            if not isinstance(metric, dict):
-                continue
             field = metric.get("field")
             operation = str(metric.get("operation", "count")).lower()
             alias = metric.get("alias") or f"{operation}_{field or 'rows'}"
-            values = [
-                _record_value(_object_to_dict(item, include_lineage=True), field)
-                for item in items
-                if field
-            ]
-            numeric_values = [
-                float(value) for value in values
-                if isinstance(value, (int, float)) and not isinstance(value, bool)
-            ]
+            tally = tallies.get(key, {}).get(
+                alias, {"present": 0, "n": 0, "sum": 0.0, "min": None, "max": None})
             if operation == "count":
-                aggregate[alias] = len([value for value in values if value is not None]) if field else len(items)
+                aggregate[alias] = tally["present"] if field else counts[key]
             elif operation == "sum":
-                aggregate[alias] = sum(numeric_values)
+                aggregate[alias] = tally["sum"]
             elif operation == "avg":
-                aggregate[alias] = sum(numeric_values) / len(numeric_values) if numeric_values else None
+                aggregate[alias] = tally["sum"] / tally["n"] if tally["n"] else None
             elif operation == "min":
-                aggregate[alias] = min(numeric_values) if numeric_values else None
+                aggregate[alias] = tally["min"]
             elif operation == "max":
-                aggregate[alias] = max(numeric_values) if numeric_values else None
+                aggregate[alias] = tally["max"]
         groups.append(aggregate)
 
     return {
         "object_type_id": object_type_id,
         "filters": filters or {},
         "group_by": group_by,
-        "total": len(rows),
+        "total": total,
         "groups": groups,
     }
 
@@ -957,7 +1120,6 @@ def spatial_query_objects(
     limit: int = 100,
     include_lineage: bool = True,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, project_id=project_id, filters=filters)
     bounded_limit = max(0, min(int(limit), 10000))
     near_point = geometry_reference_point(normalize_geometry(near) or {}) if near else None
     normalized_polygon = normalize_geometry(polygon) if polygon else None
@@ -967,26 +1129,55 @@ def spatial_query_objects(
     if polygon and (not normalized_polygon or normalized_polygon.get("type") != "Polygon"):
         raise ValueError("polygon must be a GeoJSON Polygon")
 
-    matches: List[Dict[str, Any]] = []
+    rows = iter_object_rows(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+
+    # Only the page is retained. Previously every match became a full payload
+    # dict, the whole list was sorted, and the first `limit` were returned: a
+    # radius query returning fifty pins held every matching object first.
+    #
+    # `heapq.nlargest` semantics by hand: the heap keeps the `limit` smallest
+    # distances, so the root is the worst kept candidate and is evicted when a
+    # closer one arrives. The sequence number is part of the key so ties resolve
+    # by scan order, which is what the previous stable sort did.
+    kept: List[Tuple[float, int, Dict[str, Any]]] = []
+    total = 0
+    sequence = 0
+
     for row in rows:
         geometry = extract_geometry(row.properties or {}, geometry_field)
         if not geometry:
+            db.expunge(row)
             continue
 
         ref_point = geometry_reference_point(geometry)
         geom_bbox = geometry_bbox(geometry)
         if normalized_bbox and (not geom_bbox or not _bbox_intersects(geom_bbox, normalized_bbox)):
+            db.expunge(row)
             continue
         if normalized_polygon and (not ref_point or not point_in_polygon(ref_point, normalized_polygon)):
+            db.expunge(row)
             continue
 
         distance = None
         if near_point:
             if not ref_point:
+                db.expunge(row)
                 continue
             distance = haversine_distance_meters(near_point, ref_point)
             if radius_meters is not None and distance > float(radius_meters):
+                db.expunge(row)
                 continue
+
+        total += 1
+        sequence += 1
+        rank = distance if near_point else float(sequence)
+        if not bounded_limit:
+            db.expunge(row)
+            continue
+        if len(kept) == bounded_limit and rank >= -kept[0][0]:
+            db.expunge(row)
+            continue
 
         payload = _object_to_dict(row, include_lineage=include_lineage)
         mgrs = encode_mgrs(ref_point[1], ref_point[0])["mgrs"] if ref_point else None
@@ -997,10 +1188,12 @@ def spatial_query_objects(
             "distance_meters": round(distance, 3) if distance is not None else None,
             "mgrs": mgrs,
         }
-        matches.append(payload)
+        db.expunge(row)
+        heapq.heappush(kept, (-rank, -sequence, payload))
+        if len(kept) > bounded_limit:
+            heapq.heappop(kept)
 
-    if near_point:
-        matches.sort(key=lambda item: item["spatial"]["distance_meters"] if item["spatial"]["distance_meters"] is not None else float("inf"))
+    objects = [payload for _, _, payload in sorted(kept, key=lambda item: (-item[0], -item[1]))]
 
     return {
         "object_type_id": object_type_id,
@@ -1012,9 +1205,9 @@ def spatial_query_objects(
             "bbox": bbox,
             "polygon": polygon,
         },
-        "total": len(matches),
-        "count": len(matches[:bounded_limit]) if bounded_limit else 0,
-        "objects": matches[:bounded_limit] if bounded_limit else [],
+        "total": total,
+        "count": len(objects),
+        "objects": objects,
     }
 
 
@@ -3059,21 +3252,59 @@ def _logic_cmp(op: str, left: Any, right: Any) -> bool:
 
 def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any], limit: int = 1000,
                        project_id: Optional[str] = None):
-    """Query an object set with simple equality filters (AIP Logic 'Query Objects')."""
-    instances = (
-        db.query(models.ObjectInstance)
-        .filter(
-            models.ObjectInstance.object_type_id == object_type_id,
-            *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
-        )
-        .all()
-    )
+    """Query an object set with simple equality filters (AIP Logic 'Query Objects').
+
+    Returns ``(rows, total_matching)``.
+
+    The `limit` argument used to be applied to the list returned by ``.all()``,
+    so it never reached SQL and every one of this function's twenty-one call
+    sites loaded the whole object type -- including the one asking for five
+    rows. It is now a SQL ``LIMIT`` whenever the predicates can be expressed in
+    SQL, and a stream that stops early otherwise.
+
+    A caller that asks for a billion rows still gets a scan; that is the
+    caller's contract, not this function's, and condition B3 of
+    ``docs/GOAL_2026-08-06.md`` covers it. What changed is that asking for a
+    page now costs a page.
+    """
     filters = filters or {}
-    matched = [
-        i for i in instances
-        if all((i.properties or {}).get(k) == v for k, v in filters.items())
-    ]
-    return matched[: int(limit)], len(matched)
+    bounded = max(0, int(limit))
+    query = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.object_type_id == object_type_id,
+        *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+    )
+
+    normalized = [{"field": key, "op": "equals", "value": value} for key, value in filters.items()]
+    conditions, exact = _pushdown_conditions(db, normalized)
+    for condition in conditions:
+        query = query.filter(condition)
+    if not filters:
+        exact = True
+
+    if exact:
+        # count(*) rather than len(list): the total was the reason callers asked
+        # for everything, and the database can produce it without shipping rows.
+        return (query.limit(bounded).all() if bounded else []), query.count()
+
+    # A predicate SQL cannot express. Stream, keep the page, count the rest.
+    # The comparison stays `properties.get(key) == value`, deliberately not
+    # `_compare_filter`: this entry point has always matched raw top-level keys,
+    # and `_record_value` would resolve a filter named `id` against the row's
+    # own id instead of its properties.
+    matched: List[models.ObjectInstance] = []
+    total = 0
+    source = query.execution_options(stream_results=True).yield_per(_STREAM_BATCH)
+    for row in source:
+        properties = row.properties or {}
+        if not all(properties.get(key) == value for key, value in filters.items()):
+            db.expunge(row)
+            continue
+        total += 1
+        if len(matched) < bounded:
+            matched.append(row)
+        else:
+            db.expunge(row)
+    return matched, total
 
 
 def _eval_logic_condition(condition: Dict[str, Any], scope: Dict[str, Any], db: Session) -> bool:
