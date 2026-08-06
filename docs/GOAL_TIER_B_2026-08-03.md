@@ -40,7 +40,7 @@ What remains for these gates is machine time, not code.
 | Pipeline scale | >= 10M partitioned rows in and out | preview 3,663.405 ms, delivery 4,046.026 ms p95 | Re-run at current head |
 | Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **FAIL: 241.605, 253.002, 219.812 ms across three runs at head 0037** | Resolve GOAL2-004 before re-measuring |
 | Identity | 200 distinct PKCE identities under login p95 gate | 4,582.792 ms against a 15,000 ms gate | Re-run; needs Keycloak |
-| Durability | Fresh-volume backup/restore and replica failover, zero committed-record loss | 36.59 GB basebackup in 50.917 s, promote in 0.686 s | Re-run at current head |
+| Durability | Fresh-volume backup/restore and replica failover, zero committed-record loss | **PASS at head 0038** — restored state identical, standby promoted with the committed probe preserved at the same LSN; run at 100k objects / 500k links, not the 10M of prior art | Satisfied as written; see the scale note |
 | Chaos | Partition and process-loss recovery, zero missed or duplicated events | **PASS at head 0038** — both subjects re-rehearsed, 0 duplicate and 0 missed events, 0 duplicate and 0 missed pairs, 124.169 ms max reconnect | Satisfied |
 
 ### Group 2 — Construction, no evidence exists
