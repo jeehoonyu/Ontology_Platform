@@ -6,6 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "ontologyos-plugin-sdk"
 version = "1.0.0"
 description = "Dependency-free typed contracts for OntologyOS sandbox plugins"
+# Without this the package publishes with an empty project page: twine reports
+# `long_description missing` and the registry has nothing to render. The README
+# has always sat beside this file; it simply was not wired in.
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 
