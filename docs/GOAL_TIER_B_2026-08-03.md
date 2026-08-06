@@ -35,7 +35,7 @@ What remains for these gates is machine time, not code.
 
 | Gate | Threshold | Prior measurement | Owed |
 | --- | --- | --- | --- |
-| Ontology scale | >= 10M objects / 50M links, bounded p95 | lookup 8.718 ms, range 11.830 ms, two-hop 13.721 ms p95 | Re-run at current head |
+| Ontology scale | >= 10M objects / 50M links, bounded p95 | **PASS at head 0038 at full reference scale** — 10,000,000 objects, 50,000,000 links, lookup p95 8.916 ms, range p95 12.248 ms, two-hop p95 14.153 ms; 8.2 GB objects and 28.9 GB links | Satisfied |
 | Mixed workload | Concurrent reads during bounded writes, rollback atomicity, retained plans | **PASS at head 0038** — read p95 23.641 ms, write batch p95 615.358 ms, 392.003 writes/s, rollback clean, index plan retained; 100k/500k fixture, not the 10M of prior art | Satisfied as written; see the scale note |
 | Pipeline scale | >= 10M partitioned rows in and out | **PASS at head 0038 at full reference scale** — 10,000,000 input rows, 20 output partitions, preview p95 2,988.033 ms, delivery 3,360.618 ms, 20 rows materialized | Satisfied |
 | Collaboration | 20 editors, 2 replicas, ack p95 < 250 ms, zero lost updates | **FAIL: 241.605, 253.002, 219.812 ms across three runs at head 0037** | Resolve GOAL2-004 before re-measuring |
