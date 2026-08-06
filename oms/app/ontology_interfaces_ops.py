@@ -21,7 +21,7 @@ NEW tables (all prefixed Iface/iface_ to avoid Base collisions):
 """
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, production_auth, tenancy
 from .ontology_interfaces import OntologyInterface, SharedPropertyType, VALID_BASE_TYPES  # noqa: F401  (read-only reuse)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
@@ -132,6 +132,9 @@ class CheckObjectTypeResult(BaseModel):
 class QueryObjectsRequest(BaseModel):
     filters: Dict[str, Any] = Field(default_factory=dict)
     limit: Optional[int] = None
+    # Narrows the query to one project. Omitting it does not widen the query
+    # past what the caller may read; it means "every project I can read".
+    project_id: Optional[str] = None
 
 
 class InterfaceActionCreate(BaseModel):
@@ -666,16 +669,34 @@ def query_objects(
     interface_id: str,
     body: QueryObjectsRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ) -> Dict[str, Any]:
     _get_interface(db, interface_id)
     flattened, _ = _resolve_properties(db, interface_id)
     iface_prop_names = set(flattened.keys())
+
+    # An interface names a capability, not a tenancy scope. Walking its
+    # implementers crosses projects by construction, so the object types are
+    # filtered to what this principal may read before any instance is touched.
+    # Without this the query returned committed instance data from every project
+    # in the deployment (GOAL2-006).
+    allowed_projects = tenancy.accessible_project_ids(db, principal, "view")
+    if body.project_id is not None:
+        tenancy.assert_project_permission(db, principal, body.project_id, "view")
+        allowed_projects = {body.project_id}
 
     impls = (
         db.query(IfaceImplementation)
         .filter(IfaceImplementation.interface_id == interface_id)
         .all()
     )
+    if allowed_projects is not None:
+        readable_type_ids = {
+            row.id for row in db.query(models.ObjectType.id, models.ObjectType.project_id)
+            .filter(models.ObjectType.project_id.in_(allowed_projects))
+            .all()
+        } if allowed_projects else set()
+        impls = [impl for impl in impls if impl.object_type_id in readable_type_ids]
 
     object_type_ids_searched: List[str] = []
     results: List[Dict[str, Any]] = []
@@ -689,11 +710,16 @@ def query_objects(
         object_type_ids_searched.append(impl.object_type_id)
         mappings = impl.property_mappings or {}
 
-        instances = (
-            db.query(models.ObjectInstance)
-            .filter(models.ObjectInstance.object_type_id == impl.object_type_id)
-            .all()
+        instance_query = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id == impl.object_type_id
         )
+        # Instances carry their own project. An object type readable in one
+        # project must not surface rows another project wrote against it.
+        if allowed_projects is not None:
+            instance_query = instance_query.filter(
+                models.ObjectInstance.project_id.in_(allowed_projects)
+            )
+        instances = instance_query.all()
 
         for inst in instances:
             inst_props = inst.properties or {}
