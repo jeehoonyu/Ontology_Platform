@@ -22,8 +22,19 @@ would have silently changed which rows came back.
 import os
 import tempfile
 
+# Runs on whatever DATABASE_URL names, defaulting to a throwaway SQLite file so
+# the suite stays self-contained. Point it at Postgres to exercise the branches
+# SQLite never reaches:
+#
+#   DATABASE_URL=postgresql+psycopg2://... python oms/test_read_path_bounds.py
+#
+# That is not optional diligence. Both dialect-specific faults in this code --
+# `.contains()` resolving to string LIKE, and `.astext` not existing on a
+# with_variant column -- were found only by running it there, after every
+# SQLite assertion was green.
 tmpdir = tempfile.TemporaryDirectory()
-os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'read_path.db')}"
+if not os.environ.get("DATABASE_URL"):
+    os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'read_path.db')}"
 
 from sqlalchemy import event  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
@@ -265,18 +276,163 @@ def equivalence():
           "a scalar filter does not match a list-valued property")
 
 
+def seed_geometry_shapes():
+    """One row per geometry encoding the product accepts.
+
+    The bounding-box pre-filter recognises point-shaped geometry only. Every
+    other encoding has to survive it by being unjudgeable in SQL and therefore
+    passed through to Python -- which is the whole safety argument, and the one
+    thing worth testing directly.
+    """
+    db = SessionLocal()
+    try:
+        db.add(models.ObjectType(
+            id="geo_asset", project_id="default", display_name="Geo Asset",
+            properties={}, created_at=0, updated_at=0,
+        ))
+        db.commit()
+        rows = [
+            ("geo_point_field", {"geometry": {"type": "Point", "coordinates": [-122.05, 37.05]}}),
+            ("geo_scalars", {"longitude": -122.0501, "latitude": 37.0501}),
+            # A Polygon's coordinates[0] is an array, not a number: SQL cannot
+            # judge it, so it must reach Python rather than be filtered out.
+            ("geo_polygon", {"geometry": {"type": "Polygon", "coordinates": [[
+                [-122.0503, 37.0499], [-122.0499, 37.0499],
+                [-122.0499, 37.0503], [-122.0503, 37.0503],
+                [-122.0503, 37.0499]]]}}),
+            # `extract_geometry` accepts `location` too; the pre-filter does not
+            # enumerate it, so this row must pass through unjudged.
+            ("geo_location_alias", {"location": {"type": "Point", "coordinates": [-122.0502, 37.0502]}}),
+            ("geo_far_away", {"geometry": {"type": "Point", "coordinates": [2.35, 48.85]}}),
+            ("geo_none", {"name": "no geometry at all"}),
+        ]
+        db.execute(models.ObjectInstance.__table__.insert(), [
+            {"id": row_id, "project_id": "default", "object_type_id": "geo_asset",
+             "properties": properties, "source_asset_id": None,
+             "materialization_id": None, "is_active": True, "retired_at": None,
+             "lineage": {}, "created_at": 0, "updated_at": 0}
+            for row_id, properties in rows
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+
+def spatial_equivalence():
+    print("\nSpatial -- the SQL pre-filter must never drop a row Python would keep")
+
+    db = SessionLocal()
+    try:
+        near = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset",
+            near={"longitude": -122.05, "latitude": 37.05},
+            radius_meters=500, limit=50, include_lineage=False)
+        found = sorted(item["id"] for item in near["objects"])
+        check(found == ["geo_location_alias", "geo_point_field", "geo_polygon", "geo_scalars"],
+              f"radius query finds every geometry encoding (got {found})")
+        check(near["total"] == 4, f"radius total counts them once each (got {near['total']})")
+
+        box = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset",
+            bbox=[-122.06, 37.04, -122.04, 37.06], limit=50, include_lineage=False)
+        found = sorted(item["id"] for item in box["objects"])
+        check(found == ["geo_location_alias", "geo_point_field", "geo_polygon", "geo_scalars"],
+              f"bbox query finds every geometry encoding (got {found})")
+
+        far = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset",
+            bbox=[2.0, 48.0, 3.0, 49.0], limit=50, include_lineage=False)
+        found = sorted(item["id"] for item in far["objects"])
+        check(found == ["geo_far_away"], f"a distant box excludes the near rows (got {found})")
+
+        # Near a pole the enclosing box is unreliable, so `_radius_bounds`
+        # declines and the query falls back to the scan. It must still answer.
+        polar = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset",
+            near={"longitude": -122.05, "latitude": 89.9},
+            radius_meters=500, limit=50, include_lineage=False)
+        check(polar["total"] == 0, f"a polar radius query still answers (got {polar['total']})")
+    finally:
+        db.close()
+
+
+def aggregation_equivalence():
+    """The pushed-down GROUP BY must agree with the streaming pass, field by field.
+
+    Hand-written expectations were tried first and were wrong twice, in both
+    directions -- once claiming a bug that was not there. Comparing the two
+    implementations against each other tests the property that actually matters
+    and cannot be got wrong by miscounting a fixture: requesting a metric forces
+    the streaming path, requesting none takes the SQL path, and for a count the
+    two owe identical answers.
+    """
+    print("\nAggregation -- the pushed-down GROUP BY must equal the streaming pass")
+
+    db = SessionLocal()
+    try:
+        for field in [None, "flag", "code", "tags", "score", "risk"]:
+            for type_id in ["edge_asset", TYPE_ID]:
+                pushed = runtime.aggregate_object_set(
+                    db, object_type_id=type_id, group_by=field)
+                streamed = runtime.aggregate_object_set(
+                    db, object_type_id=type_id, group_by=field,
+                    metrics=[{"operation": "count", "alias": "n"}])
+                pushed_groups = {g["group"]: g["count"] for g in pushed["groups"]}
+                streamed_groups = {g["group"]: g["count"] for g in streamed["groups"]}
+                label = f"group_by={field!r} on {type_id}"
+                check(pushed_groups == streamed_groups,
+                      f"{label}: group counts agree"
+                      + ("" if pushed_groups == streamed_groups
+                         else f" (SQL {pushed_groups} vs Python {streamed_groups})"))
+                check(pushed["total"] == streamed["total"],
+                      f"{label}: totals agree ({pushed['total']} vs {streamed['total']})")
+    finally:
+        db.close()
+
+
+FIXTURE_TYPES = (TYPE_ID, "edge_asset", "geo_asset")
+
+
+def teardown():
+    """Leave a shared database as it was found.
+
+    Harmless against the default throwaway SQLite file, and necessary against a
+    real Postgres, which this now runs on.
+    """
+    db = SessionLocal()
+    try:
+        db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id.in_(FIXTURE_TYPES)
+        ).delete(synchronize_session=False)
+        db.query(models.ObjectType).filter(
+            models.ObjectType.id.in_(FIXTURE_TYPES)
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 def main():
-    seed()
-    seed_edge_cases()
-    boundedness()
-    equivalence()
+    print(f"dialect: {engine.dialect.name}")
+    teardown()  # a prior interrupted run must not change what this one measures
+    try:
+        seed()
+        seed_edge_cases()
+        seed_geometry_shapes()
+        boundedness()
+        equivalence()
+        spatial_equivalence()
+        aggregation_equivalence()
+    finally:
+        teardown()
     print()
     if failures:
         print(f"{len(failures)} failure(s):")
         for message in failures:
             print(f"  - {message}")
         raise SystemExit(1)
-    print(f"Read path bounded and equivalent over {CORPUS} objects.")
+    print(f"Read path bounded and equivalent over {CORPUS} objects "
+          f"on {engine.dialect.name}.")
 
 
 main()
