@@ -99,3 +99,18 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
   re-run must reproduce.
 - A gate that passes only after repeated attempts has not passed. If a harness is re-run
   after a failure, every run is recorded, and the failing run is part of the evidence.
+
+- **Latency gates are measured on an otherwise idle host, and the reading is the worst of
+  at least six observations.** This was missing and cost a wrong diagnosis. The
+  collaboration gate was recorded as breaching because its p95 is taken over 20 samples,
+  which was the wrong cause: six runs on a quiet host spread 6.791 ms, while the three
+  earlier observations that produced a breach were taken while the machine was building
+  images and running suites concurrently. A latency threshold with no stated quiescence
+  condition measures the machine's mood as much as the system.
+
+- **A recorded failure is not overwritten by a later pass at the same head.** The rule
+  above was stated and unenforced: every harness rewrote its evidence file on every run,
+  so re-running after a failure silently replaced it. `write_evidence` now preserves the
+  failure and files the later attempt under `later_passing_attempts`; promoting a gate
+  takes an explicit `supersede=True`, which asserts the cause was fixed rather than
+  out-waited.
