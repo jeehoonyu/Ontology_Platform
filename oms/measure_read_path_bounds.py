@@ -7,45 +7,59 @@ Each of those takes a path that materializes the whole object type before any
 limit applies, so the gate's bounded p95 says nothing about them.
 
 This measures the four shapes side by side at several cardinalities, in latency
-and in peak heap, so the growth curve is measured rather than asserted. It is
-the harness for condition B1 of ``docs/GOAL_2026-08-06.md``.
+and in peak resident memory, so the growth curve is measured rather than
+asserted. It is the harness for condition B1 of ``docs/GOAL_2026-08-06.md``.
 
-Two rules carried over from ``docs/TIER_B_MEASUREMENT_CONTRACT.md``:
+The fixture mirrors ``benchmark_ontology_scale_postgres.py`` -- same property
+shape, same server-side ``generate_series`` seed -- so the shapes are measured
+on the corpus the gate certifies rather than on a fixture of this file's own
+invention. ``latitude``/``longitude`` scalars are what ``extract_geometry``
+falls back to, so the spatial shape reads the same rows as the others.
+
+Three rules, two carried over from ``docs/TIER_B_MEASUREMENT_CONTRACT.md``:
 
   - The worst observation is the measurement, never the mean. An operator
     experiences the worst case.
   - A shape that matches nothing is not a measurement. The scan still runs, but
     the per-row comparison work does not, and reporting that as the cost of a
     real query understates it. Every shape asserts a non-empty result.
+  - Each observation runs in a fresh subprocess. At ten million rows the
+    allocator does not return pages between shapes, so an in-process
+    measurement charges one shape's retention to the next.
 
 Growth is the gate, not the constant. A host twice as fast halves every number
 here and changes nothing about whether a read is bounded.
 
-  python oms/measure_read_path_bounds.py
   python oms/measure_read_path_bounds.py --sizes 100000,1000000
-  python oms/measure_read_path_bounds.py --database-url postgresql://...
+  python oms/measure_read_path_bounds.py --database-url postgresql+psycopg2://...
 """
 from __future__ import annotations
 
 import argparse
+import gc
+import json
 import math
 import os
 import random
-import statistics
+import subprocess
 import sys
 import tempfile
 import time
-import tracemalloc
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# A tight cluster so the radius query has real matches to score and sort, and a
-# dispersed remainder so the scan has non-matching rows to reject.
-HUB = (-122.4012, 37.7924)
-CLUSTER_EVERY = 50
 TYPE_ID = "read_path_asset"
+OBJECT_PREFIX = "read_path_object_"
+
+# Matches 1 in 20 rows: selective enough to be a real predicate, common enough
+# that the result is never empty at any size.
+FILTER_CATEGORY = "category_0"
+# The seed lays points along a diagonal of 1000 distinct positions, so a radius
+# this size always covers several of them however large the corpus is.
+HUB = (-122.05, 37.05)
+RADIUS_METERS = 400.0
 
 DEFAULT_SIZES = (25_000, 100_000, 400_000)
 
@@ -54,8 +68,106 @@ HEAP_CEILING_MB = 64.0
 HEAP_GROWTH_MAX = 1.5
 LATENCY_GROWTH_MAX = 2.0
 
+SHAPE_LABELS = [
+    "typed read, no filter (the shape the 10M gate measures)",
+    "typed read, one equality filter (the Object Explorer)",
+    "facet aggregation (the Explorer's left rail)",
+    "spatial radius query (the Operational Map)",
+]
 
-def _bootstrap(database_url: str | None) -> Tuple[Any, Any, Any]:
+
+# ---------------------------------------------------------------------------
+# Resident memory
+# ---------------------------------------------------------------------------
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
+
+    class _Counters(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.wintypes.DWORD),
+            ("PageFaultCount", ctypes.wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    # argtypes and restypes are declared rather than left to ctypes' defaults.
+    # GetCurrentProcess returns the pseudo-handle (HANDLE)-1; without a declared
+    # restype ctypes hands back a signed 32-bit int, the call fails, and the
+    # struct stays zeroed. The first version of this file did exactly that and
+    # reported 0.0 MB for every shape at every size -- a clean, plausible,
+    # entirely fabricated reading.
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    _kernel32.GetCurrentProcess.argtypes = []
+    _kernel32.GetCurrentProcess.restype = ctypes.wintypes.HANDLE
+    _psapi.GetProcessMemoryInfo.argtypes = [
+        ctypes.wintypes.HANDLE, ctypes.POINTER(_Counters), ctypes.wintypes.DWORD,
+    ]
+    _psapi.GetProcessMemoryInfo.restype = ctypes.wintypes.BOOL
+
+
+def working_set_mb() -> float:
+    """Peak resident memory of this process so far, in MB.
+
+    ``tracemalloc`` was the obvious instrument and is the wrong one here: it
+    hooks every allocation, and these paths allocate per row, so it inflates
+    the scanning shapes by roughly 3x while leaving the bounded shape untouched
+    -- distortion in the direction of the conclusion. Resident memory costs one
+    syscall and does not perturb what it measures.
+    """
+    if sys.platform == "win32":
+        counters = _Counters()
+        counters.cb = ctypes.sizeof(_Counters)
+        if not _psapi.GetProcessMemoryInfo(
+            _kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb,
+        ):
+            raise OSError(ctypes.get_last_error(), "GetProcessMemoryInfo failed")
+        return counters.PeakWorkingSetSize / 1024 / 1024
+
+    import resource
+    peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Linux reports KB, macOS bytes.
+    return (peak_kb / 1024) if sys.platform.startswith("linux") else (peak_kb / 1024 / 1024)
+
+
+def self_check(megabytes: int = 256) -> int:
+    """Verify the memory instrument against a known allocation.
+
+    An instrument that reads zero looks exactly like a bounded read. This
+    allocates a buffer of known size and requires the reading to move by
+    roughly that much, so a broken instrument fails loudly instead of
+    certifying every shape as bounded.
+    """
+    before = working_set_mb()
+    block = bytearray(megabytes * 1024 * 1024)
+    block[::4096] = b"\x01" * len(block[::4096])  # touch every page
+    after = working_set_mb()
+    observed = after - before
+    del block
+    low, high = megabytes * 0.8, megabytes * 1.5
+    verdict = "ok" if low <= observed <= high else "BROKEN"
+    print(f"memory instrument self-check: allocated {megabytes} MB, "
+          f"observed {observed:.1f} MB -- {verdict}")
+    if verdict == "BROKEN":
+        print(f"  expected between {low:.0f} and {high:.0f} MB. Every memory "
+              f"reading from this harness is untrustworthy until this passes.")
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Fixture
+# ---------------------------------------------------------------------------
+
+def bootstrap(database_url: str | None):
     """Import the app against a chosen database. Must precede any app import."""
     if database_url:
         os.environ["DATABASE_URL"] = database_url
@@ -63,66 +175,104 @@ def _bootstrap(database_url: str | None) -> Tuple[Any, Any, Any]:
         tmpdir = tempfile.mkdtemp(prefix="read-path-bounds-")
         os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir, 'bounds.db')}"
 
-    sys.path.insert(0, str(REPO_ROOT / "oms"))
+    if str(REPO_ROOT / "oms") not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT / "oms"))
     from app import models, models_action  # noqa: E402
     from app.database import SessionLocal, engine  # noqa: E402
     from app import runtime  # noqa: E402
 
     models.Base.metadata.create_all(bind=engine)
     models_action.Base.metadata.create_all(bind=engine)
-    return models, SessionLocal, runtime
+    return models, SessionLocal, engine, runtime
 
 
-def seed(models, SessionLocal, size: int, batch: int = 20_000) -> None:
+def corpus_size(models, SessionLocal) -> int:
+    db = SessionLocal()
+    try:
+        return db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id == TYPE_ID).count()
+    finally:
+        db.close()
+
+
+def seed(models, SessionLocal, engine, size: int) -> None:
+    from sqlalchemy import text
+
+    dialect = engine.dialect.name
     db = SessionLocal()
     try:
         db.query(models.ObjectInstance).filter(
             models.ObjectInstance.object_type_id == TYPE_ID
         ).delete(synchronize_session=False)
-        db.query(models.ObjectType).filter(models.ObjectType.id == TYPE_ID).delete(
-            synchronize_session=False
-        )
+        db.query(models.ObjectType).filter(
+            models.ObjectType.id == TYPE_ID
+        ).delete(synchronize_session=False)
         db.commit()
         db.add(models.ObjectType(
             id=TYPE_ID, project_id="default", display_name="Read Path Asset",
             properties={
-                "status": {"type": "string"},
-                "risk_score": {"type": "integer"},
-                "geometry": {"type": "geometry"},
+                "assetId": {"type": "string"},
+                "risk": {"type": "number"},
+                "category": {"type": "string"},
+                "latitude": {"type": "number"},
+                "longitude": {"type": "number"},
             },
             created_at=0, updated_at=0,
         ))
         db.commit()
+    finally:
+        db.close()
 
-        rng = random.Random(7)
+    width = max(8, len(str(size)))
+    if dialect == "postgresql":
+        # Server-side generation, as benchmark_ontology_scale_postgres.py does.
+        # Ten million rows through Python would dominate the run.
+        with engine.begin() as connection:
+            connection.execute(text("SET LOCAL synchronous_commit = off"))
+            connection.execute(text("""
+                INSERT INTO object_instances (
+                    id, project_id, object_type_id, properties, source_asset_id,
+                    is_active, lineage, created_at, updated_at
+                )
+                SELECT
+                    :prefix || lpad(series::text, :width, '0'),
+                    'default', :type_id,
+                    jsonb_build_object(
+                        'assetId', :prefix || lpad(series::text, :width, '0'),
+                        'risk', mod(series, 101),
+                        'category', 'category_' || mod(series, 20),
+                        'latitude', 37.0 + mod(series, 1000)::double precision / 10000.0,
+                        'longitude', -122.0 - mod(series, 1000)::double precision / 10000.0
+                    ),
+                    NULL, true, '{}'::jsonb,
+                    1700000000 + mod(series, 1000000),
+                    1700000000 + mod(series, 1000000)
+                FROM generate_series(1, :count) AS generated(series)
+            """), {"prefix": OBJECT_PREFIX, "width": width,
+                   "type_id": TYPE_ID, "count": size})
+        return
+
+    db = SessionLocal()
+    try:
         rows: List[Dict[str, Any]] = []
-        for index in range(size):
-            clustered = index % CLUSTER_EVERY == 0
-            spread = 0.002 if clustered else 0.4
+        for series in range(1, size + 1):
             rows.append({
-                "id": f"{TYPE_ID}_{index}",
+                "id": f"{OBJECT_PREFIX}{series:0{width}d}",
                 "project_id": "default",
                 "object_type_id": TYPE_ID,
                 "properties": {
-                    "status": "degraded" if index % 3 == 0 else "operational",
-                    "risk_score": index % 100,
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [
-                            HUB[0] + rng.uniform(-spread, spread),
-                            HUB[1] + rng.uniform(-spread, spread),
-                        ],
-                    },
+                    "assetId": f"{OBJECT_PREFIX}{series:0{width}d}",
+                    "risk": series % 101,
+                    "category": f"category_{series % 20}",
+                    "latitude": 37.0 + (series % 1000) / 10000.0,
+                    "longitude": -122.0 - (series % 1000) / 10000.0,
                 },
-                "source_asset_id": None,
-                "materialization_id": None,
-                "is_active": True,
-                "retired_at": None,
-                "lineage": {},
-                "created_at": index,
-                "updated_at": index,
+                "source_asset_id": None, "materialization_id": None,
+                "is_active": True, "retired_at": None, "lineage": {},
+                "created_at": 1700000000 + series % 1000000,
+                "updated_at": 1700000000 + series % 1000000,
             })
-            if len(rows) >= batch:
+            if len(rows) >= 20_000:
                 db.execute(models.ObjectInstance.__table__.insert(), rows)
                 db.commit()
                 rows = []
@@ -133,59 +283,92 @@ def seed(models, SessionLocal, size: int, batch: int = 20_000) -> None:
         db.close()
 
 
-def shapes(runtime) -> List[Tuple[str, Callable[[Any], int]]]:
+# ---------------------------------------------------------------------------
+# Shapes
+# ---------------------------------------------------------------------------
+
+def shapes(runtime) -> List[Callable[[Any], int]]:
     """Each returns a match count, so an empty result can be rejected."""
     return [
-        ("typed read, no filter (the shape the 10M gate measures)",
-         lambda db: runtime.query_object_set(
-             db, object_type_id=TYPE_ID, limit=50, with_total=False)["count"]),
-        ("typed read, one equality filter (the Object Explorer)",
-         lambda db: runtime.query_object_set(
-             db, object_type_id=TYPE_ID, filters={"status": "degraded"},
-             limit=50, with_total=False)["count"]),
-        ("facet aggregation (the Explorer's left rail)",
-         lambda db: sum(group["count"] for group in runtime.aggregate_object_set(
-             db, object_type_id=TYPE_ID, group_by="status")["groups"])),
-        ("spatial radius query (the Operational Map)",
-         lambda db: runtime.spatial_query_objects(
-             db, object_type_id=TYPE_ID,
-             near={"longitude": HUB[0], "latitude": HUB[1]},
-             radius_meters=500, limit=50, include_lineage=False)["total"]),
+        lambda db: runtime.query_object_set(
+            db, object_type_id=TYPE_ID, limit=50, with_total=False)["count"],
+        lambda db: runtime.query_object_set(
+            db, object_type_id=TYPE_ID, filters={"category": FILTER_CATEGORY},
+            limit=50, with_total=False)["count"],
+        lambda db: sum(group["count"] for group in runtime.aggregate_object_set(
+            db, object_type_id=TYPE_ID, group_by="category")["groups"]),
+        lambda db: runtime.spatial_query_objects(
+            db, object_type_id=TYPE_ID,
+            near={"longitude": HUB[0], "latitude": HUB[1]},
+            radius_meters=RADIUS_METERS, limit=50, include_lineage=False)["total"],
     ]
 
 
-def measure(SessionLocal, fn, repeats: int) -> Tuple[float, float, int]:
-    """Worst latency, worst peak heap, and the match count.
+def run_child(shape_index: int, database_url: str | None) -> int:
+    """One observation, in its own process. Prints a JSON line on stdout.
 
-    Latency and heap are measured in separate passes on purpose. ``tracemalloc``
-    hooks every allocation, and these paths allocate per row, so timing under it
-    inflates the very shapes being judged -- by roughly 3x on the scanning ones
-    and not at all on the bounded one, which is exactly the wrong direction.
-    Measuring them together would report an instrument artifact as a defect and
-    send someone to optimize it.
+    Memory and latency come from two runs against two sessions, because they
+    need opposite conditions. Memory must be attributed to a cold process --
+    peak working set is a high-water mark, so a warmed process reports the
+    second query as costing nothing. Latency must exclude connection setup and
+    first-statement planning, which in a fresh process are hundreds of
+    milliseconds and swamp the bounded shape, making it look unbounded.
+
+    Each run gets its own session because the app opens one per request, and a
+    reused session serves the second query out of the identity map.
     """
+    _, SessionLocal, _, runtime = bootstrap(database_url)
+    fn = shapes(runtime)[shape_index]
+
+    cold = SessionLocal()
+    try:
+        baseline = working_set_mb()
+        matched = fn(cold)
+        peak = working_set_mb()
+    finally:
+        cold.close()
+
+    gc.collect()
+    warm = SessionLocal()
+    try:
+        started = time.perf_counter()
+        matched_again = fn(warm)
+        latency_ms = (time.perf_counter() - started) * 1000
+    finally:
+        warm.close()
+
+    print(json.dumps({
+        "latency_ms": latency_ms,
+        "peak_mb": max(0.0, peak - baseline),
+        "resident_peak_mb": peak,
+        "matched": int(matched),
+        "matched_warm": int(matched_again),
+    }))
+    return 0
+
+
+def observe(shape_index: int, database_url: str | None, repeats: int) -> Tuple[float, float, int]:
+    """Worst latency, worst attributed memory, and the match count."""
     latencies: List[float] = []
+    peaks: List[float] = []
     matched = 0
     for _ in range(repeats):
-        db = SessionLocal()
-        try:
-            start = time.perf_counter()
-            matched = fn(db)
-            latencies.append((time.perf_counter() - start) * 1000)
-        finally:
-            db.close()
-
-    peaks: List[float] = []
-    for _ in range(repeats):
-        db = SessionLocal()
-        try:
-            tracemalloc.start()
-            fn(db)
-            peaks.append(tracemalloc.get_traced_memory()[1] / 1024 / 1024)
-        finally:
-            tracemalloc.stop()
-            db.close()
-
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()),
+             "--child", str(shape_index)]
+            + (["--database-url", database_url] if database_url else []),
+            capture_output=True, text=True,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"shape {shape_index} died (exit {completed.returncode}). "
+                f"At this cardinality that is itself the finding.\n"
+                f"{completed.stderr[-2000:]}"
+            )
+        payload = json.loads(completed.stdout.strip().splitlines()[-1])
+        latencies.append(payload["latency_ms"])
+        peaks.append(payload["peak_mb"])
+        matched = payload["matched"]
     return max(latencies), max(peaks), matched
 
 
@@ -198,77 +381,133 @@ def growth(readings: Dict[int, float], sizes: List[int]) -> float:
     """
     first, last = sizes[0], sizes[-1]
     if readings[first] <= 0:
-        return 0.0
+        # Below the instrument's floor at the small end. Returning 0 here would
+        # let "we could not see it" render as "it did not grow" -- the passing-
+        # by-absence failure the measurement contract already names once. A
+        # reading that went from unmeasurable to anything at all has grown
+        # without bound as far as this harness can tell, and says so.
+        return 0.0 if readings[last] <= 0 else float("inf")
     ratio = readings[last] / readings[first]
     decades = math.log10(last / first)
     return ratio if decades <= 0 else ratio ** (1 / decades)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--sizes", default=",".join(str(s) for s in DEFAULT_SIZES),
-                        help="comma-separated object counts")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--sizes", default=",".join(str(s) for s in DEFAULT_SIZES))
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--database-url", default=None,
                         help="defaults to a throwaway SQLite file. Postgres is the "
                              "production dialect and has no equality pushdown, so a "
                              "SQLite-only reading is the favorable case")
+    parser.add_argument("--child", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--evidence", default=None,
+                        help="write a JSON reading to this path")
+    parser.add_argument("--self-check", action="store_true",
+                        help="verify the memory instrument and exit")
+    parser.add_argument("--reuse", action="store_true",
+                        help="skip seeding when the corpus already holds the "
+                             "requested size, so a before/after pair measures "
+                             "identical rows")
     args = parser.parse_args()
 
-    sizes = sorted(int(value) for value in args.sizes.split(",") if value.strip())
-    if len(sizes) < 2:
-        print("At least two sizes are required: the gate is a growth curve.")
+    if args.child is not None:
+        return run_child(args.child, args.database_url)
+    if args.self_check:
+        return self_check()
+
+    # The memory instrument is verified before it is trusted, every run. A
+    # reading of zero is indistinguishable from a bounded read, so a silent
+    # failure here would certify the exact defect this harness exists to find.
+    if self_check() != 0:
         return 2
 
-    models, SessionLocal, runtime = _bootstrap(args.database_url)
-    dialect = SessionLocal().get_bind().dialect.name
+    sizes = sorted(int(value) for value in args.sizes.split(",") if value.strip())
+    if not sizes:
+        print("At least one size is required.")
+        return 2
+    # Two or more sizes give the growth curve, which is the real gate. One size
+    # gives only the absolute ceiling -- enough for a before/after pair on an
+    # identical corpus, where the comparison is between two runs rather than
+    # between two cardinalities, and cheaper than seeding ten million rows twice.
+    curve = len(sizes) > 1
+
+    models, SessionLocal, engine, _ = bootstrap(args.database_url)
+    dialect = engine.dialect.name
 
     latency: Dict[str, Dict[int, float]] = {}
-    heap: Dict[str, Dict[int, float]] = {}
-    counts: Dict[str, int] = {}
+    memory: Dict[str, Dict[int, float]] = {}
+    counts: Dict[str, Dict[int, int]] = {}
 
     for size in sizes:
-        print(f"seeding {size:,} objects...", flush=True)
-        seed(models, SessionLocal, size)
-        for label, fn in shapes(runtime):
-            worst_ms, worst_mb, matched = measure(SessionLocal, fn, args.repeats)
+        if args.reuse and corpus_size(models, SessionLocal) == size:
+            # Before and after should be measured on identical rows. Reseeding
+            # between them would introduce a second variable into a comparison
+            # whose whole point is that only the code changed.
+            print(f"reusing the existing {size:,}-object corpus", flush=True)
+        else:
+            started = time.perf_counter()
+            print(f"seeding {size:,} objects on {dialect}...", flush=True)
+            seed(models, SessionLocal, engine, size)
+            print(f"  seeded in {time.perf_counter() - started:,.1f}s", flush=True)
+        for index, label in enumerate(SHAPE_LABELS):
+            worst_ms, worst_mb, matched = observe(index, args.database_url, args.repeats)
             if not matched:
                 print(f"\n{label} matched nothing at {size:,}. The scan still ran, but "
                       f"the comparison work did not, so this timing would understate "
                       f"the cost of a real query. Fix the fixture, not the threshold.")
                 return 2
             latency.setdefault(label, {})[size] = worst_ms
-            heap.setdefault(label, {})[size] = worst_mb
-            counts[label] = matched
+            memory.setdefault(label, {})[size] = worst_mb
+            counts.setdefault(label, {})[size] = matched
+            print(f"  {label[:46]:<46} {worst_ms:>10.1f}ms {worst_mb:>9.1f}MB "
+                  f"{matched:>12,} matched", flush=True)
 
     header = " ".join(f"{size:>11,}" for size in sizes)
-    print(f"\nRead path bounds on {dialect}, worst of {args.repeats}\n")
-    print(f"{'query shape':<54} {header}   per 10x")
+    print(f"\nRead path bounds on {dialect}, worst of {args.repeats}, "
+          f"each observation in a fresh process\n")
+    print(f"{'query shape':<54} {header}" + ("   per 10x" if curve else ""))
     print("-" * (56 + 12 * len(sizes) + 10))
     print("latency")
-    for label, readings in latency.items():
-        cells = " ".join(f"{readings[size]:>9.1f}ms" for size in sizes)
-        print(f"  {label:<52} {cells}   x{growth(readings, sizes):.1f}")
-    print("peak heap")
-    for label, readings in heap.items():
-        cells = " ".join(f"{readings[size]:>9.1f}MB" for size in sizes)
-        print(f"  {label:<52} {cells}   x{growth(readings, sizes):.1f}")
+    for label in SHAPE_LABELS:
+        cells = " ".join(f"{latency[label][size]:>9.1f}ms" for size in sizes)
+        suffix = f"   x{growth(latency[label], sizes):.1f}" if curve else ""
+        print(f"  {label:<52} {cells}{suffix}")
+    print("resident memory attributed to the query")
+    for label in SHAPE_LABELS:
+        cells = " ".join(f"{memory[label][size]:>9.1f}MB" for size in sizes)
+        suffix = f"   x{growth(memory[label], sizes):.1f}" if curve else ""
+        print(f"  {label:<52} {cells}{suffix}")
+    if not curve:
+        print("\n  One cardinality only: the growth gate did not run, so this is the "
+              "\n  absolute ceiling alone. Compare against another run on the same corpus.")
 
     breaches: List[str] = []
-    for label in latency:
-        latency_growth = growth(latency[label], sizes)
-        heap_growth = growth(heap[label], sizes)
-        worst_heap = max(heap[label].values())
-        if latency_growth > LATENCY_GROWTH_MAX:
-            breaches.append(f"{label}: latency grows x{latency_growth:.1f} per 10x, "
-                            f"above x{LATENCY_GROWTH_MAX}")
-        if heap_growth > HEAP_GROWTH_MAX:
-            breaches.append(f"{label}: heap grows x{heap_growth:.1f} per 10x, "
-                            f"above x{HEAP_GROWTH_MAX}")
-        if worst_heap > HEAP_CEILING_MB:
-            breaches.append(f"{label}: peak heap {worst_heap:.1f} MB, "
+    for label in SHAPE_LABELS:
+        worst_memory = max(memory[label].values())
+        if curve:
+            latency_growth = growth(latency[label], sizes)
+            memory_growth = growth(memory[label], sizes)
+            if latency_growth > LATENCY_GROWTH_MAX:
+                breaches.append(f"{label}: latency grows x{latency_growth:.1f} per 10x, "
+                                f"above x{LATENCY_GROWTH_MAX}")
+            if memory_growth > HEAP_GROWTH_MAX:
+                breaches.append(f"{label}: memory grows x{memory_growth:.1f} per 10x, "
+                                f"above x{HEAP_GROWTH_MAX}")
+        if worst_memory > HEAP_CEILING_MB:
+            breaches.append(f"{label}: peak {worst_memory:.1f} MB, "
                             f"above the {HEAP_CEILING_MB:.0f} MB ceiling")
+
+    if args.evidence:
+        Path(args.evidence).write_text(json.dumps({
+            "dialect": dialect, "sizes": sizes, "repeats": args.repeats,
+            "latency_ms": {k: {str(s): v for s, v in d.items()} for k, d in latency.items()},
+            "memory_mb": {k: {str(s): v for s, v in d.items()} for k, d in memory.items()},
+            "matched": {k: {str(s): v for s, v in d.items()} for k, d in counts.items()},
+            "breaches": breaches,
+            "status": "FAIL" if breaches else "PASS",
+        }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print()
     if breaches:

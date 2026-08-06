@@ -1,5 +1,7 @@
 {
-  "note": "Ratchets. Renderable types may rise; coupling may fall. Never the reverse.",
+  "note": "Ratchets. Renderable types and wired surfaces may rise; coupling and unwired surfaces may fall. Never the reverse.",
   "ontology_type_coupling_ceiling": 1,
-  "renderable_base_types_floor": 13
+  "renderable_base_types_floor": 13,
+  "surfaces_missing_specs_ceiling": 0,
+  "surfaces_receiving_specs_floor": 3
 }
