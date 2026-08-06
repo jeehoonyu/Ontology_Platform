@@ -32,9 +32,15 @@ def record(subject: str, measurements: Dict[str, Any], harness: str,
            rehearsals_file: Optional[Path] = None) -> Dict[str, Any]:
     if subject not in SUBJECTS:
         raise ValueError(f"unknown chaos subject {subject!r}; expected one of {SUBJECTS}")
+    from tier_b_evidence import current_head
+
     path = Path(rehearsals_file) if rehearsals_file else DEFAULT_REHEARSALS
+    # Each rehearsal records the head it ran at. Without this the aggregate can
+    # combine rehearsals from different schemas into one evidence file that
+    # claims a single current head, which launders stale work into fresh-looking
+    # evidence -- the exact thing the non-completion rule forbids.
     entry = {"subject": subject, "at": int(time.time()), "harness": harness,
-             "measurements": measurements}
+             "migration_head": current_head(), "measurements": measurements}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
@@ -78,12 +84,30 @@ def summarize(rehearsals: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def at_head(rehearsals: List[Dict[str, Any]], head: str) -> List[Dict[str, Any]]:
+    """Keep only rehearsals run at the given head.
+
+    A rehearsal recorded before the head advanced describes a different schema.
+    Counting it would let the gate read as satisfied on work that was never
+    repeated, which is the non-completion rule violated from the inside.
+    Records predating this field carry no head and are dropped.
+    """
+    return [row for row in rehearsals if row.get("migration_head") == head]
+
+
 def aggregate(rehearsals_file: Optional[Path] = None,
               output_dir: Optional[Path] = None) -> int:
-    from tier_b_evidence import write_evidence
+    from tier_b_evidence import current_head, write_evidence
 
     path = Path(rehearsals_file) if rehearsals_file else DEFAULT_REHEARSALS
-    summary = summarize(load(path))
+    head = current_head()
+    all_rehearsals = load(path)
+    current = at_head(all_rehearsals, head)
+    dropped = len(all_rehearsals) - len(current)
+    if dropped:
+        print(f"Ignoring {dropped} rehearsal(s) not run at {head}.")
+    summary = summarize(current)
+    summary["rehearsals_ignored_at_other_heads"] = dropped
     if not summary["collaboration_rehearsals"]:
         # With no collaboration rehearsal there is no reconnect measurement, and
         # a _max threshold with no data would satisfy itself.
