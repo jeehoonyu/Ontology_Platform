@@ -1,33 +1,32 @@
 {
-  "breaches": [
-    "ack_p95_ms=253.002 vs ack_p95_ms_max=250.0"
-  ],
   "gate_id": "collaboration",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "ack_p95_ms": 253.002,
+    "ack_p95_ms": 212.982,
     "editors": 20,
     "lost_updates": 0,
+    "observations": 6,
     "replicas": 2,
     "unique_revisions": 20
   },
-  "notes": "Worst of three consecutive runs at this head on one host: 241.605 ms, 253.002 ms, 219.812 ms. Correctness held in every run (20 unique contiguous revisions, zero lost updates); only the latency threshold breached. The p95 is taken over 20 samples, so it is the 19th value and moves with a single slow request. The gate is not accepted until the estimator is widened or the threshold is re-decided on the record.",
+  "notes": "Six consecutive runs at head 0038 on an otherwise idle host: 210.451 ms, 206.575 ms, 207.863 ms, 207.029 ms, 212.982 ms, 206.191 ms. The reported figure is the worst of the six. Spread is 6.791 ms and the margin to the 250 ms threshold is 37.018 ms. The three observations recorded under GOAL2-004 -- 241.605, 253.002 and 219.812 ms, one of them a breach -- were taken at head 0037 and do not carry forward. They were also taken while this host was running other heavy work concurrently, which the tight spread here suggests was the dominant factor rather than the estimator being a single observation.",
   "provenance": {
-    "captured_at": 1785826428,
-    "git_commit": "86d4481",
+    "captured_at": 1785985302,
+    "git_commit": "afc97eb",
     "harness": "oms/verify_collaboration_scale_postgres.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0037_cross_stream_joins"
+    "migration_head": "0038_explicit_schema_baseline"
   },
-  "status": "FAIL",
+  "status": "PASS",
   "thresholds": {
     "ack_p95_ms_max": 250.0,
     "editors_min": 20,
     "lost_updates_max": 0,
+    "observations_min": 6,
     "replicas_min": 2,
     "unique_revisions_min": 20
   },
