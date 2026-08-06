@@ -91,8 +91,14 @@ def write_mark(target: str, marks_file: Path) -> Dict[str, Any]:
 
 
 def highest_surviving_sequence(target: str) -> Optional[int]:
+    # Objects of a type are listed at /objects/{type}. The first version of this
+    # queried /objects?object_type_id=... which is a 405: that path only accepts
+    # POST. The sampler therefore read nothing, reported total_loss on every
+    # sample, and would have filled a seven-day RPO window with false total
+    # losses while the database held the marks perfectly. A unit test over
+    # synthetic samples could not catch this; only a real restore could.
     status, payload = _json_request(
-        f"{target.rstrip('/')}/objects?object_type_id={MARK_OBJECT_TYPE}&limit=1000"
+        f"{target.rstrip('/')}/objects/{MARK_OBJECT_TYPE}?limit=1000"
     )
     if status != 200:
         return None

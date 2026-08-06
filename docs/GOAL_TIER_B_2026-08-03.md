@@ -55,6 +55,25 @@ Group 2 was the critical path and could not be compressed by running existing sc
 harder. The tooling now exists; what remains is wall clock and a pilot deployment to
 measure. Availability still sets the floor at 7 days.
 
+**Both harnesses were dry-run against real infrastructure on 2026-08-05, and the RPO
+sampler was broken.** It read surviving marks from `GET /objects?object_type_id=...`,
+which is a 405 because that path only accepts POST, so it saw nothing and reported
+`total_loss` on every sample. The restored database held the marks perfectly: three marks,
+maximum sequence three. Corrected to `/objects/{type}`, the same scenario measures
+`surviving_sequence: 3` and `rpo_seconds: 25`, matching the real loss exactly.
+
+Twenty-three unit tests over synthetic samples passed throughout and could not have caught
+it, because they exercise the accounting and never the reading. Left undiscovered, the
+seven-day window would have produced ten samples of false total loss, each recorded as a
+breach, and the failure would have read as a durability defect rather than a broken
+instrument. A week spent and the wrong conclusion drawn.
+
+RTO validated clean on the same restore: restore 2.814 s, ready 3.528 s, first
+authenticated write at 3.700 s against an 1,800 s limit.
+
+The gates still need the declared window. What changed is that the window will measure the
+system rather than a bug.
+
 ## Ordering
 
 1. **Declare the measurement contract first.** Availability window, RPO sampling cadence,
