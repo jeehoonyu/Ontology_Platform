@@ -20,6 +20,7 @@ import {
   type ObjectTypeSummary
 } from "../api/objectExplorerApi";
 import { formatValue } from "../utils/format";
+import { propertySpecs, renderPropertyValue } from "../utils/semanticRender";
 
 type Risk = { score: number; band: string; explanation?: string };
 type FilterValue = string | number | boolean;
@@ -158,6 +159,13 @@ export function ObjectExplorer() {
 
   const columns = query?.columns.slice(0, 8) || [];
   const selectedType = types.find((type) => type.id === objectTypeId);
+  // Values are drawn by the type the ontology declares for them. The query's
+  // object type carries the property declarations, so a geoshape renders as a
+  // shape and a timestamp in the viewer's zone without this component knowing
+  // which object types exist.
+  const specs = propertySpecs(
+    (query?.object_type?.properties || selectedType?.properties) as Record<string, unknown> | undefined,
+  );
 
   return (
     <Page title="Object Explorer" subtitle="Search ontology objects, filter with live facets, inspect relationships, and run governed actions.">
@@ -187,12 +195,12 @@ export function ObjectExplorer() {
           <header className="explorer-results-header"><div><h2>{query?.object_type?.display_name || selectedType?.display_name || "Objects"}</h2><span>{query ? `${query.result_count} results across ${columns.length} visible fields` : "Run an exploration"}</span></div><StatusBadge value={selectedIds.length ? `${selectedIds.length} selected` : "ready"} /></header>
           {loading ? <LoadingState label="Evaluating object set and risk..." /> : null}
           {!loading && !query?.objects.length ? <EmptyState title="No matching objects" description="Change the object type, search phrase, or active facet filters." /> : null}
-          {!loading && query?.objects.length ? <div className="table-wrap explorer-table" tabIndex={0}><table><thead><tr><th className="selection-cell"><input aria-label="Select all objects" type="checkbox" checked={selectedIds.length === query.objects.length} onChange={(event) => setSelectedIds(event.target.checked ? query.objects.map((object) => object.id) : [])} /></th><th>Object</th><th>Risk</th>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{query.objects.map((object) => <tr key={object.id} className={profile?.object.id === object.id ? "selected" : ""} onClick={() => void selectObject(object)}><td className="selection-cell" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${object.id}`} type="checkbox" checked={selectedIds.includes(object.id)} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...new Set([...ids, object.id])] : ids.filter((id) => id !== object.id))} /></td><td><button className="object-link" onClick={() => void selectObject(object)}>{object.id}</button></td><td><StatusBadge value={risk[object.id] ? `${risk[object.id].band} ${risk[object.id].score}` : "not scored"} /></td>{columns.map((column) => <td key={column} title={formatValue(propertyValue(object, column))}>{formatValue(propertyValue(object, column))}</td>)}</tr>)}</tbody></table></div> : null}
+          {!loading && query?.objects.length ? <div className="table-wrap explorer-table" tabIndex={0}><table><thead><tr><th className="selection-cell"><input aria-label="Select all objects" type="checkbox" checked={selectedIds.length === query.objects.length} onChange={(event) => setSelectedIds(event.target.checked ? query.objects.map((object) => object.id) : [])} /></th><th>Object</th><th>Risk</th>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{query.objects.map((object) => <tr key={object.id} className={profile?.object.id === object.id ? "selected" : ""} onClick={() => void selectObject(object)}><td className="selection-cell" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${object.id}`} type="checkbox" checked={selectedIds.includes(object.id)} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...new Set([...ids, object.id])] : ids.filter((id) => id !== object.id))} /></td><td><button className="object-link" onClick={() => void selectObject(object)}>{object.id}</button></td><td><StatusBadge value={risk[object.id] ? `${risk[object.id].band} ${risk[object.id].score}` : "not scored"} /></td>{columns.map((column) => <td key={column} title={formatValue(propertyValue(object, column))}>{renderPropertyValue(propertyValue(object, column), specs[column])}</td>)}</tr>)}</tbody></table></div> : null}
         </main>
 
         <aside className="explorer-inspector">
           <Panel title="Object Preview" action={<Network size={15} />}>
-            {!profile ? <div className="empty">Select a result to inspect its properties and links.</div> : <><header className="object-profile-heading"><div><strong>{formatValue(profile.object.properties.name || profile.object.properties.title || profile.object.id)}</strong><small>{profile.object.id}</small></div><StatusBadge value={risk[profile.object.id]?.band || "unscored"} /></header><KeyValueGrid data={profile.object.properties} /><div className="object-profile-metrics"><span>{profile.inbound_links.length} inbound</span><span>{profile.outbound_links.length} outbound</span><span>{profile.linked_objects.length} linked</span></div>{risk[profile.object.id]?.explanation ? <p className="risk-explanation"><ShieldCheck size={15} />{risk[profile.object.id].explanation}</p> : null}</>}
+            {!profile ? <div className="empty">Select a result to inspect its properties and links.</div> : <><header className="object-profile-heading"><div><strong>{formatValue(profile.object.properties.name || profile.object.properties.title || profile.object.id)}</strong><small>{profile.object.id}</small></div><StatusBadge value={risk[profile.object.id]?.band || "unscored"} /></header><KeyValueGrid data={profile.object.properties} specs={specs} /><div className="object-profile-metrics"><span>{profile.inbound_links.length} inbound</span><span>{profile.outbound_links.length} outbound</span><span>{profile.linked_objects.length} linked</span></div>{risk[profile.object.id]?.explanation ? <p className="risk-explanation"><ShieldCheck size={15} />{risk[profile.object.id].explanation}</p> : null}</>}
           </Panel>
           <Panel title="Governed Actions">
             {!query?.available_actions.length ? <div className="empty">No actions are bound to this object type.</div> : <div className="explorer-action-list">{query.available_actions.map((action) => <button key={action.id} disabled={!selectedIds.length} onClick={() => { setActiveAction(action); setActionParams({}); }}><span><strong>{action.display_name}</strong><small>{action.description || `${action.id} action`}</small></span><ChevronRight size={14} /></button>)}</div>}
