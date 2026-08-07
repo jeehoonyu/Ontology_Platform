@@ -174,6 +174,36 @@ def find_call_sites() -> List[Dict[str, object]]:
     return sites
 
 
+# Ways to write an object row that never reach the mapper, and so never reach
+# the listener that maintains `geo_min_lon`/`geo_indexed`.
+MAPPER_BYPASSES = (
+    "ObjectInstance.__table__.insert",
+    "bulk_insert_mappings",
+    "bulk_save_objects",
+    "INSERT INTO object_instances",
+)
+
+
+def mapper_bypass_sites() -> List[Dict[str, object]]:
+    """Application writes that skip the ORM, and so skip the geo-bounds listener.
+
+    A row written this way arrives with `geo_indexed` false. That is handled --
+    `spatial_query_objects` falls back to a scan rather than returning a wrong
+    answer -- but it is handled by being slow, silently, for as long as nobody
+    runs `runtime.backfill_geo_bounds`. Benchmarks and migrations legitimately
+    bulk-load and set the columns themselves; application code should not, so
+    this is ratcheted at zero.
+    """
+    sites: List[Dict[str, object]] = []
+    for path in sorted(APP_DIR.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), start=1):
+            for marker in MAPPER_BYPASSES:
+                if marker in line:
+                    sites.append({"module": path.name, "line": number, "marker": marker})
+    return sites
+
+
 def measure() -> Dict[str, object]:
     unbounded = {name for name in PRIMITIVES if primitive_materializes(name)}
     sites = find_call_sites()
@@ -189,6 +219,7 @@ def measure() -> Dict[str, object]:
         "sites": live,
         "nominal_limit_call_sites": len(nominal),
         "nominal_limit_sites": nominal,
+        "mapper_bypass_sites": mapper_bypass_sites(),
     }
 
 
@@ -211,6 +242,10 @@ def main() -> int:
         print(f"    {module:<28} {count}")
     print(f"\n  call sites asking for everything (B3, still scan)  "
           f"{reading['nominal_limit_call_sites']}")
+    bypasses = reading["mapper_bypass_sites"]
+    print(f"  application writes bypassing the geo-bounds listener  {len(bypasses)}")
+    for site in bypasses:
+        print(f"    {site['module']}:{site['line']} {site['marker']}")
     if args.verbose:
         for site in reading["nominal_limit_sites"]:
             print(f"    {site['module']}:{site['line']} limit={site['limit']:,}")
@@ -238,7 +273,13 @@ def main() -> int:
         print(f"\nRATCHET BROKEN: {reading['unbounded_call_sites']} unbounded call "
               f"sites, above the ceiling of {ceiling}.")
         return 1
-    print(f"\nRatchet held: {reading['unbounded_call_sites']} <= {ceiling}.")
+    if reading["mapper_bypass_sites"]:
+        print("\nRATCHET BROKEN: application code writes object rows without the "
+              "mapper, so their geographic bounds are never computed. Spatial "
+              "queries then fall back to scanning, correctly but silently.")
+        return 1
+    print(f"\nRatchet held: {reading['unbounded_call_sites']} <= {ceiling}, "
+          f"0 mapper bypasses.")
     return 0
 
 
