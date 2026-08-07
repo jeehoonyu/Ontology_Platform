@@ -124,7 +124,7 @@ jobs:
           with engine.connect() as connection:
               revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
               tables = inspect(connection).get_table_names()
-          assert revision == "0038_explicit_schema_baseline", revision
+          assert revision == "0039_object_geo_bounds", revision
           assert len(tables) >= 100, len(tables)
           print(f"PostgreSQL schema ready at {revision} with {len(tables)} tables")
           PY

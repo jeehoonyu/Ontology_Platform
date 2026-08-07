@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         project_id = connection.execute("SELECT project_id FROM pipeline_builder_graphs WHERE id='legacy-graph'").fetchone()[0]
         indexes = {row[1] for row in connection.execute("PRAGMA index_list('pipeline_builder_graphs')").fetchall()}
 
-    assert version == "0038_explicit_schema_baseline", version
+    assert version == "0039_object_geo_bounds", version
     assert project_id == "default", project_id
     assert "ix_pipeline_builder_graphs_project_id" in indexes, indexes
 

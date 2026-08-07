@@ -131,17 +131,18 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Latest reading |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 187 of 187 in 831 s at head 0038 |
+| Backend scripts passing in one sequential run | the suite | 187 of 187 in 787 s at head 0039 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 — GOAL2-007 and GOAL2-008 fixed 2026-08-06 |
 | Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
 | Call sites asking a primitive for everything | `oms/audit_query_bounds.py` | 14, ceiling 14 |
 | Peak memory, any read shape at 10M objects | `oms/measure_read_path_bounds.py` | 6.9 MB, ceiling 64 MB (was 21,940.6 MB) |
 | Facet aggregation latency at 10M | `oms/measure_read_path_bounds.py` | 40,957.8 ms, ceiling 40,957.8 ms (was 163,095.2 ms) |
-| Spatial query latency at 10M | `oms/measure_read_path_bounds.py` | 44,802.8 ms, ceiling 44,802.8 ms (was 170,863.7 ms) |
+| Spatial viewport latency at 10M | `oms/measure_read_path_bounds.py` | 70.6 ms, ceiling 250 ms |
+| Application writes bypassing the geo-bounds listener | `oms/audit_query_bounds.py` | 0, ceiling 0 |
 | Data surfaces receiving ontology specs | `oms/audit_extensibility.py` | 3 of 3, floor 3, unwired ceiling 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 7 of 10 at head 0038 |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 at head 0039 — 7 STALE, 3 MISSING |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
@@ -232,3 +233,5 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-06 | Is the facet aggregation slow because of I/O or because of the model? | Neither guess: 92% is jsonb traversal. The identical scan with trivial per-row work costs 1,807 ms against 23,981 ms with extraction, so the fix is an expression index, and the profile's unread `indexed` flag already says which property | Facet 163,095.2 -> 40,957.8 ms |
 | 2026-08-06 | Does a spatial index help once the pre-filter is in? | Not while the pre-filter must tolerate geometry it cannot judge. The index is built and ignored; dropping the one `OR` disjunct makes the same query an index scan at 674 ms against 11,006 ms. Safety, not the planner, is the binding constraint | Spatial 170,863.7 -> 44,802.8 ms |
 | 2026-08-06 | Can the corpus demonstrate the spatial gate at all? | No. Ten million objects sit on 1,000 distinct positions, so a 400 m radius matches 570,000 of them and no bbox query can be selective. The gate is untestable against this fixture in either direction | Recorded as an apparatus defect, not worked around |
+| 2026-08-06 | Does streaming rows out of the session cost anything the tests would see? | Yes, and only one did. Expunging kept memory bounded and detached instances the *caller* held, so a read could sever a pending write. Selecting columns instead of entities keeps the scan out of the identity map entirely, so there is nothing to expunge | 12 expunge calls removed |
+| 2026-08-06 | Is a NULL bounding box "no geometry" or "never computed"? | Both, which is why the first version made bulk-loaded objects vanish from the map. A `geo_indexed` flag separates them: unindexed rows force the slow correct scan instead of a fast wrong answer | Tier B 7 of 10 -> 0 of 10 at the new head |

@@ -22,7 +22,22 @@ This distinction is the whole plan. Seven gates have prior evidence and need
 Re-execution is scheduling; construction is engineering. Treating them as one backlog is
 what makes Tier B look closer than it is.
 
-### Group 1 — Re-execution at head `0038_explicit_schema_baseline`
+### The head moved again on 2026-08-06
+
+`0039_object_geo_bounds` materializes each object's geographic extent, which is what
+closes B4 of [`GOAL_2026-08-06.md`](GOAL_2026-08-06.md). Advancing the head invalidates
+every gate below: all seven read **STALE**, and Tier B goes from 7 of 10 to **0 of 10**.
+
+This is the non-completion rule working, not a setback to be edited around. The evidence
+files still say `0038` because that is where they were produced, and changing that string
+would be forging provenance rather than re-earning it. The same thing happened at
+`0037 -> 0038`, and the same remedy applies: re-execute.
+
+What is owed is machine time, not code. Group 1's harnesses are wired and emit correctly
+judged evidence; the schema change beneath them is additive — four nullable columns, a
+flag, and three indexes — so no gate's subject has changed.
+
+### Group 1 — Re-execution at head `0039_object_geo_bounds`
 
 Gate evidence emission is wired into the ontology-scale and pipeline-scale harnesses, so
 a reference run now produces a correctly judged evidence file without anyone assembling

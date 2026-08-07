@@ -1,8 +1,10 @@
 from typing import Optional
-from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, Index, text
+from sqlalchemy import (String, Integer, Float, JSON, ForeignKey, Boolean, Index,
+                        event, text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
+from .geo_bounds import bounds_of
 
 class ObjectType(Base):
     """
@@ -75,6 +77,29 @@ class ObjectInstance(Base):
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
     properties: Mapped[dict] = mapped_column(OBJECT_STATE_JSON)
+
+    # The object's geographic extent, derived from `properties` on every write by
+    # the listener below. It exists so a spatial query can be answered by an
+    # index instead of by carrying every row into Python to have its geometry
+    # parsed -- which cost 21.9 GB and 171 s at ten million objects.
+    #
+    # NULL means the object has no geometry, which is exactly the set a spatial
+    # query should exclude, so the filter can be a plain conjunction rather than
+    # the disjunction that previously defeated the planner. That equivalence is
+    # only true while these stay in step with `properties`; see the listener.
+    geo_min_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geo_min_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geo_max_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geo_max_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Distinguishes "no geometry" from "never computed", which NULL bounds alone
+    # cannot. Without it a row inserted through SQLAlchemy Core -- which bypasses
+    # the mapper, and so the listener -- is indistinguishable from a row with
+    # nothing to place, and a spatial query drops it silently. With it, such rows
+    # are visible, countable, and force the correct-but-slower scan instead of a
+    # wrong answer. Set by the listener on every ORM write.
+    geo_indexed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False,
+    )
     source_asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     materialization_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(
@@ -86,6 +111,27 @@ class ObjectInstance(Base):
     updated_at: Mapped[int] = mapped_column(Integer)
 
     object_type = relationship("ObjectType")
+
+
+@event.listens_for(ObjectInstance, "before_insert")
+@event.listens_for(ObjectInstance, "before_update")
+def _synchronize_geo_bounds(_mapper, _connection, target: "ObjectInstance") -> None:
+    """Recompute the geographic extent whenever an object is written.
+
+    Registered on the mapper rather than called from each writer, because there
+    are twenty-eight assignments to `properties` across the application and a
+    spatial query reads these columns as authoritative: a site that forgot to
+    update them would not fail, it would quietly remove objects from the map.
+
+    This covers every ORM write, which today is every write the application
+    makes. It does **not** cover a Core bulk insert, which bypasses the mapper
+    entirely -- benchmark fixtures do that, and `oms/audit_query_bounds.py`
+    fails the build if application code starts to.
+    """
+    bounds = bounds_of(target.properties)
+    (target.geo_min_lon, target.geo_min_lat,
+     target.geo_max_lon, target.geo_max_lat) = bounds or (None, None, None, None)
+    target.geo_indexed = True
 
 
 class LinkInstance(Base):
