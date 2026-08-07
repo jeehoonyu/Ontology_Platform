@@ -356,6 +356,87 @@ def spatial_equivalence():
         db.close()
 
 
+def materialized_bounds():
+    """The stored extent must never disagree with the properties it describes.
+
+    `spatial_query_objects` filters on these columns and treats NULL as "no
+    geometry, cannot match". A stale or missing value therefore does not raise
+    -- it removes the object from the map. These check the transitions that
+    could produce one.
+    """
+    print("\nMaterialized bounds -- the stored extent must track the properties")
+
+    # The fixtures above were inserted through SQLAlchemy Core, which bypasses
+    # the mapper and so the listener -- exactly what a bulk load does. Those
+    # rows are marked unindexed, and the query must still answer correctly from
+    # them before any backfill runs. This is the case that would otherwise make
+    # objects silently disappear from a map, so it is asserted before the happy
+    # path rather than after.
+    db = SessionLocal()
+    try:
+        unindexed = db.query(models.ObjectInstance).filter_by(geo_indexed=False).count()
+        check(unindexed > 0, f"bulk-inserted rows are marked unindexed (got {unindexed})")
+        before = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset",
+            bbox=[-122.06, 37.04, -122.04, 37.06], limit=50, include_lineage=False)
+        found = sorted(item["id"] for item in before["objects"])
+        check(found == ["geo_location_alias", "geo_point_field", "geo_polygon", "geo_scalars"],
+              f"unindexed rows are still found, via the scan (got {found})")
+
+        repaired = runtime.backfill_geo_bounds(db)
+        check(repaired >= unindexed, f"the backfill repaired {repaired} rows")
+        check(db.query(models.ObjectInstance).filter_by(geo_indexed=False).count() == 0,
+              "nothing is left unindexed after a backfill")
+
+        after = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset",
+            bbox=[-122.06, 37.04, -122.04, 37.06], limit=50, include_lineage=False)
+        check(sorted(item["id"] for item in after["objects"]) == found,
+              "the indexed path returns exactly what the scan returned")
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        point = db.query(models.ObjectInstance).filter_by(id="geo_point_field").one()
+        check(point.geo_min_lon == -122.05 and point.geo_max_lon == -122.05
+              and point.geo_min_lat == 37.05 and point.geo_max_lat == 37.05,
+              "a Point stores a degenerate box at its own position")
+
+        polygon = db.query(models.ObjectInstance).filter_by(id="geo_polygon").one()
+        check(polygon.geo_min_lon is not None and polygon.geo_max_lon > polygon.geo_min_lon,
+              "a Polygon stores its full extent, not a point")
+
+        nothing = db.query(models.ObjectInstance).filter_by(id="geo_none").one()
+        check(nothing.geo_min_lon is None,
+              "an object without geometry stores NULL bounds")
+
+        # The failure that matters: geometry moves and the bounds do not follow.
+        moved = db.query(models.ObjectInstance).filter_by(id="geo_point_field").one()
+        moved.properties = {"geometry": {"type": "Point", "coordinates": [10.0, 20.0]}}
+        db.commit()
+        moved = db.query(models.ObjectInstance).filter_by(id="geo_point_field").one()
+        check(moved.geo_min_lon == 10.0 and moved.geo_min_lat == 20.0,
+              f"moving an object updates its bounds (got {moved.geo_min_lon}, {moved.geo_min_lat})")
+        found = runtime.spatial_query_objects(
+            db, object_type_id="geo_asset", bbox=[9.0, 19.0, 11.0, 21.0],
+            limit=10, include_lineage=False)
+        check([item["id"] for item in found["objects"]] == ["geo_point_field"],
+              "the moved object is found at its new position")
+
+        # And geometry removed entirely must stop matching, not keep its old box.
+        moved.properties = {"name": "geometry removed"}
+        db.commit()
+        emptied = db.query(models.ObjectInstance).filter_by(id="geo_point_field").one()
+        check(emptied.geo_min_lon is None, "removing geometry clears the bounds")
+
+        # Restore, so the sections that follow see the fixture they expect.
+        emptied.properties = {"geometry": {"type": "Point", "coordinates": [-122.05, 37.05]}}
+        db.commit()
+    finally:
+        db.close()
+
+
 def aggregation_equivalence():
     """The pushed-down GROUP BY must agree with the streaming pass, field by field.
 
@@ -421,6 +502,7 @@ def main():
         seed_geometry_shapes()
         boundedness()
         equivalence()
+        materialized_bounds()
         spatial_equivalence()
         aggregation_equivalence()
     finally:

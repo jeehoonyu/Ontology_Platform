@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         receipt_columns = {column["name"] for column in inspector.get_columns("event_stream_receipts")}
         assert {"project_id", "target_stream_id", "topics", "event_types", "cursor_sequence"} <= binding_columns
         assert {"binding_id", "event_id", "event_sequence", "stream_record_id"} <= receipt_columns
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0038_explicit_schema_baseline"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0039_object_geo_bounds"
 
     alembic("downgrade", "0035_object_materialization")
     with engine.connect() as connection:
@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
 
     alembic("upgrade", "head")
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0038_explicit_schema_baseline"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0039_object_geo_bounds"
     engine.dispose()
 
 print("Event-to-stream binding migration verified.")

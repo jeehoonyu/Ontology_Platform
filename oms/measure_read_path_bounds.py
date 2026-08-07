@@ -73,6 +73,7 @@ SHAPE_LABELS = [
     "typed read, one equality filter (the Object Explorer)",
     "facet aggregation (the Explorer's left rail)",
     "spatial radius query (the Operational Map)",
+    "spatial bbox, map viewport (the B4 gate)",
 ]
 
 
@@ -229,10 +230,16 @@ def seed(models, SessionLocal, engine, size: int) -> None:
         # Ten million rows through Python would dominate the run.
         with engine.begin() as connection:
             connection.execute(text("SET LOCAL synchronous_commit = off"))
+            # The geo columns are populated here for the same reason the
+            # migration backfills them: a Core insert bypasses the ORM listener
+            # that normally maintains them, so rows would arrive marked
+            # unindexed and every spatial query would take the correct-but-slow
+            # scan. Seeding them mirrors what a real bulk load must do.
             connection.execute(text("""
                 INSERT INTO object_instances (
                     id, project_id, object_type_id, properties, source_asset_id,
-                    is_active, lineage, created_at, updated_at
+                    is_active, lineage, created_at, updated_at,
+                    geo_min_lon, geo_min_lat, geo_max_lon, geo_max_lat, geo_indexed
                 )
                 SELECT
                     :prefix || lpad(series::text, :width, '0'),
@@ -246,7 +253,12 @@ def seed(models, SessionLocal, engine, size: int) -> None:
                     ),
                     NULL, true, '{}'::jsonb,
                     1700000000 + mod(series, 1000000),
-                    1700000000 + mod(series, 1000000)
+                    1700000000 + mod(series, 1000000),
+                    -122.0 - mod(series, 1000)::double precision / 10000.0,
+                    37.0 + mod(series, 1000)::double precision / 10000.0,
+                    -122.0 - mod(series, 1000)::double precision / 10000.0,
+                    37.0 + mod(series, 1000)::double precision / 10000.0,
+                    true
                 FROM generate_series(1, :count) AS generated(series)
             """), {"prefix": OBJECT_PREFIX, "width": width,
                    "type_id": TYPE_ID, "count": size})
@@ -271,6 +283,11 @@ def seed(models, SessionLocal, engine, size: int) -> None:
                 "is_active": True, "retired_at": None, "lineage": {},
                 "created_at": 1700000000 + series % 1000000,
                 "updated_at": 1700000000 + series % 1000000,
+                "geo_min_lon": -122.0 - (series % 1000) / 10000.0,
+                "geo_max_lon": -122.0 - (series % 1000) / 10000.0,
+                "geo_min_lat": 37.0 + (series % 1000) / 10000.0,
+                "geo_max_lat": 37.0 + (series % 1000) / 10000.0,
+                "geo_indexed": True,
             })
             if len(rows) >= 20_000:
                 db.execute(models.ObjectInstance.__table__.insert(), rows)
@@ -301,6 +318,17 @@ def shapes(runtime) -> List[Callable[[Any], int]]:
             db, object_type_id=TYPE_ID,
             near={"longitude": HUB[0], "latitude": HUB[1]},
             radius_meters=RADIUS_METERS, limit=50, include_lineage=False)["total"],
+        # B4's gate is about a map viewport, and the radius shape above cannot
+        # express one against this fixture: ten million objects sit on a
+        # thousand positions, so any radius wide enough to match anything
+        # matches 5.7% of the corpus. This box covers a single position, the
+        # closest this fixture comes to a selective viewport, and it is the
+        # query the 250 ms threshold was written about.
+        lambda db: runtime.spatial_query_objects(
+            db, object_type_id=TYPE_ID,
+            bbox=[HUB[0] - 0.00005, HUB[1] - 0.00005,
+                  HUB[0] + 0.00005, HUB[1] + 0.00005],
+            limit=50, include_lineage=False)["total"],
     ]
 
 
