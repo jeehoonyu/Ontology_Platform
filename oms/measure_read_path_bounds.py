@@ -262,8 +262,37 @@ def seed(models, SessionLocal, engine, size: int) -> None:
                 FROM generate_series(1, :count) AS generated(series)
             """), {"prefix": OBJECT_PREFIX, "width": width,
                    "type_id": TYPE_ID, "count": size})
+        _refresh_statistics(engine)
         return
 
+    _seed_python(models, SessionLocal, engine, size, width)
+    _refresh_statistics(engine)
+
+
+def _refresh_statistics(engine) -> None:
+    """Update planner statistics after a bulk load.
+
+    Not a nicety. Measured at one million objects, the identical corpus with
+    stale statistics against current ones: the map viewport 6,263.3 ms versus
+    10.5 ms, the radius query 6,388.0 ms versus 466.2 ms, the facet 5,610.0 ms
+    versus 2,368.8 ms. With no statistics the planner estimated one row for the
+    object type and chose to filter through the type index instead of the GiST
+    index, so the harness was measuring what the planner did not know rather
+    than what the system can do.
+
+    Every real bulk load owes this too, which is why it belongs in the fixture
+    rather than in a caveat.
+    """
+    from sqlalchemy import text
+
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            connection.execute(text("ANALYZE object_instances"))
+        elif engine.dialect.name == "sqlite":
+            connection.execute(text("ANALYZE"))
+
+
+def _seed_python(models, SessionLocal, engine, size: int, width: int) -> None:
     db = SessionLocal()
     try:
         rows: List[Dict[str, Any]] = []
