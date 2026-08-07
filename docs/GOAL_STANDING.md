@@ -131,14 +131,14 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Latest reading |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 187 of 187 in 787 s at head 0039 |
+| Backend scripts passing in one sequential run | the suite | 187 of 187 in 853 s at head 0040 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 — GOAL2-007 and GOAL2-008 fixed 2026-08-06 |
 | Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
 | Call sites asking a primitive for everything | `oms/audit_query_bounds.py` | 14, ceiling 14 |
 | Peak memory, any read shape at 10M objects | `oms/measure_read_path_bounds.py` | 6.9 MB, ceiling 64 MB (was 21,940.6 MB) |
 | Facet read latency at 10M | `runtime.aggregate_object_set` via the rollup | 1.4 ms, ceiling 250 ms (was 163,095.2 ms) |
-| Spatial viewport latency at 10M | `oms/measure_read_path_bounds.py` | 70.6 ms, ceiling 250 ms |
+| Spatial viewport latency at 10M | `oms/measure_read_path_bounds.py` | 78.6 ms, ceiling 250 ms — measured on the pre-2026-08-07 fixture |
 | Application writes bypassing the geo-bounds listener | `oms/audit_query_bounds.py` | 0, ceiling 0 |
 | Data surfaces receiving ontology specs | `oms/audit_extensibility.py` | 3 of 3, floor 3, unwired ceiling 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
@@ -236,4 +236,6 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-06 | Does streaming rows out of the session cost anything the tests would see? | Yes, and only one did. Expunging kept memory bounded and detached instances the *caller* held, so a read could sever a pending write. Selecting columns instead of entities keeps the scan out of the identity map entirely, so there is nothing to expunge | 12 expunge calls removed |
 | 2026-08-06 | Is a NULL bounding box "no geometry" or "never computed"? | Both, which is why the first version made bulk-loaded objects vanish from the map. A `geo_indexed` flag separates them: unindexed rows force the slow correct scan instead of a fast wrong answer | Tier B 7 of 10 -> 0 of 10 at the new head |
 | 2026-08-07 | Was the harness measuring the system or the planner? | The planner. It bulk-loaded and never ran ANALYZE, so Postgres estimated one row for the object type. At one million the map viewport read 6,263.3 ms stale against 10.5 ms current -- a factor of 596 on the shape B4's gate turns on | ANALYZE moved into seeding |
+| 2026-08-07 | Does the spatial fixture describe a region? | No, a line. Latitude and longitude moved together, so ten million objects sat on 1,000 positions stacked 10,000 deep, and a 400 m radius matched 570,000 of them. Every spatial number taken against it measured coincident-point scoring. Rebuilt over an area: at one million the radius matches 549 instead of 57,000 | Spatial readings restated as a new baseline, not a gain |
+| 2026-08-07 | Did the GiST index make bulk ingest several times slower? | No, and it was asserted before it was tested. Measured at one million: 190 s with all three geo indexes against 207 s without plus 22 s to build them. The ten-million load that prompted the claim is still unexplained, and now says so | Claim retracted |
 | 2026-08-07 | Why is the facet slow -- jsonb, statistics, or the plan? | None of them. An expression index was declined by the planner and slower when forced; ANALYZE made it marginally worse; the jsonb share read 92% hot and 62% cold. A full aggregate over ten million rows is O(n) whatever the split | Facet read 51,521.8 ms -> 1.4 ms via a rollup |
