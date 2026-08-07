@@ -23,7 +23,7 @@ command.upgrade(config, "head")
 
 engine = create_engine(database_url)
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0039_object_geo_bounds"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0040_object_facet_counts"
     columns = {column["name"] for column in inspect(connection).get_columns("ontology_health_runs")}
     assert {"id", "project_id", "object_type_id", "status", "score", "summary", "metrics", "findings", "created_by", "created_at"} <= columns
 engine.dispose()

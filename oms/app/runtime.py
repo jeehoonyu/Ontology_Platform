@@ -1233,6 +1233,71 @@ def _sql_group_counts(db: Session, query, group_by: Optional[str]) -> Optional[D
     return counts
 
 
+def refresh_facet_counts(db: Session, *, object_type_id: str, field: str,
+                         project_id: Optional[str] = None) -> Dict[str, Any]:
+    """Recompute and store the facet counts for one property.
+
+    This pays the aggregate -- 56,487.9 ms at ten million objects -- so that
+    reads do not. Run it on a schedule, or after a load, at whatever staleness
+    the deployment is willing to show.
+
+    Returns the counts it stored, so a caller can refresh and render in one go.
+    """
+    query, residual, _ = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=None)
+    if residual:  # unreachable with filters=None; guards a future caller
+        raise ValueError("facet rollups are computed over the unfiltered type")
+    counts = _sql_group_counts(db, query, field)
+    if counts is None:
+        # A group key SQL cannot render the way Python does. Falling back to the
+        # streaming pass here would store numbers the exact path disagrees with,
+        # so nothing is stored and reads keep computing exactly.
+        raise ValueError(f"'{field}' cannot be grouped in SQL for this object type")
+
+    scope = project_id or "default"
+    computed_at = int(time.time())
+    db.query(models.ObjectFacetCount).filter(
+        models.ObjectFacetCount.object_type_id == object_type_id,
+        models.ObjectFacetCount.field == field,
+        models.ObjectFacetCount.project_id == scope,
+    ).delete(synchronize_session=False)
+    for group_key, count in counts.items():
+        db.add(models.ObjectFacetCount(
+            id=f"facet_{uuid.uuid4().hex}", project_id=scope,
+            object_type_id=object_type_id, field=field,
+            group_key=group_key, count=count, computed_at=computed_at,
+        ))
+    db.commit()
+    return {
+        "object_type_id": object_type_id, "field": field,
+        "project_id": scope, "computed_at": computed_at,
+        "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+    }
+
+
+def _read_facet_rollup(db: Session, object_type_id: str, field: Optional[str],
+                       project_id: Optional[str], max_age_seconds: Optional[int]):
+    """Stored counts for this facet, or None when they cannot be used.
+
+    Returns None -- meaning "compute it exactly" -- when no rollup exists or it
+    is older than the caller will accept. A rollup is never used for a filtered
+    aggregate, because it describes the whole type.
+    """
+    if field is None:
+        return None
+    rows = db.query(models.ObjectFacetCount).filter(
+        models.ObjectFacetCount.object_type_id == object_type_id,
+        models.ObjectFacetCount.field == field,
+        models.ObjectFacetCount.project_id == (project_id or "default"),
+    ).all()
+    if not rows:
+        return None
+    computed_at = min(row.computed_at for row in rows)
+    if max_age_seconds is not None and int(time.time()) - computed_at > max_age_seconds:
+        return None
+    return computed_at, {row.group_key: row.count for row in rows}
+
+
 def aggregate_object_set(
     db: Session,
     *,
@@ -1241,8 +1306,28 @@ def aggregate_object_set(
     filters: Optional[Any] = None,
     group_by: Optional[str] = None,
     metrics: Optional[List[Dict[str, Any]]] = None,
+    max_rollup_age_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
     requested_metrics = [metric for metric in (metrics or []) if isinstance(metric, dict)]
+
+    if not requested_metrics and not filters:
+        # Stored counts, when there are any and the caller accepts their age.
+        # Only for an unfiltered aggregate: a rollup describes the whole type.
+        rollup = _read_facet_rollup(
+            db, object_type_id, group_by, project_id, max_rollup_age_seconds)
+        if rollup is not None:
+            computed_at, counts = rollup
+            return {
+                "object_type_id": object_type_id,
+                "filters": {},
+                "group_by": group_by,
+                "total": sum(counts.values()),
+                "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+                # Never omitted. A caller that does not look still has it in the
+                # payload, which is the difference between stale and misleading.
+                "source": "rollup",
+                "computed_at": computed_at,
+            }
 
     if not requested_metrics:
         query, residual, _ = _prepared_object_query(
@@ -1256,6 +1341,7 @@ def aggregate_object_set(
                     "group_by": group_by,
                     "total": sum(counts.values()),
                     "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+                    "source": "exact",
                 }
 
     # Accumulators per group rather than the rows themselves. The previous
@@ -1321,6 +1407,7 @@ def aggregate_object_set(
         "group_by": group_by,
         "total": total,
         "groups": groups,
+        "source": "exact",
     }
 
 
