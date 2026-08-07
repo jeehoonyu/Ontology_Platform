@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         project_id = connection.execute("SELECT project_id FROM workshop_modules WHERE id='legacy-workshop'").fetchone()[0]
         indexes = {row[1] for row in connection.execute("PRAGMA index_list('workshop_modules')").fetchall()}
 
-    assert version == "0039_object_geo_bounds", version
+    assert version == "0040_object_facet_counts", version
     assert project_id == "default", project_id
     assert "ix_workshop_modules_project_id" in indexes, indexes
 

@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         assert "joins_emitted" in {row["name"] for row in inspector.get_columns("stream_processing_runs")}
         indexes = {row["name"] for row in inspector.get_indexes("stream_join_inputs")}
         assert "ix_stream_join_inputs_match" in indexes
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0039_object_geo_bounds"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0040_object_facet_counts"
 
     alembic("downgrade", "0036_event_stream_bindings")
     with engine.connect() as connection:
@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
 
     alembic("upgrade", "head")
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0039_object_geo_bounds"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0040_object_facet_counts"
     engine.dispose()
 
 print("Cross-stream join migration verified.")

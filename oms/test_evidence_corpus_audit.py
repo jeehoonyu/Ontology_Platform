@@ -9,7 +9,7 @@ import audit_evidence_corpus as audit  # noqa: E402
 from audit_evidence_corpus import CURRENT, STALE, UNPROVENANCED, head_of  # noqa: E402
 
 passed = 0
-HEAD = "0039_object_geo_bounds"
+HEAD = "0040_object_facet_counts"
 
 
 def check(condition, label, payload=None):
