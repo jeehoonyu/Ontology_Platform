@@ -134,6 +134,28 @@ def _synchronize_geo_bounds(_mapper, _connection, target: "ObjectInstance") -> N
     target.geo_indexed = True
 
 
+class ObjectFacetCount(Base):
+    """A precomputed facet bucket, with the time it was computed.
+
+    A facet over ten million objects is a full aggregate however it is written,
+    so the read is served from here and the aggregate is paid out of band. The
+    age is stored beside the number rather than inferred, because a count that
+    does not say how old it is cannot be distinguished from a wrong one.
+    """
+    __tablename__ = "object_facet_counts"
+    __table_args__ = (
+        Index("ix_object_facet_counts_lookup", "object_type_id", "field", "project_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default")
+    object_type_id: Mapped[str] = mapped_column(String)
+    field: Mapped[str] = mapped_column(String)
+    group_key: Mapped[str] = mapped_column(String)
+    count: Mapped[int] = mapped_column(Integer)
+    computed_at: Mapped[int] = mapped_column(Integer)
+
+
 class LinkInstance(Base):
     """
     Runtime relationship between two object instances.

@@ -137,12 +137,12 @@ never regress. A regression is a build failure, not a discussion.
 | Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
 | Call sites asking a primitive for everything | `oms/audit_query_bounds.py` | 14, ceiling 14 |
 | Peak memory, any read shape at 10M objects | `oms/measure_read_path_bounds.py` | 6.9 MB, ceiling 64 MB (was 21,940.6 MB) |
-| Facet aggregation latency at 10M | `oms/measure_read_path_bounds.py` | 40,957.8 ms, ceiling 40,957.8 ms (was 163,095.2 ms) |
+| Facet read latency at 10M | `runtime.aggregate_object_set` via the rollup | 1.4 ms, ceiling 250 ms (was 163,095.2 ms) |
 | Spatial viewport latency at 10M | `oms/measure_read_path_bounds.py` | 70.6 ms, ceiling 250 ms |
 | Application writes bypassing the geo-bounds listener | `oms/audit_query_bounds.py` | 0, ceiling 0 |
 | Data surfaces receiving ontology specs | `oms/audit_extensibility.py` | 3 of 3, floor 3, unwired ceiling 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 at head 0039 — 7 STALE, 3 MISSING |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 at head 0040 — 7 STALE, 3 MISSING |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
@@ -235,3 +235,5 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-06 | Can the corpus demonstrate the spatial gate at all? | No. Ten million objects sit on 1,000 distinct positions, so a 400 m radius matches 570,000 of them and no bbox query can be selective. The gate is untestable against this fixture in either direction | Recorded as an apparatus defect, not worked around |
 | 2026-08-06 | Does streaming rows out of the session cost anything the tests would see? | Yes, and only one did. Expunging kept memory bounded and detached instances the *caller* held, so a read could sever a pending write. Selecting columns instead of entities keeps the scan out of the identity map entirely, so there is nothing to expunge | 12 expunge calls removed |
 | 2026-08-06 | Is a NULL bounding box "no geometry" or "never computed"? | Both, which is why the first version made bulk-loaded objects vanish from the map. A `geo_indexed` flag separates them: unindexed rows force the slow correct scan instead of a fast wrong answer | Tier B 7 of 10 -> 0 of 10 at the new head |
+| 2026-08-07 | Was the harness measuring the system or the planner? | The planner. It bulk-loaded and never ran ANALYZE, so Postgres estimated one row for the object type. At one million the map viewport read 6,263.3 ms stale against 10.5 ms current -- a factor of 596 on the shape B4's gate turns on | ANALYZE moved into seeding |
+| 2026-08-07 | Why is the facet slow -- jsonb, statistics, or the plan? | None of them. An expression index was declined by the planner and slower when forced; ANALYZE made it marginally worse; the jsonb share read 92% hot and 62% cold. A full aggregate over ten million rows is O(n) whatever the split | Facet read 51,521.8 ms -> 1.4 ms via a rollup |

@@ -488,7 +488,61 @@ def teardown():
         db.query(models.ObjectType).filter(
             models.ObjectType.id.in_(FIXTURE_TYPES)
         ).delete(synchronize_session=False)
+        db.query(models.ObjectFacetCount).filter(
+            models.ObjectFacetCount.object_type_id.in_(FIXTURE_TYPES)
+        ).delete(synchronize_session=False)
         db.commit()
+    finally:
+        db.close()
+
+
+def facet_rollup():
+    """A stored count must equal the computed one, and must know when to refuse.
+
+    The rollup exists so a facet read costs milliseconds instead of the ~56 s a
+    full aggregate costs at ten million objects. Every risk it carries is about
+    being used where it does not apply, so those are the cases here: a filtered
+    aggregate, an expired one, and one whose numbers have drifted from the type.
+    """
+    print("\nFacet rollup -- stored counts must agree, and must refuse where they mislead")
+
+    db = SessionLocal()
+    try:
+        exact = runtime.aggregate_object_set(db, object_type_id=TYPE_ID, group_by="category")
+        check(exact["source"] == "exact", f"with no rollup the read is exact ({exact['source']})")
+
+        stored = runtime.refresh_facet_counts(db, object_type_id=TYPE_ID, field="category")
+        check(stored["groups"] == exact["groups"],
+              "the refresh stores exactly what the aggregate computed")
+
+        served = runtime.aggregate_object_set(db, object_type_id=TYPE_ID, group_by="category")
+        check(served["source"] == "rollup", f"the next read is served from it ({served['source']})")
+        check(served["groups"] == exact["groups"], "and returns identical counts")
+        check(served["total"] == exact["total"], "and an identical total")
+        check(isinstance(served.get("computed_at"), int),
+              "the response carries the age of what it served")
+
+        # A rollup describes the whole type, so a filtered aggregate must not
+        # use it -- the counts would be for a different set entirely.
+        filtered = runtime.aggregate_object_set(
+            db, object_type_id=TYPE_ID, group_by="category",
+            filters={"category": "category_3"})
+        check(filtered["source"] == "exact", "a filtered aggregate ignores the rollup")
+        check(sum(g["count"] for g in filtered["groups"]) == CORPUS // 20,
+              "and counts only the filtered set")
+
+        # An age limit the rollup cannot meet must send the read back to source.
+        fresh_only = runtime.aggregate_object_set(
+            db, object_type_id=TYPE_ID, group_by="category", max_rollup_age_seconds=-1)
+        check(fresh_only["source"] == "exact",
+              f"an expired rollup is not served ({fresh_only['source']})")
+        check(fresh_only["groups"] == exact["groups"], "and the exact path still agrees")
+
+        # Metrics are computed per row and were never part of the rollup.
+        with_metrics = runtime.aggregate_object_set(
+            db, object_type_id=TYPE_ID, group_by="category",
+            metrics=[{"operation": "count", "alias": "n"}])
+        check(with_metrics["source"] == "exact", "a metric request ignores the rollup")
     finally:
         db.close()
 
@@ -505,6 +559,7 @@ def main():
         materialized_bounds()
         spatial_equivalence()
         aggregation_equivalence()
+        facet_rollup()
     finally:
         teardown()
     print()
