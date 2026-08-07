@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from . import models, models_action
+from .geo_bounds import bounds_of
 
 
 def now_ts() -> int:
@@ -820,6 +821,104 @@ def _point_coordinate_expressions(dialect: str, geometry_field: str):
     return coordinate(0, "longitude"), coordinate(1, "latitude")
 
 
+# `extract_geometry` consults these before falling back to longitude/latitude
+# scalars, and the materialized bounds are computed with that same default
+# precedence. A query naming some other field is asking about geometry the
+# stored bounds do not describe, so it must not use them.
+_DEFAULT_GEOMETRY_FIELDS = {"geometry", "location", "geojson"}
+
+
+def backfill_geo_bounds(db: Session, *, object_type_id: Optional[str] = None,
+                        batch: int = 1000) -> int:
+    """Compute the stored extent for rows that never got one, and return how many.
+
+    Needed after any load that bypasses the ORM -- a Core bulk insert, a COPY, a
+    restore from a dump taken before this column existed. Until it runs, those
+    rows are marked unindexed and spatial queries fall back to scanning, which
+    is slower and correct; after it, they are indexed and the query is fast and
+    correct. At no point are they invisible.
+    """
+    updated = 0
+    while True:
+        query = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.geo_indexed.is_(False))
+        if object_type_id is not None:
+            query = query.filter(models.ObjectInstance.object_type_id == object_type_id)
+        rows = query.limit(batch).all()
+        if not rows:
+            return updated
+        for row in rows:
+            bounds = bounds_of(row.properties)
+            (row.geo_min_lon, row.geo_min_lat,
+             row.geo_max_lon, row.geo_max_lat) = bounds or (None, None, None, None)
+            row.geo_indexed = True
+            updated += 1
+        db.commit()
+
+
+def _geo_bounds_complete(db: Session, object_type_id: str) -> bool:
+    """Whether every row of this type has a computed extent.
+
+    One indexed existence check. If anything is unindexed the caller must scan,
+    because for those rows NULL bounds carry no information -- and answering
+    quickly from data that does not exist is the failure this guards against.
+    """
+    return not db.query(
+        db.query(models.ObjectInstance)
+        .filter(models.ObjectInstance.object_type_id == object_type_id,
+                models.ObjectInstance.geo_indexed.is_(False))
+        .exists()
+    ).scalar()
+
+
+def _materialized_bbox_condition(db: Session, geometry_field: str, bounds: Optional[List[float]]):
+    """Intersect the query box with the stored extent, as a plain conjunction.
+
+    This is what closes B4. The expression pre-filter below is correct but
+    carries an ``OR unjudgeable`` disjunct for geometry SQL cannot parse, and
+    that disjunct measured a sixteen-fold cost by preventing an index scan.
+    Bounds computed on write are comparable for every shape, so no disjunct is
+    needed and the planner can use `ix_object_instances_geo_bounds_gist`.
+
+    Excluding NULL bounds is not a shortcut: NULL means the row has no geometry,
+    and `spatial_query_objects` skips exactly those rows anyway.
+
+    Standard box intersection -- two boxes overlap unless one is entirely to one
+    side of the other -- so this is a superset of every predicate the Python
+    pass applies, including a radius, whose reference point lies inside the
+    object's own extent.
+    """
+    if not bounds or len(bounds) != 4:
+        return None
+    if geometry_field not in _DEFAULT_GEOMETRY_FIELDS:
+        return None
+    west, south, east, north = (float(value) for value in bounds)
+    if west > east:
+        return None  # crosses the antimeridian
+
+    min_lon = models.ObjectInstance.geo_min_lon
+    min_lat = models.ObjectInstance.geo_min_lat
+    max_lon = models.ObjectInstance.geo_max_lon
+    max_lat = models.ObjectInstance.geo_max_lat
+
+    if _dialect_name(db) == "postgresql":
+        # Spelled as a box overlap, because that is what the GiST index in
+        # `0039_object_geo_bounds` is built over. The four range comparisons
+        # below are logically identical and the planner will not match them to
+        # that index -- a btree cannot answer a two-sided interval intersection
+        # selectively, which is the whole reason the index is GiST.
+        #
+        # The IS NOT NULL is not redundant either: the index is partial on that
+        # predicate, and the planner has to be able to prove it to use it.
+        stored = func.box(func.point(min_lon, min_lat), func.point(max_lon, max_lat))
+        wanted = func.box(func.point(west, south), func.point(east, north))
+        return and_(min_lon.isnot(None),
+                    stored.op("&&", is_comparison=True)(wanted))
+
+    return and_(min_lon <= east, max_lon >= west,
+                min_lat <= north, max_lat >= south)
+
+
 def _bbox_prefilter(db: Session, geometry_field: str, bounds: Optional[List[float]]):
     """A SQL condition selecting a superset of rows whose point lies in ``bounds``.
 
@@ -868,11 +967,25 @@ def _radius_bounds(centre: Tuple[float, float], radius_meters: float) -> Optiona
     return [west, latitude - delta_latitude, east, latitude + delta_latitude]
 
 
+# Exactly what `_object_to_dict` reads. Selecting columns rather than entities
+# keeps a scan out of the session's identity map altogether.
+_OBJECT_COLUMNS = (
+    models.ObjectInstance.id,
+    models.ObjectInstance.project_id,
+    models.ObjectInstance.object_type_id,
+    models.ObjectInstance.properties,
+    models.ObjectInstance.source_asset_id,
+    models.ObjectInstance.created_at,
+    models.ObjectInstance.updated_at,
+    models.ObjectInstance.lineage,
+)
+
+
 def _stream_object_rows(
     db: Session,
     query,
     normalized_filters: List[Dict[str, Any]],
-) -> Iterable[models.ObjectInstance]:
+) -> Iterable[Any]:
     """Yield rows satisfying the residual predicates without materializing the scan.
 
     ``query.all()`` was what made every filtered read cost the object type: it
@@ -880,11 +993,20 @@ def _stream_object_rows(
     Streaming keeps the same rows in the same order and the same Python
     semantics, but the caller decides how many to hold.
 
-    Rejected rows are expunged because ``yield_per`` still registers each
-    instance in the session's identity map, which would accumulate the whole
-    scan by a slower route.
+    Columns, not entities, and deliberately so. The first version streamed
+    entities and expunged the rejects, because ``yield_per`` still registers
+    each instance in the identity map. That bounded memory and introduced a
+    worse problem: expunging detaches an instance the *caller* may be holding
+    from an earlier query, so a read could silently sever a pending write. A
+    column query never enters the identity map, so there is nothing to expunge
+    and nothing to detach.
+
+    The rows returned carry the same attribute names, which is all
+    `_object_to_dict` and every caller of this ever used.
     """
-    source = query.execution_options(stream_results=True).yield_per(_STREAM_BATCH)
+    source = (query.with_entities(*_OBJECT_COLUMNS)
+              .execution_options(stream_results=True)
+              .yield_per(_STREAM_BATCH))
     if not normalized_filters:
         yield from source
         return
@@ -899,8 +1021,6 @@ def _stream_object_rows(
             for item in normalized_filters
         ):
             yield row
-        else:
-            db.expunge(row)
 
 
 def _object_base_query(db: Session, *, object_type_id: str, project_id: Optional[str] = None):
@@ -998,7 +1118,8 @@ def query_object_set(
         # total come from the database. Order-free offset/limit returns
         # insertion order on both dialects, matching the previous output.
         total = query.count() if with_total else None
-        selected = query.offset(start).limit(bounded_limit).all() if bounded_limit else []
+        selected = (query.with_entities(*_OBJECT_COLUMNS)
+                    .offset(start).limit(bounded_limit).all()) if bounded_limit else []
     else:
         # A predicate SQL cannot express exactly. The Python pass stays
         # authoritative, but it runs over a stream and holds only the page, so
@@ -1009,12 +1130,6 @@ def query_object_set(
         for row in _stream_object_rows(db, query, residual):
             if bounded_limit and start <= matched < window_end:
                 selected.append(row)
-            else:
-                # A row that matched but sits outside the page is still holding
-                # a slot in the identity map. Left in, the scan costs one
-                # instance per *match* instead of per page -- smaller than
-                # materializing the type and still proportional to it.
-                db.expunge(row)
             matched += 1
             # The total is the only reason to keep reading past the page. Asked
             # for one, this still walks every match; asked for none, it stops.
@@ -1178,7 +1293,6 @@ def aggregate_object_set(
                     tally["sum"] += number
                     tally["min"] = number if tally["min"] is None else min(tally["min"], number)
                     tally["max"] = number if tally["max"] is None else max(tally["max"], number)
-        db.expunge(row)
 
     groups: List[Dict[str, Any]] = []
     for key in sorted(counts):
@@ -1337,7 +1451,15 @@ def spatial_query_objects(
 
     query, residual, _ = _prepared_object_query(
         db, object_type_id=object_type_id, project_id=project_id, filters=filters)
-    spatial_condition = _bbox_prefilter(db, geometry_field, prefilter_bounds)
+    # Prefer the materialized extent, which is indexable. The expression
+    # pre-filter is the fallback for a query naming a non-default geometry
+    # field, where the stored bounds describe something else.
+    spatial_condition = None
+    if prefilter_bounds and _geo_bounds_complete(db, object_type_id):
+        spatial_condition = _materialized_bbox_condition(
+            db, geometry_field, prefilter_bounds)
+    if spatial_condition is None:
+        spatial_condition = _bbox_prefilter(db, geometry_field, prefilter_bounds)
     if spatial_condition is not None:
         query = query.filter(spatial_condition)
     rows = _stream_object_rows(db, query, residual)
@@ -1357,36 +1479,29 @@ def spatial_query_objects(
     for row in rows:
         geometry = extract_geometry(row.properties or {}, geometry_field)
         if not geometry:
-            db.expunge(row)
             continue
 
         ref_point = geometry_reference_point(geometry)
         geom_bbox = geometry_bbox(geometry)
         if normalized_bbox and (not geom_bbox or not _bbox_intersects(geom_bbox, normalized_bbox)):
-            db.expunge(row)
             continue
         if normalized_polygon and (not ref_point or not point_in_polygon(ref_point, normalized_polygon)):
-            db.expunge(row)
             continue
 
         distance = None
         if near_point:
             if not ref_point:
-                db.expunge(row)
                 continue
             distance = haversine_distance_meters(near_point, ref_point)
             if radius_meters is not None and distance > float(radius_meters):
-                db.expunge(row)
                 continue
 
         total += 1
         sequence += 1
         rank = distance if near_point else float(sequence)
         if not bounded_limit:
-            db.expunge(row)
             continue
         if len(kept) == bounded_limit and rank >= -kept[0][0]:
-            db.expunge(row)
             continue
 
         payload = _object_to_dict(row, include_lineage=include_lineage)
@@ -1398,7 +1513,6 @@ def spatial_query_objects(
             "distance_meters": round(distance, 3) if distance is not None else None,
             "mgrs": mgrs,
         }
-        db.expunge(row)
         heapq.heappush(kept, (-rank, -sequence, payload))
         if len(kept) > bounded_limit:
             heapq.heappop(kept)
@@ -3494,26 +3608,28 @@ def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any]
     if exact:
         # count(*) rather than len(list): the total was the reason callers asked
         # for everything, and the database can produce it without shipping rows.
-        return (query.limit(bounded).all() if bounded else []), query.count()
+        total = query.count()
+        rows = (query.with_entities(*_OBJECT_COLUMNS).limit(bounded).all()
+                if bounded else [])
+        return rows, total
 
     # A predicate SQL cannot express. Stream, keep the page, count the rest.
     # The comparison stays `properties.get(key) == value`, deliberately not
     # `_compare_filter`: this entry point has always matched raw top-level keys,
     # and `_record_value` would resolve a filter named `id` against the row's
     # own id instead of its properties.
-    matched: List[models.ObjectInstance] = []
+    matched: List[Any] = []
     total = 0
-    source = query.execution_options(stream_results=True).yield_per(_STREAM_BATCH)
+    source = (query.with_entities(*_OBJECT_COLUMNS)
+              .execution_options(stream_results=True)
+              .yield_per(_STREAM_BATCH))
     for row in source:
         properties = row.properties or {}
         if not all(properties.get(key) == value for key, value in filters.items()):
-            db.expunge(row)
             continue
         total += 1
         if len(matched) < bounded:
             matched.append(row)
-        else:
-            db.expunge(row)
     return matched, total
 
 

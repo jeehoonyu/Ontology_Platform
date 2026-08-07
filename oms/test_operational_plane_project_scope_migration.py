@@ -64,6 +64,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             assert project_id == expected, (table_name, project_id)
             assert f"ix_{table_name}_project_id" in indexes, (table_name, indexes)
 
-    assert version == "0038_explicit_schema_baseline", version
+    assert version == "0039_object_geo_bounds", version
 
 print("\nOperational plane project migration verified for 21 legacy tables.")
