@@ -51,7 +51,14 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      # A named volume, not a bind mount. On Docker Desktop a bind mount puts
+      # the data directory across the Windows filesystem boundary, and at
+      # reference scale that layer fails rather than merely slowing down: a
+      # 50-million-row insert produced "could not write to log file ... Input/
+      # output error", the WAL writer aborted, and the container died with
+      # pg_control unreadable. A named volume lives on the VM's own filesystem.
+      # docker-compose.rehearsal.yml already does this.
+      - ontology_pgdata:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     command: ["postgres", "-c", "wal_level=logical"] 
     # Logical WAL needed for Debezium CDC
@@ -175,6 +182,7 @@ services:
       retries: 10
 
 volumes:
+  ontology_pgdata:
   ontology_snapshots:
   ontology_snapshot_cache:
   ontology_plugin_bundles:
