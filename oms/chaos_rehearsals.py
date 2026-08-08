@@ -126,6 +126,17 @@ def aggregate(rehearsals_file: Optional[Path] = None,
         },
         measurements=summary,
         harness="oms/chaos_rehearsals.py",
+        # An aggregator has no route of its own. What it covers is the set of
+        # rehearsals it counted, so it names those rather than inventing an
+        # endpoint it never called.
+        entry_points=[
+            "aggregate of oms/verify_collaboration_websocket_chaos_postgres.py",
+            "aggregate of oms/verify_cross_stream_partition_postgres.py",
+        ],
+        request_shapes=[
+            "websocket replica termination and resume",
+            "cross-stream network partition with in-flight processor interruption",
+        ],
         notes=(
             "The gate names collaboration and cross-stream processing. Both subjects "
             "must have rehearsed, so the gate cannot read as satisfied while covering "

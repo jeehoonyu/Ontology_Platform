@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import sys
 import re
 import subprocess
 import time
@@ -282,8 +283,22 @@ evidence = {
 serialized = json.dumps(evidence, indent=2, sort_keys=True)
 if EVIDENCE_PATH:
     Path(EVIDENCE_PATH).write_text(serialized + "\n", encoding="utf-8")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from durability_rehearsals import record  # noqa: E402
+
+record("replica_failover", {
+    "promotions_out_of_recovery": 1 if evidence.get("promoted_out_of_recovery") else 0,
+    "failover_promotion_seconds": evidence["failover_promotion_seconds"],
+    "failover_state_mismatches": 0 if evidence["source_state"] == evidence["promoted_state"] else 1,
+    # The gate's subject: a record committed before the failover must survive it.
+    "committed_probe_lost": 0 if evidence.get("committed_probe_preserved") else 1,
+    "committed_lsn": evidence.get("committed_lsn"),
+    "replayed_lsn": evidence.get("replayed_lsn"),
+}, harness="oms/rehearse_ontology_scale_replica_failover.py")
+
 print("PostgreSQL ontology scale replica failover rehearsal passed:")
 print(serialized)
+print("Recorded a replica failover durability rehearsal.")
 replica_engine.dispose()
 docker("stop", REPLICA_CONTAINER)
 docker("start", SOURCE_CONTAINER)

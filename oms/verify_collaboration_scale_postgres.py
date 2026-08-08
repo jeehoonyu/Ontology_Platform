@@ -241,6 +241,14 @@ with ExitStack() as stack:
             "unique_revisions": len({event["lock_version"] for event in command_events}),
         },
         harness="oms/verify_collaboration_scale_postgres.py",
+        entry_points=[
+            "POST /artifacts (two independently started API replicas)",
+            "GET /health/live",
+        ],
+        request_shapes=[
+            "concurrent artifact commands from 20 editors across 2 replicas",
+            "revision-fenced read-back under write load",
+        ],
     )
     print(f"Tier B evidence {status}: {path.name}")
     if breaches:

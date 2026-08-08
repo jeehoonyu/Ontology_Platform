@@ -81,6 +81,48 @@ Recorded as GOAL2-007 (P0) in [`GOAL_2026-08-03.md`](GOAL_2026-08-03.md), now FI
 program is [`GOAL_2026-08-06.md`](GOAL_2026-08-06.md). Condition B7 — re-scoping this gate
 to enter through the product's own door — is still owed, so the row's scope note stands.
 
+### Two gates have no emitter, and were never machine-produced
+
+Found 2026-08-08 while re-executing at head `0041`. Four of the six stale gates re-ran
+from their harnesses and now PASS. Two could not, for a reason worth stating plainly:
+
+**Nothing in this repository writes `tier-b-identity-evidence.json` or
+`tier-b-durability-evidence.json`.** Both carry a well-formed envelope — thresholds,
+measurements, provenance, a `harness` field naming real scripts — and neither of those
+scripts, nor any other, calls `write_evidence` for them. They were assembled by hand.
+
+That contradicts the rule the envelope exists to enforce: *a harness cannot record PASS by
+asserting it; the verdict is derived from the numbers.* A hand-written file satisfies every
+check the auditor performs — current head, thresholds present, measurements present,
+thresholds satisfied — while proving only that someone typed numbers that pass. The other
+eight gates cannot do this; these two did.
+
+**Both emitters were written on 2026-08-08.** What remains for these two gates is now
+machine time and infrastructure, the same as the other seven:
+
+| Gate | Emitter | Infrastructure still needed |
+| --- | --- | --- |
+| Durability | `oms/durability_rehearsals.py` — both rehearsal scripts now `record()` into `docs/durability-rehearsals.jsonl`, aggregated and head-filtered exactly as the chaos gate is | a second PostgreSQL container, `pg_basebackup`, a promotable standby |
+| Identity | `oms/identity_scale_evidence.py` — reads what the `oidc-scale` Playwright profile measured and derives the verdict | Keycloak, two API replicas, a browser |
+
+Three properties are worth naming, because each is a way the hand-written files could not
+fail and the emitters can:
+
+- **An empty record breaches.** A `_max` threshold with nothing to compare satisfies
+  itself for want of a maximum, so "never rehearsed" would read as "never exceeded". Both
+  aggregators substitute a breaching value, and `oms/test_durability_rehearsals.py`
+  asserts it.
+- **Half a gate breaches.** Durability names two subjects; a backup/restore alone and a
+  failover alone each leave the gate unsatisfied.
+- **The run does not get a vote.** The `oidc-scale` spec writes `status: "PASS"` as a
+  literal before any threshold is consulted. The emitter ignores that field, and refuses
+  to emit at all on a partial run rather than defaulting a missing measurement — a gap
+  filled with a default is indistinguishable from a measurement once it is in the file.
+
+The two hand-written files stay in place and stay STALE until a real run replaces them.
+Deleting them would lose the prior art; editing their `migration_head` would forge
+provenance. Neither is done.
+
 ### Group 2 — Construction, no evidence exists
 
 | Gate | Threshold | What is missing |
