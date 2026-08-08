@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import sys
 import re
 import subprocess
 import time
@@ -188,8 +189,22 @@ evidence = {
 serialized = json.dumps(evidence, indent=2, sort_keys=True)
 if EVIDENCE_PATH:
     Path(EVIDENCE_PATH).write_text(serialized + "\n", encoding="utf-8")
+# Record into the durability journal. Until 2026-08-08 this rehearsal printed
+# its numbers and the gate evidence was assembled by hand from them, which is
+# how a gate came to be counted as passing without any code ever producing it.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from durability_rehearsals import record  # noqa: E402
+
+record("backup_restore", {
+    "fresh_volume_restores": 1 if evidence.get("fresh_volume") else 0,
+    "restore_readiness_seconds": evidence["restore_readiness_seconds"],
+    "backup_seconds": evidence["backup_seconds"],
+    "restore_state_mismatches": 0 if evidence["source_state"] == evidence["target_state"] else 1,
+}, harness="oms/rehearse_ontology_scale_backup_restore.py")
+
 print("PostgreSQL ontology scale backup/restore rehearsal passed:")
 print(serialized)
+print("Recorded a backup/restore durability rehearsal.")
 source_engine.dispose()
 target_engine.dispose()
 docker("stop", TARGET_CONTAINER)

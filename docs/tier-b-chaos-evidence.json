@@ -8,8 +8,8 @@
     "duplicate_pairs": 0,
     "missed_events": 0,
     "missed_pairs": 0,
-    "reconnect_max_ms": 124.169,
-    "rehearsals_ignored_at_other_heads": 2,
+    "reconnect_max_ms": 85.634,
+    "rehearsals_ignored_at_other_heads": 4,
     "subjects_covered": [
       "collaboration",
       "cross_stream"
@@ -17,15 +17,23 @@
   },
   "notes": "The gate names collaboration and cross-stream processing. Both subjects must have rehearsed, so the gate cannot read as satisfied while covering one half. Losses and duplicates are summed across rehearsals rather than averaged.",
   "provenance": {
-    "captured_at": 1785913335,
-    "git_commit": "bf22c9d",
+    "captured_at": 1786228302,
+    "entry_points": [
+      "aggregate of oms/verify_collaboration_websocket_chaos_postgres.py",
+      "aggregate of oms/verify_cross_stream_partition_postgres.py"
+    ],
+    "git_commit": "5e2300c",
     "harness": "oms/chaos_rehearsals.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0038_explicit_schema_baseline"
+    "migration_head": "0041_drop_redundant_pk_indexes",
+    "request_shapes": [
+      "websocket replica termination and resume",
+      "cross-stream network partition with in-flight processor interruption"
+    ]
   },
   "status": "PASS",
   "thresholds": {
