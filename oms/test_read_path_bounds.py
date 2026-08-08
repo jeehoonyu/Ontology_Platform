@@ -374,7 +374,14 @@ def materialized_bounds():
     # path rather than after.
     db = SessionLocal()
     try:
-        unindexed = db.query(models.ObjectInstance).filter_by(geo_indexed=False).count()
+        # Scoped to this test's own types. An unscoped count -- and worse, an
+        # unscoped backfill -- repairs every row in the database, which against
+        # a benchmark corpus meant walking 7.5 million unrelated rows a thousand
+        # at a time and never finishing. A test may read the whole database; it
+        # must not rewrite it.
+        unindexed = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id.in_(FIXTURE_TYPES),
+            models.ObjectInstance.geo_indexed.is_(False)).count()
         check(unindexed > 0, f"bulk-inserted rows are marked unindexed (got {unindexed})")
         before = runtime.spatial_query_objects(
             db, object_type_id="geo_asset",
@@ -383,10 +390,13 @@ def materialized_bounds():
         check(found == ["geo_location_alias", "geo_point_field", "geo_polygon", "geo_scalars"],
               f"unindexed rows are still found, via the scan (got {found})")
 
-        repaired = runtime.backfill_geo_bounds(db)
+        repaired = sum(runtime.backfill_geo_bounds(db, object_type_id=type_id)
+                       for type_id in FIXTURE_TYPES)
         check(repaired >= unindexed, f"the backfill repaired {repaired} rows")
-        check(db.query(models.ObjectInstance).filter_by(geo_indexed=False).count() == 0,
-              "nothing is left unindexed after a backfill")
+        remaining = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id.in_(FIXTURE_TYPES),
+            models.ObjectInstance.geo_indexed.is_(False)).count()
+        check(remaining == 0, f"nothing of this fixture is left unindexed ({remaining})")
 
         after = runtime.spatial_query_objects(
             db, object_type_id="geo_asset",
@@ -496,6 +506,55 @@ def teardown():
         db.close()
 
 
+def capped_totals():
+    """A total may be exact or a labelled floor, never an unlabelled guess.
+
+    Counting every match is what made the Object Explorer's filtered read cost
+    621.9 ms at ten million objects against 1.8 ms without it (GOAL2-010). The
+    cap exists so a caller that genuinely wants a total can bound what it pays,
+    and the flag exists so it can tell a real count from a stopped one.
+    """
+    print("\nCapped totals -- a bounded count must say that it is bounded")
+
+    db = SessionLocal()
+    try:
+        exact = runtime.query_object_set(
+            db, object_type_id=TYPE_ID, filters={"category": "category_3"},
+            limit=10, with_total=True)
+        check(exact["total"] == CORPUS // 20, f"an uncapped total is exact ({exact['total']})")
+        check(exact["total_is_capped"] is False, "and says it was not capped")
+
+        capped = runtime.query_object_set(
+            db, object_type_id=TYPE_ID, filters={"category": "category_3"},
+            limit=10, with_total=True, max_total=25)
+        check(capped["total"] == 25, f"a cap below the match count stops there ({capped['total']})")
+        check(capped["total_is_capped"] is True, "and says so")
+        check(capped["count"] == 10, "while still returning a full page")
+
+        roomy = runtime.query_object_set(
+            db, object_type_id=TYPE_ID, filters={"category": "category_3"},
+            limit=10, with_total=True, max_total=10_000)
+        check(roomy["total"] == CORPUS // 20 and roomy["total_is_capped"] is False,
+              f"a cap above the match count reports the true total ({roomy['total']})")
+
+        # The unpushable predicate takes the streaming branch, which counts in
+        # Python; the cap has to work there too or it only half exists.
+        streamed = runtime.query_object_set(
+            db, object_type_id=TYPE_ID, filters={"risk": {"gt": 50}},
+            limit=10, with_total=True, max_total=25)
+        check(streamed["total"] == 25 and streamed["total_is_capped"] is True,
+              f"the streaming branch caps too ({streamed['total']}, "
+              f"capped={streamed['total_is_capped']})")
+
+        # And the Explorer asks for no total at all, because it never used one.
+        none = runtime.query_object_set(
+            db, object_type_id=TYPE_ID, filters={"category": "category_3"},
+            limit=10, with_total=False)
+        check("total" not in none, "with_total=False omits the total entirely")
+    finally:
+        db.close()
+
+
 def facet_rollup():
     """A stored count must equal the computed one, and must know when to refuse.
 
@@ -554,11 +613,19 @@ def main():
         seed()
         seed_edge_cases()
         seed_geometry_shapes()
+        # Before boundedness: the fixture is bulk-inserted, so its geographic
+        # bounds start unindexed and every spatial query takes the correct-but-
+        # slow scan fallback. That is the behaviour `materialized_bounds`
+        # asserts, and once it has backfilled, the sections after it measure the
+        # indexed path -- which is what they are about. Run the other way round
+        # the spatial assertions scan the whole table, which on a database that
+        # also holds ten million unrelated rows does not finish.
+        materialized_bounds()
         boundedness()
         equivalence()
-        materialized_bounds()
         spatial_equivalence()
         aggregation_equivalence()
+        capped_totals()
         facet_rollup()
     finally:
         teardown()
