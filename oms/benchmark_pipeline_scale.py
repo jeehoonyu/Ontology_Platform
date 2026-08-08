@@ -363,6 +363,16 @@ if PROFILE == "reference":
             "materialized_python_rows": evidence["materialized_python_rows"],
         },
         harness="oms/benchmark_pipeline_scale.py",
+        entry_points=[
+            "POST /data-assets",
+            "POST /pipeline-builder/graphs",
+            "POST /pipeline-builder/workers/run-next",
+        ],
+        request_shapes=[
+            "partitioned dataset registration",
+            "compiled pipeline graph preview",
+            "worker-driven partitioned delivery",
+        ],
         notes=(
             f"Reference profile over {ROW_COUNT} rows in {PARTITION_COUNT} immutable "
             f"partitions, delivered to {evidence['output_partitions']} output partitions."
