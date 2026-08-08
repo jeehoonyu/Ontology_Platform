@@ -43,7 +43,7 @@ POLICY_EFFECTS = {"ALLOW", "DENY", "MASK", "ROW_FILTER", "REQUIRE_APPROVAL"}
 class EventSubscription(Base):
     __tablename__ = "platform_event_subscriptions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     filters: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -56,7 +56,7 @@ class EventSubscription(Base):
 class PolicyRule(Base):
     __tablename__ = "platform_policy_rules"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     effect: Mapped[str] = mapped_column(String, default="ALLOW", index=True)
@@ -80,7 +80,7 @@ class PolicyRule(Base):
 class PolicyDecisionLog(Base):
     __tablename__ = "platform_policy_decisions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     principal: Mapped[str] = mapped_column(String, index=True)
     action: Mapped[str] = mapped_column(String, index=True)
     resource_kind: Mapped[str] = mapped_column(String, index=True)

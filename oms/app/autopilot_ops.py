@@ -37,7 +37,7 @@ def _now() -> int:
 
 class ApBoard(Base):
     __tablename__ = "ap_boards"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     state_property: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -48,7 +48,7 @@ class ApBoard(Base):
 class ApStateRule(Base):
     """Ordered predicate -> state mapping for computed (inferred) board state."""
     __tablename__ = "ap_state_rules"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     board_id: Mapped[str] = mapped_column(String, index=True)
     state: Mapped[str] = mapped_column(String)
     prop: Mapped[str] = mapped_column(String)
@@ -59,14 +59,14 @@ class ApStateRule(Base):
 
 class ApWorkflow(Base):
     __tablename__ = "ap_workflows"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
 
 
 class ApWorkflowStep(Base):
     __tablename__ = "ap_workflow_steps"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     workflow_id: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String)
     step_type: Mapped[str] = mapped_column(String)   # automation | action | function

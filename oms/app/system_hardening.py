@@ -90,7 +90,7 @@ def health_ready(db: Session = Depends(get_db)):
 class MigrationRecord(Base):
     __tablename__ = "system_migration_records"
 
-    version: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="applied")
     applied_at: Mapped[int] = mapped_column(Integer)

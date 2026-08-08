@@ -28,7 +28,7 @@ def _now() -> int:
 
 class AuthProvider(Base):
     __tablename__ = "admin_auth_providers"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String)
     protocol: Mapped[str] = mapped_column(String)              # saml | oidc
     config: Mapped[dict] = mapped_column(JSON, default=dict)   # no secrets stored in clear
@@ -39,7 +39,7 @@ class AuthProvider(Base):
 
 class ServiceAccount(Base):
     __tablename__ = "admin_service_accounts"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     organization_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -47,7 +47,7 @@ class ServiceAccount(Base):
 
 class ApiToken(Base):
     __tablename__ = "admin_api_tokens"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     token: Mapped[str] = mapped_column(String, index=True)  # legacy value or non-secret hashed:<id> marker
     token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
     token_prefix: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -62,7 +62,7 @@ class ApiToken(Base):
 
 class OAuthClient(Base):
     __tablename__ = "admin_oauth_clients"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     client_id: Mapped[str] = mapped_column(String, index=True)
     scopes: Mapped[list] = mapped_column(JSON, default=list)

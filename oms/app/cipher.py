@@ -60,7 +60,7 @@ VALID_HASH_ALGORITHMS = {"sha256", "sha512"}
 class CipherChannel(Base):
     __tablename__ = "cipher_channels"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     mode: Mapped[str] = mapped_column(String, nullable=False)          # "encrypt" | "tokenize"
     key_ref: Mapped[str] = mapped_column(String, nullable=False)
@@ -80,7 +80,7 @@ class CipherChannel(Base):
 class CipherLicense(Base):
     __tablename__ = "cipher_licenses"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     channel_id: Mapped[str] = mapped_column(String, ForeignKey("cipher_channels.id"), nullable=False, index=True)
     principal: Mapped[str] = mapped_column(String, nullable=False)
     # License type governs which operations the grant permits. Defaults to

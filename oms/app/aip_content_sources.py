@@ -157,7 +157,7 @@ def _chunk_markdown(text: str) -> List[Dict[str, Any]]:
 class AcsSource(Base):
     __tablename__ = "acs_sources"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_type: Mapped[str] = mapped_column(String)  # notepad | markdown_docs
@@ -172,7 +172,7 @@ class AcsSource(Base):
 class AcsVisibility(Base):
     __tablename__ = "acs_visibility"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     source_id: Mapped[str] = mapped_column(String, ForeignKey("acs_sources.id"), index=True)
     scope_type: Mapped[str] = mapped_column(String, default="always")  # always | by_resource
     resource_ids: Mapped[list] = mapped_column(JSON, default=list)
@@ -182,7 +182,7 @@ class AcsVisibility(Base):
 class AcsChunk(Base):
     __tablename__ = "acs_chunks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     source_id: Mapped[str] = mapped_column(String, ForeignKey("acs_sources.id"), index=True)
     heading_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     section_title: Mapped[Optional[str]] = mapped_column(String, nullable=True)

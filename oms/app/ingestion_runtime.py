@@ -26,7 +26,7 @@ class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
     __table_args__ = (UniqueConstraint("project_id", "idempotency_key", name="uq_ingestion_project_idempotency"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     job_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
     idempotency_key: Mapped[str] = mapped_column(String)
@@ -49,7 +49,7 @@ class IngestionBudget(Base):
     __tablename__ = "ingestion_budgets"
     __table_args__ = (UniqueConstraint("project_id", "metric", name="uq_ingestion_project_budget_metric"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     metric: Mapped[str] = mapped_column(String, index=True)
     limit_value: Mapped[float] = mapped_column(Float)
@@ -62,7 +62,7 @@ class IngestionBudget(Base):
 class IngestionDeadLetter(Base):
     __tablename__ = "ingestion_dead_letters"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     run_id: Mapped[str] = mapped_column(String, index=True)
     resource_type: Mapped[str] = mapped_column(String)

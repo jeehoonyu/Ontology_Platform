@@ -23,7 +23,7 @@ command.upgrade(config, "head")
 
 engine = create_engine(database_url)
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0040_object_facet_counts"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0041_drop_redundant_pk_indexes"
     columns = {column["name"] for column in inspect(connection).get_columns("ontology_registry_entries")}
     assert {
         "id", "project_id", "channel", "version", "revision_id", "revision_number", "status",

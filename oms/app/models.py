@@ -12,7 +12,7 @@ class ObjectType(Base):
     """
     __tablename__ = "object_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -29,7 +29,7 @@ class LinkType(Base):
     """
     __tablename__ = "link_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -47,7 +47,7 @@ class ActionType(Base):
     """
     __tablename__ = "action_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -73,7 +73,7 @@ class ObjectInstance(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
     properties: Mapped[dict] = mapped_column(OBJECT_STATE_JSON)
@@ -162,7 +162,7 @@ class LinkInstance(Base):
     """
     __tablename__ = "link_instances"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     link_type_id: Mapped[str] = mapped_column(String, ForeignKey("link_types.id"), index=True)
     source_object_id: Mapped[str] = mapped_column(String, ForeignKey("object_instances.id"), index=True)
@@ -183,7 +183,7 @@ class DataAsset(Base):
     """
     __tablename__ = "data_assets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -205,7 +205,7 @@ class PipelineDefinition(Base):
     """
     __tablename__ = "pipeline_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -227,7 +227,7 @@ class PipelineRun(Base):
     """
     __tablename__ = "pipeline_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     pipeline_id: Mapped[str] = mapped_column(String, ForeignKey("pipeline_definitions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
@@ -251,7 +251,7 @@ class ModelEndpoint(Base):
     """
     __tablename__ = "model_endpoints"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -271,7 +271,7 @@ class AgentDefinition(Base):
     """
     __tablename__ = "agent_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -292,7 +292,7 @@ class AgentSession(Base):
     """
     __tablename__ = "agent_sessions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     agent_id: Mapped[str] = mapped_column(String, ForeignKey("agent_definitions.id"), index=True)
     user_prompt: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="CREATED")
@@ -312,7 +312,7 @@ class AIPThread(Base):
     """
     __tablename__ = "aip_threads"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String)
     owner: Mapped[str] = mapped_column(String, default="system")
     resources: Mapped[list] = mapped_column(JSON, default=list)
@@ -328,7 +328,7 @@ class SavedObjectSet(Base):
     """
     __tablename__ = "saved_object_sets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -348,7 +348,7 @@ class MapLayerDefinition(Base):
     """
     __tablename__ = "map_layer_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -374,7 +374,7 @@ class LogicFunction(Base):
     """
     __tablename__ = "logic_functions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -392,7 +392,7 @@ class LogicRun(Base):
     """
     __tablename__ = "logic_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     logic_function_id: Mapped[str] = mapped_column(String, ForeignKey("logic_functions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -412,7 +412,7 @@ class AutomationDefinition(Base):
     """
     __tablename__ = "automation_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     trigger: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -429,7 +429,7 @@ class AutomationRun(Base):
     """
     __tablename__ = "automation_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("automation_definitions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     condition_result: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -446,7 +446,7 @@ class EvalSuite(Base):
     """
     __tablename__ = "eval_suites"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -465,7 +465,7 @@ class EvalRun(Base):
     """
     __tablename__ = "eval_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     suite_id: Mapped[str] = mapped_column(String, ForeignKey("eval_suites.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")

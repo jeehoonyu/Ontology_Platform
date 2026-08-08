@@ -72,7 +72,7 @@ def _assert_tool_resources(db: Session, project_id: str, tools: List[Dict[str, A
 # ---------------------------------------------------------------------------
 class AgentToolConfig(Base):
     __tablename__ = "agent_tool_configs"
-    agent_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    agent_id: Mapped[str] = mapped_column(String, primary_key=True)
     # tools: [{name, type: object_query|action|function|command, ...config, trigger?, always?}]
     tools: Mapped[list] = mapped_column(JSON, default=list)
     # retrieval: {ontology: [object_type_ids], documents: [strings]}
@@ -83,7 +83,7 @@ class AgentToolConfig(Base):
 
 class AgentToolRun(Base):
     __tablename__ = "agent_tool_runs"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     agent_id: Mapped[str] = mapped_column(String, index=True)
     prompt: Mapped[str] = mapped_column(String)
     tool_calls: Mapped[list] = mapped_column(JSON, default=list)

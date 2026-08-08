@@ -21,7 +21,7 @@ router = APIRouter(tags=["security"])
 class Marking(Base):
     __tablename__ = "markings"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)  # PII/PHI/SECRET/CUI/custom
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -41,7 +41,7 @@ MARKING_PERMISSION_FULL = "*"
 class MarkingGrant(Base):
     __tablename__ = "marking_grants"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     marking_id: Mapped[str] = mapped_column(String, ForeignKey("markings.id"), nullable=False, index=True)
     principal: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # Granular permission carried by this grant. Defaults to the full/permissive
@@ -68,7 +68,7 @@ MARKING_CATEGORY_ROLES = {"admin", "viewer"}
 class MarkingCategory(Base):
     __tablename__ = "mkcat_categories"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     visibility: Mapped[str] = mapped_column(String, nullable=False, default="visible")  # visible/hidden
     org_restriction: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -79,7 +79,7 @@ class MarkingCategory(Base):
 class MarkingCategoryRoleGrant(Base):
     __tablename__ = "mkcat_role_grants"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     category_id: Mapped[str] = mapped_column(
         String, ForeignKey("mkcat_categories.id"), nullable=False, index=True
     )
@@ -91,7 +91,7 @@ class MarkingCategoryRoleGrant(Base):
 class RestrictedView(Base):
     __tablename__ = "restricted_views"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     object_type_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     row_filter: Mapped[Dict] = mapped_column(JSON, default=dict)
@@ -103,7 +103,7 @@ class RestrictedView(Base):
 class RetentionPolicy(Base):
     __tablename__ = "retention_policies"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     resource_type: Mapped[str] = mapped_column(String, nullable=False)
     resource_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     ttl_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -117,7 +117,7 @@ class RetentionPolicy(Base):
 class Checkpoint(Base):
     __tablename__ = "checkpoints"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     action_label: Mapped[str] = mapped_column(String, nullable=False)
     requires_approval: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="open")  # open/passed

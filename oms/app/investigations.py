@@ -34,7 +34,7 @@ def _new_id(prefix: str) -> str:
 class InvestigationWorkspace(Base):
     __tablename__ = "investigation_workspaces"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -50,7 +50,7 @@ class InvestigationWorkspace(Base):
 class EvidenceItem(Base):
     __tablename__ = "investigation_evidence"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)
@@ -64,7 +64,7 @@ class EvidenceItem(Base):
 class InvestigationHypothesis(Base):
     __tablename__ = "investigation_hypotheses"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     statement: Mapped[str] = mapped_column(String)
@@ -78,7 +78,7 @@ class InvestigationHypothesis(Base):
 class InvestigationFinding(Base):
     __tablename__ = "investigation_findings"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)
@@ -92,7 +92,7 @@ class InvestigationFinding(Base):
 class InvestigationReport(Base):
     __tablename__ = "investigation_reports"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     investigation_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)

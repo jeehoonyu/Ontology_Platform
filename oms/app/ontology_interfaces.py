@@ -70,7 +70,7 @@ class SharedPropertyType(Base):
     """Reusable, governed property definition that can be referenced by interfaces."""
     __tablename__ = "shared_property_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     base_type: Mapped[str] = mapped_column(String)  # string/integer/double/boolean/date/timestamp/geo
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -87,7 +87,7 @@ class SptApplication(Base):
     """
     __tablename__ = "spt_applications"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     shared_property_type_id: Mapped[str] = mapped_column(
         String, ForeignKey("shared_property_types.id"), index=True
     )
@@ -104,7 +104,7 @@ class OntologyInterface(Base):
     """Polymorphic shared contract that multiple object types can implement."""
     __tablename__ = "ontology_interfaces"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # {prop_name: {base_type: str, required: bool}}

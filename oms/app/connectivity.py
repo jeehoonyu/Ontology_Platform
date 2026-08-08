@@ -22,7 +22,7 @@ class ConnectionSource(Base):
     """External data source: JDBC, S3, SFTP, REST, or Kafka."""
     __tablename__ = "connection_sources"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     source_type: Mapped[str] = mapped_column(String)  # jdbc/s3/sftp/rest/kafka
@@ -38,7 +38,7 @@ class ConnectionSync(Base):
     """Sync configuration from a source into a DataAsset."""
     __tablename__ = "connection_syncs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source_id: Mapped[str] = mapped_column(String, ForeignKey("connection_sources.id"), index=True)
     target_asset_id: Mapped[str] = mapped_column(String, index=True)
@@ -55,7 +55,7 @@ class SyncRun(Base):
     """Execution record for a ConnectionSync."""
     __tablename__ = "sync_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     sync_id: Mapped[str] = mapped_column(String, ForeignKey("connection_syncs.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="completed")
     records_in: Mapped[int] = mapped_column(Integer, default=0)
@@ -70,7 +70,7 @@ class ConnectionExport(Base):
     """Export configuration from a DataAsset to an external sink."""
     __tablename__ = "connection_exports"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source_asset_id: Mapped[str] = mapped_column(String, index=True)
     destination: Mapped[str] = mapped_column(String)
@@ -86,7 +86,7 @@ class ConnectionExportCheckpoint(Base):
     """
     __tablename__ = "connection_export_checkpoints"
 
-    export_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    export_id: Mapped[str] = mapped_column(String, primary_key=True)
     last_exported_count: Mapped[int] = mapped_column(Integer, default=0)
     runs: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[int] = mapped_column(Integer)

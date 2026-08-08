@@ -33,7 +33,7 @@ router = APIRouter(tags=["imports"])
 class ImportJob(Base):
     __tablename__ = "import_jobs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     source_type: Mapped[str] = mapped_column(String, index=True)
     filename: Mapped[Optional[str]] = mapped_column(String, nullable=True)

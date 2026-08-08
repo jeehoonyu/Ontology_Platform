@@ -36,7 +36,7 @@ def _now() -> int:
 
 class McpProposal(Base):
     __tablename__ = "mcp_proposals"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     tool: Mapped[str] = mapped_column(String)
     arguments: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String, default="staged")  # staged | committed

@@ -32,7 +32,7 @@ class ContourAnalysis(Base):
     """Tabular step-analysis (CONTOUR) over a DataAsset."""
     __tablename__ = "contour_analyses"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     input_asset_id: Mapped[str] = mapped_column(String, index=True)
     boards: Mapped[list] = mapped_column(JSON, default=list)
@@ -44,7 +44,7 @@ class QuiverAnalysis(Base):
     """Time-series analysis (QUIVER) over ObjectInstance properties."""
     __tablename__ = "quiver_analyses"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     time_field: Mapped[str] = mapped_column(String)
@@ -56,7 +56,7 @@ class FusionWorkbook(Base):
     """Spreadsheet-over-object-sets (FUSION)."""
     __tablename__ = "fusion_workbooks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     cells: Mapped[dict] = mapped_column(JSON, default=dict)
