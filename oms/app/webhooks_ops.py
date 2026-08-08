@@ -46,7 +46,7 @@ LISTENER_AUTH_TYPES = {"hmac", "bearer", "api_key", "none"}
 class WhWebhook(Base):
     __tablename__ = "wh_webhooks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     source_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -66,7 +66,7 @@ class WhWebhook(Base):
 class WhExecution(Base):
     __tablename__ = "wh_executions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     webhook_id: Mapped[str] = mapped_column(String, ForeignKey("wh_webhooks.id"), index=True)
     request_payload: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -82,7 +82,7 @@ class WhExecution(Base):
 class WhCredential(Base):
     __tablename__ = "wh_credentials"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     source_id: Mapped[str] = mapped_column(String, index=True)
     credential_type: Mapped[str] = mapped_column(String)  # api_key | oauth2
@@ -94,7 +94,7 @@ class WhCredential(Base):
 class WhOutboundApp(Base):
     __tablename__ = "wh_outbound_apps"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     client_id: Mapped[str] = mapped_column(String)
@@ -107,7 +107,7 @@ class WhOutboundApp(Base):
 class WhListener(Base):
     __tablename__ = "wh_listeners"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     auth_type: Mapped[str] = mapped_column(String)  # hmac | bearer | api_key | none
@@ -125,7 +125,7 @@ class WhListener(Base):
 class WhListenerEvent(Base):
     __tablename__ = "wh_listener_events"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     listener_id: Mapped[str] = mapped_column(String, ForeignKey("wh_listeners.id"), index=True)
     raw_payload: Mapped[dict] = mapped_column(JSON, default=dict)

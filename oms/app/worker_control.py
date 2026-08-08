@@ -29,7 +29,7 @@ class RuntimeWorker(Base):
     __tablename__ = "runtime_workers"
     __table_args__ = (UniqueConstraint("organization_id", "worker_name", name="uq_runtime_worker_org_name"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     organization_id: Mapped[str] = mapped_column(String, index=True)
     worker_name: Mapped[str] = mapped_column(String, index=True)
     principal_id: Mapped[str] = mapped_column(String, index=True)
@@ -47,7 +47,7 @@ class RuntimeWorker(Base):
 class RuntimeQueuePolicy(Base):
     __tablename__ = "runtime_queue_policies"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     weight: Mapped[int] = mapped_column(Integer, default=1)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=10)

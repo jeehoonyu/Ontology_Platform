@@ -45,7 +45,7 @@ def _now() -> int:
 
 class AipEvalRun(Base):
     __tablename__ = "aip_eval_runs"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     target: Mapped[str] = mapped_column(String)          # "actual" | logic function id
     total: Mapped[int] = mapped_column(Integer, default=0)

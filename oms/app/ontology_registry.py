@@ -34,7 +34,7 @@ class OntologyRegistryEntry(Base):
         UniqueConstraint("project_id", "channel", "version", name="uq_ontology_registry_project_channel_version"),
     )
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     channel: Mapped[str] = mapped_column(String, nullable=False, index=True)
     version: Mapped[str] = mapped_column(String, nullable=False, index=True)

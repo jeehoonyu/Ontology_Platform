@@ -49,7 +49,7 @@ def _now() -> int:
 class ConnectorCredential(Base):
     __tablename__ = "connector_credentials"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     source_id: Mapped[str] = mapped_column(String, index=True)
     credential_type: Mapped[str] = mapped_column(String, index=True)
@@ -66,7 +66,7 @@ class ConnectorCredential(Base):
 class ConnectorFetchAttempt(Base):
     __tablename__ = "connector_fetch_attempts"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     source_id: Mapped[str] = mapped_column(String, index=True)
     sync_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)

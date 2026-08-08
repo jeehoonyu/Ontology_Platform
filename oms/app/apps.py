@@ -28,7 +28,7 @@ class WorkshopModule(Base):
 
     __tablename__ = "workshop_modules"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -44,7 +44,7 @@ class WorkshopModuleVersion(Base):
 
     __tablename__ = "workshop_module_versions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     module_id: Mapped[str] = mapped_column(String, index=True)
     version_number: Mapped[int] = mapped_column(Integer)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -58,7 +58,7 @@ class SlateApp(Base):
 
     __tablename__ = "slate_apps"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     queries: Mapped[dict] = mapped_column(JSON, default=dict)
     widgets: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -72,7 +72,7 @@ class SlateAppVersion(Base):
 
     __tablename__ = "slate_app_versions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     app_id: Mapped[str] = mapped_column(String, index=True)
     version_number: Mapped[int] = mapped_column(Integer)
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -86,7 +86,7 @@ class CarbonWorkspace(Base):
 
     __tablename__ = "carbon_workspaces"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     module_ids: Mapped[list] = mapped_column(JSON, default=list)
     navigation: Mapped[dict] = mapped_column(JSON, default=dict)

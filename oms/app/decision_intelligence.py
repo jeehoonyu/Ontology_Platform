@@ -43,7 +43,7 @@ def _ensure_object_snapshot_table(db: Session) -> None:
 class DecisionRule(Base):
     __tablename__ = "decision_rules"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -60,7 +60,7 @@ class DecisionRule(Base):
 class DecisionScorecard(Base):
     __tablename__ = "decision_scorecards"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -76,7 +76,7 @@ class DecisionScorecard(Base):
 class DecisionRun(Base):
     __tablename__ = "decision_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     scope: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String, default="RUNNING")
@@ -89,7 +89,7 @@ class DecisionRun(Base):
 class ObjectSnapshot(Base):
     __tablename__ = "object_snapshots"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_id: Mapped[str] = mapped_column(String, index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
@@ -106,7 +106,7 @@ class ObjectSnapshot(Base):
 class EntityResolutionJob(Base):
     __tablename__ = "entity_resolution_jobs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     fields: Mapped[list] = mapped_column(JSON, default=list)
@@ -119,7 +119,7 @@ class EntityResolutionJob(Base):
 class EntityCandidate(Base):
     __tablename__ = "entity_candidates"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     job_id: Mapped[str] = mapped_column(String, index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
@@ -135,7 +135,7 @@ class EntityCandidate(Base):
 class DecisionScenario(Base):
     __tablename__ = "decision_scenarios"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)

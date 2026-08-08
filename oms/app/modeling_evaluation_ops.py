@@ -47,7 +47,7 @@ class MevRelease(Base):
     """A released model version pinned to an environment tag (staging / production)."""
     __tablename__ = "mev_releases"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
@@ -61,7 +61,7 @@ class MevCheck(Base):
     """A manual or automatic release-gate check defined on an objective."""
     __tablename__ = "mev_checks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     name: Mapped[str] = mapped_column(String)
@@ -76,7 +76,7 @@ class MevCheckResult(Base):
     """The decision (pending/approved/rejected) for a check against a submission."""
     __tablename__ = "mev_check_results"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     check_id: Mapped[str] = mapped_column(String, ForeignKey("mev_checks.id"), index=True)
@@ -90,7 +90,7 @@ class MevEvalDataset(Base):
     """An evaluation dataset registered for an objective."""
     __tablename__ = "mev_eval_datasets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -102,7 +102,7 @@ class MevEvalSubset(Base):
     """A fairness/analysis slice over an evaluation dataset (filter_column in filter_values)."""
     __tablename__ = "mev_eval_subsets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     eval_dataset_id: Mapped[str] = mapped_column(String, ForeignKey("mev_eval_datasets.id"), index=True)
     name: Mapped[str] = mapped_column(String)
@@ -115,7 +115,7 @@ class MevExperiment(Base):
     """A logged experiment: hyperparameters, metrics, artifacts for a submission."""
     __tablename__ = "mev_experiments"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     hyperparameters: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -128,7 +128,7 @@ class MevAdapter(Base):
     """A model adapter defining the input/output schema of a submission."""
     __tablename__ = "mev_adapters"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -140,7 +140,7 @@ class MevDeploymentConfig(Base):
     """Deployment configuration bound to a SPECIFIC release (batch or live)."""
     __tablename__ = "mev_deployment_configs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     deployment_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     release_id: Mapped[str] = mapped_column(String, ForeignKey("mev_releases.id"), index=True)

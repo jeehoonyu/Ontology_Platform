@@ -25,7 +25,7 @@ router = APIRouter(tags=["object_explorer_ops"])
 class ObjectExplorerExploration(Base):
     __tablename__ = "object_explorer_explorations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)

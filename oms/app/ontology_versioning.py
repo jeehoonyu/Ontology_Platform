@@ -40,7 +40,7 @@ from .production_auth import Principal, require_permission
 class OntologyBranch(Base):
     __tablename__ = "ontology_branches"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     base_branch: Mapped[str] = mapped_column(String, nullable=False, default="main")
@@ -51,7 +51,7 @@ class OntologyBranch(Base):
 class OntologyProposal(Base):
     __tablename__ = "ontology_proposals"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, default="default", index=True)
     branch_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -69,7 +69,7 @@ class OntologyRevision(Base):
     __tablename__ = "ontology_revisions"
     __table_args__ = (UniqueConstraint("project_id", "revision", name="uq_ontology_revision_project_number"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="DRAFT", index=True)
@@ -87,7 +87,7 @@ class OntologyChangeSet(Base):
     """Reviewable set of semantic changes and its generated migration evidence."""
     __tablename__ = "ontology_change_sets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -110,7 +110,7 @@ class OntologyEnvironment(Base):
     __tablename__ = "ontology_environments"
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_ontology_environment_project_name"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     current_revision_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)

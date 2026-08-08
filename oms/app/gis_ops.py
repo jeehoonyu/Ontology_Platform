@@ -30,7 +30,7 @@ class GisDisplay(Base):
     """Per-layer cartographic display: symbol + value-driven style rules."""
     __tablename__ = "gis_displays"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     layer_id: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String)
     symbol: Mapped[str] = mapped_column(String, default="circle")

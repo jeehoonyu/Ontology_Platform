@@ -36,7 +36,7 @@ def _new_id(prefix: str) -> str:
 class DataQualityContract(Base):
     __tablename__ = "data_quality_contracts"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     asset_id: Mapped[str] = mapped_column(String, index=True)
@@ -50,7 +50,7 @@ class DataQualityContract(Base):
 class DataQualityRun(Base):
     __tablename__ = "data_quality_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     contract_id: Mapped[str] = mapped_column(String, index=True)
     asset_id: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, default="PASS", index=True)
@@ -63,7 +63,7 @@ class DataQualityRun(Base):
 class LineageImpactRun(Base):
     __tablename__ = "lineage_impact_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     resource_kind: Mapped[str] = mapped_column(String, index=True)
     resource_id: Mapped[str] = mapped_column(String, index=True)
     direction: Mapped[str] = mapped_column(String, default="downstream")
@@ -76,7 +76,7 @@ class LineageImpactRun(Base):
 class BackfillPlan(Base):
     __tablename__ = "backfill_plans"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     pipeline_ids: Mapped[list] = mapped_column(JSON, default=list)
@@ -91,7 +91,7 @@ class BackfillPlan(Base):
 class ReliabilitySnapshot(Base):
     __tablename__ = "reliability_snapshots"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     snapshot_type: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, default="PASS", index=True)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)

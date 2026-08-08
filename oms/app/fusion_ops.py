@@ -53,7 +53,7 @@ ERROR_TOKENS = {"#REF!", "#DIV/0!", "#CYCLE!", "#NAME?", "#VALUE!", "#ERR!", "#N
 class FusWorkbook(Base):
     __tablename__ = "fus_workbooks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     owner: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -63,7 +63,7 @@ class FusWorkbook(Base):
 class FusSheet(Base):
     __tablename__ = "fus_sheets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     workbook_id: Mapped[str] = mapped_column(String, ForeignKey("fus_workbooks.id"), index=True)
     name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -72,7 +72,7 @@ class FusSheet(Base):
 class FusCell(Base):
     __tablename__ = "fus_cells"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     sheet_id: Mapped[str] = mapped_column(String, ForeignKey("fus_sheets.id"), index=True)
     ref: Mapped[str] = mapped_column(String, index=True)   # A1 notation
     raw: Mapped[str] = mapped_column(String)               # literal or "=formula"
@@ -83,7 +83,7 @@ class FusCell(Base):
 class FusReference(Base):
     __tablename__ = "fus_references"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     sheet_id: Mapped[str] = mapped_column(String, ForeignKey("fus_sheets.id"), index=True)
     anchor_ref: Mapped[str] = mapped_column(String)        # top-left of materialized range
     object_type_id: Mapped[str] = mapped_column(String)
