@@ -83,7 +83,23 @@ def audit_gate(gate_id: str, filename: str, head: str) -> tuple[str, str]:
         return "FAIL", "; ".join(breaches)
     if payload.get("status") != "PASS":
         return "FAIL", f"status is {payload.get('status')!r} despite satisfied thresholds"
-    return "PASS", f"{len(thresholds)} thresholds satisfied"
+
+    # Condition B7. A gate that does not say which route it called is not
+    # evidence for any particular one, and this is not hypothetical: the
+    # ontology-scale gate posted realistic filtered queries to a real endpoint
+    # for months while the Object Explorer -- a different implementation of the
+    # same typed read, behind a different route -- allocated 21.9 GB per click.
+    # Reported as UNSCOPED rather than PASS, because the numbers are sound and
+    # it is their reach that is unstated.
+    entry_points = (payload.get("provenance") or {}).get("entry_points") or []
+    if not entry_points:
+        return "UNSCOPED", (f"{len(thresholds)} thresholds satisfied, but the run names "
+                            f"no entry point, so what it covers is unstated")
+    shapes = (payload.get("provenance") or {}).get("request_shapes") or []
+    detail = f"{len(thresholds)} thresholds satisfied via {', '.join(entry_points)}"
+    if shapes:
+        detail += f" ({len(shapes)} request shapes)"
+    return "PASS", detail
 
 
 def main() -> int:
