@@ -60,7 +60,7 @@ def _locked_artifact_for(
 class PlatformArtifact(Base):
     __tablename__ = "platform_artifacts"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     artifact_type: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -79,7 +79,7 @@ class ArtifactRevision(Base):
     __tablename__ = "platform_artifact_revisions"
     __table_args__ = (UniqueConstraint("artifact_id", "revision", name="uq_artifact_revision"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(String, index=True)
     revision: Mapped[int] = mapped_column(Integer)
     state: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -95,7 +95,7 @@ class ArtifactRevision(Base):
 class ArtifactLease(Base):
     __tablename__ = "platform_artifact_leases"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     holder: Mapped[str] = mapped_column(String, index=True)
     token: Mapped[str] = mapped_column(String, unique=True, index=True)
@@ -108,7 +108,7 @@ class ArtifactCollaborationParticipant(Base):
     __tablename__ = "platform_artifact_collaborators"
     __table_args__ = (UniqueConstraint("artifact_id", "principal_id", "client_id", name="uq_artifact_collaborator_client"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(String, index=True)
     principal_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -142,7 +142,7 @@ class ArtifactCommandReceipt(Base):
         UniqueConstraint("artifact_id", "command_scope", "idempotency_key", name="uq_artifact_command_receipt"),
     )
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(String, index=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     command_scope: Mapped[str] = mapped_column(String, index=True)
@@ -159,7 +159,7 @@ class ArtifactCommandReceipt(Base):
 class ArtifactReviewComment(Base):
     __tablename__ = "platform_artifact_review_comments"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(String, index=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     revision: Mapped[int] = mapped_column(Integer, index=True)
@@ -178,7 +178,7 @@ class ArtifactReviewComment(Base):
 class ArtifactChangeProposal(Base):
     __tablename__ = "platform_artifact_change_proposals"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     artifact_id: Mapped[str] = mapped_column(String, index=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     base_revision: Mapped[int] = mapped_column(Integer)
@@ -203,7 +203,7 @@ class ArtifactChangeProposal(Base):
 class PlatformJob(Base):
     __tablename__ = "platform_jobs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     job_type: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, default="QUEUED", index=True)
@@ -224,7 +224,7 @@ class PlatformJob(Base):
 class PlatformJobIdempotencyReceipt(Base):
     __tablename__ = "platform_job_idempotency_receipts"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     scope_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     job_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
@@ -251,7 +251,7 @@ class PlatformJobEvent(Base):
 class PlatformJobLease(Base):
     __tablename__ = "platform_job_leases"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     job_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     worker_id: Mapped[str] = mapped_column(String, index=True)
     token: Mapped[str] = mapped_column(String, unique=True, index=True)

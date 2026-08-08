@@ -26,7 +26,7 @@ def _now() -> int:
 class RuntimeJobObservation(Base):
     __tablename__ = "runtime_job_observations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     job_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     correlation_id: Mapped[str] = mapped_column(String, index=True)
@@ -53,7 +53,7 @@ class RuntimeBudgetPolicy(Base):
     __tablename__ = "runtime_budget_policies"
     __table_args__ = (UniqueConstraint("project_id", "metric", name="uq_runtime_project_budget_metric"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     metric: Mapped[str] = mapped_column(String, index=True)
     limit_value: Mapped[float] = mapped_column(Float)
@@ -67,7 +67,7 @@ class RuntimeBudgetPolicy(Base):
 class RuntimeSloPolicy(Base):
     __tablename__ = "runtime_slo_policies"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
     job_type: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
@@ -84,7 +84,7 @@ class RuntimeSloPolicy(Base):
 class RuntimeSloEvaluation(Base):
     __tablename__ = "runtime_slo_evaluations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     policy_id: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, index=True)

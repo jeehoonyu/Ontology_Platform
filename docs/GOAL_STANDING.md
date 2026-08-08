@@ -131,7 +131,7 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Latest reading |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 187 of 187 in 853 s at head 0040 |
+| Backend scripts passing in one sequential run | the suite | 187 of 187 in 888 s at head 0041 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 — GOAL2-007 and GOAL2-008 fixed 2026-08-06 |
 | Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
@@ -142,7 +142,8 @@ never regress. A regression is a build failure, not a discussion.
 | Application writes bypassing the geo-bounds listener | `oms/audit_query_bounds.py` | 0, ceiling 0 |
 | Data surfaces receiving ontology specs | `oms/audit_extensibility.py` | 3 of 3, floor 3, unwired ceiling 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 at head 0040 — 7 STALE, 3 MISSING |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 at head 0041 — 7 STALE, 3 MISSING |
+| Indexes duplicating a primary key | `pg_index` against `pg_constraint` | 0, ceiling 0 (was 244, 283 MB) |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
@@ -239,5 +240,6 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-07 | Does the spatial fixture describe a region? | No, a line. Latitude and longitude moved together, so ten million objects sat on 1,000 positions stacked 10,000 deep, and a 400 m radius matched 570,000 of them. Every spatial number taken against it measured coincident-point scoring. Rebuilt over an area: at one million the radius matches 549 instead of 57,000 | Spatial readings restated as a new baseline, not a gain |
 | 2026-08-07 | Did the GiST index make bulk ingest several times slower? | No, asserted twice before it was tested properly. The one-million control that first "exonerated" it was worthless -- at that size the index fits in cache and the test could not have shown the effect either way | Claim retracted |
 | 2026-08-07 | Then why does a bulk load decay fourfold? | 2,761 MB of indexes against a 966 MB heap and 128 MB of shared_buffers, with ~9x WAL amplification from wal_level=logical and a 1 GB max_wal_size. Measured with every geo index dropped: 10,416 rows/s falling to 2,645. Pre-existing, and hidden while the fixture was degenerate | 244 indexes duplicate a primary key, 283 MB |
+| 2026-08-07 | Does removing 244 duplicate primary-key indexes speed the load? | Barely. 718 s to 674 s across three million rows, one run per arm, and the decay curve is unchanged -- it was a constant tax, not the cause. 283 MB reclaimed and one fewer index per write is the real return | 244 -> 0 |
 | 2026-08-07 | Is the profile's `indexed` flag read by anything? | Yes. `_plan_index_definition` creates a btree expression index per indexed property; two occupy 1,010 MB on the benchmark corpus. GOAL_2026-08-06.md had claimed it was read by nothing and proposed building what already exists | Correction published |
 | 2026-08-07 | Why is the facet slow -- jsonb, statistics, or the plan? | None of them. An expression index was declined by the planner and slower when forced; ANALYZE made it marginally worse; the jsonb share read 92% hot and 62% cold. A full aggregate over ten million rows is O(n) whatever the split | Facet read 51,521.8 ms -> 1.4 ms via a rollup |

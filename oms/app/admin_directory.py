@@ -40,14 +40,14 @@ ROLE_CAPABILITIES: Dict[str, List[str]] = {
 # ---------------------------------------------------------------------------
 class Enrollment(Base):
     __tablename__ = "admin_enrollments"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
 
 
 class Organization(Base):
     __tablename__ = "admin_organizations"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     enrollment_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -55,7 +55,7 @@ class Organization(Base):
 
 class Space(Base):
     __tablename__ = "admin_spaces"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     organization_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -63,7 +63,7 @@ class Space(Base):
 
 class AdminUser(Base):
     __tablename__ = "admin_users"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     username: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -78,7 +78,7 @@ class AdminProject(Base):
     """A project lives inside a space. Used so project-scoped role grants can
     inherit up the hierarchy (project -> space -> organization -> enrollment)."""
     __tablename__ = "admin_projects"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     space_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -86,7 +86,7 @@ class AdminProject(Base):
 
 class AdminGroup(Base):
     __tablename__ = "admin_groups"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     organization_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     display_name: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -94,7 +94,7 @@ class AdminGroup(Base):
 
 class GroupMembership(Base):
     __tablename__ = "admin_group_memberships"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     group_id: Mapped[str] = mapped_column(String, index=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
     expiration: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -105,7 +105,7 @@ class GroupMembership(Base):
 
 class AdminRoleGrant(Base):
     __tablename__ = "admin_role_grants"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     scope_type: Mapped[str] = mapped_column(String, index=True)   # enrollment|organization|space|project
     scope_id: Mapped[str] = mapped_column(String, index=True)
     principal_type: Mapped[str] = mapped_column(String)           # user|group

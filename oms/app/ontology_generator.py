@@ -26,7 +26,7 @@ router = APIRouter(tags=["ontology_generator"])
 class OntologyGeneratorDraft(Base):
     __tablename__ = "ontology_generator_drafts"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     asset_id: Mapped[str] = mapped_column(String, index=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
     draft: Mapped[dict] = mapped_column(JSON, default=dict)

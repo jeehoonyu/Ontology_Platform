@@ -27,7 +27,7 @@ def _now() -> int:
 
 class ProductRequirement(Base):
     __tablename__ = "product_requirements"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     product_id: Mapped[str] = mapped_column(String, index=True)
     key: Mapped[str] = mapped_column(String)
     kind: Mapped[str] = mapped_column(String, default="dataset")  # dataset/source/object_type
@@ -37,7 +37,7 @@ class ProductRequirement(Base):
 
 class ReleaseSnapshot(Base):
     __tablename__ = "release_snapshots"
-    release_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    release_id: Mapped[str] = mapped_column(String, primary_key=True)
     product_id: Mapped[str] = mapped_column(String, index=True)
     version: Mapped[str] = mapped_column(String)
     resources: Mapped[list] = mapped_column(JSON, default=list)
@@ -53,7 +53,7 @@ class ProductPort(Base):
     be promoted to an output (so the product ships that resource itself).
     """
     __tablename__ = "product_ports"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     product_id: Mapped[str] = mapped_column(String, index=True)
     port_type: Mapped[str] = mapped_column(String, index=True)  # input | output
     kind: Mapped[str] = mapped_column(String, default="dataset")  # dataset/source/object_type

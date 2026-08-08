@@ -30,7 +30,7 @@ class ComputeModule(Base):
     """Container-based compute unit that can be invoked interactively or in a pipeline."""
     __tablename__ = "compute_modules"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     image: Mapped[str] = mapped_column(String)
     entrypoint: Mapped[str] = mapped_column(String)

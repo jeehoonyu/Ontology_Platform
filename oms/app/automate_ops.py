@@ -50,7 +50,7 @@ ACTIVITY_EVENTS = {
 class AtmAutomation(Base):
     __tablename__ = "atm_automations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     scope_mode: Mapped[str] = mapped_column(String, default="user_scoped")
@@ -65,7 +65,7 @@ class AtmAutomation(Base):
 class AtmCondition(Base):
     __tablename__ = "atm_conditions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     condition_type: Mapped[str] = mapped_column(String)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -76,7 +76,7 @@ class AtmCondition(Base):
 class AtmEffect(Base):
     __tablename__ = "atm_effects"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     effect_type: Mapped[str] = mapped_column(String)
     execution_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -87,7 +87,7 @@ class AtmEffect(Base):
 class AtmExecSettings(Base):
     __tablename__ = "atm_exec_settings"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     execution_mode: Mapped[str] = mapped_column(String, default="sequential")
     batch_size: Mapped[int] = mapped_column(Integer, default=100)
@@ -97,7 +97,7 @@ class AtmExecSettings(Base):
 class AtmRetryConfig(Base):
     __tablename__ = "atm_retry_configs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     max_attempts: Mapped[int] = mapped_column(Integer, default=1)
     interval_seconds: Mapped[int] = mapped_column(Integer, default=0)
@@ -107,7 +107,7 @@ class AtmRetryConfig(Base):
 class AtmRun(Base):
     __tablename__ = "atm_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     manual: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String, default="TRIGGERED")
@@ -121,7 +121,7 @@ class AtmRun(Base):
 class AtmActivity(Base):
     __tablename__ = "atm_activities"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     event_type: Mapped[str] = mapped_column(String)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -131,7 +131,7 @@ class AtmActivity(Base):
 class AtmDependency(Base):
     __tablename__ = "atm_dependencies"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     dependent_id: Mapped[str] = mapped_column(String, ForeignKey("atm_automations.id"), index=True)
     additional_condition: Mapped[dict] = mapped_column(JSON, default=dict)

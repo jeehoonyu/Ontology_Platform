@@ -41,7 +41,7 @@ class DevopsProduct(Base):
 
     __tablename__ = "devops_products"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     resources: Mapped[list] = mapped_column(JSON, default=list)
@@ -59,7 +59,7 @@ class ProductRelease(Base):
 
     __tablename__ = "product_releases"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     product_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     version: Mapped[str] = mapped_column(String, nullable=False)
     channel: Mapped[str] = mapped_column(String, nullable=False, default="stable")
@@ -72,7 +72,7 @@ class ProductInstallation(Base):
 
     __tablename__ = "product_installations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     product_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     release_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     target_project: Mapped[str] = mapped_column(String, nullable=False)

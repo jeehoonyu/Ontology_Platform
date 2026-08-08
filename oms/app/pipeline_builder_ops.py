@@ -212,7 +212,7 @@ NODE_CONFIGURATION_SCHEMAS: Dict[str, Dict[str, Any]] = {
 class PipelineBuilderGraph(Base):
     __tablename__ = "pipeline_builder_graphs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -227,7 +227,7 @@ class PipelineBuilderGraph(Base):
 class PipelineBuilderBuild(Base):
     __tablename__ = "pipeline_builder_builds"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     graph_id: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, default="SUCCESS")
     run_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -242,7 +242,7 @@ class PipelineOntologyContractRun(Base):
     """Immutable ontology-output reconciliation and quarantine evidence for a build."""
     __tablename__ = "pipeline_ontology_contract_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     graph_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     build_id: Mapped[str] = mapped_column(String, nullable=False, index=True)

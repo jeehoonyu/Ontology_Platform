@@ -39,7 +39,7 @@ class IfaceLinkConstraint(Base):
     """A link constraint declared on an interface (an interface link type)."""
     __tablename__ = "iface_link_constraints"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     interface_id: Mapped[str] = mapped_column(String, ForeignKey("ontology_interfaces.id"), index=True)
     api_name: Mapped[str] = mapped_column(String)
     target_kind: Mapped[str] = mapped_column(String)  # "interface" | "object_type"
@@ -53,7 +53,7 @@ class IfaceImplementation(Base):
     """An explicit declaration that an object type implements an interface."""
     __tablename__ = "iface_implementations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
     interface_id: Mapped[str] = mapped_column(String, ForeignKey("ontology_interfaces.id"), index=True)
     # {interface_prop -> object_type_prop}
@@ -67,7 +67,7 @@ class IfaceAction(Base):
     """An interface action (create/modify/delete) defined polymorphically on an interface."""
     __tablename__ = "iface_actions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     interface_id: Mapped[str] = mapped_column(String, ForeignKey("ontology_interfaces.id"), index=True)
     api_name: Mapped[str] = mapped_column(String)
     operation: Mapped[str] = mapped_column(String)  # "create" | "modify" | "delete"

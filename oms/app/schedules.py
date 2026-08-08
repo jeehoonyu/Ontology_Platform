@@ -22,7 +22,7 @@ class Schedule(Base):
 
     __tablename__ = "schedules"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     target_type: Mapped[str] = mapped_column(String, nullable=False)  # pipeline/logic/automation
@@ -40,7 +40,7 @@ class Build(Base):
 
     __tablename__ = "builds"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     schedule_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     target_type: Mapped[str] = mapped_column(String, nullable=False)

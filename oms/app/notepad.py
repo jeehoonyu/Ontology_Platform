@@ -28,7 +28,7 @@ def _now() -> int:
 # ---------------------------------------------------------------------------
 class NotepadDocument(Base):
     __tablename__ = "notepad_documents"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String)
     kind: Mapped[str] = mapped_column(String, default="document")  # document/report
     owner: Mapped[str] = mapped_column(String, default="system")
@@ -45,7 +45,7 @@ class NptTemplate(Base):
     live document, with declared inputs bound to specific blocks. Deterministic/local.
     """
     __tablename__ = "npt_templates"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String)
     # inputs: [{name: str, type: string|number|object, default: Any|None, required: bool}]
     inputs: Mapped[list] = mapped_column(JSON, default=list)
