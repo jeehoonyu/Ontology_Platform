@@ -430,6 +430,11 @@ _gate_path, _gate_status, _gate_breaches = write_evidence(
         "temporal_events": evidence["temporal_events"],
     },
     harness="oms/benchmark_ontology_mixed_workload_postgres.py",
+        entry_points=["POST /api/v1/objects/query"],
+        request_shapes=[
+            "concurrent typed reads under transactional write load",
+            "bounded batched writes with rollback",
+        ],
     notes=(
         f"Profile '{PROFILE}' at {OBJECT_COUNT} objects and {LINK_COUNT} links with "
         f"{WRITE_COUNT} writes across {evidence['write_transactions']} bounded transactions "
