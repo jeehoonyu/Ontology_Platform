@@ -105,6 +105,12 @@ class ObjectSetAggregateResponse(BaseModel):
     group_by: Optional[str] = None
     total: int
     groups: List[Dict[str, Any]] = Field(default_factory=list)
+    # "exact" when the aggregate was computed, "rollup" when served from stored
+    # counts. Declared here because a response model silently drops fields it
+    # does not name, and a caller cannot tell a fresh count from a stored one
+    # without being told which it got.
+    source: Optional[str] = None
+    computed_at: Optional[int] = None
 
 class ObjectSetSearchAroundRequest(BaseModel):
     object_ids: List[str]

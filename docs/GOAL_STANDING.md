@@ -90,11 +90,23 @@ Added 2026-08-06, because the first two invariants both held while a claim was f
 The Tier B ontology-scale gate passes at ten million objects with a bounded typed read.
 Its evidence is current at the head, so invariant 1 is satisfied. The extensibility
 ratchets are green, so invariant 2 is satisfied. And the claim a reader draws from it —
-that this platform's reads are bounded at ten million objects — is false, because the gate
-reads an object set with no residual filter and every surface a user touches sends one.
-Measured by `oms/measure_read_path_bounds.py`, the filtered read costs 2,235.1 ms and
-302.5 MB at 400,000 objects against 1.3 ms and 0.1 MB unfiltered, and heap grows x9.9 to
-x10.0 per 10x objects where the measured shape is flat at x1.0. That is GOAL2-007.
+that this platform's reads are bounded at ten million objects — is false.
+
+Not for the reason first recorded here. The gate posts to `/api/v1/objects/query` through
+the real application and does send filters; that endpoint is a keyset-paginated `select`
+with a `LIMIT` and was always sound. The platform simply has **two** typed-read
+implementations, and every user-facing surface — the Object Explorer, the map, the MCP
+tools, the analytics and app-building runtimes — calls the other one,
+`runtime.query_object_set`, which materialized the object type. The gate certified the
+implementation almost nothing ships through.
+
+Measured by `oms/measure_read_path_bounds.py` on that second implementation, a filtered
+read cost 2,235.1 ms and 302.5 MB at 400,000 objects against 1.3 ms and 0.1 MB unfiltered,
+and heap grew x9.9 to x10.0 per 10x objects. That is GOAL2-007.
+
+The correction matters to the invariant rather than weakening it. A gate can enter through
+a real door, send a realistic request, and still describe only one of several code paths
+that answer it.
 
 The same shape produced GOAL2-008 independently on the same day: `renderable_base_types`
 reads 13 of 13, every match comes from the renderer's own source file, and one workspace
@@ -131,7 +143,7 @@ never regress. A regression is a build failure, not a discussion.
 | Ratchet | Instrument | Latest reading |
 | --- | --- | --- |
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
-| Backend scripts passing in one sequential run | the suite | 187 of 187 in 888 s at head 0041 |
+| Backend scripts passing in one sequential run | the suite | 187 of 187 in 880 s at head 0041 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
 | Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 — GOAL2-007 and GOAL2-008 fixed 2026-08-06 |
 | Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
@@ -242,6 +254,7 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-07 | Did the GiST index make bulk ingest several times slower? | No, asserted twice before it was tested properly. The one-million control that first "exonerated" it was worthless -- at that size the index fits in cache and the test could not have shown the effect either way | Claim retracted |
 | 2026-08-07 | Then why does a bulk load decay fourfold? | 2,761 MB of indexes against a 966 MB heap and 128 MB of shared_buffers, with ~9x WAL amplification from wal_level=logical and a 1 GB max_wal_size. Measured with every geo index dropped: 10,416 rows/s falling to 2,645. Pre-existing, and hidden while the fixture was degenerate | 244 indexes duplicate a primary key, 283 MB |
 | 2026-08-07 | Does the read path hold at ten million on a fixture that is a region? | Yes. Viewport 59.9 ms against a 250 ms gate, radius 50.2 ms over 5,461 matches where the degenerate fixture read 33,090.3 ms over 570,000, facet read 1.5 ms from the rollup, nothing above 5.5 MB. The load took 40 min with indexes dropped and rebuilt, against ~7 h maintained row-by-row | B4 met on a real distribution |
+| 2026-08-07 | Did the scale gate really measure a shape nobody issues? | No. It posts filtered queries to /api/v1/objects/query through the real app, and that endpoint is a keyset select with a LIMIT. The platform has two typed-read implementations and the gate exercised the sound one while every surface called the other. The central claim of GOAL_2026-08-06 was wrong about its own reason | Correction published; B7 restated |
 | 2026-08-07 | Did the index rebuild actually rebuild everything? | No. `pg_indexes.indexdef` can span lines and the replay loop read line-by-line, so one expression index executed as fragments, failed silently and reported 0 s. Caught by counting indexes before measuring | Schema verified before every reading |
 | 2026-08-07 | Does removing 244 duplicate primary-key indexes speed the load? | Barely. 718 s to 674 s across three million rows, one run per arm, and the decay curve is unchanged -- it was a constant tax, not the cause. 283 MB reclaimed and one fewer index per write is the real return | 244 -> 0 |
 | 2026-08-07 | Is the profile's `indexed` flag read by anything? | Yes. `_plan_index_definition` creates a btree expression index per indexed property; two occupy 1,010 MB on the benchmark corpus. GOAL_2026-08-06.md had claimed it was read by nothing and proposed building what already exists | Correction published |

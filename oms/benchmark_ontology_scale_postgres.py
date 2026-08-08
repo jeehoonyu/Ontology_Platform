@@ -307,8 +307,58 @@ assert graph_p95 < GRAPH_P95_LIMIT_MS, {
     "limit_ms": GRAPH_P95_LIMIT_MS,
 }
 
+# --- Condition B7: the shapes the surfaces issue -----------------------------
+#
+# Everything above posts to /api/v1/objects/query, which is one implementation
+# of a typed read: a keyset-paginated select with a LIMIT. The Object Explorer
+# and the Operational Map reach a *different* implementation behind different
+# routes, and until 2026-08-06 that one materialized the whole object type --
+# 21.9 GB for a single filter click at this scale. This gate passed throughout,
+# honestly, because it never called those routes.
+#
+# So it calls them now. Same corpus, same run, same evidence file.
+surface_latencies: dict[str, list[float]] = {"explorer_filter": [], "facet": []}
+
+explorer_body = {
+    "object_type_id": OBJECT_TYPE_ID,
+    "filters": {"category": "category_0"},
+    "limit": 50,
+}
+facet_body = {
+    "object_type_id": OBJECT_TYPE_ID,
+    "group_by": "category",
+}
+
+for _ in range(WARMUPS):
+    checked(client.post("/object-explorer/query", json=explorer_body))
+
+for _ in range(SAMPLES):
+    latency, explorer_result = timed_post("/object-explorer/query", explorer_body)
+    surface_latencies["explorer_filter"].append(latency)
+    assert explorer_result["result_count"] >= 0, explorer_result
+
+# The facet is served from a rollup when one exists and computed exactly
+# otherwise; both are legitimate and the response says which, so the evidence
+# records the source rather than assuming the fast path was taken.
+facet_source = "unmeasured"
+try:
+    for _ in range(max(3, SAMPLES // 4)):
+        latency, facet_result = timed_post("/object-sets/aggregate", facet_body)
+        surface_latencies["facet"].append(latency)
+        facet_source = facet_result.get("source", "unknown")
+except AssertionError:
+    # The aggregate route is not mounted in every profile. Recorded as absent
+    # rather than silently skipped, so the evidence does not imply coverage.
+    facet_source = "route_unavailable"
+
+explorer_p95 = percentile(surface_latencies["explorer_filter"], 0.95) if surface_latencies["explorer_filter"] else None
+facet_p95 = percentile(surface_latencies["facet"], 0.95) if surface_latencies["facet"] else None
+
 evidence = {
     "profile": PROFILE,
+    "explorer_filter_p95_ms": round(explorer_p95, 3) if explorer_p95 is not None else None,
+    "facet_p95_ms": round(facet_p95, 3) if facet_p95 is not None else None,
+    "facet_source": facet_source,
     "reference_scale_achieved": OBJECT_COUNT >= REFERENCE_OBJECTS and LINK_COUNT >= REFERENCE_LINKS,
     "objects": OBJECT_COUNT,
     "links": LINK_COUNT,
@@ -356,6 +406,10 @@ if PROFILE == "reference":
             "object_lookup_p95_ms_max": OBJECT_P95_LIMIT_MS,
             "object_range_p95_ms_max": OBJECT_P95_LIMIT_MS,
             "graph_two_hop_p95_ms_max": GRAPH_P95_LIMIT_MS,
+            # The Object Explorer's own route, held to the same bound as the
+            # typed read it parallels. Without this the gate certifies one
+            # implementation of a typed read and says nothing about the other.
+            "explorer_filter_p95_ms_max": OBJECT_P95_LIMIT_MS,
         },
         measurements={
             "objects": OBJECT_COUNT,
@@ -363,11 +417,29 @@ if PROFILE == "reference":
             "object_lookup_p95_ms": evidence["object_lookup_p95_ms"],
             "object_range_p95_ms": evidence["object_range_p95_ms"],
             "graph_two_hop_p95_ms": evidence["graph_two_hop_p95_ms"],
+            "explorer_filter_p95_ms": evidence["explorer_filter_p95_ms"],
+            "facet_p95_ms": evidence["facet_p95_ms"],
+            "facet_source": evidence["facet_source"],
         },
         harness="oms/benchmark_ontology_scale_postgres.py",
+        entry_points=[
+            "POST /api/v1/objects/query",
+            "POST /api/v1/graph/query",
+            "POST /object-explorer/query",
+            "POST /object-sets/aggregate",
+        ],
+        request_shapes=[
+            "typed lookup, equality filter on an indexed property",
+            "typed range read, gte filter with ordering",
+            "two-hop graph traversal",
+            "Object Explorer filtered read (runtime.query_object_set)",
+            "facet aggregation grouped by a property",
+        ],
         notes=(
             f"Reference profile over {OBJECT_COUNT} objects and {LINK_COUNT} links, "
-            f"{SAMPLES} samples per query shape, physical index plans verified."
+            f"{SAMPLES} samples per query shape, physical index plans verified. "
+            f"Covers both typed-read implementations: the v1 keyset select and the "
+            f"Object Explorer path. Facet served from {evidence['facet_source']}."
         ),
     )
     print(f"\nTier B evidence {gate_status}: {gate_path.name}")
