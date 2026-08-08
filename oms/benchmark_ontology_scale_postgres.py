@@ -85,6 +85,48 @@ def timed_post(path: str, body: dict) -> tuple[float, dict]:
     return (time.perf_counter() - started) * 1000.0, result
 
 
+def _drop_secondary_indexes(connection, tables: list[str]) -> list[tuple[str, str]]:
+    """Drop every non-constraint index on these tables, returning definitions.
+
+    Reference scale is unreachable without this. Maintaining 2.7 GB of index
+    row by row through a 128 MB buffer took a ten-million-object load from four
+    minutes to a measured fourfold decay heading for seven hours; building each
+    index once afterwards costs a fraction of that.
+
+    Primary and unique indexes are left alone: they enforce constraints, and
+    dropping them would let the load insert rows the schema forbids.
+
+    Definitions are read as result rows rather than lines of text. `indexdef`
+    can contain newlines -- an expression index over a multi-line CASE does --
+    and an earlier version of this pattern split on them, executed fragments,
+    and silently left one index missing.
+    """
+    captured: list[tuple[str, str]] = []
+    for table in tables:
+        rows = connection.execute(text("""
+            SELECT i.indexname, i.indexdef
+            FROM pg_indexes i
+            JOIN pg_class c ON c.relname = i.indexname
+            JOIN pg_index x ON x.indexrelid = c.oid
+            WHERE i.tablename = :table
+              AND NOT x.indisprimary AND NOT x.indisunique
+        """), {"table": table}).fetchall()
+        captured.extend((row[0], row[1]) for row in rows)
+    for name, _definition in captured:
+        connection.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+    return captured
+
+
+def _rebuild_indexes(connection, captured: list[tuple[str, str]]) -> dict[str, float]:
+    """Recreate what was dropped, verbatim, and time each one."""
+    timings: dict[str, float] = {}
+    for name, definition in captured:
+        started = time.perf_counter()
+        connection.execute(text(definition))
+        timings[name] = round(time.perf_counter() - started, 3)
+    return timings
+
+
 if not REUSE_EXISTING:
     checked(client.post("/object-types", json={
         "id": OBJECT_TYPE_ID,
@@ -139,9 +181,13 @@ if REUSE_EXISTING:
             "Reuse fixture count mismatch: "
             f"expected {OBJECT_COUNT}/{LINK_COUNT}, found {counts['object_count']}/{counts['link_count']}"
         )
-else:
+index_rebuild_seconds: dict[str, float] = {}
+if not REUSE_EXISTING:
     with engine.begin() as connection:
         connection.execute(text("SET LOCAL synchronous_commit = off"))
+        dropped_indexes = _drop_secondary_indexes(
+            connection, ["object_instances", "link_instances"])
+        print(f"bulk load: dropped {len(dropped_indexes)} secondary indexes")
         connection.execute(text("""
         INSERT INTO object_instances (
             id, project_id, object_type_id, properties, source_asset_id,
@@ -194,6 +240,14 @@ else:
             "object_count": OBJECT_COUNT,
             "link_count": LINK_COUNT,
         })
+        rebuild_started = time.perf_counter()
+        index_rebuild_seconds = _rebuild_indexes(connection, dropped_indexes)
+        print(f"bulk load: rebuilt {len(dropped_indexes)} indexes in "
+              f"{time.perf_counter() - rebuild_started:,.1f}s")
+        # Without this the planner still believes the table is empty and will
+        # choose a plan for a corpus that no longer exists. Measured at one
+        # million objects, a stale-statistics viewport query read 6,263.3 ms
+        # against 10.5 ms with statistics current.
         connection.execute(text("ANALYZE object_instances"))
         connection.execute(text("ANALYZE link_instances"))
 seed_seconds = time.perf_counter() - seed_started
@@ -363,6 +417,7 @@ evidence = {
     "objects": OBJECT_COUNT,
     "links": LINK_COUNT,
     "seed_seconds": round(seed_seconds, 3),
+    "index_rebuild_seconds": index_rebuild_seconds,
     "reused_existing_fixture": REUSE_EXISTING,
     "samples": SAMPLES,
     "object_lookup_p50_ms": round(statistics.median(lookup_latencies), 3),
