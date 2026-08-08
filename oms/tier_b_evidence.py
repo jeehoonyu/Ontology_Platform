@@ -82,6 +82,8 @@ def write_evidence(
     thresholds: Dict[str, Any],
     measurements: Dict[str, Any],
     harness: str,
+    entry_points: List[str] | None = None,
+    request_shapes: List[str] | None = None,
     notes: str = "",
     output_dir: Path | None = None,
     supersede: bool = False,
@@ -90,6 +92,15 @@ def write_evidence(
 
     status is PASS only when every threshold is satisfied. A harness cannot
     record PASS by asserting it; the verdict is derived from the numbers.
+
+    `entry_points` and `request_shapes` are condition B7 and the third standing
+    invariant: a measurement is evidence only for the path it traverses. The
+    ontology-scale gate posted realistic filtered queries to a real endpoint for
+    months and still missed a defect that made the Object Explorer allocate
+    21.9 GB, because `/api/v1/objects/query` and `/object-explorer/query` are
+    two different implementations of a typed read and the gate only ever
+    exercised the first. Naming the routes a run actually called is what makes
+    that visible in the file rather than discoverable by reading the harness.
 
     output_dir exists so tests can exercise emission without writing into
     docs/. Gate evidence must come from a real run, and a test writing a file
@@ -110,6 +121,12 @@ def write_evidence(
             "git_commit": _git_commit(),
             "captured_at": int(time.time()),
             "harness": harness,
+            # The routes this run actually called, and the request shapes it
+            # issued. Empty means the harness declined to say, which the auditor
+            # reports rather than assumes: a gate that does not name its entry
+            # point is not evidence for any particular one.
+            "entry_points": list(entry_points or []),
+            "request_shapes": list(request_shapes or []),
             "host": {
                 "platform": platform.system().lower(),
                 "release": platform.release(),
