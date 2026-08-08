@@ -1,27 +1,47 @@
 {
+  "breaches": [
+    "explorer_filter_p95_ms=567.009 vs explorer_filter_p95_ms_max=300.0"
+  ],
   "gate_id": "ontology_scale",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "graph_two_hop_p95_ms": 14.153,
+    "explorer_filter_p95_ms": 567.009,
+    "facet_p95_ms": 2632.265,
+    "facet_source": "exact",
+    "graph_two_hop_p95_ms": 12.559,
     "links": 50000000,
-    "object_lookup_p95_ms": 8.916,
-    "object_range_p95_ms": 12.248,
+    "object_lookup_p95_ms": 7.29,
+    "object_range_p95_ms": 9.899,
     "objects": 10000000
   },
-  "notes": "Reference profile over 10000000 objects and 50000000 links, 10 samples per query shape, physical index plans verified.",
+  "notes": "Reference profile over 10000000 objects and 50000000 links, 20 samples per query shape, physical index plans verified. Covers both typed-read implementations: the v1 keyset select and the Object Explorer path. Facet served from exact.",
   "provenance": {
-    "captured_at": 1785985006,
-    "git_commit": "e2d813c",
+    "captured_at": 1786220775,
+    "entry_points": [
+      "POST /api/v1/objects/query",
+      "POST /api/v1/graph/query",
+      "POST /object-explorer/query",
+      "POST /object-sets/aggregate"
+    ],
+    "git_commit": "3aaa02f",
     "harness": "oms/benchmark_ontology_scale_postgres.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0038_explicit_schema_baseline"
+    "migration_head": "0041_drop_redundant_pk_indexes",
+    "request_shapes": [
+      "typed lookup, equality filter on an indexed property",
+      "typed range read, gte filter with ordering",
+      "two-hop graph traversal",
+      "Object Explorer filtered read (runtime.query_object_set)",
+      "facet aggregation grouped by a property"
+    ]
   },
-  "status": "PASS",
+  "status": "FAIL",
   "thresholds": {
+    "explorer_filter_p95_ms_max": 300.0,
     "graph_two_hop_p95_ms_max": 2000.0,
     "links_min": 50000000,
     "object_lookup_p95_ms_max": 300.0,
