@@ -35,6 +35,15 @@ OBJECT_P95_LIMIT_MS = float(os.getenv("ONTOLOGY_OBJECT_QUERY_P95_LIMIT_MS", "300
 GRAPH_P95_LIMIT_MS = float(os.getenv("ONTOLOGY_GRAPH_QUERY_P95_LIMIT_MS", "2000"))
 EVIDENCE_PATH = os.getenv("ONTOLOGY_SCALE_EVIDENCE_PATH")
 REUSE_EXISTING = os.getenv("ONTOLOGY_SCALE_REUSE_EXISTING", "").strip().lower() in {"1", "true", "yes"}
+# Set to a sentence naming the defect that was repaired, to promote a gate that
+# previously failed at this head. Deliberately a reason rather than a boolean:
+# the guard it unlocks exists to stop a failure being out-waited, and "true"
+# carries no evidence that anything changed.
+SUPERSEDE_REASON = os.getenv("ONTOLOGY_SCALE_SUPERSEDE_REASON", "").strip() or None
+if SUPERSEDE_REASON is not None and len(SUPERSEDE_REASON) < 20:
+    raise SystemExit(
+        "ONTOLOGY_SCALE_SUPERSEDE_REASON must state what was fixed, not merely be set"
+    )
 
 if OBJECT_COUNT < 100 or LINK_COUNT < 100 or SAMPLES < 5:
     raise SystemExit("Scale counts must be at least 100 and samples at least 5")
@@ -477,6 +486,12 @@ if PROFILE == "reference":
             "facet_source": evidence["facet_source"],
         },
         harness="oms/benchmark_ontology_scale_postgres.py",
+        # Superseding a recorded failure requires naming what was fixed. The
+        # guard in tier_b_evidence exists because a gate that passes on the
+        # fourth attempt has not passed, and it cannot distinguish a repaired
+        # system from a lucky run -- only a person can, so a person has to say
+        # so and sign it. An empty reason is refused above.
+        supersede=SUPERSEDE_REASON is not None,
         entry_points=[
             "POST /api/v1/objects/query",
             "POST /api/v1/graph/query",
@@ -495,6 +510,8 @@ if PROFILE == "reference":
             f"{SAMPLES} samples per query shape, physical index plans verified. "
             f"Covers both typed-read implementations: the v1 keyset select and the "
             f"Object Explorer path. Facet served from {evidence['facet_source']}."
+            + (f" Supersedes an earlier failure at this head: {SUPERSEDE_REASON}"
+               if SUPERSEDE_REASON else "")
         ),
     )
     print(f"\nTier B evidence {gate_status}: {gate_path.name}")
