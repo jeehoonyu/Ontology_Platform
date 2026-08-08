@@ -145,7 +145,7 @@ never regress. A regression is a build failure, not a discussion.
 | Unprovenanced evidence files | `oms/audit_evidence_corpus.py` | 11, ceiling 11 |
 | Backend scripts passing in one sequential run | the suite | 187 of 187 in 880 s at head 0041 |
 | Matrix rows `PARTIAL` or `MISSING` | `oms/validate_docs_conformance.py` | 0 of 72 |
-| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 1 — GOAL2-010 (P1), found by the first reference run to cover both read implementations |
+| Unresolved P0 or P1 defects | the ledger in `GOAL_2026-08-03.md` | 0 — GOAL2-010 fixed 2026-08-08 |
 | Object-set materializations reachable from a route | `oms/audit_query_bounds.py` | 0, ceiling 0 (was 24) |
 | Call sites asking a primitive for everything | `oms/audit_query_bounds.py` | 14, ceiling 14 |
 | Peak memory, any read shape at 10M objects | `oms/measure_read_path_bounds.py` | 6.9 MB, ceiling 64 MB (was 21,940.6 MB) |
@@ -155,7 +155,7 @@ never regress. A regression is a build failure, not a discussion.
 | Application writes bypassing the geo-bounds listener | `oms/audit_query_bounds.py` | 0, ceiling 0 |
 | Data surfaces receiving ontology specs | `oms/audit_extensibility.py` | 3 of 3, floor 3, unwired ceiling 0 |
 | Tables reaching a database only via the baseline | `oms/test_schema_identity.py` | 0 of 271, ceiling 0 |
-| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 0 of 10 at head 0041 — 1 FAIL, 6 STALE, 3 MISSING |
+| Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 1 of 10 at head 0041 — ontology_scale PASS, 6 STALE, 3 MISSING |
 | Indexes duplicating a primary key | `pg_index` against `pg_constraint` | 0, ceiling 0 (was 244, 283 MB) |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
@@ -254,6 +254,7 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-07 | Did the GiST index make bulk ingest several times slower? | No, asserted twice before it was tested properly. The one-million control that first "exonerated" it was worthless -- at that size the index fits in cache and the test could not have shown the effect either way | Claim retracted |
 | 2026-08-07 | Then why does a bulk load decay fourfold? | 2,761 MB of indexes against a 966 MB heap and 128 MB of shared_buffers, with ~9x WAL amplification from wal_level=logical and a 1 GB max_wal_size. Measured with every geo index dropped: 10,416 rows/s falling to 2,645. Pre-existing, and hidden while the fixture was degenerate | 244 indexes duplicate a primary key, 283 MB |
 | 2026-08-07 | Does the read path hold at ten million on a fixture that is a region? | Yes. Viewport 59.9 ms against a 250 ms gate, radius 50.2 ms over 5,461 matches where the degenerate fixture read 33,090.3 ms over 570,000, facet read 1.5 ms from the rollup, nothing above 5.5 MB. The load took 40 min with indexes dropped and rebuilt, against ~7 h maintained row-by-row | B4 met on a real distribution |
+| 2026-08-08 | Why was the Explorer 78x slower -- indexes, or something else? | Something else, and the first answer was wrong. It is not structurally slower: on a selective indexed equality it beats the v1 path, 6.4 ms to 7.5 ms. The comparison had filtered on an unindexed property. The real cost was an exact count(*) over every match that the handler then discarded | 567.009 -> 7.144 ms |
 | 2026-08-08 | Does the Object Explorer meet the bound its sibling meets? | No. At ten million objects the same predicate shape costs 7.290 ms through /api/v1/objects/query and 567.009 ms through /object-explorer/query -- 78x, because only the first uses the property expression indexes. Caught on the first reference run that covered both implementations, and recorded as a FAIL rather than re-run or re-thresholded | GOAL2-010 (P1) opened |
 | 2026-08-07 | Did the scale gate really measure a shape nobody issues? | No. It posts filtered queries to /api/v1/objects/query through the real app, and that endpoint is a keyset select with a LIMIT. The platform has two typed-read implementations and the gate exercised the sound one while every surface called the other. The central claim of GOAL_2026-08-06 was wrong about its own reason | Correction published; B7 restated |
 | 2026-08-07 | Did the index rebuild actually rebuild everything? | No. `pg_indexes.indexdef` can span lines and the replay loop read line-by-line, so one expression index executed as fragments, failed silently and reported 0 s. Caught by counting indexes before measuring | Schema verified before every reading |
