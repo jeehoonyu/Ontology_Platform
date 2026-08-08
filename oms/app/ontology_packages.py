@@ -33,7 +33,7 @@ def _id(prefix: str) -> str:
 class OntologyPackage(Base):
     __tablename__ = "ontology_packages"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     organization_id: Mapped[str] = mapped_column(String, index=True)
     owning_project_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -49,7 +49,7 @@ class OntologyPackageVersion(Base):
     __tablename__ = "ontology_package_versions"
     __table_args__ = (UniqueConstraint("package_id", "version", name="uq_ontology_package_version"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     package_id: Mapped[str] = mapped_column(String, index=True)
     version: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="DRAFT", index=True)
@@ -64,7 +64,7 @@ class OntologyPackageVersion(Base):
 class OntologyPackageInstallation(Base):
     __tablename__ = "ontology_package_installations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     package_id: Mapped[str] = mapped_column(String, index=True)
     package_version_id: Mapped[str] = mapped_column(String, index=True)
     version: Mapped[str] = mapped_column(String)
@@ -83,7 +83,7 @@ class OntologyPackageResource(Base):
     __tablename__ = "ontology_package_resources"
     __table_args__ = (UniqueConstraint("target_project_id", "resource_type", "resource_id", name="uq_package_project_resource"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     package_id: Mapped[str] = mapped_column(String, index=True)
     installation_id: Mapped[str] = mapped_column(String, index=True)
     target_project_id: Mapped[str] = mapped_column(String, index=True)

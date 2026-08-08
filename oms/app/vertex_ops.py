@@ -35,7 +35,7 @@ class VtxGraph(Base):
     """A materialized exploration graph: seed objects expanded via link traversal."""
     __tablename__ = "vtx_graphs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     seed_object_ids: Mapped[list] = mapped_column(JSON, default=list)
@@ -52,7 +52,7 @@ class VtxTemplate(Base):
     """A reusable graph template: parameterized seeds + canned search-arounds."""
     __tablename__ = "vtx_templates"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     object_params: Mapped[list] = mapped_column(JSON, default=list)   # [{name, object_type_id}]
     scalar_params: Mapped[list] = mapped_column(JSON, default=list)   # [{name, default}]
@@ -64,7 +64,7 @@ class VtxScenario(Base):
     """Deterministic what-if simulation over a graph's node properties."""
     __tablename__ = "vtx_scenarios"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     graph_id: Mapped[str] = mapped_column(String, ForeignKey("vtx_graphs.id"), index=True)
     display_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     parameter_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -77,7 +77,7 @@ class VtxEventConfig(Base):
     """Event configuration: declares which object type carries time fields for the timeline."""
     __tablename__ = "vtx_event_configs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     graph_id: Mapped[str] = mapped_column(String, ForeignKey("vtx_graphs.id"), index=True)
     event_object_type_id: Mapped[str] = mapped_column(String)
     start_time_field: Mapped[str] = mapped_column(String)
@@ -90,7 +90,7 @@ class VtxControlPanel(Base):
     """Singleton-ish control-panel settings store (vertex-settings-control-panel)."""
     __tablename__ = "vtx_control_panel"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_at: Mapped[int] = mapped_column(Integer)
 

@@ -46,7 +46,7 @@ class LinDatasetSchema(Base):
     """Registered column schema for a dataset (drives column discovery)."""
     __tablename__ = "lin_dataset_schemas"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     # list of {name, type, description}
     columns: Mapped[list] = mapped_column(JSON, default=list)
@@ -57,7 +57,7 @@ class LinBuildRecord(Base):
     """A recorded build of a dataset (build timeline + staleness + rollback)."""
     __tablename__ = "lin_build_records"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, index=True)
     pipeline_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="SUCCEEDED")  # SUCCEEDED|FAILED|...
@@ -72,7 +72,7 @@ class LinMarking(Base):
     """A security marking applied to a dataset (drives PERMISSION_CHANGE impact)."""
     __tablename__ = "lin_markings"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, index=True)
     marking: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -82,7 +82,7 @@ class LinRollback(Base):
     """A recorded rollback of a dataset to a prior successful build."""
     __tablename__ = "lin_rollbacks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, index=True)
     from_build_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     to_build_id: Mapped[str] = mapped_column(String)

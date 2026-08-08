@@ -80,7 +80,7 @@ class OvView(Base):
     """A configured Object View bound to a single object type."""
     __tablename__ = "ov_views"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True, unique=True)
     form_factor: Mapped[str] = mapped_column(String, default="full")  # full|panel
     panel_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # instance|object_set
@@ -96,7 +96,7 @@ class OvTab(Base):
     """A tab within an Object View; each tab is backed by a Workshop module."""
     __tablename__ = "ov_tabs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     view_id: Mapped[str] = mapped_column(String, ForeignKey("ov_views.id"), index=True)
     tab_type: Mapped[str] = mapped_column(String, default="workshop")  # workshop|legacy
     display_name: Mapped[str] = mapped_column(String)
@@ -110,7 +110,7 @@ class OvWidget(Base):
     """A widget within a tab (property_list, links, markdown, layout containers...)."""
     __tablename__ = "ov_widgets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     tab_id: Mapped[str] = mapped_column(String, ForeignKey("ov_tabs.id"), index=True)
     widget_type: Mapped[str] = mapped_column(String)
     widget_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -122,7 +122,7 @@ class OvVersion(Base):
     """An immutable snapshot of a view's content; published versions are user-visible."""
     __tablename__ = "ov_versions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     view_id: Mapped[str] = mapped_column(String, ForeignKey("ov_views.id"), index=True)
     version_number: Mapped[int] = mapped_column(Integer)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -136,7 +136,7 @@ class OvSidebar(Base):
     """The applications sidebar for a view (optional, opt-in)."""
     __tablename__ = "ov_sidebars"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     view_id: Mapped[str] = mapped_column(String, ForeignKey("ov_views.id"), index=True, unique=True)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer)

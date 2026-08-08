@@ -26,7 +26,7 @@ def _now() -> int:
 
 class UsageRecord(Base):
     __tablename__ = "admin_usage_records"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     principal: Mapped[str] = mapped_column(String, index=True)
     project: Mapped[str] = mapped_column(String, index=True)
     organization: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
@@ -39,7 +39,7 @@ class UsageRecord(Base):
 
 class UsageQuota(Base):
     __tablename__ = "admin_usage_quotas"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     scope_type: Mapped[str] = mapped_column(String, index=True)  # project | organization
     scope_id: Mapped[str] = mapped_column(String, index=True)
     metric: Mapped[str] = mapped_column(String, index=True)

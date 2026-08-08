@@ -21,7 +21,7 @@ router = APIRouter(tags=["ontology-health"])
 class OntologyHealthRun(Base):
     __tablename__ = "ontology_health_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     object_type_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String, nullable=False, index=True)

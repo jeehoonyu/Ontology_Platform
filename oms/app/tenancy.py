@@ -32,7 +32,7 @@ def _now() -> int:
 class PlatformOrganization(Base):
     __tablename__ = "platform_organizations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="ACTIVE", index=True)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -42,7 +42,7 @@ class PlatformOrganization(Base):
 class PlatformProject(Base):
     __tablename__ = "platform_projects"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     organization_id: Mapped[str] = mapped_column(String, index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -55,7 +55,7 @@ class ProjectMembership(Base):
     __tablename__ = "platform_project_memberships"
     __table_args__ = (UniqueConstraint("project_id", "principal_id", name="uq_project_membership_principal"),)
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, index=True)
     principal_id: Mapped[str] = mapped_column(String, index=True)
     role: Mapped[str] = mapped_column(String)

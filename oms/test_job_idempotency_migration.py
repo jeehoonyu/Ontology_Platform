@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             "SELECT * FROM platform_job_idempotency_receipts ORDER BY created_at"
         ).fetchall()
 
-    assert version == "0040_object_facet_counts", version
+    assert version == "0041_drop_redundant_pk_indexes", version
     assert len(receipts) == 1, [dict(row) for row in receipts]
     receipt = receipts[0]
     assert receipt["job_id"] == "legacy-job-first" and receipt["project_id"] == "legacy-project"

@@ -47,7 +47,7 @@ def _audit(db: Session, actor: str, event: str, subject_type: str, subject_id: s
 class ClsScheme(Base):
     """A classification system: an ordered list of levels + disjunctive category groups."""
     __tablename__ = "cls_schemes"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     levels: Mapped[list] = mapped_column(JSON, default=list)            # low -> high
     category_groups: Mapped[list] = mapped_column(JSON, default=list)   # [[cat,...], ...] (OR within a group)
@@ -57,7 +57,7 @@ class ClsScheme(Base):
 class ClsClassification(Base):
     """A classification applied to a file / dataset / project."""
     __tablename__ = "cls_classifications"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     scheme_id: Mapped[str] = mapped_column(String, index=True)
     kind: Mapped[str] = mapped_column(String)          # file | data | project
     level: Mapped[str] = mapped_column(String)
@@ -69,7 +69,7 @@ class ClsClassification(Base):
 class ClsClearance(Base):
     """A clearance held by a principal within a scheme."""
     __tablename__ = "cls_clearances"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     principal_id: Mapped[str] = mapped_column(String, index=True)
     scheme_id: Mapped[str] = mapped_column(String, index=True)
     max_level: Mapped[str] = mapped_column(String)

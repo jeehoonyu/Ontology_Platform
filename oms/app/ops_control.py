@@ -38,7 +38,7 @@ def _new_id(prefix: str) -> str:
 class OpsEvent(Base):
     __tablename__ = "ops_events"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     source: Mapped[str] = mapped_column(String, index=True)
     event_type: Mapped[str] = mapped_column(String, index=True)
@@ -57,7 +57,7 @@ class OpsEvent(Base):
 class AlertRule(Base):
     __tablename__ = "ops_alert_rules"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -75,7 +75,7 @@ class AlertRule(Base):
 class AlertEvent(Base):
     __tablename__ = "ops_alert_events"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     rule_id: Mapped[str] = mapped_column(String, index=True)
     event_id: Mapped[str] = mapped_column(String, index=True)
@@ -96,7 +96,7 @@ class AlertEvent(Base):
 class Incident(Base):
     __tablename__ = "ops_incidents"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -115,7 +115,7 @@ class Incident(Base):
 class Runbook(Base):
     __tablename__ = "ops_runbooks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -128,7 +128,7 @@ class Runbook(Base):
 class RunbookExecution(Base):
     __tablename__ = "ops_runbook_executions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     runbook_id: Mapped[str] = mapped_column(String, index=True)
     incident_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
@@ -143,7 +143,7 @@ class RunbookExecution(Base):
 class OpsNotification(Base):
     __tablename__ = "ops_notifications"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     recipient: Mapped[str] = mapped_column(String, default="workspace", index=True)
     severity: Mapped[str] = mapped_column(String, default="info", index=True)
@@ -161,7 +161,7 @@ class OpsNotification(Base):
 class OpsSlaPolicy(Base):
     __tablename__ = "ops_sla_policies"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     scope: Mapped[dict] = mapped_column(JSON, default=dict)

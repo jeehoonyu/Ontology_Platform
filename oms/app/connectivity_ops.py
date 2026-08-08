@@ -26,7 +26,7 @@ def _now() -> int:
 
 class SyncCursorState(Base):
     __tablename__ = "sync_cursor_state"
-    sync_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    sync_id: Mapped[str] = mapped_column(String, primary_key=True)
     cursor_field: Mapped[str] = mapped_column(String)
     last_value: Mapped[dict] = mapped_column(JSON, default=dict)  # {"value": ...}
     runs: Mapped[int] = mapped_column(Integer, default=0)

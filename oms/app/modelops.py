@@ -36,7 +36,7 @@ def _new_id(prefix: str) -> str:
 class ModelMonitor(Base):
     __tablename__ = "model_monitors"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -55,7 +55,7 @@ class ModelMonitor(Base):
 class ModelMonitorRun(Base):
     __tablename__ = "model_monitor_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     monitor_id: Mapped[str] = mapped_column(String, index=True)
     objective_id: Mapped[str] = mapped_column(String, index=True)
@@ -74,7 +74,7 @@ class ModelMonitorRun(Base):
 class ModelPredictionLog(Base):
     __tablename__ = "model_prediction_logs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     deployment_id: Mapped[str] = mapped_column(String, index=True)
     objective_id: Mapped[str] = mapped_column(String, index=True)

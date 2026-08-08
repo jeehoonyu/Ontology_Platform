@@ -113,7 +113,7 @@ def validate_api_name(name: str, style: str) -> List[str]:
 # ---------------------------------------------------------------------------
 class ObjectTypeProfile(Base):
     __tablename__ = "object_type_profiles"
-    object_type_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    object_type_id: Mapped[str] = mapped_column(String, primary_key=True)
     api_name: Mapped[str] = mapped_column(String)
     primary_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     title_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -137,7 +137,7 @@ class ActionLog(Base):
     modifications — the BEFORE values so the execution can be reversed (undo).
     """
     __tablename__ = "act_action_log"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     action_type_id: Mapped[str] = mapped_column(String, index=True)
     actor: Mapped[str] = mapped_column(String, default="system", index=True)

@@ -25,7 +25,7 @@ class ModelingObjective(Base):
     """Defines the ML problem: what to predict and from which features."""
     __tablename__ = "modeling_objectives"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -41,7 +41,7 @@ class ModelSubmission(Base):
     """A trained model artifact associated with an objective."""
     __tablename__ = "model_submissions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     algorithm: Mapped[str] = mapped_column(String)
@@ -64,7 +64,7 @@ class ModelDeployment(Base):
     """A running deployment backed by a released submission."""
     __tablename__ = "model_deployments"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)

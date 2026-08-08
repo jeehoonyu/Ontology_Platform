@@ -21,7 +21,7 @@ class MediaSet(Base):
     """
     __tablename__ = "media_sets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     media_type: Mapped[str] = mapped_column(String, nullable=False)  # image/pdf/audio/video/document
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -37,7 +37,7 @@ class MediaItem(Base):
     """
     __tablename__ = "media_items"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     media_set_id: Mapped[str] = mapped_column(String, ForeignKey("media_sets.id"), nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     mime_type: Mapped[str] = mapped_column(String, nullable=False)

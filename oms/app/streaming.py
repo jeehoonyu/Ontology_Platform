@@ -18,7 +18,7 @@ from .production_auth import Principal, require_permission
 class Stream(Base):
     __tablename__ = "streams"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     schema_: Mapped[dict] = mapped_column("schema", JSON, default=dict)
@@ -35,7 +35,7 @@ class Stream(Base):
 class StreamRecord(Base):
     __tablename__ = "stream_records"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     stream_id: Mapped[str] = mapped_column(String, ForeignKey("streams.id"), index=True)
     sequence: Mapped[int] = mapped_column(Integer, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)

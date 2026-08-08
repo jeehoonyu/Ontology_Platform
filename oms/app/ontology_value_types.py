@@ -40,7 +40,7 @@ import time, uuid, re, math
 class ValueType(Base):
     __tablename__ = "value_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     base_type: Mapped[str] = mapped_column(String, nullable=False)
     # JSON: constraint families, e.g.
@@ -66,7 +66,7 @@ class ValueTypeVersion(Base):
     """
     __tablename__ = "value_type_versions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     value_type_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     base_type: Mapped[str] = mapped_column(String, nullable=False)

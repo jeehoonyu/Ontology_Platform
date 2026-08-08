@@ -74,7 +74,7 @@ def validate_auth_configuration() -> None:
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     principal_id: Mapped[str] = mapped_column(String, index=True)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -88,7 +88,7 @@ class AuthSession(Base):
 class OidcFlow(Base):
     __tablename__ = "auth_oidc_flows"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     state: Mapped[str] = mapped_column(String, unique=True, index=True)
     nonce: Mapped[str] = mapped_column(String)
     code_verifier: Mapped[str] = mapped_column(String)

@@ -27,7 +27,7 @@ class OntologyFunction(Base):
     """
     __tablename__ = "ontology_functions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     kind: Mapped[str] = mapped_column(String, default="query")          # "query" | "compute"
@@ -44,7 +44,7 @@ class OntologyFunctionRun(Base):
     """
     __tablename__ = "ontology_function_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     function_id: Mapped[str] = mapped_column(String, index=True)
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)
     output: Mapped[dict] = mapped_column(JSON, default=dict)

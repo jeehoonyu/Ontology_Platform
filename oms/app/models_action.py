@@ -19,7 +19,7 @@ class OutboxEvent(Base):
     """
     __tablename__ = "action_outbox"
 
-    id = Column(String, primary_key=True, index=True) # UUID
+    id = Column(String, primary_key=True) # UUID
     project_id = Column(String, default="default", index=True, nullable=False)
     action_type_id = Column(String, index=True)
     payload = Column(JSON) # The parameters of the action
@@ -32,7 +32,7 @@ class IdempotencyKey(Base):
     """
     __tablename__ = "idempotency_keys"
 
-    key = Column(String, primary_key=True, index=True)
+    key = Column(String, primary_key=True)
     project_id = Column(String, default="default", index=True, nullable=False)
     action_type_id = Column(String, nullable=False)
     response_payload = Column(JSON, nullable=True) # Cached success response
@@ -44,7 +44,7 @@ class ApprovalRequest(Base):
     """
     __tablename__ = "approval_requests"
 
-    id = Column(String, primary_key=True, index=True)
+    id = Column(String, primary_key=True)
     project_id = Column(String, default="default", index=True, nullable=False)
     action_type_id = Column(String, ForeignKey("action_types.id"), index=True, nullable=False)
     requester = Column(String, nullable=False, default="system")
@@ -60,7 +60,7 @@ class AuditLog(Base):
     """
     __tablename__ = "audit_logs"
 
-    id = Column(String, primary_key=True, index=True)
+    id = Column(String, primary_key=True)
     actor = Column(String, nullable=False, default="system")
     event_type = Column(String, index=True, nullable=False)
     subject_type = Column(String, index=True, nullable=False)
