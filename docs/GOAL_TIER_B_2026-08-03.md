@@ -278,12 +278,46 @@ What remains is not code:
 | --- | --- |
 | A pilot deployment with OIDC, TLS, and a real `.env.production` | Not created; `.env.production` does not exist in this checkout |
 | A second isolated Compose project for restores | `docker-compose.pilot-recovery.yml` exists and its topology validates |
-| **Seven days with a frozen migration head** | **The blocker.** Heads moved 0039 → 0042 in four days; `tick` aborts the window the moment the head changes |
+| **Seven days with a frozen migration head** | **Declared 2026-08-09** at `0042_stream_outer_joins`, enforced in CI |
 
-The head freeze is the real gate on starting. A window opened at `0042_stream_outer_joins`
-is void the moment `0043` lands, and the schema has been changing roughly daily. Nothing
-in the harness can soften this and it should not: pooling samples across schemas is
-exactly the non-completion rule this tier exists to enforce.
+The head freeze is the real gate on starting, and it is now mechanical rather than an
+intention. `docs/SCHEMA_FREEZE.json` declares the frozen head with an owner and an end
+date, and `oms/validate_schema_freeze.py` runs in CI beside the other ratchets: while the
+freeze is open, any other head fails the build. That moves the enforcement from
+destructive to cheap. `pilot_window.py tick` already refused to pool two schemas, but it
+could only discover the change after the fact, when the days were spent and the migration
+was merged. Now the pull request goes red instead. An expired freeze also fails, so the
+file cannot quietly become a thing that looks like protection and is not.
+
+### What was verified locally on 2026-08-09, and what was not
+
+Against a real API on the development stack, with `PILOT_EVIDENCE_ROOT` pointed at a
+scratch directory so nothing entered the release evidence set:
+
+- `preflight` reported the live configuration correctly, including the case it exists
+  for: `PILOT_RECOVERY_TOKEN` exported in the operator's shell but absent from the API
+  container, so the recovery protocol was disabled and answered 404. With the token
+  plumbed into the container, the same request returned 422 — mounted, credential
+  accepted.
+- Six real availability samples against `/health/live` and `/health/ready`, all 200,
+  100.0% available, hash chain intact.
+- `aggregate` on that clean run still reported **FAIL**: `observed_seconds=180` against
+  `604800`, `samples=6` against `20160`, and 167h 57m of window remaining. A clean window
+  does not buy a short one.
+
+**The seven-day clock was not started, and could not be from this machine.** There is no
+`.env.production`, no OIDC issuer, and no TLS ingress here; the development database is
+32 GB, so the first tick would fire a `pg_dump` of it. More to the point, a window
+measures whatever host it runs on, and a laptop that sleeps and restarts is not a pilot
+deployment — the third standing invariant, that a measurement is evidence only for the
+path it traverses, applies to the machine as much as to the query. Starting a window here
+would have produced a well-formed file that means nothing, which is the failure this tier
+exists to prevent.
+
+Starting the real window needs a deployed pilot host. On it, in order:
+`validate_schema_freeze.py`, the `pilot-observability` profile, `pilot_window.py
+preflight`, `pilot_window.py start`, then `register-pilot-window.ps1` and
+`Start-ScheduledTask`.
 
 ## Exit criteria
 
