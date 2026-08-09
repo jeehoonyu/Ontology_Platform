@@ -27,7 +27,7 @@ TARGET_PORT = int(os.environ.get("ONTOLOGY_BACKUP_TARGET_PORT", "55433"))
 POSTGRES_USER = os.environ.get("ONTOLOGY_BACKUP_POSTGRES_USER", "ontology")
 POSTGRES_PASSWORD = os.environ.get("ONTOLOGY_BACKUP_POSTGRES_PASSWORD", "")
 POSTGRES_DB = os.environ.get("ONTOLOGY_BACKUP_POSTGRES_DB", "ontology")
-POSTGRES_IMAGE = os.environ.get("ONTOLOGY_BACKUP_POSTGRES_IMAGE", "postgres:16-alpine")
+POSTGRES_IMAGE = os.environ.get("ONTOLOGY_BACKUP_POSTGRES_IMAGE", "").strip()
 RESET_TARGET = os.environ.get("ONTOLOGY_BACKUP_RESET_TARGET", "").lower() in {"1", "true", "yes"}
 OBJECTS = int(os.environ.get("ONTOLOGY_BACKUP_OBJECTS", "10000000"))
 LINKS = int(os.environ.get("ONTOLOGY_BACKUP_LINKS", "50000000"))
@@ -52,6 +52,16 @@ def docker(*args: str, timeout: float | None = None, check: bool = True) -> subp
     if check and result.returncode != 0:
         raise AssertionError({"docker_args": args, "stdout": result.stdout, "stderr": result.stderr})
     return result
+
+
+if not POSTGRES_IMAGE:
+    # A physical backup can only start on the same PostgreSQL major version.
+    # Reusing the source image digest also preserves extensions such as PostGIS.
+    POSTGRES_IMAGE = docker(
+        "inspect", "--format", "{{.Image}}", SOURCE_CONTAINER,
+    ).stdout.strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", POSTGRES_IMAGE):
+        raise SystemExit("Could not derive a pinned PostgreSQL image from the source container")
 
 
 def exists(kind: str, name: str) -> bool:
@@ -169,6 +179,7 @@ volume_bytes = int(docker(
 evidence = {
     "status": "PASS",
     "backup_method": "pg_basebackup_physical_stream",
+    "postgres_image": POSTGRES_IMAGE,
     "backup_seconds": round(backup_seconds, 3),
     "restore_readiness_seconds": round(restore_seconds, 3),
     "rto_limit_seconds": RTO_LIMIT_SECONDS,

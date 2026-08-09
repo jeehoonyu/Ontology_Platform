@@ -4,6 +4,7 @@ services:
     environment:
       APP_ENV: production
       AUTH_MODE: oidc
+      ONTOLOGY_CONTRACT_ENFORCEMENT: strict
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
       OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER}
       OIDC_BACKCHANNEL_BASE_URL: ${OIDC_BACKCHANNEL_BASE_URL:-}
@@ -45,6 +46,8 @@ services:
       EVENT_KAFKA_ALLOW_PLAINTEXT: ${EVENT_KAFKA_ALLOW_PLAINTEXT:-false}
       EVENT_KAFKA_REQUEST_TIMEOUT_MS: ${EVENT_KAFKA_REQUEST_TIMEOUT_MS:-30000}
       EVENT_KAFKA_MAX_BLOCK_MS: ${EVENT_KAFKA_MAX_BLOCK_MS:-10000}
+      PILOT_EVIDENCE_ROOT: /var/lib/ontology/pilot-evidence
+      PILOT_RECOVERY_TOKEN: ${PILOT_RECOVERY_TOKEN:-}
     ports: []
     expose:
       - "8000"
@@ -52,6 +55,7 @@ services:
       - ontology_snapshots:/var/lib/ontology/snapshots
       - ontology_snapshot_cache:/var/cache/ontology/snapshots
       - ontology_plugin_bundles:/var/lib/ontology/plugins
+      - ${PILOT_EVIDENCE_PATH:-ontology_pilot_evidence}:/var/lib/ontology/pilot-evidence:ro
     deploy:
       resources:
         limits:
@@ -109,6 +113,43 @@ services:
           memory: 2G
         reservations:
           memory: 256M
+
+  pilot-observer:
+    profiles: ["pilot-observability"]
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    command:
+      - python
+      - /app/availability_probe.py
+      - probe
+      - --target
+      - http://oms-api:8000
+      - --samples-file
+      - /var/lib/ontology/pilot-evidence/availability-samples.jsonl
+      - --state-file
+      - /var/lib/ontology/pilot-evidence/availability-probe-state.json
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ${PILOT_EVIDENCE_PATH:-ontology_pilot_evidence}:/var/lib/ontology/pilot-evidence
+    depends_on:
+      - oms-api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; p='/var/lib/ontology/pilot-evidence/availability-probe-state.json'; assert os.path.exists(p) and time.time()-os.path.getmtime(p)<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          memory: 32M
 
   plugin-oci-daemon:
     profiles: ["plugin-execution"]
@@ -219,6 +260,7 @@ volumes:
   ontology_snapshots:
   ontology_snapshot_cache:
   plugin_oci_data:
+  ontology_pilot_evidence:
 
 networks:
   plugin_runtime:

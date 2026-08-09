@@ -1206,7 +1206,7 @@ def builder_catalog(
 
 @router.post("/ontology/changes/impact")
 def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
-    from . import apps, investigations, models, pipeline_builder_ops
+    from . import apps, investigations, models, ontology_runtime_v1, pipeline_builder_ops
 
     object_type = db.get(models.ObjectType, body.object_type_id)
     if not object_type:
@@ -1218,14 +1218,63 @@ def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = D
         (models.LinkType.source_object_type_id == body.object_type_id) | (models.LinkType.target_object_type_id == body.object_type_id)
     ).all()
     search_tokens = {body.object_type_id}
-    pipeline_rows = db.query(pipeline_builder_ops.PipelineBuilderGraph).filter(pipeline_builder_ops.PipelineBuilderGraph.project_id == project_id).all()
-    pipelines = [row for row in pipeline_rows if any(token in str(row.nodes or []) or token in str(row.edges or []) for token in search_tokens)]
-    workshop_rows = db.query(apps.WorkshopModule).filter(apps.WorkshopModule.project_id == project_id).all()
-    workshops = [row for row in workshop_rows if body.object_type_id in str({"layout": row.layout, "widgets": row.widgets, "variables": row.variables})]
-    artifact_rows = db.query(PlatformArtifact).filter(PlatformArtifact.project_id == project_id).all()
-    dependent_artifacts = [row for row in artifact_rows if body.object_type_id in str(_revision(db, row.id, row.current_revision).state or {})]
-    destructive = [change for change in body.changes if str(change.get("operation") or change.get("type") or "").lower() in {"delete", "remove", "archive", "change_type", "change_primary_key"}]
+    destructive = [change for change in body.changes if str(change.get("operation") or change.get("type") or "").lower() in {"delete", "remove", "archive", "archive_property", "change_type", "change_primary_key"}]
     affected_property_names = [str(change.get("property_name") or change.get("field") or "") for change in destructive]
+    binding_rows = db.query(ontology_runtime_v1.OntologyResourceDefinition).filter(
+        ontology_runtime_v1.OntologyResourceDefinition.project_id == project_id,
+        ontology_runtime_v1.OntologyResourceDefinition.resource_kind == "contract_binding",
+        ontology_runtime_v1.OntologyResourceDefinition.object_type_id == body.object_type_id,
+        ontology_runtime_v1.OntologyResourceDefinition.status == "ACTIVE",
+    ).all()
+    affected_property_set = {name for name in affected_property_names if name}
+    bindings = [
+        row for row in binding_rows
+        if not affected_property_set
+        or not set((row.definition or {}).get("properties") or [])
+        or bool(affected_property_set & set((row.definition or {}).get("properties") or []))
+    ]
+    exact_consumers = {
+        (str((row.definition or {}).get("consumer_kind") or ""), str((row.definition or {}).get("consumer_id") or ""))
+        for row in bindings
+    }
+    all_bound_consumers = {
+        (str((row.definition or {}).get("consumer_kind") or ""), str((row.definition or {}).get("consumer_id") or ""))
+        for row in binding_rows
+    }
+    pipeline_rows = db.query(pipeline_builder_ops.PipelineBuilderGraph).filter(pipeline_builder_ops.PipelineBuilderGraph.project_id == project_id).all()
+    pipelines = [
+        row for row in pipeline_rows
+        if ("pipeline", row.id) in exact_consumers
+        or (("pipeline", row.id) not in all_bound_consumers and any(token in str(row.nodes or []) or token in str(row.edges or []) for token in search_tokens))
+    ]
+    workshop_rows = db.query(apps.WorkshopModule).filter(apps.WorkshopModule.project_id == project_id).all()
+    workshops = [
+        row for row in workshop_rows
+        if ("workshop", row.id) in exact_consumers
+        or (("workshop", row.id) not in all_bound_consumers and body.object_type_id in str({"layout": row.layout, "widgets": row.widgets, "variables": row.variables}))
+    ]
+    artifact_rows = db.query(PlatformArtifact).filter(PlatformArtifact.project_id == project_id).all()
+    dependent_artifacts = [
+        row for row in artifact_rows
+        if (f"artifact.{row.artifact_type}", row.id) in exact_consumers
+        or ((f"artifact.{row.artifact_type}", row.id) not in all_bound_consumers and body.object_type_id in str(_revision(db, row.id, row.current_revision).state or {}))
+    ]
+    represented = {("pipeline", row.id) for row in pipelines} | {("workshop", row.id) for row in workshops}
+    represented |= {(f"artifact.{row.artifact_type}", row.id) for row in dependent_artifacts}
+    other_consumers = [
+        {
+            "consumer_kind": kind,
+            "consumer_id": consumer_id,
+            "ontology_revision_id": row.ontology_revision_id,
+            "properties": (row.definition or {}).get("properties") or [],
+        }
+        for row in bindings
+        for kind, consumer_id in [(
+            str((row.definition or {}).get("consumer_kind") or ""),
+            str((row.definition or {}).get("consumer_id") or ""),
+        )]
+        if (kind, consumer_id) not in represented
+    ]
     populated_values = 0
     if affected_property_names:
         for instance in db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == body.object_type_id).all():
@@ -1245,7 +1294,7 @@ def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = D
         "summary": {
             "objects": objects, "populated_values": populated_values, "link_types": len(links),
             "pipelines": len(pipelines), "workshops": len(workshops), "artifacts": len(dependent_artifacts),
-            "reports_reviewed": report_count,
+            "contract_bindings": len(bindings), "other_contract_consumers": len(other_consumers), "reports_reviewed": report_count,
         },
         "affected": {
             "objects": [{"id": body.object_type_id, "count": objects}],
@@ -1253,6 +1302,8 @@ def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = D
             "pipelines": [{"id": row.id, "display_name": row.display_name} for row in pipelines],
             "workshops": [{"id": row.id, "display_name": row.display_name} for row in workshops],
             "artifacts": [{"id": row.id, "artifact_type": row.artifact_type, "display_name": row.display_name} for row in dependent_artifacts],
+            "contract_bindings": [ontology_runtime_v1._resource_dict(row) for row in bindings],
+            "other_consumers": other_consumers,
         },
         "warnings": warnings,
         "recommended_action": "Archive affected fields and publish a recoverable revision." if destructive else "Validate mappings and publish the draft.",
@@ -1606,6 +1657,16 @@ def publish_artifact(artifact_id: str, body: PublishRequest, principal: Principa
     revision.validation = _validate_state(row.artifact_type, revision.state or {})
     if revision.validation.get("status") == "FAIL":
         raise HTTPException(status_code=422, detail={"message": "Artifact validation failed", "validation": revision.validation})
+    from . import ontology_runtime_v1
+    ontology_runtime_v1.bind_ontology_contract(
+        db,
+        project_id=row.project_id,
+        consumer_kind=f"artifact.{row.artifact_type}",
+        consumer_id=row.id,
+        consumer_version=str(row.current_revision),
+        payload={"state": revision.state or {}, "metadata": row.metadata_ or {}},
+        actor=principal.id,
+    )
     revision.published = True
     revision.message = body.message or revision.message
     row.published_revision = row.current_revision

@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -133,6 +134,14 @@ class OntologyCompileRequest(BaseModel):
     project_id: str = "default"
     object_type_ids: List[str] = Field(default_factory=list)
     revision_id: Optional[str] = None
+
+
+class OntologyContractRequest(BaseModel):
+    project_id: str = "default"
+    consumer_kind: str = Field(min_length=1, max_length=100)
+    consumer_id: str = Field(min_length=1, max_length=200)
+    consumer_version: str = Field(default="draft", min_length=1, max_length=100)
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class OntologyIndexPlanRequest(BaseModel):
@@ -315,6 +324,405 @@ def _active_revision_id(db: Session, project_id: str) -> Optional[str]:
         ontology_versioning.OntologyEnvironment.name == "production",
     ).first()
     return environment.current_revision_id if environment else None
+
+
+_OBJECT_REFERENCE_KEYS = {
+    "object_type_id", "source_object_type_id", "target_object_type_id",
+    "object_type", "source_object_type", "target_object_type",
+}
+_ACTION_REFERENCE_KEYS = {"action_type_id"}
+_PROPERTY_LIST_KEYS = {
+    "properties", "property_names", "selected_properties", "selected_columns",
+    "ontology_properties", "target_properties",
+}
+
+
+def _contract_enforcement_strict() -> bool:
+    configured = os.getenv("ONTOLOGY_CONTRACT_ENFORCEMENT")
+    if configured is not None:
+        return configured.strip().lower() in {"strict", "true", "1", "on"}
+    return os.getenv("APP_ENV", "development").strip().lower() == "production"
+
+
+def _object_type_project_id(object_type: models.ObjectType) -> str:
+    manager = ((object_type.properties or {}).get("__manager") or {}) if isinstance(object_type.properties, dict) else {}
+    return str(manager.get("project_id") or object_type.project_id or "default")
+
+
+def _extract_contract_references(payload: Any) -> Dict[str, Any]:
+    """Extract ontology references from structured builder state without string scanning."""
+    object_refs: Dict[str, Dict[str, Any]] = {}
+    action_refs: Dict[str, set[str]] = {}
+
+    def add_object(object_type_id: Any, path: str, properties: Optional[List[Any]] = None) -> Optional[str]:
+        if not isinstance(object_type_id, str) or not object_type_id.strip():
+            return None
+        key = object_type_id.strip()
+        entry = object_refs.setdefault(key, {"object_type_id": key, "properties": set(), "source_paths": set()})
+        entry["source_paths"].add(path)
+        for value in properties or []:
+            if isinstance(value, str) and value and not value.startswith("__"):
+                entry["properties"].add(value)
+        return key
+
+    def visit(value: Any, path: str, inherited_object_type: Optional[str] = None) -> None:
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{path}[{index}]", inherited_object_type)
+            return
+        if not isinstance(value, dict):
+            return
+
+        local_types: List[str] = []
+        for key in _OBJECT_REFERENCE_KEYS:
+            candidate = value.get(key)
+            resolved = add_object(candidate, f"{path}.{key}")
+            if resolved:
+                local_types.append(resolved)
+        local_object_type = local_types[0] if len(local_types) == 1 else inherited_object_type
+
+        for key in _ACTION_REFERENCE_KEYS:
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                action_refs.setdefault(candidate.strip(), set()).add(f"{path}.{key}")
+
+        if local_object_type:
+            properties: List[Any] = []
+            for key in _PROPERTY_LIST_KEYS:
+                candidate = value.get(key)
+                if isinstance(candidate, list):
+                    properties.extend(candidate)
+                elif isinstance(candidate, dict):
+                    properties.extend(candidate.keys())
+            for key in ("property_mapping", "mapping", "field_mapping"):
+                candidate = value.get(key)
+                if isinstance(candidate, dict):
+                    properties.extend(candidate.values())
+                elif isinstance(candidate, list):
+                    properties.extend(
+                        item.get("target_property")
+                        for item in candidate if isinstance(item, dict)
+                    )
+            for key in ("property_name", "target_property", "ontology_property"):
+                if key in value:
+                    properties.append(value.get(key))
+            add_object(local_object_type, path, properties)
+
+        for key, child in value.items():
+            visit(child, f"{path}.{key}", local_object_type)
+
+    visit(payload, "payload")
+    return {
+        "object_types": [
+            {
+                "object_type_id": entry["object_type_id"],
+                "properties": sorted(entry["properties"]),
+                "source_paths": sorted(entry["source_paths"]),
+            }
+            for entry in sorted(object_refs.values(), key=lambda item: item["object_type_id"])
+        ],
+        "action_types": [
+            {"action_type_id": action_id, "source_paths": sorted(paths)}
+            for action_id, paths in sorted(action_refs.items())
+        ],
+    }
+
+
+def validate_ontology_contract(
+    db: Session,
+    *,
+    project_id: str,
+    consumer_kind: str,
+    consumer_id: str,
+    consumer_version: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    references = _extract_contract_references(payload)
+    revision_id = _active_revision_id(db, project_id)
+    revision = db.get(ontology_versioning.OntologyRevision, revision_id) if revision_id else None
+    issues: List[Dict[str, Any]] = []
+    strict = _contract_enforcement_strict()
+    has_references = bool(references["object_types"] or references["action_types"])
+    if has_references and not revision:
+        issues.append({
+            "code": "ACTIVE_ONTOLOGY_REVISION_REQUIRED",
+            "severity": "ERROR" if strict else "WARNING",
+            "message": "Publish an ontology revision to the production environment before publishing this consumer.",
+        })
+
+    manifest = revision.manifest if revision else {}
+    object_contracts = {
+        str(item.get("id")): item for item in (manifest.get("object_types") or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    action_contracts = {
+        str(item.get("id")): item for item in (manifest.get("action_types") or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    for reference in references["object_types"]:
+        live_object_type = db.get(models.ObjectType, reference["object_type_id"])
+        if not live_object_type:
+            issues.append({"code": "OBJECT_TYPE_NOT_FOUND", "severity": "ERROR", **reference})
+        elif _object_type_project_id(live_object_type) != project_id:
+            issues.append({"code": "CROSS_PROJECT_OBJECT_TYPE", "severity": "ERROR", **reference})
+    for reference in references["action_types"]:
+        live_action = db.get(models.ActionType, reference["action_type_id"])
+        if not live_action:
+            issues.append({"code": "ACTION_TYPE_NOT_FOUND", "severity": "ERROR", **reference})
+        elif live_action.project_id != project_id:
+            issues.append({"code": "CROSS_PROJECT_ACTION_TYPE", "severity": "ERROR", **reference})
+    if revision:
+        for reference in references["object_types"]:
+            object_type_id = reference["object_type_id"]
+            contract = object_contracts.get(object_type_id)
+            if not contract:
+                issues.append({"code": "OBJECT_TYPE_NOT_IN_REVISION", "severity": "ERROR", "object_type_id": object_type_id, "source_paths": reference["source_paths"]})
+                continue
+            available = set((contract.get("properties") or {}).keys())
+            missing = sorted(set(reference["properties"]) - available)
+            if missing:
+                issues.append({"code": "PROPERTIES_NOT_IN_REVISION", "severity": "ERROR", "object_type_id": object_type_id, "properties": missing, "source_paths": reference["source_paths"]})
+        for reference in references["action_types"]:
+            if reference["action_type_id"] not in action_contracts:
+                issues.append({"code": "ACTION_TYPE_NOT_IN_REVISION", "severity": "ERROR", **reference})
+
+    status = "FAIL" if any(item["severity"] == "ERROR" for item in issues) else "WARN" if issues else "PASS"
+    return {
+        "project_id": project_id,
+        "consumer_kind": consumer_kind,
+        "consumer_id": consumer_id,
+        "consumer_version": consumer_version,
+        "status": status,
+        "strict": strict,
+        "ontology_revision_id": revision.id if revision else None,
+        "ontology_revision": revision.revision if revision else None,
+        "ontology_checksum": revision.checksum if revision else None,
+        "references": references,
+        "issues": issues,
+    }
+
+
+def _contract_binding_health(row: OntologyResourceDefinition, revision: Optional[ontology_versioning.OntologyRevision]) -> Dict[str, Any]:
+    definition = row.definition or {}
+    if not revision:
+        return {
+            "status": "UNVERSIONED" if not row.ontology_revision_id else "NO_ACTIVE_REVISION",
+            "compatible": not row.ontology_revision_id,
+            "active_revision_id": None,
+            "active_checksum": None,
+            "missing_properties": [],
+        }
+    target_kind = str(definition.get("target_kind") or "object_type")
+    target_id = str(definition.get("target_id") or row.object_type_id or "")
+    collection = "action_types" if target_kind == "action_type" else "object_types"
+    targets = {
+        str(item.get("id")): item for item in (revision.manifest or {}).get(collection, [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    target = targets.get(target_id)
+    missing_properties: List[str] = []
+    reason = None
+    if not target or str(target.get("status") or "ACTIVE").upper() == "ARCHIVED":
+        reason = "TARGET_NOT_IN_ACTIVE_REVISION"
+    elif target_kind == "object_type":
+        available = set((target.get("properties") or {}).keys())
+        missing_properties = sorted(set(definition.get("properties") or []) - available)
+        if missing_properties:
+            reason = "PROPERTIES_NOT_IN_ACTIVE_REVISION"
+    compatible = reason is None
+    if not compatible:
+        status = "BROKEN"
+    elif not row.ontology_revision_id:
+        status = "UNVERSIONED"
+    elif row.ontology_revision_id == revision.id:
+        status = "CURRENT"
+    else:
+        status = "COMPATIBLE_STALE"
+    return {
+        "status": status,
+        "compatible": compatible,
+        "reason": reason,
+        "bound_revision_id": row.ontology_revision_id,
+        "bound_checksum": definition.get("ontology_checksum"),
+        "active_revision_id": revision.id,
+        "active_revision": revision.revision,
+        "active_checksum": revision.checksum,
+        "same_checksum": bool(definition.get("ontology_checksum") and definition.get("ontology_checksum") == revision.checksum),
+        "missing_properties": missing_properties,
+    }
+
+
+def contract_binding_health(db: Session, *, project_id: str, object_type_id: Optional[str] = None) -> Dict[str, Any]:
+    revision_id = _active_revision_id(db, project_id)
+    revision = db.get(ontology_versioning.OntologyRevision, revision_id) if revision_id else None
+    query = db.query(OntologyResourceDefinition).filter(
+        OntologyResourceDefinition.project_id == project_id,
+        OntologyResourceDefinition.resource_kind == "contract_binding",
+        OntologyResourceDefinition.status == "ACTIVE",
+    )
+    if object_type_id:
+        query = query.filter(OntologyResourceDefinition.object_type_id == object_type_id)
+    rows = query.order_by(OntologyResourceDefinition.resource_id).all()
+    bindings = [{**_resource_dict(row), "health": _contract_binding_health(row, revision)} for row in rows]
+    counts = {status: 0 for status in ("CURRENT", "COMPATIBLE_STALE", "BROKEN", "UNVERSIONED", "NO_ACTIVE_REVISION")}
+    for binding in bindings:
+        status = binding["health"]["status"]
+        counts[status] = counts.get(status, 0) + 1
+    overall = "FAIL" if counts.get("BROKEN") or counts.get("NO_ACTIVE_REVISION") else "WARN" if counts.get("COMPATIBLE_STALE") or counts.get("UNVERSIONED") else "PASS"
+    return {
+        "project_id": project_id,
+        "status": overall,
+        "active_revision_id": revision.id if revision else None,
+        "active_revision": revision.revision if revision else None,
+        "active_checksum": revision.checksum if revision else None,
+        "counts": counts,
+        "binding_count": len(bindings),
+        "bindings": bindings,
+    }
+
+
+def bind_ontology_contract(
+    db: Session,
+    *,
+    project_id: str,
+    consumer_kind: str,
+    consumer_id: str,
+    consumer_version: str,
+    payload: Dict[str, Any],
+    actor: str,
+) -> Dict[str, Any]:
+    result = validate_ontology_contract(
+        db,
+        project_id=project_id,
+        consumer_kind=consumer_kind,
+        consumer_id=consumer_id,
+        consumer_version=consumer_version,
+        payload=payload,
+    )
+    if result["status"] == "FAIL":
+        raise HTTPException(status_code=422, detail={"message": "Ontology contract validation failed", **result})
+
+    prefix = f"{consumer_kind}:{consumer_id}:"
+    active_ids: set[str] = set()
+    now = _now()
+    candidates = db.query(OntologyResourceDefinition).filter(
+        OntologyResourceDefinition.project_id == project_id,
+        OntologyResourceDefinition.resource_kind == "contract_binding",
+    ).all()
+    consumer_rows = [
+        row for row in candidates
+        if (row.definition or {}).get("consumer_kind") == consumer_kind
+        and (row.definition or {}).get("consumer_id") == consumer_id
+    ]
+    same_version = [row for row in consumer_rows if str((row.definition or {}).get("consumer_version")) == consumer_version]
+    expected_targets = {
+        ("object_type", reference["object_type_id"]): {
+            "properties": reference["properties"], "source_paths": reference["source_paths"],
+        }
+        for reference in result["references"]["object_types"]
+    }
+    expected_targets.update({
+        ("action_type", reference["action_type_id"]): {
+            "properties": [], "source_paths": reference["source_paths"],
+        }
+        for reference in result["references"]["action_types"]
+    })
+    if same_version:
+        existing_targets = {
+            (str((row.definition or {}).get("target_kind")), str((row.definition or {}).get("target_id"))): {
+                "properties": sorted((row.definition or {}).get("properties") or []),
+                "source_paths": sorted((row.definition or {}).get("source_paths") or []),
+            }
+            for row in same_version
+        }
+        expected_comparable = {
+            key: {"properties": sorted(value["properties"]), "source_paths": sorted(value["source_paths"])}
+            for key, value in expected_targets.items()
+        }
+        bound_revisions = {row.ontology_revision_id for row in same_version}
+        if existing_targets != expected_comparable or bound_revisions != {result["ontology_revision_id"]}:
+            raise HTTPException(status_code=409, detail={
+                "message": "Consumer version is immutable; publish a new consumer version to change its ontology contract",
+                "consumer_kind": consumer_kind,
+                "consumer_id": consumer_id,
+                "consumer_version": consumer_version,
+            })
+    existing_by_target = {
+        (str((row.definition or {}).get("target_kind")), str((row.definition or {}).get("target_id"))): row
+        for row in same_version
+    }
+    for reference in result["references"]["object_types"]:
+        object_type_id = reference["object_type_id"]
+        prior = existing_by_target.get(("object_type", object_type_id))
+        resource_id = prior.resource_id if prior else f"{prefix}{consumer_version}:object_type:{object_type_id}"
+        active_ids.add(resource_id)
+        _upsert_resource(
+            db,
+            project_id=project_id,
+            kind="contract_binding",
+            resource_id=resource_id,
+            display_name=f"{consumer_kind} {consumer_id} -> {object_type_id}",
+            object_type_id=object_type_id,
+            revision_id=result["ontology_revision_id"],
+            definition={
+                "consumer_kind": consumer_kind,
+                "consumer_id": consumer_id,
+                "consumer_version": consumer_version,
+                "target_kind": "object_type",
+                "target_id": object_type_id,
+                "properties": reference["properties"],
+                "source_paths": reference["source_paths"],
+                "ontology_revision": result["ontology_revision"],
+                "ontology_checksum": result["ontology_checksum"],
+                "binding_status": "ACTIVE" if result["ontology_revision_id"] else "UNVERSIONED",
+            },
+        )
+    for reference in result["references"]["action_types"]:
+        action_type_id = reference["action_type_id"]
+        prior = existing_by_target.get(("action_type", action_type_id))
+        resource_id = prior.resource_id if prior else f"{prefix}{consumer_version}:action_type:{action_type_id}"
+        active_ids.add(resource_id)
+        _upsert_resource(
+            db,
+            project_id=project_id,
+            kind="contract_binding",
+            resource_id=resource_id,
+            display_name=f"{consumer_kind} {consumer_id} -> action {action_type_id}",
+            revision_id=result["ontology_revision_id"],
+            definition={
+                "consumer_kind": consumer_kind,
+                "consumer_id": consumer_id,
+                "consumer_version": consumer_version,
+                "target_kind": "action_type",
+                "target_id": action_type_id,
+                "source_paths": reference["source_paths"],
+                "ontology_revision": result["ontology_revision"],
+                "ontology_checksum": result["ontology_checksum"],
+                "binding_status": "ACTIVE" if result["ontology_revision_id"] else "UNVERSIONED",
+            },
+        )
+
+    for row in consumer_rows:
+        if row.resource_id not in active_ids and row.status == "ACTIVE":
+            row.status = "ARCHIVED"
+            row.updated_at = now
+            row.version += 1
+    result["binding_count"] = len(active_ids)
+    create_audit_log(
+        db,
+        actor=actor,
+        event_type="ontology.contract.bound",
+        subject_type="ontology_contract",
+        subject_id=f"{consumer_kind}:{consumer_id}",
+        payload={
+            "project_id": project_id,
+            "consumer_version": consumer_version,
+            "ontology_revision_id": result["ontology_revision_id"],
+            "binding_count": len(active_ids),
+            "status": result["status"],
+        },
+    )
+    return result
 
 
 def _property_specs(db: Session, object_type: models.ObjectType) -> tuple[Dict[str, Any], Optional[ontology_core.ObjectTypeProfile]]:
@@ -1014,6 +1422,79 @@ def compile_ontology(body: OntologyCompileRequest, principal: Principal = Depend
     )
     db.commit()
     return result
+
+
+@router.post("/ontology/contracts/validate")
+def validate_contract_endpoint(body: OntologyContractRequest, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "view")
+    return validate_ontology_contract(
+        db,
+        project_id=body.project_id,
+        consumer_kind=body.consumer_kind,
+        consumer_id=body.consumer_id,
+        consumer_version=body.consumer_version,
+        payload=body.payload,
+    )
+
+
+@router.post("/ontology/contracts/bind")
+def bind_contract_endpoint(body: OntologyContractRequest, principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "publish")
+    result = bind_ontology_contract(
+        db,
+        project_id=body.project_id,
+        consumer_kind=body.consumer_kind,
+        consumer_id=body.consumer_id,
+        consumer_version=body.consumer_version,
+        payload=body.payload,
+        actor=principal.id,
+    )
+    db.commit()
+    return result
+
+
+@router.get("/ontology/contracts/bindings")
+def list_contract_bindings(
+    project_id: str = "default",
+    consumer_kind: Optional[str] = None,
+    consumer_id: Optional[str] = None,
+    object_type_id: Optional[str] = None,
+    include_archived: bool = False,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    tenancy.assert_project_permission(db, principal, project_id, "view")
+    query = db.query(OntologyResourceDefinition).filter(
+        OntologyResourceDefinition.project_id == project_id,
+        OntologyResourceDefinition.resource_kind == "contract_binding",
+    )
+    if not include_archived:
+        query = query.filter(OntologyResourceDefinition.status == "ACTIVE")
+    if object_type_id:
+        query = query.filter(OntologyResourceDefinition.object_type_id == object_type_id)
+    rows = query.order_by(OntologyResourceDefinition.resource_id).all()
+    if consumer_kind:
+        rows = [row for row in rows if (row.definition or {}).get("consumer_kind") == consumer_kind]
+    if consumer_id:
+        rows = [row for row in rows if (row.definition or {}).get("consumer_id") == consumer_id]
+    revision_id = _active_revision_id(db, project_id)
+    revision = db.get(ontology_versioning.OntologyRevision, revision_id) if revision_id else None
+    return {
+        "project_id": project_id,
+        "count": len(rows),
+        "bindings": [{**_resource_dict(row), "health": _contract_binding_health(row, revision)} for row in rows],
+    }
+
+
+@router.get("/ontology/contracts/health")
+def read_contract_binding_health(
+    project_id: str = "default",
+    object_type_id: Optional[str] = None,
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    tenancy.assert_project_permission(db, principal, project_id, "view")
+    return contract_binding_health(db, project_id=project_id, object_type_id=object_type_id)
 
 
 @router.get("/ontology/schema/definitions")

@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY oms/app ./app
 COPY oms/AgentStudio.py ./AgentStudio.py
+COPY oms/availability_probe.py ./availability_probe.py
+COPY oms/tier_b_evidence.py ./tier_b_evidence.py
 COPY oms/alembic.ini ./alembic.ini
 COPY oms/alembic ./alembic
 COPY oms/entrypoint.sh ./entrypoint.sh

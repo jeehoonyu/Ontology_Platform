@@ -50,6 +50,8 @@ assert "durableJobRequest" in browser and "changedJobRequest" in browser
 assert "chaosJob" in browser and "staleCompletion" in browser and "recoveryEvidence" in browser
 assert "abandoned-worker chaos recovery" in acceptance
 assert "rehearse-production-acceptance.ps1" in workflow
+assert "identity_scale_evidence.py" in acceptance
+assert "oidc-identity-scale-evidence.json" in acceptance
 assert "playwright install --with-deps chrome" in workflow
 assert "pg_advisory_xact_lock" in migration_env
 assert "connection.dialect.name == \"postgresql\"" in migration_env

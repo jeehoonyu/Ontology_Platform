@@ -540,6 +540,13 @@ export interface OntologyManagerState {
     datasources: { count: number; rows: TableRow[] };
     observability: JsonObject;
     dependents: { count: number; rows: TableRow[] };
+    contract_health: {
+      count: number;
+      status: string;
+      counts: Record<string, number>;
+      active_revision_id?: string | null;
+      rows: TableRow[];
+    };
   };
   primary_actions: ActionLink[];
   last_updated: number;

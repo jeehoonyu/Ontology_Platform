@@ -810,6 +810,25 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
                     pipeline_dependents.append({"type": "pipeline_graph", "id": graph.id, "display_name": graph.display_name, "node_id": node.get("id")})
     except Exception:
         pipeline_dependents = []
+    from . import ontology_runtime_v1
+    downstream_health = ontology_runtime_v1.contract_binding_health(
+        db, project_id=obj_type.project_id, object_type_id=object_type_id,
+    )
+    contract_rows = [
+        {
+            "id": binding["id"],
+            "consumer_kind": (binding.get("definition") or {}).get("consumer_kind"),
+            "consumer_id": (binding.get("definition") or {}).get("consumer_id"),
+            "consumer_version": (binding.get("definition") or {}).get("consumer_version"),
+            "properties": (binding.get("definition") or {}).get("properties") or [],
+            "status": (binding.get("health") or {}).get("status"),
+            "compatible": (binding.get("health") or {}).get("compatible"),
+            "reason": (binding.get("health") or {}).get("reason"),
+            "bound_revision_id": binding.get("ontology_revision_id"),
+            "active_revision_id": (binding.get("health") or {}).get("active_revision_id"),
+        }
+        for binding in downstream_health["bindings"]
+    ]
     return {
         "object_type": metadata,
         "navigation": [
@@ -824,6 +843,7 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
             "materializations",
             "automations",
             "usage",
+            "contracts",
             "history",
         ],
         "cards": {
@@ -833,6 +853,13 @@ def _object_type_manager_state(db: Session, object_type_id: str) -> Dict[str, An
             "datasources": {"count": len(set(source_asset_ids) | {str(item.get('asset_id')) for item in saved_mappings}), "rows": [{"asset_id": asset_id, "status": "materialized"} for asset_id in source_asset_ids] + [{**item, "status": "mapped"} for item in saved_mappings if item.get("asset_id") not in source_asset_ids]},
             "observability": {"object_count": object_count, "index_status": metadata["index_status"], "data_health": "configured" if object_count else "not_configured"},
             "dependents": {"count": len(pipeline_dependents), "rows": pipeline_dependents},
+            "contract_health": {
+                "count": downstream_health["binding_count"],
+                "status": downstream_health["status"],
+                "counts": downstream_health["counts"],
+                "active_revision_id": downstream_health["active_revision_id"],
+                "rows": contract_rows,
+            },
         },
         "primary_actions": [
             {"id": "update_metadata", "label": "Update metadata", "method": "PATCH", "path": f"/ontology/object-types/{object_type_id}/metadata"},
@@ -913,6 +940,7 @@ def _object_type_section_state(db: Session, object_type_id: str, section_id: str
         "datasources": "datasources",
         "observability": "observability",
         "dependents": "dependents",
+        "contracts": "contract_health",
     }
     if section in card_map:
         card = cards[card_map[section]]

@@ -774,9 +774,10 @@ def _ensure_cached_s3_file(
     entry: Dict[str, Any],
     partitioned: bool,
 ) -> Path:
-    target = (cache_dir / Path(relative)).resolve()
-    if cache_dir != target.parent and cache_dir not in target.parents:
+    relative_path = Path(relative)
+    if not relative or relative_path.is_absolute() or ".." in relative_path.parts:
         raise HTTPException(status_code=422, detail="S3 snapshot cache target escaped its snapshot directory")
+    target = cache_dir / relative_path
     uri = row.storage_uri.rstrip("/") + (f"/{relative}" if partitioned else "")
     with _cache_file_lock(target):
         needs_download = not target.is_file()

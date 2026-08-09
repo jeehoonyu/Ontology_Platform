@@ -1,20 +1,10 @@
-"""Recovery-point sampler for the Tier B RPO gate.
+"""Tamper-evident recovery-point sampling against an isolated restored API.
 
-Implements the definition fixed in docs/TIER_B_MEASUREMENT_CONTRACT.md: RPO is
-the interval between the last write durably committed before an incident and the
-latest write present after recovery. A writer appends monotonically increasing
-sequenced marks; after a restore the highest surviving mark is located and the
-gap is converted to elapsed time from the mark timestamps.
-
-At least ten samples are required across the window, taken at varied points in
-the backup cycle, and at least two immediately before a scheduled backup. That
-last requirement is the point of the gate: mid-cycle samples flatter the system,
-because the worst recovery point is always the moment just before a backup runs.
-Every sample must be within 5 minutes and the maximum is reported.
-
-  python oms/rpo_sampler.py mark --target http://127.0.0.1:8000
-  python oms/rpo_sampler.py observe --target http://127.0.0.1:8000 --phase pre_backup
-  python oms/rpo_sampler.py aggregate
+The live source receives monotonic marks through the dedicated recovery probe.
+After an independently restored API is ready, ``observe`` finds the highest mark
+that survived and computes the timestamp gap. Source and recovery URLs must be
+different, both database/runtime migration heads must match the current build,
+and evidence corruption is a hard gate failure.
 """
 from __future__ import annotations
 
@@ -22,186 +12,264 @@ import argparse
 import json
 import sys
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from app.pilot_evidence import (
+    JournalIntegrityError,
+    append_observation,
+    current_migration_head,
+    latest_run,
+    load_journal,
+    load_or_create_run_state,
+    save_run_state,
+)
+from recovery_probe_client import (
+    assert_current_heads,
+    json_request,
+    recovery_token,
+    require_isolated_target,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MARKS = REPO_ROOT / "docs" / "rpo-marks.jsonl"
 DEFAULT_SAMPLES = REPO_ROOT / "docs" / "rpo-samples.jsonl"
+DEFAULT_STATE = REPO_ROOT / "docs" / "rpo-sampler-state.json"
 
 RPO_LIMIT_SECONDS = 5 * 60
 REQUIRED_SAMPLES = 10
 REQUIRED_PRE_BACKUP_SAMPLES = 2
-MARK_OBJECT_TYPE = "rpo_mark"
 PHASES = ("pre_backup", "mid_cycle", "post_backup")
 
 
-def _json_request(url: str, method: str = "GET", body: Optional[Dict[str, Any]] = None,
-                  timeout: float = 15.0):
-    data = None if body is None else json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method=method)
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = response.read()
-            return response.status, (json.loads(payload) if payload else {})
-    except urllib.error.HTTPError as error:
-        return error.code, {}
-    except Exception:
-        return 0, {}
+def _scheduled_at(records: List[Dict[str, Any]], now: int) -> int:
+    return max(int(now), int(records[-1]["scheduled_at"]) + 1 if records else int(now))
 
 
-def ensure_mark_type(target: str) -> None:
-    base = target.rstrip("/")
-    status, _ = _json_request(f"{base}/object-types/{MARK_OBJECT_TYPE}")
-    if status == 200:
-        return
-    _json_request(f"{base}/object-types", "POST", {
-        "id": MARK_OBJECT_TYPE,
-        "display_name": "RPO mark",
-        "description": "Monotonic durability marker for recovery-point sampling.",
-        "properties": {"sequence": {"type": "integer"}, "written_at": {"type": "integer"}},
-    })
+def _run_records(path: Path, run_id: str) -> List[Dict[str, Any]]:
+    return [row for row in load_journal(path) if row.get("run_id") == run_id]
 
 
-def next_sequence(marks_file: Path) -> int:
-    marks = load_jsonl(marks_file)
-    return (max((mark["sequence"] for mark in marks), default=0)) + 1
-
-
-def write_mark(target: str, marks_file: Path) -> Dict[str, Any]:
-    ensure_mark_type(target)
-    sequence = next_sequence(marks_file)
-    written_at = int(time.time())
-    status, _ = _json_request(f"{target.rstrip('/')}/objects", "POST", {
-        "object_type_id": MARK_OBJECT_TYPE,
-        "id": f"{MARK_OBJECT_TYPE}_{sequence:09d}",
-        "properties": {"sequence": sequence, "written_at": written_at},
-    })
-    if status not in (200, 201):
-        raise SystemExit(f"Could not write mark {sequence}: HTTP {status}")
-    mark = {"sequence": sequence, "written_at": written_at}
-    marks_file.parent.mkdir(parents=True, exist_ok=True)
-    with marks_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(mark, sort_keys=True) + "\n")
-    return mark
-
-
-def highest_surviving_sequence(target: str) -> Optional[int]:
-    # Objects of a type are listed at /objects/{type}. The first version of this
-    # queried /objects?object_type_id=... which is a 405: that path only accepts
-    # POST. The sampler therefore read nothing, reported total_loss on every
-    # sample, and would have filled a seven-day RPO window with false total
-    # losses while the database held the marks perfectly. A unit test over
-    # synthetic samples could not catch this; only a real restore could.
-    status, payload = _json_request(
-        f"{target.rstrip('/')}/objects/{MARK_OBJECT_TYPE}?limit=1000"
+def write_mark(
+    target: str,
+    marks_file: Path,
+    state_file: Path = DEFAULT_STATE,
+    *,
+    project_id: str = "default",
+    token: Optional[str] = None,
+    now: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Persist and submit one source mark without creating a crash window."""
+    observed_at = int(time.time() if now is None else now)
+    head = current_migration_head()
+    state = load_or_create_run_state(
+        state_file, target=target, migration_head=head, now=observed_at, interval_seconds=1,
     )
-    if status != 200:
-        return None
-    rows = payload if isinstance(payload, list) else payload.get("objects", payload.get("items", []))
-    sequences = [
-        (row.get("properties") or {}).get("sequence")
-        for row in rows if isinstance(row, dict)
+    records = _run_records(marks_file, state["run_id"])
+    pending = state.get("pending_mark")
+    if not isinstance(pending, dict):
+        sequence = max(
+            (int(row["payload"]["sequence"]) for row in records), default=0,
+        ) + 1
+        all_records = load_journal(marks_file)
+        pending = {
+            "sequence": sequence,
+            "written_at": observed_at,
+            "scheduled_at": _scheduled_at(all_records, observed_at),
+            "project_id": project_id,
+        }
+        state["pending_mark"] = pending
+        save_run_state(state_file, state)
+
+    matching = [
+        row for row in records
+        if int(row["payload"].get("sequence", -1)) == int(pending["sequence"])
     ]
-    sequences = [value for value in sequences if isinstance(value, int)]
-    return max(sequences) if sequences else None
+    if matching:
+        payload = matching[-1]["payload"]
+        if (
+            int(payload.get("written_at", -1)) != int(pending["written_at"])
+            or payload.get("project_id") != pending["project_id"]
+        ):
+            raise JournalIntegrityError("pending RPO mark conflicts with the durable journal")
+        state.pop("pending_mark", None)
+        save_run_state(state_file, state)
+        return {"run_id": state["run_id"], **payload}
+
+    credential = token or recovery_token()
+    body = {
+        "run_id": state["run_id"],
+        "sequence": int(pending["sequence"]),
+        "written_at": int(pending["written_at"]),
+        "project_id": pending["project_id"],
+        "migration_head": head,
+    }
+    status, response = json_request(
+        target, "/health/pilot-recovery/marks", token=credential, method="POST", body=body,
+    )
+    if status not in (200, 201):
+        raise RuntimeError(f"Could not write recovery mark {pending['sequence']}: HTTP {status}")
+    assert_current_heads(response, head)
+    append_observation(
+        marks_file,
+        run_id=state["run_id"],
+        kind="rpo_mark",
+        target=target,
+        migration_head=head,
+        scheduled_at=int(pending["scheduled_at"]),
+        observed_at=observed_at,
+        payload={
+            "sequence": int(pending["sequence"]),
+            "written_at": int(pending["written_at"]),
+            "project_id": pending["project_id"],
+        },
+    )
+    state.pop("pending_mark", None)
+    save_run_state(state_file, state)
+    return {"run_id": state["run_id"], **body}
 
 
-def observe(target: str, marks_file: Path, samples_file: Path, phase: str,
-            note: str = "") -> int:
-    """Compare the restored system against the marks written before the cut."""
-    marks = load_jsonl(marks_file)
+def highest_surviving_mark(
+    target: str, run_id: str, project_id: str, token: str, expected_head: str,
+) -> Optional[Dict[str, Any]]:
+    run_path = urllib.parse.quote(run_id, safe="")
+    project = urllib.parse.quote(project_id, safe="")
+    status, payload = json_request(
+        target,
+        f"/health/pilot-recovery/marks/{run_path}/highest?project_id={project}",
+        token=token,
+    )
+    if status == 404:
+        return None
+    if status != 200:
+        raise RuntimeError(f"Could not inspect restored recovery marks: HTTP {status}")
+    assert_current_heads(payload, expected_head)
+    return payload
+
+
+def observe(
+    source_target: str,
+    recovery_target: str,
+    marks_file: Path,
+    samples_file: Path,
+    phase: str,
+    *,
+    project_id: str = "default",
+    token: Optional[str] = None,
+    note: str = "",
+    now: Optional[int] = None,
+) -> int:
+    """Measure one restored target; the live source is never an allowed target."""
+    require_isolated_target(source_target, recovery_target)
+    observed_at = int(time.time() if now is None else now)
+    head = current_migration_head()
+    marks = latest_run(load_journal(marks_file), migration_head=head)
     if not marks:
-        raise SystemExit("No marks recorded. Run 'mark' against the live system first.")
-    last_written = max(marks, key=lambda mark: mark["sequence"])
-    survivor = highest_surviving_sequence(target)
+        raise RuntimeError("No current-head marks exist. Run 'mark' against the live source first.")
+    last_written = max(marks, key=lambda row: int(row["payload"]["sequence"]))
+    run_id = str(last_written["run_id"])
+    credential = token or recovery_token()
+    survivor = highest_surviving_mark(
+        recovery_target, run_id, project_id, credential, head,
+    )
+    by_sequence = {int(row["payload"]["sequence"]): row for row in marks}
 
     if survivor is None:
-        # Nothing survived. That is a total loss of the marked window, not a
-        # small RPO, and must not be recorded as a good sample.
-        lost_seconds = last_written["written_at"] - min(mark["written_at"] for mark in marks)
-        sample = {
-            "at": int(time.time()), "phase": phase, "note": note,
-            "last_written_sequence": last_written["sequence"], "surviving_sequence": None,
-            "rpo_seconds": max(lost_seconds, RPO_LIMIT_SECONDS + 1), "total_loss": True,
-        }
+        first_at = min(int(row["payload"]["written_at"]) for row in marks)
+        rpo_seconds = max(
+            int(last_written["payload"]["written_at"]) - first_at,
+            RPO_LIMIT_SECONDS + 1,
+        )
+        surviving_sequence = None
+        total_loss = True
     else:
-        by_sequence = {mark["sequence"]: mark for mark in marks}
-        surviving_mark = by_sequence.get(survivor)
+        surviving_sequence = int(survivor["sequence"])
+        surviving_mark = by_sequence.get(surviving_sequence)
         if surviving_mark is None:
-            raise SystemExit(
-                f"Restored system reports sequence {survivor}, which was never marked. "
-                "The marks file does not describe this system."
+            raise RuntimeError(
+                f"Restored target reports unrecorded sequence {surviving_sequence}; "
+                "the mark journal and target do not describe the same run."
             )
-        sample = {
-            "at": int(time.time()), "phase": phase, "note": note,
-            "last_written_sequence": last_written["sequence"],
-            "surviving_sequence": survivor,
-            "rpo_seconds": max(0, last_written["written_at"] - surviving_mark["written_at"]),
-            "total_loss": False,
-        }
+        rpo_seconds = max(
+            0,
+            int(last_written["payload"]["written_at"])
+            - int(surviving_mark["payload"]["written_at"]),
+        )
+        total_loss = False
 
-    samples_file.parent.mkdir(parents=True, exist_ok=True)
-    with samples_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(sample, sort_keys=True) + "\n")
+    sample = {
+        "at": observed_at,
+        "phase": phase,
+        "note": note,
+        "source_target": source_target,
+        "recovery_target": recovery_target,
+        "project_id": project_id,
+        "last_written_sequence": int(last_written["payload"]["sequence"]),
+        "surviving_sequence": surviving_sequence,
+        "rpo_seconds": rpo_seconds,
+        "total_loss": total_loss,
+    }
+    existing = load_journal(samples_file)
+    append_observation(
+        samples_file,
+        run_id=run_id,
+        kind="rpo_observation",
+        target=recovery_target,
+        migration_head=head,
+        scheduled_at=_scheduled_at(existing, observed_at),
+        observed_at=observed_at,
+        payload=sample,
+    )
     print(json.dumps(sample, indent=2, sort_keys=True))
-    return 0 if sample["rpo_seconds"] <= RPO_LIMIT_SECONDS else 1
+    return 0 if rpo_seconds <= RPO_LIMIT_SECONDS and not total_loss else 1
 
 
 def load_jsonl(path: Path) -> List[Dict[str, Any]]:
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
+    """Return validated payloads for existing status and aggregation callers."""
+    return [dict(row.get("payload") or {}) for row in load_journal(path)]
 
 
 def summarize(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
     values = [sample["rpo_seconds"] for sample in samples]
     return {
         "samples": len(samples),
-        "pre_backup_samples": sum(1 for s in samples if s.get("phase") == "pre_backup"),
-        "total_loss_samples": sum(1 for s in samples if s.get("total_loss")),
+        "pre_backup_samples": sum(1 for sample in samples if sample.get("phase") == "pre_backup"),
+        "total_loss_samples": sum(1 for sample in samples if sample.get("total_loss")),
+        "integrity_failures": 0,
         "max_rpo_seconds": round(max(values), 3) if values else 0,
         "min_rpo_seconds": round(min(values), 3) if values else 0,
         "rpo_distribution_seconds": sorted(round(value, 3) for value in values),
-        "phases_covered": sorted({s.get("phase") for s in samples if s.get("phase")}),
+        "phases_covered": sorted({sample.get("phase") for sample in samples if sample.get("phase")}),
     }
 
 
 def aggregate(samples_file: Path, output_dir: Optional[Path] = None) -> int:
     from tier_b_evidence import write_evidence
 
-    summary = summarize(load_jsonl(samples_file))
+    try:
+        summary = summarize(load_jsonl(samples_file))
+    except JournalIntegrityError as error:
+        summary = summarize([])
+        summary["integrity_failures"] = 1
+        summary["integrity_error"] = str(error)
     if summary["samples"] == 0:
-        # No samples must breach rather than satisfy the maximum by default.
         summary["max_rpo_seconds"] = RPO_LIMIT_SECONDS + 1
-
     path, status, breaches = write_evidence(
         "rpo",
         thresholds={
             "samples_min": REQUIRED_SAMPLES,
             "pre_backup_samples_min": REQUIRED_PRE_BACKUP_SAMPLES,
             "total_loss_samples_max": 0,
+            "integrity_failures_max": 0,
             "max_rpo_seconds_max": RPO_LIMIT_SECONDS,
         },
         measurements=summary,
         harness="oms/rpo_sampler.py",
         notes=(
-            "Marks are monotonic and timestamped; RPO is the gap between the last mark "
-            "written before the cut and the highest mark surviving the restore. At least "
-            "two samples must be taken immediately before a scheduled backup, which is "
-            "the worst point in the cycle and the one a mid-cycle sample hides."
+            "A dedicated bearer-authenticated marker is written to the live source and "
+            "queried only through a distinct restored target. Database/runtime migration "
+            "heads must match, and the local mark and observation journals are hash-chained."
         ),
         output_dir=output_dir,
     )
@@ -215,20 +283,34 @@ def aggregate(samples_file: Path, output_dir: Optional[Path] = None) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("mark", "observe", "aggregate"))
-    parser.add_argument("--target", default="http://127.0.0.1:8000")
+    parser.add_argument("--target", default="http://127.0.0.1:8000",
+                        help="Live source for mark; isolated recovered API for observe")
+    parser.add_argument("--source-target", default="",
+                        help="Required live source URL for observe isolation validation")
     parser.add_argument("--phase", choices=PHASES, default="mid_cycle")
+    parser.add_argument("--project-id", default="default")
+    parser.add_argument("--token-env", default="PILOT_RECOVERY_TOKEN")
     parser.add_argument("--note", default="")
     parser.add_argument("--marks-file", default=str(DEFAULT_MARKS))
     parser.add_argument("--samples-file", default=str(DEFAULT_SAMPLES))
+    parser.add_argument("--state-file", default=str(DEFAULT_STATE))
     args = parser.parse_args()
 
     if args.mode == "mark":
-        mark = write_mark(args.target, Path(args.marks_file))
+        mark = write_mark(
+            args.target, Path(args.marks_file), Path(args.state_file),
+            project_id=args.project_id, token=recovery_token(args.token_env),
+        )
         print(json.dumps(mark, sort_keys=True))
         return 0
     if args.mode == "observe":
-        return observe(args.target, Path(args.marks_file), Path(args.samples_file),
-                       args.phase, args.note)
+        if not args.source_target:
+            raise SystemExit("--source-target is required for an isolated recovery observation")
+        return observe(
+            args.source_target, args.target, Path(args.marks_file), Path(args.samples_file),
+            args.phase, project_id=args.project_id, token=recovery_token(args.token_env),
+            note=args.note,
+        )
     return aggregate(Path(args.samples_file))
 
 

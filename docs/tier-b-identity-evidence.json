@@ -2,31 +2,41 @@
   "gate_id": "identity",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "concurrency": 20,
-    "elapsed_seconds": 38.914,
+    "authorization_flow": "authorization_code_pkce",
+    "concurrency": 10,
+    "elapsed_seconds": 28.93,
     "identities": 200,
-    "login_p50_ms": 3122.733,
-    "login_p95_ms": 4244.765,
+    "login_p50_ms": 1326.319,
+    "login_p95_ms": 1716.151,
     "mutation_denials": 200,
     "replicas_verified": 2,
+    "run_migration_head": "0042_stream_outer_joins",
     "unique_principals": 200
   },
-  "notes": "Real Keycloak authorization-code PKCE against two API replicas. 200 distinct identities resolved to 200 unique principals carrying organization pilot and project default, each denied a mutation server-side as a viewer. The first run failed on a null organization claim: the rehearsal launcher aborted on a PowerShell stderr artifact after docker compose up, so the kcadm step registering organization_id and project_ids as tenant attributes never ran. The product behaved correctly throughout and the assertion caught a half-configured environment; both runs are part of this gate's record.",
+  "notes": "Derived from the oidc-scale run at oidc-identity-scale-evidence.json, measured at 0042_stream_outer_joins. The run's own 'status' field is ignored; the verdict comes from the thresholds.",
   "provenance": {
-    "captured_at": 1785981869,
-    "git_commit": "3b8f863",
-    "harness": "frontend/tests/production/oidc-scale.spec.ts + oms/provision_oidc_scale_users.py",
+    "captured_at": 1786255819,
+    "entry_points": [
+      "authorization_code_pkce against Keycloak, via frontend/tests/production/oidc-scale.spec.ts",
+      "two independently addressed API replicas"
+    ],
+    "git_commit": "82848db",
+    "harness": "oms/identity_scale_evidence.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0038_explicit_schema_baseline"
+    "migration_head": "0042_stream_outer_joins",
+    "request_shapes": [
+      "200 distinct PKCE logins",
+      "server-side mutation denial per authenticated viewer"
+    ]
   },
   "status": "PASS",
   "thresholds": {
     "identities_min": 200,
-    "login_p95_ms_max": 15000,
+    "login_p95_ms_max": 15000.0,
     "mutation_denials_min": 200,
     "replicas_verified_min": 2,
     "unique_principals_min": 200

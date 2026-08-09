@@ -3,6 +3,7 @@ import {
   captureOntologyRevision,
   createOntologyChangeSet,
   decideOntologyChangeSet,
+  getOntologyContractHealth,
   listOntologyChangeSets,
   listOntologyEnvironments,
   listOntologyRevisions,
@@ -10,6 +11,7 @@ import {
   rollbackOntologyEnvironment,
   validateOntologyChangeSet,
   type OntologyChangeSet,
+  type OntologyContractHealth,
   type OntologyEnvironmentState,
   type OntologyRevisionSummary
 } from "../api/ontologyLifecycleApi";
@@ -31,18 +33,22 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [contractHealth, setContractHealth] = useState<OntologyContractHealth | null>(null);
+  const [breakingAcknowledged, setBreakingAcknowledged] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextRevisions, nextChangeSets, nextEnvironments] = await Promise.all([
+      const [nextRevisions, nextChangeSets, nextEnvironments, nextContractHealth] = await Promise.all([
         listOntologyRevisions(projectId),
         listOntologyChangeSets(projectId),
-        listOntologyEnvironments(projectId)
+        listOntologyEnvironments(projectId),
+        getOntologyContractHealth(projectId)
       ]);
       setRevisions(nextRevisions);
       setChangeSets(nextChangeSets);
       setEnvironments(nextEnvironments);
+      setContractHealth(nextContractHealth);
       setSelectedChangeSetId((current) => current || nextChangeSets[0]?.id || "");
       const production = nextEnvironments.find((item) => item.name === "production");
       setBaseRevisionId((current) => current || production?.current_revision_id || nextRevisions[0]?.id || "");
@@ -59,6 +65,10 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
 
   const selected = useMemo(() => changeSets.find((item) => item.id === selectedChangeSetId) || null, [changeSets, selectedChangeSetId]);
   const production = environments.find((item) => item.name === "production");
+
+  useEffect(() => {
+    setBreakingAcknowledged(false);
+  }, [selectedChangeSetId]);
 
   async function run<T>(action: () => Promise<T>, success: string): Promise<T | undefined> {
     setBusy(true);
@@ -131,6 +141,8 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
 
       {message ? <div className="operation-message" role="status">{message}</div> : null}
 
+      <ContractHealthPanel health={contractHealth} />
+
       <div className="ontology-release-grid">
         <Panel title="Propose Schema Change" className="ontology-change-form">
           <label><span>Base revision</span><select value={baseRevisionId} onChange={(event) => setBaseRevisionId(event.target.value)}>
@@ -165,7 +177,22 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
         busy={busy}
         onValidate={() => run(() => validateOntologyChangeSet(selected.id), "Change set validation completed.")}
         onDecision={(approve) => run(() => decideOntologyChangeSet(selected.id, approve), approve ? "Change set approved." : "Change set rejected.")}
-        onPublish={() => run(() => publishOntologyChangeSet(selected.id, selected.checksum, selected.diff.classification === "BREAKING"), "Ontology revision published to production.")}
+        breakingAcknowledged={breakingAcknowledged}
+        onBreakingAcknowledged={setBreakingAcknowledged}
+        onPublish={async () => {
+          const result = await run(
+            () => publishOntologyChangeSet(
+              selected.id,
+              selected.checksum,
+              breakingAcknowledged,
+              breakingAcknowledged
+                ? (selected.impact.affected_consumers || []).filter((consumer) => consumer.breaking).map((consumer) => consumer.binding_id)
+                : []
+            ),
+            "Ontology revision published to production. Downstream compatibility has been refreshed."
+          );
+          if (result) setBaseRevisionId(result.revision.id);
+        }}
       /> : null}
 
       <Panel title="Revision History" className="ontology-revision-history">
@@ -176,7 +203,10 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
               <StatusBadge value={revision.status} />
               <span role="cell">{revision.validation.status || "NOT_VALIDATED"}</span>
               <span role="cell">{new Date(revision.created_at * 1000).toLocaleString()}</span>
-              <button disabled={busy || !["PUBLISHED", "SUPERSEDED"].includes(revision.status) || production?.current_revision_id === revision.id} onClick={() => run(() => rollbackOntologyEnvironment(projectId, revision.id), `Production restored from revision ${revision.revision}.`)}>Restore</button>
+              <button disabled={busy || !["PUBLISHED", "SUPERSEDED"].includes(revision.status) || production?.current_revision_id === revision.id} onClick={async () => {
+                const result = await run(() => rollbackOntologyEnvironment(projectId, revision.id), `Production restored from revision ${revision.revision}. Downstream compatibility has been refreshed.`);
+                if (result) setBaseRevisionId(result.revision.id);
+              }}>Restore</button>
             </div>
           ))}
         </div>
@@ -185,9 +215,37 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
   );
 }
 
-function ChangeSetReview({ changeSet, busy, onValidate, onDecision, onPublish }: {
+function ContractHealthPanel({ health }: { health: OntologyContractHealth | null }) {
+  const statuses = ["CURRENT", "COMPATIBLE_STALE", "BROKEN", "UNVERSIONED", "NO_ACTIVE_REVISION"] as const;
+  return (
+    <Panel title="Downstream Contract Health" ariaLabel="Downstream Contract Health" className="ontology-contract-health" action={<StatusBadge value={health?.status || "NOT_AVAILABLE"} />}>
+      <div className="contract-health-summary" aria-label="Downstream ontology contract status counts">
+        {statuses.map((status) => <div key={status}><span>{status.replace(/_/g, " ")}</span><strong>{health?.counts[status] || 0}</strong></div>)}
+      </div>
+      {health?.bindings.length ? (
+        <div className="contract-consumer-list">
+          {health.bindings.map((binding) => (
+            <article key={binding.id}>
+              <StatusBadge value={binding.health.status} />
+              <div>
+                <strong>{binding.definition.consumer_kind} · {binding.definition.consumer_id}</strong>
+                <span>Version {binding.definition.consumer_version} · {binding.definition.target_id}</span>
+                {binding.definition.properties?.length ? <small>{binding.definition.properties.join(", ")}</small> : <small>Whole object contract</small>}
+              </div>
+              {binding.health.reason ? <span className="contract-health-reason">{binding.health.reason.replace(/_/g, " ")}</span> : null}
+            </article>
+          ))}
+        </div>
+      ) : <div className="empty">No published downstream consumer is bound to this ontology yet.</div>}
+    </Panel>
+  );
+}
+
+function ChangeSetReview({ changeSet, busy, breakingAcknowledged, onBreakingAcknowledged, onValidate, onDecision, onPublish }: {
   changeSet: OntologyChangeSet;
   busy: boolean;
+  breakingAcknowledged: boolean;
+  onBreakingAcknowledged: (value: boolean) => void;
   onValidate: () => void;
   onDecision: (approve: boolean) => void;
   onPublish: () => void;
@@ -198,7 +256,7 @@ function ChangeSetReview({ changeSet, busy, onValidate, onDecision, onPublish }:
         <div><span>Changes</span><strong>{changeSet.diff.summary?.changes || 0}</strong></div>
         <div><span>Breaking</span><strong>{changeSet.diff.summary?.breaking || 0}</strong></div>
         <div><span>Live objects</span><strong>{changeSet.impact.live_objects || 0}</strong></div>
-        <div><span>Migration</span><strong>{changeSet.migration_plan.status || "PENDING"}</strong></div>
+        <div><span>Consumers</span><strong>{changeSet.impact.affected_consumer_count || 0}</strong></div>
       </div>
       <div className="release-evidence-grid">
         <div>
@@ -209,12 +267,22 @@ function ChangeSetReview({ changeSet, busy, onValidate, onDecision, onPublish }:
           <h3>Migration plan</h3>
           <ol>{(changeSet.migration_plan.steps || []).map((step) => <li key={step.order}><strong>{step.strategy.replace(/_/g, " ")}</strong><span>{step.resource_id}{step.property_name ? `.${step.property_name}` : ""}</span></li>)}</ol>
         </div>
+        <div>
+          <h3>Affected consumers</h3>
+          {(changeSet.impact.affected_consumers || []).length ? <ul>{(changeSet.impact.affected_consumers || []).map((consumer) => <li key={consumer.binding_id}><StatusBadge value={consumer.breaking ? "BREAKING" : "REVIEW"} /><span>{consumer.consumer_kind} · {consumer.consumer_id} · v{consumer.consumer_version}</span></li>)}</ul> : <p className="release-no-consumers">No version-bound consumer references this change.</p>}
+        </div>
       </div>
+      {changeSet.diff.classification === "BREAKING" ? (
+        <label className="breaking-acknowledgement">
+          <input type="checkbox" checked={breakingAcknowledged} onChange={(event) => onBreakingAcknowledged(event.target.checked)} />
+          <span>I reviewed the migration plan and affected consumers. Publish this recoverable breaking revision.</span>
+        </label>
+      ) : null}
       <div className="button-row release-actions">
         <button onClick={onValidate} disabled={busy || !["DRAFT", "VALIDATED"].includes(changeSet.status)}>Validate</button>
         <button onClick={() => onDecision(true)} disabled={busy || changeSet.status !== "VALIDATED"}>Approve</button>
         <button onClick={() => onDecision(false)} disabled={busy || changeSet.status !== "VALIDATED"}>Reject</button>
-        <button className="primary" onClick={onPublish} disabled={busy || changeSet.status !== "APPROVED"}>Publish</button>
+        <button className="primary" onClick={onPublish} disabled={busy || changeSet.status !== "APPROVED" || (changeSet.diff.classification === "BREAKING" && !breakingAcknowledged)}>Publish</button>
       </div>
     </Panel>
   );

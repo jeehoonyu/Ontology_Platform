@@ -54,6 +54,22 @@ Rules:
 The seven re-execution gates keep the thresholds already stated in the goal. The three
 construction gates need definitions that do not yet exist anywhere, and are fixed here.
 
+### Identity
+
+- **Definition**: 200 distinct users complete Authorization Code with PKCE against the
+  configured production identity provider, resolve to 200 unique principals, read through
+  two independently addressed API replicas, and each receive a backend `403` for a
+  viewer-forbidden mutation.
+- **Concurrency**: provisioning and authentication concurrency are harness controls, not
+  acceptance thresholds. The containerized release rehearsal defaults to 20 provisioning
+  workers and 10 browser login workers so a single Chromium process remains stable after
+  image and plugin-executor stress. The separate collaboration gate owns the 20-editor and
+  200-reader concurrency requirements.
+- **Threshold**: 200 identities, 200 unique principals, 200 mutation denials, two replicas,
+  and login p95 <= 15 seconds.
+- **Provenance**: the raw browser result and derived Tier B envelope must both name the exact
+  database/runtime migration head exercised by the run.
+
 ### Availability
 
 - **Definition of available**: `GET /health/live` and `GET /health/ready` both return 200
@@ -65,6 +81,12 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
   fabricate downtime; the outage is then backdated to the first failure.
 - **Planned restarts count against the budget.** A pilot that is only available when
   nobody deploys is not available.
+- **Observer loss counts against the budget.** The production observer persists its next
+  scheduled slot and appends every missed slot as unavailable after restart. Samples are
+  hash chained and anchored by separate persisted state; altered, duplicated, torn, or
+  rolled-back journals invalidate the run instead of silently shrinking the denominator.
+- **Migration scoped**: a migration-head change starts a new seven-day run. Samples from
+  different schema heads cannot be combined to satisfy the window.
 
 ### RPO
 
@@ -74,6 +96,12 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
   continuously. Recovery is performed from the most recent backup, and RPO is the gap
   between the highest sequence written before the cut and the highest sequence present
   after restore, converted to elapsed time using the record timestamps.
+- **Isolation and authentication**: marks use the dedicated bearer-authenticated recovery
+  protocol and are persisted in the transactional event outbox. Observation is rejected
+  when source and recovery URLs identify the same target, or when the restored database
+  and runtime migration heads do not both equal the evidence head.
+- **Integrity**: source-mark receipts and restored-target observations are hash chained.
+  Altered, duplicated, reordered, torn, or mixed-head records invalidate the gate.
 - **Sampling**: at least 10 independent samples across the 7-day window, at varied points
   in the backup cycle, including at least 2 taken immediately before a scheduled backup —
   the worst case, which a mid-cycle sample would hide.
@@ -85,6 +113,16 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
   writes at the restored head.
 - **Measurement**: wall clock from the restore command to the first successful
   authenticated write, including migration time and readiness checks.
+- **Isolation**: the restore command must produce a distinct API/database target. An
+  already-running source, an empty restore command, a readiness-only response, or a write
+  at a stale database/runtime head is a failed rehearsal.
+- **Reference implementation**: `oms/pilot_postgres_recovery.py` and
+  `docker-compose.pilot-recovery.yml` restore checksummed database, snapshot, and plugin
+  artifacts into a distinct Compose project with fresh volumes. The source project is
+  never stopped, renamed, or mutated by this driver. Logical dumps are suitable only for
+  small pilots; large deployments must provide equivalent incremental/WAL recovery.
+- **Integrity**: every attempted rehearsal, including command failure and timeout, is
+  appended to a hash-chained journal and remains part of the maximum/failure count.
 - **Schedule**: at least 4 rehearsals across the window, at least one unattended and
   triggered by a timer rather than a person.
 - **Threshold**: every rehearsal <= 30 minutes. The maximum is reported, and the

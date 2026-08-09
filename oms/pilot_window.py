@@ -1,226 +1,483 @@
-"""Drive the seven-day pilot window that the availability, RPO and RTO gates need.
+"""Schedule a real seven-day availability, RPO, and RTO pilot window.
 
-Those three gates are not blocked on engineering. They are blocked on a window
-of wall clock during which something keeps probing, keeps marking, and keeps
-rehearsing recovery on a schedule. Assembling that by hand each time is the real
-obstacle, and a seven-day measurement that depends on someone remembering to run
-five things is a seven-day measurement that will be wrong.
+``run`` is the supervisor: one process, one writer, a tick every 30 seconds for
+seven days. Source recovery marks are written every tick. At the configured
+recovery cadence an external command restores a *separate* API and database, RTO
+is measured through an authenticated write, RPO is measured from the highest
+surviving source mark, and an optional cleanup command removes the isolated
+target. The live source can never be configured as the recovery URL.
 
-This is designed for a scheduler rather than a long-lived process. `tick` does
-one cycle and exits, so Windows Task Scheduler or cron can call it every thirty
-seconds for a week and the window survives reboots, crashes and deploys. Every
-action is idempotent and appends; nothing is recomputed from memory.
+``tick`` performs exactly one of those cycles and exists for tests and for
+manual inspection. Do not put it on cron or Task Scheduler. Both bottom out at a
+one-minute granularity -- `schtasks /SC MINUTE` accepts 1..1439 *minutes*, and
+cron's finest field is a minute -- while the measurement contract fixes the
+probe interval at 30 seconds. A one-minute cadence therefore leaves every second
+slot unwritten, and an unwritten slot is unavailable by design, so a perfectly
+healthy deployment measures ~50% available. Observed against a target that
+answered 200 on every real probe: 57.1% over four invocations.
 
-  python oms/pilot_window.py start --target http://127.0.0.1:8000
-  python oms/pilot_window.py tick          # from a scheduler, every 30s
-  python oms/pilot_window.py status
-  python oms/pilot_window.py aggregate     # emit all three gate evidence files
+Availability has two possible writers and the journal permits exactly one:
 
-The window's own definitions live in docs/TIER_B_MEASUREMENT_CONTRACT.md. This
-module schedules them; it does not reinterpret them.
+  ``--availability-writer scheduler``  this process probes as part of each tick.
+      Simple, but the probe stops for as long as a recovery rehearsal runs, and
+      those minutes are backfilled as unavailable. The 99.9% target allows 604.8
+      seconds of downtime across the whole window, so roughly ten minutes total
+      -- less than a single Postgres restore. Sound only when no rehearsal is
+      configured, i.e. an availability-only window.
+
+  ``--availability-writer observer``  the separate `pilot-observability`
+      container owns the journal and keeps probing throughout a rehearsal. This
+      process then writes no availability sample, and instead fails its tick
+      when the observer stops advancing, so a dead observer is a loud failure
+      rather than a silent gap.
+
+Collecting all three gates requires the observer.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DOCS = REPO_ROOT / "docs"
-MANIFEST = DOCS / "pilot-window.json"
+EVIDENCE_ROOT = Path(os.getenv("PILOT_EVIDENCE_ROOT", str(REPO_ROOT / "docs")))
+MANIFEST = EVIDENCE_ROOT / "pilot-window.json"
 
 WINDOW_DAYS = 7
 WINDOW_SECONDS = WINDOW_DAYS * 24 * 60 * 60
 PROBE_INTERVAL_SECONDS = 30
-# Ten RPO samples across the window, two of them immediately before a scheduled
-# backup. Backups every six hours give 28 opportunities across seven days, which
-# leaves room for the schedule to slip without starving the sample count.
-BACKUP_INTERVAL_SECONDS = 6 * 60 * 60
+# The declared recovery objective is five minutes. The scheduler default cannot
+# quietly create six-hour recovery points and then pretend the harness failed;
+# operators may use WAL archival or another incremental backup command here.
+BACKUP_INTERVAL_SECONDS = 5 * 60
+RECOVERY_INTERVAL_SECONDS = 14 * 60 * 60
 RPO_SAMPLE_TARGET = 10
 PRE_BACKUP_SAMPLE_TARGET = 2
-# Four RTO rehearsals across the window, at least one timer-triggered. Spacing
-# them at 40 hours puts four inside seven days with margin at both ends.
-RTO_INTERVAL_SECONDS = 40 * 60 * 60
 RTO_REHEARSAL_TARGET = 4
+
+AVAILABILITY_WRITERS = ("scheduler", "observer")
+# Two missed slots is what the contract already treats as an outage, so the
+# supervisor refuses to keep collecting past that rather than accumulate a gap
+# it would only discover at aggregation.
+OBSERVER_MAX_LAG_SECONDS = 2 * PROBE_INTERVAL_SECONDS
+SUPERVISOR_LOCK = "pilot-window-supervisor.lock"
+SUPERVISOR_LOCK_STALE_SECONDS = 5 * PROBE_INTERVAL_SECONDS
+
+
+class WindowVoided(RuntimeError):
+    """The window can no longer produce evidence, and no later tick repairs it.
+
+    Distinct from an ordinary tick failure so the supervisor cannot mistake a
+    transient error for a schema change and quietly stop collecting.
+    """
+
+
+def _path(name: str) -> Path:
+    return EVIDENCE_ROOT / name
 
 
 def load_manifest() -> Optional[Dict[str, Any]]:
     if not MANIFEST.exists():
         return None
     try:
-        return json.loads(MANIFEST.read_text(encoding="utf-8"))
+        payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
     except (json.JSONDecodeError, OSError):
         return None
 
 
 def save_manifest(manifest: Dict[str, Any]) -> None:
-    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    MANIFEST.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    from app.pilot_evidence import save_run_state
+
+    save_run_state(MANIFEST, manifest)
 
 
 def start(args: argparse.Namespace) -> int:
     existing = load_manifest()
-    if existing and not args.restart:
-        started = existing["started_at"]
-        raise SystemExit(
-            f"A window is already open, started at {started}. Pass --restart to abandon it, "
-            "which discards its samples rather than extending them."
+    if existing:
+        raise RuntimeError(
+            f"A window is already open at {EVIDENCE_ROOT}. Use a new "
+            "PILOT_EVIDENCE_ROOT for a new migration-scoped pilot."
         )
+    from recovery_probe_client import canonical_target, recovery_token, require_isolated_target
     from tier_b_evidence import current_head
 
+    require_isolated_target(args.target, args.recovery_target)
+    recovery_token(args.token_env)
+    recovery_driver = getattr(args, "recovery_driver", "manual")
+    if recovery_driver == "postgres-compose":
+        from pilot_postgres_recovery import Config
+
+        driver_config = Config.from_env()
+        if canonical_target(driver_config.source_url) != canonical_target(args.target):
+            raise ValueError("PILOT_SOURCE_URL must match --target for the postgres-compose driver")
+        if canonical_target(driver_config.recovery_url) != canonical_target(args.recovery_target):
+            raise ValueError(
+                "PILOT_RECOVERY_URL must match --recovery-target for the postgres-compose driver"
+            )
+        driver = Path(__file__).parent / "pilot_postgres_recovery.py"
+        executable = str(Path(sys.executable).resolve())
+        prefix = f'"{executable}" "{driver}"'
+        args.backup_command = args.backup_command.strip() or f"{prefix} backup"
+        args.restore_command = args.restore_command.strip() or f"{prefix} restore"
+        args.recovery_cleanup_command = (
+            args.recovery_cleanup_command.strip() or f"{prefix} cleanup"
+        )
+    if not args.restore_command.strip() or not args.backup_command.strip():
+        raise RuntimeError("Both --backup-command and --restore-command are required")
+    if args.backup_interval_seconds <= 0 or args.recovery_interval_seconds <= 0:
+        raise RuntimeError("Pilot intervals must be positive")
+    writer = getattr(args, "availability_writer", "observer")
+    if writer not in AVAILABILITY_WRITERS:
+        raise ValueError(f"--availability-writer must be one of {AVAILABILITY_WRITERS}")
+    if writer == "scheduler":
+        # A rehearsal blocks this process, and every blocked slot is backfilled
+        # as unavailable. Twelve rehearsals over seven days cannot fit in a
+        # 604.8-second error budget, so refusing here is cheaper than letting
+        # the window run for a week and fail on arithmetic that was fixed at
+        # the moment it started.
+        raise RuntimeError(
+            "A scheduler-written availability journal cannot survive recovery "
+            "rehearsals: the probe is blocked for the duration of each restore "
+            "and every missed 30s slot counts as unavailable, against a total "
+            f"budget of {WINDOW_SECONDS * 0.001:.1f}s for the whole window. Start the "
+            "`pilot-observability` container and pass "
+            "--availability-writer observer, or collect availability alone."
+        )
+    now = int(time.time())
     manifest = {
-        "started_at": int(time.time()),
-        # The head is pinned at the start. If it advances mid-window the samples
-        # describe two different systems, and the non-completion rule says that
-        # evidence cannot be pooled. status reports the drift rather than hiding it.
+        "schema_version": 3,
+        "started_at": now,
         "migration_head_at_start": current_head(),
         "target": args.target,
+        "recovery_target": args.recovery_target,
+        "project_id": args.project_id,
+        "recovery_driver": recovery_driver,
+        "availability_writer": writer,
+        "token_env": args.token_env,
         "restore_command": args.restore_command,
+        "recovery_cleanup_command": args.recovery_cleanup_command,
         "backup_command": args.backup_command,
+        "backup_interval_seconds": args.backup_interval_seconds,
+        "recovery_interval_seconds": args.recovery_interval_seconds,
         "window_seconds": WINDOW_SECONDS,
         "last_backup_at": 0,
-        "last_rto_at": 0,
-        "rto_rehearsals": 0,
-        "unattended_rto_rehearsals": 0,
+        "last_recovery_at": now,
+        "backup_attempts": 0,
+        "recovery_attempts": 0,
     }
     save_manifest(manifest)
     print(json.dumps(manifest, indent=2, sort_keys=True))
-    print(f"\nWindow open. Schedule `python oms/pilot_window.py tick` every "
-          f"{PROBE_INTERVAL_SECONDS}s for {WINDOW_DAYS} days.")
+    print(
+        f"\nWindow open. Run `python oms/pilot_window.py run` and keep it running for "
+        f"{WINDOW_DAYS} days. Do not schedule `tick`: cron and Task Scheduler both "
+        f"round up to a minute and the contract needs {PROBE_INTERVAL_SECONDS}s."
+    )
     return 0
 
 
 def _run(command: str, timeout: int) -> int:
-    if not command:
-        return 0
     completed = subprocess.run(
-        command, shell=True, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout,
+        command, shell=True, cwd=REPO_ROOT,
+        capture_output=True, text=True, timeout=timeout,
     )
     return completed.returncode
 
 
-def tick(args: argparse.Namespace) -> int:
-    """One scheduled cycle. Idempotent, append-only, safe to miss."""
-    manifest = load_manifest()
-    if manifest is None:
-        raise SystemExit("No window is open. Run `pilot_window.py start` first.")
+def _record_recovery(manifest: Dict[str, Any], now: int, phase: str) -> tuple[int, int]:
+    """Run one isolated restore, then return (rto_code, rpo_code)."""
+    from recovery_probe_client import recovery_token
+    from rpo_sampler import observe
 
-    from availability_probe import probe_once
+    command = [
+        sys.executable,
+        str(Path(__file__).parent / "rto_rehearsal.py"),
+        "record",
+        "--source-target", manifest["target"],
+        "--target", manifest["recovery_target"],
+        "--restore-command", manifest["restore_command"],
+        "--trigger", "unattended",
+        "--project-id", manifest["project_id"],
+        "--token-env", manifest["token_env"],
+        "--rehearsals-file", str(_path("rto-rehearsals.jsonl")),
+        "--note", f"scheduled isolated recovery at {now}",
+    ]
+    rto = subprocess.run(
+        command, cwd=REPO_ROOT, capture_output=True, text=True,
+        timeout=35 * 60,
+    )
+    rpo_code = 1
+    try:
+        if rto.returncode == 0:
+            rpo_code = observe(
+                manifest["target"],
+                manifest["recovery_target"],
+                _path("rpo-marks.jsonl"),
+                _path("rpo-samples.jsonl"),
+                phase,
+                project_id=manifest["project_id"],
+                token=recovery_token(manifest["token_env"]),
+                note=f"same isolated recovery as RTO rehearsal at {now}",
+                now=now,
+            )
+    finally:
+        cleanup = str(manifest.get("recovery_cleanup_command") or "").strip()
+        if cleanup:
+            cleanup_code = _run(cleanup, timeout=15 * 60)
+            if cleanup_code != 0:
+                rpo_code = 1
+    return rto.returncode, rpo_code
+
+
+def observer_lag(now: int) -> Optional[int]:
+    """Seconds since the observer last wrote, or None if it never has.
+
+    Read from the observer's own state anchor rather than the journal: this runs
+    every 30 seconds for a week, and revalidating a 20,000-record hash chain
+    each time to learn one timestamp is work for `status` and `aggregate`.
+    """
+    state_file = _path("availability-probe-state.json")
+    if not state_file.exists():
+        return None
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    scheduled = state.get("next_scheduled_at")
+    if not isinstance(scheduled, (int, float)):
+        return None
+    # next_scheduled_at is one interval past the last write.
+    return max(0, now - (int(scheduled) - PROBE_INTERVAL_SECONDS))
+
+
+def _observe_availability(manifest: Dict[str, Any], now: int) -> tuple[str, bool]:
+    """Either write the sample, or verify the writer that does."""
+    if manifest.get("availability_writer") == "observer":
+        lag = observer_lag(now)
+        if lag is None:
+            return "availability-observer:absent", True
+        if lag > OBSERVER_MAX_LAG_SECONDS:
+            return f"availability-observer:stalled:{lag}s", True
+        return f"availability-observer:current:{lag}s", False
+    from availability_probe import run_probe
+
+    run_probe(
+        manifest["target"],
+        _path("availability-samples.jsonl"),
+        _path("availability-probe-state.json"),
+        max_samples=1,
+    )
+    return "availability:recorded", False
+
+
+def tick_once(manifest: Dict[str, Any]) -> tuple[int, list[str]]:
+    from recovery_probe_client import recovery_token
     from rpo_sampler import write_mark
+    from tier_b_evidence import current_head
 
+    head = current_head()
+    if head != manifest.get("migration_head_at_start"):
+        raise WindowVoided(
+            f"Migration head changed from {manifest.get('migration_head_at_start')} to {head}; "
+            "start a new evidence root instead of pooling different schemas."
+        )
     now = int(time.time())
-    elapsed = now - manifest["started_at"]
-    actions = []
+    actions: list[str] = []
 
-    # Availability: every tick, unconditionally. A probe that is skipped when the
-    # system looks unhealthy would measure only the good moments. probe_once
-    # returns a sample without persisting it -- run_probe owns the loop and the
-    # file -- so the tick appends it here, which is what makes a scheduler-driven
-    # window equivalent to a long-lived probe process.
-    samples_file = DOCS / "availability-samples.jsonl"
+    action, failed = _observe_availability(manifest, now)
+    actions.append(action)
+
     try:
-        sample = probe_once(manifest["target"])
-        samples_file.parent.mkdir(parents=True, exist_ok=True)
-        with samples_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(sample, sort_keys=True) + "\n")
-        actions.append("probe:available" if sample["available"] else "probe:unavailable")
-    except Exception as error:  # noqa: BLE001 - a probe failure is data, not a crash
-        # An unreachable target is unavailability, not an absent sample. Dropping
-        # it would let an outage improve the measured uptime.
-        samples_file.parent.mkdir(parents=True, exist_ok=True)
-        with samples_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(
-                {"at": now, "available": False,
-                 "endpoints": {"probe_error": type(error).__name__}}, sort_keys=True) + "\n")
-        actions.append(f"probe-error:{type(error).__name__}")
+        mark = write_mark(
+            manifest["target"],
+            _path("rpo-marks.jsonl"),
+            _path("rpo-sampler-state.json"),
+            project_id=manifest["project_id"],
+            token=recovery_token(manifest["token_env"]),
+            now=now,
+        )
+        actions.append(f"rpo-mark:{mark['sequence']}")
+    except Exception as error:  # the scheduler continues and exits nonzero
+        failed = True
+        actions.append(f"rpo-mark-failed:{type(error).__name__}")
 
-    # RPO marks advance continuously so a restore always has a recent recovery
-    # point to be measured against.
-    #
-    # SystemExit is caught explicitly, not by accident. write_mark raises it when
-    # the target refuses the write, and SystemExit derives from BaseException, so
-    # `except Exception` lets it through and kills the tick. That would abort the
-    # cycle during an outage -- precisely when the window most needs to keep
-    # sampling -- and every later action in this tick, backups and rehearsals
-    # included, would silently stop running for as long as the target was down.
-    try:
-        write_mark(manifest["target"], DOCS / "rpo-marks.jsonl")
-        actions.append("mark")
-    except (Exception, SystemExit) as error:  # noqa: BLE001
-        actions.append(f"mark-unavailable:{type(error).__name__}")
+    backup_due = now - int(manifest["last_backup_at"]) >= int(manifest["backup_interval_seconds"])
+    recovery_due = (
+        int(manifest.get("backup_attempts", 0)) > 0
+        and now - int(manifest["last_recovery_at"]) >= int(manifest["recovery_interval_seconds"])
+    )
+    if recovery_due:
+        phase = "pre_backup" if backup_due else "mid_cycle"
+        rto_code, rpo_code = _record_recovery(manifest, now, phase)
+        manifest["last_recovery_at"] = now
+        manifest["recovery_attempts"] = int(manifest.get("recovery_attempts", 0)) + 1
+        actions.extend((f"rto:{rto_code}", f"rpo-observe:{rpo_code}:{phase}"))
+        failed = failed or rto_code != 0 or rpo_code != 0
 
-    if now - manifest["last_backup_at"] >= BACKUP_INTERVAL_SECONDS:
-        code = _run(manifest.get("backup_command") or "", timeout=3600)
+    # A pre-backup observation must restore the previous recovery point. The new
+    # backup therefore runs after the observation, never before it.
+    if backup_due:
+        try:
+            backup_code = _run(manifest["backup_command"], timeout=3600)
+        except Exception:
+            backup_code = 1
         manifest["last_backup_at"] = now
-        actions.append(f"backup:{code}")
-
-    if (
-        now - manifest["last_rto_at"] >= RTO_INTERVAL_SECONDS
-        and manifest["rto_rehearsals"] < RTO_REHEARSAL_TARGET
-        and manifest.get("restore_command")
-    ):
-        # Triggered by the scheduler, so it is unattended by construction. That
-        # is the contract's requirement and it is satisfied by how this runs,
-        # not by someone asserting it afterwards.
-        code = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "rto_rehearsal.py"), "record",
-             "--restore-command", manifest["restore_command"],
-             "--target", manifest["target"], "--trigger", "unattended",
-             "--note", f"scheduled rehearsal {manifest['rto_rehearsals'] + 1}"],
-            cwd=REPO_ROOT, capture_output=True, text=True, timeout=3600,
-        ).returncode
-        manifest["last_rto_at"] = now
-        manifest["rto_rehearsals"] += 1
-        manifest["unattended_rto_rehearsals"] += 1
-        actions.append(f"rto:{code}")
+        manifest["backup_attempts"] = int(manifest.get("backup_attempts", 0)) + 1
+        actions.append(f"backup:{backup_code}")
+        failed = failed or backup_code != 0
 
     save_manifest(manifest)
-    print(json.dumps({"elapsed_seconds": elapsed, "actions": actions}, sort_keys=True))
-    return 0
+    return (1 if failed else 0), actions
+
+
+def tick(args: argparse.Namespace) -> int:
+    """One cycle. For tests and manual inspection -- see `run` for the window."""
+    del args
+    manifest = load_manifest()
+    if manifest is None:
+        raise RuntimeError("No window is open. Run `pilot_window.py start` first.")
+    code, actions = tick_once(manifest)
+    print(json.dumps(
+        {"elapsed_seconds": int(time.time()) - manifest["started_at"], "actions": actions},
+        sort_keys=True,
+    ))
+    return code
+
+
+@contextmanager
+def _supervisor_lock() -> Iterator[Path]:
+    """Exactly one supervisor per evidence root.
+
+    Concurrent journal appends are already serialized and duplicate slots are
+    rejected at load, so a second supervisor would not corrupt the chain. It
+    would corrupt the *window*: both read-modify-write one manifest, so each
+    silently discards the other's backup and recovery counters.
+    """
+    lock_path = _path(SUPERVISOR_LOCK)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            descriptor = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if age <= SUPERVISOR_LOCK_STALE_SECONDS:
+                raise RuntimeError(
+                    f"Another supervisor holds {lock_path} (last heartbeat {int(age)}s ago). "
+                    "One evidence root takes one supervisor."
+                )
+            # Older than several probe intervals: the holder died without
+            # releasing. Reclaiming is safe because the manifest it left behind
+            # is complete -- every tick saves it before returning.
+            lock_path.unlink(missing_ok=True)
+    os.write(descriptor, f"{os.getpid()}\n".encode("ascii"))
+    os.fsync(descriptor)
+    try:
+        yield lock_path
+    finally:
+        os.close(descriptor)
+        lock_path.unlink(missing_ok=True)
+
+
+def run(args: argparse.Namespace) -> int:
+    """Supervise the window: one process, one writer, a tick every 30 seconds.
+
+    This exists because neither cron nor Task Scheduler can express the
+    contract's 30-second interval; both round up to a minute, and the missing
+    slots are scored as downtime.
+    """
+    manifest = load_manifest()
+    if manifest is None:
+        raise RuntimeError("No window is open. Run `pilot_window.py start` first.")
+    limit = getattr(args, "max_ticks", None)
+    deadline = int(manifest["started_at"]) + int(manifest["window_seconds"])
+    ticks = failures = 0
+    with _supervisor_lock() as lock_path:
+        print(
+            f"Supervising {manifest['target']} every {PROBE_INTERVAL_SECONDS}s until "
+            f"{deadline} (availability writer: {manifest.get('availability_writer')})."
+        )
+        while limit is None or ticks < limit:
+            started = time.monotonic()
+            try:
+                code, actions = tick_once(manifest)
+            except WindowVoided as error:
+                # Only this ends collection. Nothing a later tick does repairs a
+                # schema change, and continuing would pool two schemas in one file.
+                print(f"Supervisor stopping: {error}")
+                return 1
+            except Exception as error:  # one bad tick must not end seven days
+                code, actions = 1, [f"tick-failed:{type(error).__name__}:{error}"]
+            ticks += 1
+            failures += 1 if code else 0
+            print(json.dumps({"tick": ticks, "code": code, "actions": actions}, sort_keys=True),
+                  flush=True)
+            lock_path.touch()
+            if int(time.time()) >= deadline:
+                print(f"Window complete after {ticks} ticks ({failures} failed).")
+                return 0
+            if limit is not None and ticks >= limit:
+                break
+            # Pace to the next boundary from a fixed origin, so a rehearsal that
+            # overran does not then fire a burst of catch-up ticks.
+            elapsed = time.monotonic() - started
+            remaining = PROBE_INTERVAL_SECONDS - (elapsed % PROBE_INTERVAL_SECONDS)
+            time.sleep(remaining)
+    print(f"Stopped after {ticks} ticks ({failures} failed).")
+    return 1 if failures else 0
 
 
 def status(args: argparse.Namespace) -> int:
+    del args
     manifest = load_manifest()
     if manifest is None:
         print("No window is open.")
         return 1
+    from app.pilot_evidence import JournalIntegrityError
     from availability_probe import load_samples
     from rpo_sampler import load_jsonl
     from rto_rehearsal import load_rehearsals
     from tier_b_evidence import current_head
 
+    try:
+        probes = len(load_samples(_path("availability-samples.jsonl")))
+        rpo_samples = load_jsonl(_path("rpo-samples.jsonl"))
+        rehearsals = load_rehearsals(_path("rto-rehearsals.jsonl"))
+    except JournalIntegrityError as error:
+        print(f"Pilot evidence integrity failure: {error}")
+        return 1
     now = int(time.time())
     elapsed = now - manifest["started_at"]
     remaining = max(0, manifest["window_seconds"] - elapsed)
-    probes = len(load_samples(DOCS / "availability-samples.jsonl"))
-    rpo_samples = load_jsonl(DOCS / "rpo-samples.jsonl")
     pre_backup = sum(1 for row in rpo_samples if row.get("phase") == "pre_backup")
-    rehearsals = load_rehearsals(DOCS / "rto-rehearsals.jsonl")
     unattended = sum(1 for row in rehearsals if row.get("trigger") == "unattended")
-    head_now = current_head()
-
+    writer = manifest.get("availability_writer", "scheduler")
+    lag = observer_lag(now) if writer == "observer" else None
     print("Pilot window status\n")
-    print(f"  elapsed            {elapsed // 3600}h of {manifest['window_seconds'] // 3600}h")
-    print(f"  remaining          {remaining // 3600}h")
+    print(f"  availability by     {writer}"
+          + ("" if writer != "observer"
+             else f" (last wrote {'never' if lag is None else str(lag) + 's ago'})"))
+    print(f"  elapsed             {elapsed // 3600}h of {manifest['window_seconds'] // 3600}h")
+    print(f"  remaining           {remaining // 3600}h")
     print(f"  availability probes {probes} (expected ~{elapsed // PROBE_INTERVAL_SECONDS})")
-    print(f"  rpo samples        {len(rpo_samples)} of {RPO_SAMPLE_TARGET}, "
-          f"pre-backup {pre_backup} of {PRE_BACKUP_SAMPLE_TARGET}")
-    print(f"  rto rehearsals     {len(rehearsals)} of {RTO_REHEARSAL_TARGET}, "
-          f"unattended {unattended} of 1")
-    if head_now != manifest["migration_head_at_start"]:
-        print(f"\n  MIGRATION HEAD DRIFTED: started at {manifest['migration_head_at_start']}, "
-              f"now {head_now}.")
-        print("  Samples taken before and after describe different systems and cannot be")
-        print("  pooled. Restart the window; the non-completion rule is not negotiable here.")
+    print(f"  rpo samples         {len(rpo_samples)} of {RPO_SAMPLE_TARGET}, pre-backup {pre_backup} of {PRE_BACKUP_SAMPLE_TARGET}")
+    print(f"  rto rehearsals      {len(rehearsals)} of {RTO_REHEARSAL_TARGET}, unattended {unattended} of 1")
+    if current_head() != manifest["migration_head_at_start"]:
+        print("\n  MIGRATION HEAD DRIFTED. This window cannot produce current evidence.")
         return 1
     owed = []
-    if remaining > 0:
+    if remaining:
         owed.append(f"{remaining // 3600}h of wall clock")
     if len(rpo_samples) < RPO_SAMPLE_TARGET:
         owed.append(f"{RPO_SAMPLE_TARGET - len(rpo_samples)} rpo samples")
@@ -230,20 +487,149 @@ def status(args: argparse.Namespace) -> int:
         owed.append(f"{RTO_REHEARSAL_TARGET - len(rehearsals)} rto rehearsals")
     if unattended < 1:
         owed.append("1 unattended rehearsal")
+    if writer == "observer" and (lag is None or lag > OBSERVER_MAX_LAG_SECONDS):
+        owed.append("a live availability observer")
     print("\n  " + ("Window complete; run aggregate." if not owed else "Still owed: " + ", ".join(owed)))
     return 0 if not owed else 1
 
 
+def preflight(args: argparse.Namespace) -> int:
+    """Check everything checkable before committing seven days to it.
+
+    Every failure here is one that would otherwise surface as a failed gate at
+    the end of the window, by which time the only remedy is another week.
+    """
+    checks: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str) -> None:
+        checks.append((name, ok, detail))
+
+    try:
+        EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
+        probe = EVIDENCE_ROOT / ".preflight-write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        check("evidence-root", True, f"writable: {EVIDENCE_ROOT}")
+    except OSError as error:
+        check("evidence-root", False, f"{EVIDENCE_ROOT}: {error}")
+
+    check("window-not-open", not MANIFEST.exists(),
+          "no manifest present" if not MANIFEST.exists()
+          else f"{MANIFEST} exists; use a fresh PILOT_EVIDENCE_ROOT")
+
+    try:
+        import shutil
+
+        free_gb = shutil.disk_usage(EVIDENCE_ROOT).free / 1e9
+        check("disk-space", free_gb >= 5.0, f"{free_gb:.1f} GB free (journals plus backups)")
+    except OSError as error:
+        check("disk-space", False, str(error))
+
+    from availability_probe import probe_once
+
+    sample = probe_once(args.target)
+    detail = ", ".join(
+        f"{endpoint} {value['status']} in {value['elapsed_ms']}ms"
+        for endpoint, value in sample["endpoints"].items() if isinstance(value, dict)
+    )
+    check("source-health", bool(sample["available"]), detail or "unreachable")
+
+    from recovery_probe_client import canonical_target, json_request, require_isolated_target
+
+    try:
+        require_isolated_target(args.target, args.recovery_target)
+        check("recovery-isolated", True,
+              f"{canonical_target(args.target)} != {canonical_target(args.recovery_target)}")
+    except ValueError as error:
+        check("recovery-isolated", False, str(error))
+
+    token = os.getenv(args.token_env, "").strip()
+    check("recovery-token", len(token) >= 32,
+          f"{args.token_env} holds {len(token)} characters; production requires 32")
+
+    if token:
+        # Read-only, and deliberately malformed. `_run_id` must start
+        # alphanumeric, so a live route rejects this with 422 -- but only after
+        # the token dependency has already accepted the credential. That
+        # separates the three answers a plain lookup cannot:
+        #
+        #   422  route mounted, token accepted
+        #   404  PILOT_RECOVERY_TOKEN is unset *on the API*, so the whole
+        #        protocol is disabled -- and a real lookup would also answer 404
+        #        for "no such run", which is why this asks with a bad run_id
+        #   401  the API has a token and it is not this one
+        #
+        # The 404 case is the likely mistake: the token exported for this
+        # process but never put in the API container's environment. Every RPO
+        # mark would then fail for seven days.
+        meaning = {
+            422: "route mounted and credential accepted",
+            404: "the recovery protocol is DISABLED -- set PILOT_RECOVERY_TOKEN "
+                 "in the API container, not only in this shell",
+            401: "the API has a different recovery token",
+            403: "the API refused the recovery credential",
+            503: "the API considers its recovery token production-unsafe",
+            0: "unreachable",
+        }
+        code, _ = json_request(
+            args.target, "/health/pilot-recovery/marks/_preflight/highest",
+            token=token, timeout=10.0,
+        )
+        check("recovery-token-accepted", code == 422,
+              f"GET .../marks/_preflight/highest returned {code}: "
+              + meaning.get(code, "unexpected status"))
+
+    if args.recovery_driver == "postgres-compose":
+        try:
+            from pilot_postgres_recovery import Config
+
+            config = Config.from_env()
+            matched = (canonical_target(config.source_url) == canonical_target(args.target)
+                       and canonical_target(config.recovery_url) == canonical_target(args.recovery_target))
+            check("recovery-driver", matched,
+                  f"projects {config.source_project} -> {config.recovery_project}, "
+                  f"backups {config.backup_root}"
+                  + ("" if matched else "; PILOT_SOURCE_URL/PILOT_RECOVERY_URL do not match the targets"))
+        except Exception as error:
+            check("recovery-driver", False, f"{type(error).__name__}: {error}")
+
+    if args.availability_writer == "observer":
+        lag = observer_lag(int(time.time()))
+        check("availability-observer", lag is not None and lag <= OBSERVER_MAX_LAG_SECONDS,
+              "no observer journal state; start the pilot-observability profile"
+              if lag is None else f"last wrote {lag}s ago (limit {OBSERVER_MAX_LAG_SECONDS}s)")
+
+    from tier_b_evidence import current_head
+
+    head = current_head()
+    check("migration-head", True, f"{head} -- must not change for {WINDOW_DAYS} days")
+
+    width = max(len(name) for name, _, _ in checks)
+    print("Pilot preflight\n")
+    for name, ok, detail in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {name.ljust(width)}  {detail}")
+    failed = [name for name, ok, _ in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} check(s) failed: {', '.join(failed)}. The window is not ready.")
+        return 1
+    print(f"\nAll {len(checks)} checks passed. A window opened now closes in {WINDOW_DAYS} days.")
+    return 0
+
+
 def aggregate(args: argparse.Namespace) -> int:
-    """Emit all three gate evidence files from the window's collected samples."""
+    del args
     from availability_probe import aggregate as availability_aggregate
     from rpo_sampler import aggregate as rpo_aggregate
     from rto_rehearsal import aggregate as rto_aggregate
 
+    generated = _path("generated")
     codes = [
-        availability_aggregate(DOCS / "availability-samples.jsonl"),
-        rpo_aggregate(DOCS / "rpo-samples.jsonl"),
-        rto_aggregate(DOCS / "rto-rehearsals.jsonl"),
+        availability_aggregate(
+            _path("availability-samples.jsonl"), output_dir=generated,
+            state_file=_path("availability-probe-state.json"),
+        ),
+        rpo_aggregate(_path("rpo-samples.jsonl"), output_dir=generated),
+        rto_aggregate(_path("rto-rehearsals.jsonl"), output_dir=generated),
     ]
     return 0 if all(code == 0 for code in codes) else 1
 
@@ -251,18 +637,44 @@ def aggregate(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
-
     started = sub.add_parser("start")
-    started.add_argument("--target", required=True)
+    started.add_argument("--target", required=True, help="Live source API")
+    started.add_argument("--recovery-target", required=True, help="Distinct isolated restored API")
+    started.add_argument(
+        "--recovery-driver", choices=("manual", "postgres-compose"), default="manual",
+        help="Use explicit commands or the shipped isolated PostgreSQL Compose driver",
+    )
     started.add_argument("--restore-command", default="")
+    started.add_argument("--recovery-cleanup-command", default="")
     started.add_argument("--backup-command", default="")
-    started.add_argument("--restart", action="store_true")
+    started.add_argument("--project-id", default="default")
+    started.add_argument("--token-env", default="PILOT_RECOVERY_TOKEN")
+    started.add_argument("--backup-interval-seconds", type=int, default=BACKUP_INTERVAL_SECONDS)
+    started.add_argument("--recovery-interval-seconds", type=int, default=RECOVERY_INTERVAL_SECONDS)
+    started.add_argument(
+        "--availability-writer", choices=AVAILABILITY_WRITERS, default="observer",
+        help="Who owns the availability journal. Collecting RPO and RTO requires "
+             "'observer', because a rehearsal blocks this process and every blocked "
+             "slot is scored as downtime.",
+    )
     started.set_defaults(func=start)
+
+    checked = sub.add_parser("preflight", help="Validate the configuration before opening a window")
+    checked.add_argument("--target", required=True)
+    checked.add_argument("--recovery-target", required=True)
+    checked.add_argument("--recovery-driver", choices=("manual", "postgres-compose"), default="manual")
+    checked.add_argument("--availability-writer", choices=AVAILABILITY_WRITERS, default="observer")
+    checked.add_argument("--token-env", default="PILOT_RECOVERY_TOKEN")
+    checked.set_defaults(func=preflight)
+
+    supervised = sub.add_parser("run", help="Supervise the whole window in one process")
+    supervised.add_argument("--max-ticks", type=int, default=None,
+                            help="Stop after this many ticks. For harness self-tests only.")
+    supervised.set_defaults(func=run)
 
     sub.add_parser("tick").set_defaults(func=tick)
     sub.add_parser("status").set_defaults(func=status)
     sub.add_parser("aggregate").set_defaults(func=aggregate)
-
     args = parser.parse_args()
     return args.func(args)
 

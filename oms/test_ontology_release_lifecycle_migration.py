@@ -33,7 +33,7 @@ assert {"ontology_revisions", "ontology_change_sets", "ontology_environments"} <
 assert "project_id" in {column["name"] for column in inspector.get_columns("ontology_branches")}
 assert "project_id" in {column["name"] for column in inspector.get_columns("ontology_proposals")}
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0041_drop_redundant_pk_indexes"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
     assert connection.execute(text("SELECT project_id FROM ontology_branches WHERE id='legacy_branch'")).scalar_one() == "default"
     assert connection.execute(text("SELECT project_id FROM ontology_proposals WHERE id='legacy_proposal'")).scalar_one() == "default"
 
