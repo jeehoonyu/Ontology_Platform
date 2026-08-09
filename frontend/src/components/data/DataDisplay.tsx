@@ -3,9 +3,9 @@ import { asString, classNames, formatValue } from "../../utils/format";
 import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
 
-export function Panel({ title, action, children, className }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
+export function Panel({ title, action, children, className, ariaLabel }: { title: string; action?: ReactNode; children: ReactNode; className?: string; ariaLabel?: string }) {
   return (
-    <section className={classNames("panel", className)}>
+    <section className={classNames("panel", className)} aria-label={ariaLabel}>
       <header className="panel-header">
         <h2>{title}</h2>
         {action}

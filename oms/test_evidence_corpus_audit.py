@@ -9,7 +9,7 @@ import audit_evidence_corpus as audit  # noqa: E402
 from audit_evidence_corpus import CURRENT, STALE, UNPROVENANCED, head_of  # noqa: E402
 
 passed = 0
-HEAD = "0041_drop_redundant_pk_indexes"
+HEAD = "0042_stream_outer_joins"
 
 
 def check(condition, label, payload=None):

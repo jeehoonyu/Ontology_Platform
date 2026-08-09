@@ -515,6 +515,16 @@ def publish_workshop_module(
         created_at=_now(),
     )
     db.add(version)
+    from . import ontology_runtime_v1
+    ontology_runtime_v1.bind_ontology_contract(
+        db,
+        project_id=module.project_id,
+        consumer_kind="workshop",
+        consumer_id=module.id,
+        consumer_version=str(version.version_number),
+        payload={"variables": module.variables or {}, "widgets": module.widgets or [], "layout": module.layout or {}},
+        actor=principal.id,
+    )
     _append_audit(
         db,
         actor=principal.id,

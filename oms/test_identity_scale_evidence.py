@@ -11,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from identity_scale_evidence import (  # noqa: E402
     LOGIN_P95_LIMIT_MS, REQUIRED_IDENTITIES, REQUIRED_REPLICAS,
-    _replica_count, measurements_from_run,
+    _replica_count, measurements_from_run, require_current_run_head,
 )
-from tier_b_evidence import compare  # noqa: E402
+from tier_b_evidence import compare, current_head  # noqa: E402
 
 passed = 0
 
@@ -44,6 +44,7 @@ def run(**overrides):
         "login_p50_ms": 3122.733,
         "concurrency": 20,
         "elapsed_seconds": 38.914,
+        "migration_head": current_head(),
     }
     base.update(overrides)
     return base
@@ -77,7 +78,7 @@ check(verdict(mutation_denials=0),
 # A partial run must refuse to produce evidence rather than default a gap. A
 # missing latency defaulted to zero would pass silently.
 for missing in ("identities", "unique_principals", "mutation_denials",
-                "replicas_verified", "login_p95_ms"):
+                "replicas_verified", "login_p95_ms", "migration_head"):
     incomplete = run()
     incomplete[missing] = None
     try:
@@ -90,6 +91,14 @@ try:
     _replica_count(True)
     raise AssertionError("a boolean was accepted as a replica count")
 except ValueError:
+    passed += 1
+
+require_current_run_head(run(), current_head())
+passed += 1
+try:
+    require_current_run_head(run(migration_head="0041_drop_redundant_pk_indexes"), current_head())
+    raise AssertionError("a stale OIDC run was accepted as current evidence")
+except SystemExit:
     passed += 1
 
 print(f"Identity gate emission: {passed} assertions passed.")

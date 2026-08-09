@@ -68,17 +68,29 @@ def summarize(rehearsals: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     collaboration = [row for row in rehearsals if row.get("subject") == "collaboration"]
     cross_stream = [row for row in rehearsals if row.get("subject") == "cross_stream"]
+    cross_stream_inner = [
+        row for row in cross_stream
+        if row.get("measurements", {}).get("join_mode") == "inner"
+    ]
+    cross_stream_outer = [
+        row for row in cross_stream
+        if row.get("measurements", {}).get("join_mode") == "outer"
+    ]
     reconnects = [value for value in metric(collaboration, "reconnect_max_ms") if value]
 
     return {
         "collaboration_rehearsals": len(collaboration),
         "cross_stream_rehearsals": len(cross_stream),
+        "cross_stream_inner_rehearsals": len(cross_stream_inner),
+        "cross_stream_outer_rehearsals": len(cross_stream_outer),
         # Losses and duplicates are summed across every rehearsal. One clean run
         # must not average away a run that dropped an event.
         "duplicate_events": sum(metric(collaboration, "duplicate_events")),
         "missed_events": sum(metric(collaboration, "missed_events")),
         "duplicate_pairs": sum(metric(cross_stream, "duplicate_pairs")),
         "missed_pairs": sum(metric(cross_stream, "missed_pairs")),
+        "duplicate_outer_rows": sum(metric(cross_stream, "duplicate_outer_rows")),
+        "missed_outer_rows": sum(metric(cross_stream, "missed_outer_rows")),
         "reconnect_max_ms": round(max(reconnects), 3) if reconnects else 0,
         "subjects_covered": sorted({row.get("subject") for row in rehearsals if row.get("subject")}),
     }
@@ -117,11 +129,14 @@ def aggregate(rehearsals_file: Optional[Path] = None,
         "chaos",
         thresholds={
             "collaboration_rehearsals_min": 1,
-            "cross_stream_rehearsals_min": 1,
+            "cross_stream_inner_rehearsals_min": 1,
+            "cross_stream_outer_rehearsals_min": 1,
             "duplicate_events_max": 0,
             "missed_events_max": 0,
             "duplicate_pairs_max": 0,
             "missed_pairs_max": 0,
+            "duplicate_outer_rows_max": 0,
+            "missed_outer_rows_max": 0,
             "reconnect_max_ms_max": RECONNECT_LIMIT_MS,
         },
         measurements=summary,
@@ -132,16 +147,18 @@ def aggregate(rehearsals_file: Optional[Path] = None,
         entry_points=[
             "aggregate of oms/verify_collaboration_websocket_chaos_postgres.py",
             "aggregate of oms/verify_cross_stream_partition_postgres.py",
+            "aggregate of oms/verify_cross_stream_outer_partition_postgres.py",
         ],
         request_shapes=[
             "websocket replica termination and resume",
             "cross-stream network partition with in-flight processor interruption",
+            "outer-join finalization interrupted before commit and replayed exactly once",
         ],
         notes=(
-            "The gate names collaboration and cross-stream processing. Both subjects "
-            "must have rehearsed, so the gate cannot read as satisfied while covering "
-            "one half. Losses and duplicates are summed across rehearsals rather than "
-            "averaged."
+            "The gate names collaboration and cross-stream processing. Collaboration, "
+            "inner-pair recovery, and outer-finalization recovery must each be rehearsed, "
+            "so the gate cannot read as satisfied while covering only one stream semantic. "
+            "Losses and duplicates are summed across rehearsals rather than averaged."
         ),
         output_dir=output_dir,
     )

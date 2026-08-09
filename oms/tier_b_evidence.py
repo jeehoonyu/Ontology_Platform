@@ -19,9 +19,17 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+MODULE_ROOT = Path(__file__).resolve().parent
+if (MODULE_ROOT.parent / "frontend" / "package.json").exists():
+    # Source checkout: this module lives under <repo>/oms while evidence belongs
+    # in the repository-level docs directory.
+    REPO_ROOT = MODULE_ROOT.parent
+    VERSIONS = REPO_ROOT / "oms" / "alembic" / "versions"
+else:
+    # Production image: the harness and Alembic tree both live under /app.
+    REPO_ROOT = MODULE_ROOT
+    VERSIONS = MODULE_ROOT / "alembic" / "versions"
 DOCS = REPO_ROOT / "docs"
-VERSIONS = REPO_ROOT / "oms" / "alembic" / "versions"
 
 
 def current_head() -> str:

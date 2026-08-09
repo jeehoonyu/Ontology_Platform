@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, Boolean, Float, Integer, String, UniqueConstraint, exists, func, inspect, or_
+from sqlalchemy import JSON, Boolean, Float, Integer, String, UniqueConstraint, and_, exists, func, inspect, or_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -23,6 +23,7 @@ from .production_auth import Principal, require_permission
 
 router = APIRouter(prefix="/api/v1", tags=["stream-processing"])
 STREAM_JSON = JSON().with_variant(JSONB(), "postgresql")
+JOIN_STATE_RETENTION_SECONDS = 86400
 
 
 def _now() -> int:
@@ -52,6 +53,7 @@ class StreamProcessor(Base):
     join_left_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     join_right_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     join_time_tolerance_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    join_type: Mapped[str] = mapped_column(String, nullable=False, default="inner")
     max_batch_records: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
     max_backlog_records: Mapped[int] = mapped_column(Integer, nullable=False, default=10000)
     backpressure_mode: Mapped[str] = mapped_column(String, nullable=False, default="reject")
@@ -155,6 +157,26 @@ class StreamJoinReceipt(Base):
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class StreamJoinOuterReceipt(Base):
+    __tablename__ = "stream_join_outer_receipts"
+    __table_args__ = (
+        UniqueConstraint("processor_id", "record_id", name="uq_stream_join_outer_input"),
+        UniqueConstraint("output_record_id", name="uq_stream_join_outer_output"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    processor_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    record_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    side: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    output_record_id: Mapped[str] = mapped_column(String, nullable=False)
+    join_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    event_time: Mapped[float] = mapped_column(Float, nullable=False)
+    opposite_watermark: Mapped[float] = mapped_column(Float, nullable=False)
+    run_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class StreamQuarantineRecord(Base):
     __tablename__ = "stream_quarantine_records"
     __table_args__ = (UniqueConstraint("processor_id", "record_id", name="uq_stream_quarantine_record"),)
@@ -188,6 +210,7 @@ class StreamProcessingRun(Base):
     records_quarantined: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     windows_emitted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     joins_emitted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    outer_joins_emitted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metrics: Mapped[dict] = mapped_column(STREAM_JSON, nullable=False, default=dict)
     error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -211,6 +234,7 @@ class ProcessorCreate(BaseModel):
     join_left_key: Optional[str] = Field(default=None, min_length=1, max_length=255)
     join_right_key: Optional[str] = Field(default=None, min_length=1, max_length=255)
     join_time_tolerance_seconds: Optional[int] = Field(default=None, ge=0, le=31_536_000)
+    join_type: str = Field(default="inner", pattern="^(inner|left|right|full)$")
     max_batch_records: int = Field(default=1000, ge=1, le=10000)
     max_backlog_records: int = Field(default=10000, ge=1, le=10_000_000)
     backpressure_mode: str = Field(default="reject", pattern="^(reject|warn)$")
@@ -224,6 +248,18 @@ class ProcessorPatch(BaseModel):
     max_backlog_records: Optional[int] = Field(default=None, ge=1, le=10_000_000)
     backpressure_mode: Optional[str] = Field(default=None, pattern="^(reject|warn)$")
     enabled: Optional[bool] = None
+
+
+class JoinCompactionRequest(BaseModel):
+    dry_run: bool = False
+    max_inputs: int = Field(default=10000, ge=1, le=100000)
+    retention_seconds: int = Field(default=JOIN_STATE_RETENTION_SECONDS, ge=0, le=31_536_000)
+
+
+class JoinWatermarkRequest(BaseModel):
+    side: str = Field(pattern="^(left|right)$")
+    join_key: str = Field(min_length=1, max_length=255)
+    watermark: float
 
 
 class ProcessRequest(BaseModel):
@@ -251,7 +287,8 @@ def _processor_dict(row: StreamProcessor) -> Dict[str, Any]:
         "id", "project_id", "stream_id", "display_name", "timestamp_field", "partition_key_field",
         "allowed_lateness_seconds", "late_policy", "window_size_seconds", "value_field", "aggregation",
         "target_asset_id", "join_stream_id", "join_left_key", "join_right_key",
-        "join_time_tolerance_seconds", "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
+        "join_time_tolerance_seconds", "join_type", "max_batch_records", "max_backlog_records",
+        "backpressure_mode", "enabled",
         "created_by", "created_at", "updated_at",
     )}
 
@@ -259,7 +296,8 @@ def _processor_dict(row: StreamProcessor) -> Dict[str, Any]:
 def _run_dict(row: StreamProcessingRun) -> Dict[str, Any]:
     return {name: getattr(row, name) for name in (
         "id", "processor_id", "project_id", "job_id", "status", "backlog_before", "backlog_after",
-        "records_processed", "records_late", "records_quarantined", "windows_emitted", "joins_emitted", "metrics",
+        "records_processed", "records_late", "records_quarantined", "windows_emitted",
+        "joins_emitted", "outer_joins_emitted", "metrics",
         "error", "created_at", "completed_at",
     )}
 
@@ -466,6 +504,8 @@ def _emit_join_pairs(
         output = {
             "_stream_join_id": output_id,
             "processor_id": processor.id,
+            "join_type": processor.join_type,
+            "match_status": "MATCHED",
             "join_key": current.join_key,
             "left_record_id": left.record_id,
             "right_record_id": right.record_id,
@@ -484,6 +524,117 @@ def _emit_join_pairs(
             right_event_time=right.event_time, run_id=run.id, created_at=_now(),
         ))
         emitted += 1
+    return emitted
+
+
+def _outer_sides(processor: StreamProcessor) -> tuple[str, ...]:
+    if processor.join_type == "left":
+        return ("left",)
+    if processor.join_type == "right":
+        return ("right",)
+    if processor.join_type == "full":
+        return ("left", "right")
+    return ()
+
+
+def _emit_outer_unmatched(
+    db: Session,
+    processor: StreamProcessor,
+    run: StreamProcessingRun,
+    outputs: List[Dict[str, Any]],
+    *,
+    join_keys: Optional[set[str]] = None,
+    max_outputs: int = 10000,
+) -> int:
+    """Finalize unmatched rows only after the opposite watermark closes their interval.
+
+    The comparison is strict because an event exactly at the watermark remains
+    admissible under the processor's late-data contract. The immutable receipt
+    makes finalization replay-safe and survives compaction of match state.
+    """
+    preserved_sides = _outer_sides(processor)
+    if not preserved_sides:
+        return 0
+    if processor.late_policy == "accept":
+        raise HTTPException(status_code=409, detail="Outer joins require a bounded late-data policy")
+
+    state_query = db.query(StreamPartitionState).filter(
+        StreamPartitionState.processor_id == processor.id,
+        StreamPartitionState.watermark.is_not(None),
+    )
+    states = state_query.all()
+    watermarks: Dict[tuple[str, str], float] = {}
+    for state in states:
+        side, separator, key = state.partition_key.partition(":")
+        if separator and side in {"left", "right"} and state.watermark is not None:
+            if join_keys is None or key in join_keys:
+                watermarks[(side, key)] = float(state.watermark)
+
+    emitted = 0
+    tolerance = float(processor.join_time_tolerance_seconds or 0)
+    for side in preserved_sides:
+        opposite_side = "right" if side == "left" else "left"
+        for (state_side, join_key), opposite_watermark in sorted(watermarks.items()):
+            if state_side != opposite_side:
+                continue
+            remaining = max_outputs - emitted
+            if remaining <= 0:
+                return emitted
+            finalized = exists().where(and_(
+                StreamJoinOuterReceipt.processor_id == processor.id,
+                StreamJoinOuterReceipt.record_id == StreamJoinInput.record_id,
+            ))
+            pair_record_id = (
+                StreamJoinReceipt.left_record_id if side == "left"
+                else StreamJoinReceipt.right_record_id
+            )
+            matched = exists().where(and_(
+                StreamJoinReceipt.processor_id == processor.id,
+                pair_record_id == StreamJoinInput.record_id,
+            ))
+            candidates = db.query(StreamJoinInput).filter(
+                StreamJoinInput.processor_id == processor.id,
+                StreamJoinInput.side == side,
+                StreamJoinInput.join_key == join_key,
+                StreamJoinInput.event_time < opposite_watermark - tolerance,
+                ~finalized,
+                ~matched,
+            ).order_by(StreamJoinInput.event_time, StreamJoinInput.record_id).limit(remaining).all()
+            if not candidates:
+                continue
+            for candidate in candidates:
+                source_record = db.get(streaming.StreamRecord, candidate.record_id)
+                if source_record is None:
+                    raise HTTPException(status_code=409, detail="Outer join input record is missing")
+                digest = hashlib.sha256(
+                    f"{processor.id}\x1fouter\x1f{side}\x1f{candidate.record_id}".encode("utf-8")
+                ).hexdigest()
+                output_id = f"stream_join_outer_{digest}"
+                payload = dict(source_record.payload or {})
+                output = {
+                    "_stream_join_id": output_id,
+                    "processor_id": processor.id,
+                    "join_type": processor.join_type,
+                    "match_status": f"{side.upper()}_UNMATCHED",
+                    "join_key": candidate.join_key,
+                    "left_record_id": candidate.record_id if side == "left" else None,
+                    "right_record_id": candidate.record_id if side == "right" else None,
+                    "left_event_time": candidate.event_time if side == "left" else None,
+                    "right_event_time": candidate.event_time if side == "right" else None,
+                    "event_time_delta_seconds": None,
+                    "left": payload if side == "left" else None,
+                    "right": payload if side == "right" else None,
+                    "finalized_by_watermark": opposite_watermark,
+                }
+                outputs.append(output)
+                db.add(StreamJoinOuterReceipt(
+                    id=f"joinouter_{digest}", processor_id=processor.id,
+                    project_id=processor.project_id, record_id=candidate.record_id,
+                    side=side, output_record_id=output_id, join_key=candidate.join_key,
+                    event_time=candidate.event_time, opposite_watermark=opposite_watermark,
+                    run_id=run.id, created_at=_now(),
+                ))
+                emitted += 1
     return emitted
 
 
@@ -520,9 +671,107 @@ def _materialize_join_outputs(
         "join_left_key": processor.join_left_key,
         "join_right_key": processor.join_right_key,
         "join_time_tolerance_seconds": processor.join_time_tolerance_seconds,
+        "join_type": processor.join_type,
         "last_stream_join_count": len(outputs),
     }
     asset.updated_at = _now()
+
+
+def compact_join_state(
+    db: Session,
+    processor: StreamProcessor,
+    *,
+    dry_run: bool = False,
+    max_inputs: int = 10000,
+    retention_seconds: int = JOIN_STATE_RETENTION_SECONDS,
+    join_keys: Optional[set[str]] = None,
+) -> Dict[str, Any]:
+    if not processor.join_stream_id:
+        return {
+            "processor_id": processor.id, "status": "NOT_APPLICABLE",
+            "reason": "processor_has_no_join", "dry_run": dry_run,
+            "inputs_before": 0, "inputs_compacted": 0, "inputs_after": 0,
+            "cutoffs": {},
+        }
+    # Automatic batch compaction stays O(touched keys); only an explicit maintenance
+    # request pays for a processor-wide state count.
+    before = None if join_keys is not None else (
+        db.query(func.count(StreamJoinInput.id)).filter(
+            StreamJoinInput.processor_id == processor.id,
+        ).scalar() or 0
+    )
+    if processor.late_policy == "accept":
+        return {
+            "processor_id": processor.id, "status": "SKIPPED",
+            "reason": "late_accept_requires_unbounded_match_state", "dry_run": dry_run,
+            "inputs_before": before, "inputs_compacted": 0, "inputs_after": before,
+            "cutoffs": {},
+        }
+
+    state_query = db.query(StreamPartitionState).filter(
+        StreamPartitionState.processor_id == processor.id,
+    )
+    if join_keys is not None:
+        state_keys = [f"{side}:{key}" for key in sorted(join_keys) for side in ("left", "right")]
+        state_query = state_query.filter(StreamPartitionState.partition_key.in_(state_keys))
+    states = state_query.all()
+    watermarks: Dict[str, Dict[str, float]] = {}
+    for state in states:
+        side, separator, join_key = state.partition_key.partition(":")
+        if not separator or side not in {"left", "right"} or state.watermark is None:
+            continue
+        watermarks.setdefault(join_key, {})[side] = float(state.watermark)
+    tolerance = float(processor.join_time_tolerance_seconds or 0)
+    retention = float(retention_seconds)
+    cutoffs = {
+        join_key: min(by_side["left"], by_side["right"]) - tolerance - retention
+        for join_key, by_side in watermarks.items()
+        if "left" in by_side and "right" in by_side
+    }
+    candidate_ids: List[str] = []
+    cutoff_items = sorted(cutoffs.items())
+    for chunk_start in range(0, len(cutoff_items), 100):
+        remaining = max_inputs - len(candidate_ids)
+        if remaining <= 0:
+            break
+        predicates = [
+            and_(
+                StreamJoinInput.side == side,
+                StreamJoinInput.join_key == join_key,
+                StreamJoinInput.event_time < cutoff,
+            )
+            for join_key, cutoff in cutoff_items[chunk_start:chunk_start + 100]
+            for side in ("left", "right")
+        ]
+        candidate_ids.extend(row[0] for row in db.query(StreamJoinInput.id).filter(
+            StreamJoinInput.processor_id == processor.id,
+            or_(*predicates),
+        ).order_by(StreamJoinInput.event_time, StreamJoinInput.id).limit(remaining).all())
+    if not dry_run:
+        if candidate_ids:
+            db.query(StreamJoinInput).filter(StreamJoinInput.id.in_(candidate_ids)).delete(
+                synchronize_session=False,
+            )
+        db.flush()
+    compacted = len(candidate_ids)
+    reported_cutoffs = cutoffs if join_keys is None else dict(list(cutoffs.items())[:100])
+    return {
+        "processor_id": processor.id,
+        "status": "DRY_RUN" if dry_run else "COMPACTED",
+        "reason": None,
+        "dry_run": dry_run,
+        "inputs_before": before,
+        "inputs_compacted": compacted,
+        "inputs_after": before if dry_run or before is None else before - compacted,
+        "scope": "touched_keys" if join_keys is not None else "processor",
+        "max_inputs": max_inputs,
+        "limit_reached": compacted >= max_inputs,
+        "retention_seconds": int(retention),
+        "tolerance_seconds": int(tolerance),
+        "cutoff_count": len(cutoffs),
+        "cutoffs_truncated": len(reported_cutoffs) < len(cutoffs),
+        "cutoffs": reported_cutoffs,
+    }
 
 
 def _emit_closed_windows(db: Session, processor: StreamProcessor, states: Dict[str, StreamPartitionState]) -> int:
@@ -591,7 +840,7 @@ def execute_batch(
         id=_id("streamrun"), processor_id=processor.id, project_id=processor.project_id,
         job_id=job_id, status="RUNNING", backlog_before=backlog_before, backlog_after=backlog_before,
         records_processed=0, records_late=0, records_quarantined=0, windows_emitted=0,
-        joins_emitted=0,
+        joins_emitted=0, outer_joins_emitted=0,
         metrics={}, error=None, created_at=_now(), completed_at=None,
     )
     db.add(run)
@@ -608,22 +857,26 @@ def execute_batch(
     ).limit(limit).all()
     states: Dict[str, StreamPartitionState] = {}
     join_outputs: List[Dict[str, Any]] = []
+    touched_join_keys: set[str] = set()
     for index, record in enumerate(records, start=1):
         payload = dict(record.payload or {})
         side = "right" if processor.join_stream_id and record.stream_id == processor.join_stream_id else "left"
-        partition_key = _partition(payload, processor.partition_key_field)
+        key_field = processor.join_right_key if side == "right" else processor.join_left_key
+        join_key = _join_key(payload, str(key_field)) if processor.join_stream_id else None
+        if join_key is not None:
+            touched_join_keys.add(join_key)
+        partition_key = (join_key or "_invalid") if processor.join_stream_id else _partition(
+            payload, processor.partition_key_field,
+        )
         state_key = f"{side}:{partition_key}" if processor.join_stream_id else partition_key
         state = states.get(state_key) or _state(db, processor, state_key)
         states[state_key] = state
         event_time = _event_time(record, processor.timestamp_field)
         prior_watermark = state.watermark
         status, reason = "PROCESSED", None
-        join_key = None
         if event_time is None:
             status, reason = "QUARANTINED", "invalid_event_time"
         elif processor.join_stream_id:
-            key_field = processor.join_right_key if side == "right" else processor.join_left_key
-            join_key = _join_key(payload, str(key_field))
             if join_key is None:
                 status, reason = "QUARANTINED", "invalid_join_key"
         if status == "PROCESSED" and prior_watermark is not None and event_time < prior_watermark:
@@ -635,7 +888,8 @@ def execute_batch(
                 status, reason = "DROPPED", "event_time_before_watermark"
         if status == "PROCESSED" and event_time is not None:
             state.max_event_time = max(state.max_event_time, event_time) if state.max_event_time is not None else event_time
-            state.watermark = state.max_event_time - processor.allowed_lateness_seconds
+            calculated_watermark = state.max_event_time - processor.allowed_lateness_seconds
+            state.watermark = max(state.watermark, calculated_watermark) if state.watermark is not None else calculated_watermark
             state.processed_count += 1
             if processor.join_stream_id and join_key is not None:
                 join_input = _join_input(
@@ -678,7 +932,15 @@ def execute_batch(
         if inject_failure_after_records and index >= inject_failure_after_records:
             raise RuntimeError("Injected stream processor failure")
     run.windows_emitted = _emit_closed_windows(db, processor, states)
+    run.outer_joins_emitted = _emit_outer_unmatched(
+        db, processor, run, join_outputs,
+        join_keys=touched_join_keys or None,
+        max_outputs=max(processor.max_batch_records, 1000),
+    )
     _materialize_join_outputs(db, processor, join_outputs)
+    compaction = compact_join_state(
+        db, processor, max_inputs=10000, join_keys=touched_join_keys,
+    )
     run.backlog_after = max(0, backlog_before - run.records_processed)
     run.status = "WARN" if run.records_quarantined else "SUCCEEDED"
     run.completed_at = _now()
@@ -686,6 +948,8 @@ def execute_batch(
         "batch_limit": limit, "partitions_touched": len(states),
         "input_streams": _processor_stream_ids(processor),
         "joins_emitted": run.joins_emitted,
+        "outer_joins_emitted": run.outer_joins_emitted,
+        "join_compaction": compaction,
         "backpressure_active": run.backlog_after >= processor.max_backlog_records,
         "duration_ms": max(0, run.completed_at - run.created_at) * 1000,
     }
@@ -727,6 +991,8 @@ def create_processor(body: ProcessorCreate, principal: Principal = Depends(requi
             status_code=422,
             detail="join_stream_id, join_left_key, join_right_key, and join_time_tolerance_seconds are required together",
         )
+    if body.join_type != "inner" and not body.join_stream_id:
+        raise HTTPException(status_code=422, detail="join_type requires a configured stream join")
     if body.join_stream_id:
         if body.join_stream_id == body.stream_id:
             raise HTTPException(status_code=422, detail="Join streams must be distinct")
@@ -737,6 +1003,8 @@ def create_processor(body: ProcessorCreate, principal: Principal = Depends(requi
             raise HTTPException(status_code=422, detail="target_asset_id is required for stream joins")
         if body.window_size_seconds:
             raise HTTPException(status_code=422, detail="Window aggregation and stream join cannot be combined in one processor")
+        if body.join_type != "inner" and body.late_policy == "accept":
+            raise HTTPException(status_code=422, detail="Outer joins require quarantine or drop late-data policy")
     if body.target_asset_id:
         asset = db.get(models.DataAsset, body.target_asset_id)
         if not asset or asset.project_id != body.project_id:
@@ -775,6 +1043,9 @@ def get_processor(processor_id: str, principal: Principal = Depends(require_perm
         "partition_key", "max_event_time", "watermark", "processed_count", "late_count",
         "quarantined_count", "updated_at",
     )} for state in db.query(StreamPartitionState).filter(StreamPartitionState.processor_id == row.id).all()]
+    result["outer_receipt_count"] = db.query(func.count(StreamJoinOuterReceipt.id)).filter(
+        StreamJoinOuterReceipt.processor_id == row.id,
+    ).scalar() or 0
     return result
 
 
@@ -786,6 +1057,137 @@ def patch_processor(processor_id: str, body: ProcessorPatch, principal: Principa
     row.updated_at = _now()
     db.commit()
     return _processor_dict(row)
+
+
+@router.post("/streams/processors/{processor_id}/compact")
+def compact_processor_join_state(
+    processor_id: str,
+    body: JoinCompactionRequest = JoinCompactionRequest(),
+    principal: Principal = Depends(require_permission("execute")),
+    db: Session = Depends(get_db),
+):
+    row = _processor(db, processor_id, principal, "execute")
+    query = db.query(StreamProcessor).filter(StreamProcessor.id == row.id)
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    row = query.one()
+    result = compact_join_state(
+        db, row, dry_run=body.dry_run, max_inputs=body.max_inputs,
+        retention_seconds=body.retention_seconds,
+    )
+    event_type = "stream.join.compaction_evaluated" if body.dry_run else "stream.join.compacted"
+    db.add(models_action.AuditLog(
+        id=uuid.uuid4().hex, actor=principal.id, event_type=event_type,
+        subject_type="stream_processor", subject_id=row.id,
+        payload={"project_id": row.project_id, **result},
+    ))
+    ops_control.record_ops_event(
+        db, source="streaming", event_type=event_type, severity="info",
+        title=f"Stream join {row.display_name} compacted {result['inputs_compacted']} input(s)",
+        subject_type="stream_processor", subject_id=row.id,
+        payload={"project_id": row.project_id, **result}, project_id=row.project_id,
+    )
+    db.commit()
+    return result
+
+
+@router.post("/streams/processors/{processor_id}/watermarks")
+def advance_processor_join_watermark(
+    processor_id: str,
+    body: JoinWatermarkRequest,
+    principal: Principal = Depends(require_permission("execute")),
+    db: Session = Depends(get_db),
+):
+    row = _processor(db, processor_id, principal, "execute")
+    query = db.query(StreamProcessor).filter(StreamProcessor.id == row.id)
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update()
+    row = query.one()
+    if not row.join_stream_id:
+        raise HTTPException(status_code=409, detail="Processor is not a stream join")
+    if row.join_type == "inner":
+        raise HTTPException(status_code=409, detail="Explicit finalization watermarks require an outer join")
+    if row.late_policy == "accept":
+        raise HTTPException(status_code=409, detail="Outer joins require a bounded late-data policy")
+
+    state_key = f"{body.side}:{body.join_key}"
+    state = _state(db, row, state_key)
+    prior = state.watermark
+    if prior is not None and body.watermark < prior:
+        raise HTTPException(status_code=409, detail={
+            "code": "WATERMARK_REGRESSION",
+            "current_watermark": prior,
+            "requested_watermark": body.watermark,
+        })
+    state.watermark = float(body.watermark)
+    implied_max = float(body.watermark) + row.allowed_lateness_seconds
+    state.max_event_time = max(state.max_event_time, implied_max) if state.max_event_time is not None else implied_max
+    state.updated_at = _now()
+
+    backlog = _backlog(db, row)
+    run = StreamProcessingRun(
+        id=_id("streamrun"), processor_id=row.id, project_id=row.project_id,
+        job_id=None, status="RUNNING", backlog_before=backlog, backlog_after=backlog,
+        records_processed=0, records_late=0, records_quarantined=0,
+        windows_emitted=0, joins_emitted=0, outer_joins_emitted=0,
+        metrics={}, error=None, created_at=_now(), completed_at=None,
+    )
+    db.add(run)
+    db.flush()
+    outputs: List[Dict[str, Any]] = []
+    run.outer_joins_emitted = _emit_outer_unmatched(
+        db, row, run, outputs, join_keys={body.join_key},
+        max_outputs=max(row.max_batch_records, 1000),
+    )
+    _materialize_join_outputs(db, row, outputs)
+    run.status = "SUCCEEDED"
+    run.completed_at = _now()
+    run.metrics = {
+        "operation": "watermark_advance",
+        "side": body.side,
+        "join_key": body.join_key,
+        "prior_watermark": prior,
+        "watermark": float(body.watermark),
+        "outer_joins_emitted": run.outer_joins_emitted,
+    }
+    event_payload = {"project_id": row.project_id, **run.metrics, "run_id": run.id}
+    db.add(models_action.AuditLog(
+        id=uuid.uuid4().hex, actor=principal.id, event_type="stream.join.watermark_advanced",
+        subject_type="stream_processor", subject_id=row.id, payload=event_payload,
+    ))
+    ops_control.record_ops_event(
+        db, source="streaming", event_type="stream.join.watermark_advanced", severity="info",
+        title=f"Stream join {row.display_name} advanced {body.side} watermark",
+        subject_type="stream_processor", subject_id=row.id,
+        payload=event_payload, project_id=row.project_id,
+    )
+    db.commit()
+    return {
+        "processor_id": row.id,
+        "side": body.side,
+        "join_key": body.join_key,
+        "prior_watermark": prior,
+        "watermark": float(body.watermark),
+        "outer_joins_emitted": run.outer_joins_emitted,
+        "run": _run_dict(run),
+    }
+
+
+@router.get("/streams/processors/{processor_id}/outer-receipts")
+def list_processor_outer_receipts(
+    processor_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    principal: Principal = Depends(require_permission("view")),
+    db: Session = Depends(get_db),
+):
+    _processor(db, processor_id, principal, "view")
+    rows = db.query(StreamJoinOuterReceipt).filter(
+        StreamJoinOuterReceipt.processor_id == processor_id,
+    ).order_by(StreamJoinOuterReceipt.created_at.desc(), StreamJoinOuterReceipt.id).limit(limit).all()
+    return [{name: getattr(receipt, name) for name in (
+        "id", "processor_id", "project_id", "record_id", "side", "output_record_id",
+        "join_key", "event_time", "opposite_watermark", "run_id", "created_at",
+    )} for receipt in rows]
 
 
 @router.post("/streams/processors/{processor_id}/process")

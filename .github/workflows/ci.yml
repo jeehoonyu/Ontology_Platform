@@ -124,7 +124,7 @@ jobs:
           with engine.connect() as connection:
               revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
               tables = inspect(connection).get_table_names()
-          assert revision == "0041_drop_redundant_pk_indexes", revision
+          assert revision == "0042_stream_outer_joins", revision
           assert len(tables) >= 100, len(tables)
           print(f"PostgreSQL schema ready at {revision} with {len(tables)} tables")
           PY
@@ -147,6 +147,8 @@ jobs:
         run: python oms/verify_event_stream_routing_postgres.py
       - name: Rehearse PostgreSQL cross-stream interval joins
         run: python oms/verify_cross_stream_join_postgres.py
+      - name: Rehearse PostgreSQL cross-stream outer joins
+        run: python oms/verify_cross_stream_outer_postgres.py
       - name: Rehearse PostgreSQL artifact review serialization
         run: python oms/verify_artifact_review_postgres.py
       - name: Rehearse PostgreSQL collaboration scale
@@ -155,6 +157,8 @@ jobs:
         run: python oms/verify_collaboration_websocket_chaos_postgres.py
       - name: Rehearse cross-stream network-partition recovery
         run: python oms/verify_cross_stream_partition_postgres.py
+      - name: Rehearse cross-stream outer-finalization partition recovery
+        run: python oms/verify_cross_stream_outer_partition_postgres.py
       - name: Aggregate the chaos gate across both of its subjects
         run: python oms/chaos_rehearsals.py aggregate
 

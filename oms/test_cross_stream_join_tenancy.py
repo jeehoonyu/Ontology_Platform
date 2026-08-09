@@ -85,6 +85,7 @@ use("alpha")
 checked(client.get("/api/v1/streams/processors/beta-join"), "deny beta processor read", 403)
 checked(client.post("/api/v1/streams/processors/beta-join/process", json={}), "deny beta processor execute", 403)
 checked(client.post("/api/v1/streams/processors/beta-join/enqueue", json={}), "deny beta processor enqueue", 403)
+checked(client.post("/api/v1/streams/processors/beta-join/compact", json={}), "deny beta processor compact", 403)
 alpha_rows = checked(client.get("/api/v1/streams/processors?project_id=alpha"), "list alpha processors")
 assert [row["id"] for row in alpha_rows] == ["alpha-join"]
 passed += 1

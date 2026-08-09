@@ -48,6 +48,7 @@ REQUIRED_KEYS = (
     "mutation_denials",
     "replicas_verified",
     "login_p95_ms",
+    "migration_head",
 )
 
 
@@ -88,6 +89,16 @@ def measurements_from_run(run: Dict[str, Any]) -> Dict[str, Any]:
     return measurements
 
 
+def require_current_run_head(run: Dict[str, Any], expected_head: str) -> None:
+    run_head = str(run.get("migration_head") or "")
+    if run_head != expected_head:
+        raise SystemExit(
+            f"The OIDC scale run was measured at {run_head or 'no migration head'}, "
+            f"but the current runtime head is {expected_head}. Run the production "
+            "OIDC scale profile again; old measurements cannot be relabeled as current."
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -106,10 +117,13 @@ def main() -> int:
         raise SystemExit(f"No OIDC scale run at {path}. Run the oidc-scale profile first.")
 
     run = json.loads(path.read_text(encoding="utf-8"))
-    measurements = measurements_from_run(run)
-    print(json.dumps(measurements, indent=2, sort_keys=True))
+    from tier_b_evidence import current_head, write_evidence
 
-    from tier_b_evidence import write_evidence
+    head = current_head()
+    require_current_run_head(run, head)
+    measurements = measurements_from_run(run)
+    measurements["run_migration_head"] = str(run["migration_head"])
+    print(json.dumps(measurements, indent=2, sort_keys=True))
 
     gate_path, status, breaches = write_evidence(
         "identity",
@@ -131,8 +145,8 @@ def main() -> int:
             "server-side mutation denial per authenticated viewer",
         ],
         notes=(
-            f"Derived from the oidc-scale run at {path.name}. The run's own "
-            f"'status' field is ignored; the verdict comes from the thresholds."
+            f"Derived from the oidc-scale run at {path.name}, measured at {head}. "
+            f"The run's own 'status' field is ignored; the verdict comes from the thresholds."
         ),
     )
     print(f"\nTier B evidence {status}: {gate_path.name}")

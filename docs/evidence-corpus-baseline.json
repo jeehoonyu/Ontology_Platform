@@ -1,5 +1,5 @@
 {
   "note": "Ratchet ceiling. May be lowered, never raised.",
-  "recorded_at_head": "0037_cross_stream_joins",
-  "unprovenanced_ceiling": 11
+  "recorded_at_head": "0042_stream_outer_joins",
+  "unprovenanced_ceiling": 10
 }

@@ -29,7 +29,7 @@ REPLICA_PORT = int(os.environ.get("ONTOLOGY_REPLICA_PORT", "55434"))
 POSTGRES_USER = os.environ.get("ONTOLOGY_REPLICA_POSTGRES_USER", "ontology")
 POSTGRES_PASSWORD = os.environ.get("ONTOLOGY_REPLICA_POSTGRES_PASSWORD", "")
 POSTGRES_DB = os.environ.get("ONTOLOGY_REPLICA_POSTGRES_DB", "ontology")
-POSTGRES_IMAGE = os.environ.get("ONTOLOGY_REPLICA_POSTGRES_IMAGE", "postgres:16-alpine")
+POSTGRES_IMAGE = os.environ.get("ONTOLOGY_REPLICA_POSTGRES_IMAGE", "").strip()
 RESET_TARGET = os.environ.get("ONTOLOGY_REPLICA_RESET_TARGET", "").lower() in {"1", "true", "yes"}
 OBJECTS = int(os.environ.get("ONTOLOGY_REPLICA_OBJECTS", "10000000"))
 LINKS = int(os.environ.get("ONTOLOGY_REPLICA_LINKS", "50000000"))
@@ -58,6 +58,16 @@ def docker(*args: str, timeout: float | None = None, check: bool = True) -> subp
     if check and result.returncode != 0:
         raise AssertionError({"docker_args": args, "stdout": result.stdout, "stderr": result.stderr})
     return result
+
+
+if not POSTGRES_IMAGE:
+    # Physical streaming replication requires an identical PostgreSQL major.
+    # The source digest also carries any required extension binaries.
+    POSTGRES_IMAGE = docker(
+        "inspect", "--format", "{{.Image}}", SOURCE_CONTAINER,
+    ).stdout.strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", POSTGRES_IMAGE):
+        raise SystemExit("Could not derive a pinned PostgreSQL image from the source container")
 
 
 def exists(kind: str, name: str) -> bool:
@@ -261,6 +271,7 @@ assert failover_seconds < RTO_LIMIT_SECONDS
 evidence = {
     "status": "PASS",
     "replication_mode": "postgresql_physical_streaming",
+    "postgres_image": POSTGRES_IMAGE,
     "replication_network_cidr": network_cidr,
     "basebackup_seconds": round(basebackup_seconds, 3),
     "committed_lsn": committed_lsn,
