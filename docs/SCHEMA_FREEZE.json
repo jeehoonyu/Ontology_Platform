@@ -1,0 +1,8 @@
+{
+  "expires_at": 1787006579,
+  "head": "0042_stream_outer_joins",
+  "opened_at": 1786315379,
+  "owner": "operations",
+  "reason": "Seven-day availability, RPO, and RTO collection. A migration during this window voids it and costs another seven days.",
+  "state": "open"
+}

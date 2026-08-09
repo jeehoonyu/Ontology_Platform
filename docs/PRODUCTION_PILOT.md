@@ -104,6 +104,25 @@ its volumes, waits past PostGIS's temporary initialization server, restores and
 validates the database, restores snapshot/plugin volumes, then starts the
 loopback-only recovery API. `cleanup` removes that isolated project and volumes.
 
+### Freeze the schema first
+
+A window is void the moment the migration head changes, and `tick` enforces that
+destructively: it aborts, and the days already collected are gone. Declare the
+freeze before opening the window so a migration fails CI instead:
+
+```powershell
+python oms/validate_schema_freeze.py
+```
+
+`docs/SCHEMA_FREEZE.json` holds the frozen head, an owner, a reason, and an end
+date. While it is open, `validate_schema_freeze.py` fails the build for any other
+head, so the pull request that would have voided the window goes red rather than
+the window dying silently a week later. An expired freeze also fails, so the file
+cannot decay into something that looks like protection and is not. Opening and
+closing a freeze are both ordinary reviewable commits.
+
+### Preflight
+
 Check the configuration before opening the window. Every failure `preflight`
 reports is one that would otherwise surface as a failed gate seven days later,
 when the only remedy is another seven days:

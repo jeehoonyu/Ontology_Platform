@@ -63,6 +63,13 @@ jobs:
         # re-earned; catching it here is the difference between a ratchet and
         # an intention.
         run: python oms/audit_evidence_corpus.py
+      - name: Enforce the schema freeze
+        # Fails the build when a migration would land during an open pilot
+        # window. pilot_window.py already refuses to pool two schemas, but it
+        # discovers the change only at collection time, by which point the seven
+        # days are spent and the migration is merged. This is the same rule
+        # applied while it is still cheap to obey.
+        run: python oms/validate_schema_freeze.py
       - name: Report Tier B gate status
         # Reports only. Tier B is not claimed, so gating on it would leave the
         # build permanently red and train everyone to ignore it.
