@@ -34,7 +34,7 @@ with engine.begin() as connection:
 
 command.upgrade(config, "head")
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0041_drop_redundant_pk_indexes"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
     columns = {column["name"] for column in inspect(connection).get_columns("object_instances")}
     assert {"materialization_id", "is_active", "retired_at"} <= columns
     assert connection.execute(text("SELECT is_active FROM object_instances WHERE id = 'asset-1'")).scalar_one() in (1, True)
@@ -50,7 +50,7 @@ with engine.connect() as connection:
 command.upgrade(config, "head")
 with engine.connect() as connection:
     assert connection.execute(text("SELECT is_active FROM object_instances WHERE id = 'asset-1'")).scalar_one() in (1, True)
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0041_drop_redundant_pk_indexes"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
 
 engine.dispose()
 temporary.cleanup()

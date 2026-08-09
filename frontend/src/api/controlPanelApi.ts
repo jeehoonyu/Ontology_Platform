@@ -465,6 +465,78 @@ export interface RuntimeSummary {
   last_updated: number;
 }
 
+export interface PilotAvailabilityStatus {
+  status: "COLLECTING" | "COMPLETE" | "INVALID";
+  integrity: "PASS" | "FAIL";
+  journal: string;
+  run_id?: string | null;
+  migration_head?: string | null;
+  measurements: {
+    samples: number;
+    observed_seconds: number;
+    window_seconds_min: number;
+    availability_pct: number;
+    unavailable_seconds: number;
+    error_budget_seconds?: number;
+    outages: number;
+    longest_outage_seconds: number;
+    missing_samples: number;
+    integrity_failures: number;
+  };
+  remaining_seconds: number;
+  warning?: string | null;
+  last_updated: number;
+}
+
+export interface PilotRecoveryPointStatus {
+  status: "COLLECTING" | "COMPLETE" | "BREACHED" | "INVALID";
+  integrity: "PASS" | "FAIL";
+  journal: string;
+  run_id?: string | null;
+  migration_head?: string | null;
+  measurements: {
+    samples: number;
+    pre_backup_samples: number;
+    total_loss_samples: number;
+    integrity_failures: number;
+    max_rpo_seconds: number;
+    min_rpo_seconds: number;
+    rpo_distribution_seconds: number[];
+    phases_covered: string[];
+  };
+  remaining_samples: number;
+  remaining_pre_backup_samples: number;
+  warning?: string | null;
+  last_updated: number;
+}
+
+export interface PilotRecoveryTimeStatus {
+  status: "COLLECTING" | "COMPLETE" | "BREACHED" | "INVALID";
+  integrity: "PASS" | "FAIL";
+  journal: string;
+  migration_head?: string | null;
+  measurements: {
+    rehearsals: number;
+    unattended_rehearsals: number;
+    failed_recoveries: number;
+    integrity_failures: number;
+    max_elapsed_seconds: number;
+    min_elapsed_seconds: number;
+    elapsed_distribution_seconds: number[];
+  };
+  remaining_rehearsals: number;
+  remaining_unattended: number;
+  warning?: string | null;
+  last_updated: number;
+}
+
+export interface PilotEvidenceStatus {
+  availability: PilotAvailabilityStatus;
+  rpo: PilotRecoveryPointStatus;
+  rto: PilotRecoveryTimeStatus;
+  last_updated: number;
+}
+
 export interface RuntimeObservation extends TableRow {
   id: string;
   project_id: string;
@@ -502,6 +574,14 @@ export interface RuntimeSlo extends TableRow {
 
 export function getRuntimeSummary(projectId: string): Promise<RuntimeSummary> {
   return api<RuntimeSummary>(`/runtime/observability/summary?project_id=${encodeURIComponent(projectId)}`);
+}
+
+export function getPilotAvailability(): Promise<PilotAvailabilityStatus> {
+  return api<PilotAvailabilityStatus>("/runtime/pilot-evidence/availability");
+}
+
+export function getPilotEvidence(): Promise<PilotEvidenceStatus> {
+  return api<PilotEvidenceStatus>("/runtime/pilot-evidence");
 }
 
 export function listRuntimeJobs(projectId: string): Promise<RuntimeObservation[]> {

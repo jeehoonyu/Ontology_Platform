@@ -94,6 +94,8 @@ from . import (
     platform_runtime,
     ingestion_runtime,
     runtime_observability,
+    pilot_observability,
+    pilot_recovery,
     worker_control,
     connector_runtime,
     plugin_runtime,
@@ -256,6 +258,8 @@ for _ext_module in (
     platform_runtime,
     ingestion_runtime,
     runtime_observability,
+    pilot_observability,
+    pilot_recovery,
     worker_control,
     connector_runtime,
     plugin_runtime,
@@ -2295,7 +2299,7 @@ def run_logic_function(
         return db_model
 
 
-@app.post("/automations", response_model=schemas.AutomationDefinition)
+@app.post("/automations", response_model=schemas.AutomationDefinition, include_in_schema=False)
 def create_automation(automation: schemas.AutomationDefinitionCreate, db: Session = Depends(get_db)):
     existing = db.query(models.AutomationDefinition).filter(models.AutomationDefinition.id == automation.id).first()
     if existing:
@@ -2316,12 +2320,16 @@ def create_automation(automation: schemas.AutomationDefinitionCreate, db: Sessio
     return db_model
 
 
-@app.get("/automations", response_model=List[schemas.AutomationDefinition])
+@app.get("/automations", response_model=List[schemas.AutomationDefinition], include_in_schema=False)
 def list_automations(db: Session = Depends(get_db)):
     return db.query(models.AutomationDefinition).all()
 
 
-@app.post("/automations/{automation_id}/run", response_model=schemas.AutomationRun)
+@app.post(
+    "/automations/{automation_id}/run",
+    response_model=schemas.AutomationRun,
+    include_in_schema=False,
+)
 def run_automation(automation_id: str, actor: str = "automation", db: Session = Depends(get_db)):
     automation = db.query(models.AutomationDefinition).filter(models.AutomationDefinition.id == automation_id).first()
     if not automation:

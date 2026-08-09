@@ -15,7 +15,7 @@ output_dir = root / output_name
 log_path = work / "docker-calls.jsonl"
 passed = 0
 
-assert "varchar(32)" in rehearsal_source and "0041_drop_redundant_pk_indexes" in rehearsal_source
+assert "varchar(32)" in rehearsal_source and "0042_stream_outer_joins" in rehearsal_source
 passed += 1
 
 fake = work / "fake_docker.py"

@@ -11,9 +11,10 @@
   "organization_id": "pilot",
   "project_id": "default",
   "mutation_denials": 200,
-  "concurrency": 20,
-  "elapsed_seconds": 55.584,
-  "login_p50_ms": 4522.317,
-  "login_p95_ms": 5625.772,
-  "login_p95_limit_ms": 15000
+  "concurrency": 10,
+  "elapsed_seconds": 28.93,
+  "login_p50_ms": 1326.319,
+  "login_p95_ms": 1716.151,
+  "login_p95_limit_ms": 15000,
+  "migration_head": "0042_stream_outer_joins"
 }

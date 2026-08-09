@@ -12,8 +12,10 @@ from rpo_sampler import (  # noqa: E402
     RPO_LIMIT_SECONDS,
     aggregate,
     load_jsonl,
-    next_sequence,
     summarize,
+)
+from app.pilot_evidence import (  # noqa: E402
+    JournalIntegrityError, append_observation, current_migration_head,
 )
 
 passed = 0
@@ -60,10 +62,12 @@ check(loss["total_loss_samples"] == 1, "a total loss is counted", loss)
 def evidence_for(samples):
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         path = Path(tmpdir) / "samples.jsonl"
-        if samples:
-            path.write_text(
-                "\n".join(json.dumps(item, sort_keys=True) for item in samples) + "\n",
-                encoding="utf-8",
+        for index, item in enumerate(samples):
+            append_observation(
+                path, run_id="rpo_test", kind="rpo_observation",
+                target="http://recovery.test", migration_head=current_migration_head(),
+                scheduled_at=1_700_000_000 + index, observed_at=1_700_000_000 + index,
+                payload=item,
             )
         output_dir = Path(tmpdir) / "evidence"
         code = aggregate(path, output_dir=output_dir)
@@ -107,14 +111,36 @@ check(
 )
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-    marks = Path(tmpdir) / "marks.jsonl"
-    check(next_sequence(marks) == 1, "sequences start at one", None)
-    marks.write_text('{"sequence": 4, "written_at": 10}\n{"sequence": 7, "written_at": 20}\n',
-                     encoding="utf-8")
-    check(next_sequence(marks) == 8, "sequences continue from the highest mark", None)
     torn = Path(tmpdir) / "torn.jsonl"
-    torn.write_text('{"sequence": 1, "written_at": 5}\n{"sequ', encoding="utf-8")
-    check(len(load_jsonl(torn)) == 1, "a torn final line is skipped", None)
+    append_observation(
+        torn, run_id="rpo_torn", kind="rpo_observation",
+        target="http://recovery.test", migration_head=current_migration_head(),
+        scheduled_at=1, observed_at=1, payload=sample(1),
+    )
+    with torn.open("ab") as handle:
+        handle.write(b'{"sequ')
+    try:
+        load_jsonl(torn)
+        raise AssertionError("a torn RPO journal was accepted")
+    except JournalIntegrityError:
+        passed += 1
+
+    tampered = Path(tmpdir) / "tampered.jsonl"
+    append_observation(
+        tampered, run_id="rpo_tamper", kind="rpo_observation",
+        target="http://recovery.test", migration_head=current_migration_head(),
+        scheduled_at=1, observed_at=1, payload=sample(1),
+    )
+    tampered.write_text(tampered.read_text(encoding="utf-8").replace(
+        '"rpo_seconds":1', '"rpo_seconds":2', 1,
+    ), encoding="utf-8")
+    # Point aggregate at the altered journal directly; corruption must be a
+    # named breach rather than disappearing as a skipped line.
+    output = Path(tmpdir) / "tamper-evidence"
+    code = aggregate(tampered, output_dir=output)
+    payload = json.loads((output / "tier-b-rpo-evidence.json").read_text(encoding="utf-8"))
+    check(code == 1 and payload["measurements"]["integrity_failures"] == 1,
+          "tampering fails RPO evidence", payload)
 
 docs_dir = Path(__file__).resolve().parent.parent / "docs"
 check(

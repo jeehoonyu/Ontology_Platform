@@ -1243,6 +1243,7 @@ function RuntimeOperationsSection() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState("");
   const summary = useAsyncState(() => admin.getRuntimeSummary(projectId), [projectId, refreshKey]);
+  const pilotEvidence = useAsyncState(() => admin.getPilotEvidence(), [refreshKey]);
   const jobs = useAsyncState(() => admin.listRuntimeJobs(projectId), [projectId, refreshKey]);
   const budgets = useAsyncState(() => admin.listRuntimeBudgets(projectId), [projectId, refreshKey]);
   const slos = useAsyncState(() => admin.listRuntimeSlos(projectId), [projectId, refreshKey]);
@@ -1340,10 +1341,13 @@ function RuntimeOperationsSection() {
     }
   }
 
-  const loading = summary.loading || jobs.loading || budgets.loading || slos.loading || fleet.loading;
+  const loading = summary.loading || pilotEvidence.loading || jobs.loading || budgets.loading || slos.loading || fleet.loading;
+  const pilotAvailability = pilotEvidence.value?.availability;
+  const pilotRpo = pilotEvidence.value?.rpo;
+  const pilotRto = pilotEvidence.value?.rto;
   return (
     <>
-      <ErrorBanner message={error || summary.error || jobs.error || budgets.error || slos.error || fleet.error} />
+      <ErrorBanner message={error || summary.error || pilotEvidence.error || jobs.error || budgets.error || slos.error || fleet.error} />
       {loading && <LoadingState label="Loading runtime operations..." />}
       <Panel title="Runtime Scope" action={<button onClick={reload}>Refresh</button>}>
         <div className="metadata-edit-grid">
@@ -1351,7 +1355,10 @@ function RuntimeOperationsSection() {
         </div>
       </Panel>
       <div className="grid metrics">
-        <Metric label="Availability" value={`${Math.round((summary.value?.availability || 0) * 10000) / 100}%`} />
+        <Metric label="Job success" value={`${Math.round((summary.value?.availability || 0) * 10000) / 100}%`} />
+        <Metric label="Pilot availability" value={`${pilotAvailability?.measurements.availability_pct || 0}%`} />
+        <Metric label="Worst RPO" value={pilotRpo?.measurements.samples ? `${pilotRpo.measurements.max_rpo_seconds}s` : "Waiting"} />
+        <Metric label="Worst RTO" value={pilotRto?.measurements.rehearsals ? `${pilotRto.measurements.max_elapsed_seconds}s` : "Waiting"} />
         <Metric label="P95 execution" value={`${summary.value?.latency_p95_ms || 0} ms`} />
         <Metric label="P95 queue" value={`${summary.value?.queue_p95_ms || 0} ms`} />
         <Metric label="Estimated cost" value={`$${(summary.value?.estimated_cost_usd || 0).toFixed(4)}`} />
@@ -1360,6 +1367,58 @@ function RuntimeOperationsSection() {
       </div>
       {(summary.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
       {(fleet.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      {[pilotAvailability?.warning, pilotRpo?.warning, pilotRto?.warning]
+        .filter((warning): warning is string => Boolean(warning))
+        .map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      <Panel title="Production Pilot Evidence" action={<StatusBadge value={pilotAvailability?.status || "COLLECTING"} />}>
+        {pilotAvailability ? (
+          <div className="runtime-slo-list">
+            <div className="runtime-slo-row">
+              <span>
+                <strong>Seven-day availability window</strong>
+                <small>
+                  {Math.round(pilotAvailability.measurements.observed_seconds / 360) / 10} hours observed
+                  {" · "}{Math.round(pilotAvailability.remaining_seconds / 360) / 10} hours remaining
+                </small>
+              </span>
+              <StatusBadge value={pilotAvailability.integrity} />
+            </div>
+            <div className="runtime-slo-row">
+              <span>
+                <strong>{pilotAvailability.measurements.samples.toLocaleString()} scheduled probes</strong>
+                <small>
+                  {pilotAvailability.measurements.missing_samples} missing slots
+                  {" · "}{pilotAvailability.measurements.unavailable_seconds}s unavailable
+                  {" · "}{pilotAvailability.measurements.outages} outages
+                </small>
+              </span>
+              <StatusBadge value={pilotAvailability.migration_head ? "CURRENT" : "WAITING"} />
+            </div>
+            <div className="runtime-slo-row">
+              <span>
+                <strong>Recovery point objective</strong>
+                <small>
+                  {pilotRpo?.measurements.samples || 0}/10 restored-target samples
+                  {" · "}{pilotRpo?.measurements.pre_backup_samples || 0}/2 pre-backup
+                  {" · "}{pilotRpo?.measurements.samples ? `${pilotRpo.measurements.max_rpo_seconds}s worst gap` : "no measured gap"}
+                </small>
+              </span>
+              <StatusBadge value={pilotRpo?.status || "COLLECTING"} />
+            </div>
+            <div className="runtime-slo-row">
+              <span>
+                <strong>Recovery time objective</strong>
+                <small>
+                  {pilotRto?.measurements.rehearsals || 0}/4 isolated rehearsals
+                  {" · "}{pilotRto?.measurements.unattended_rehearsals || 0} unattended
+                  {" · "}{pilotRto?.measurements.rehearsals ? `${pilotRto.measurements.max_elapsed_seconds}s worst recovery` : "no measured recovery"}
+                </small>
+              </span>
+              <StatusBadge value={pilotRto?.status || "COLLECTING"} />
+            </div>
+          </div>
+        ) : <EmptyState title="Pilot observer is not collecting" description="Enable the pilot-observability deployment profile to begin a tamper-evident availability window." />}
+      </Panel>
       <Panel title="Durable Job Telemetry">
         <DataTable rows={jobs.value || []} empty="No durable jobs have run in this project." />
       </Panel>

@@ -760,7 +760,39 @@ test("ontology release studio reviews a semantic change before publication", asy
   await expect(studio.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
   await studio.getByRole("button", { name: "Approve", exact: true }).click();
   await expect(studio.getByRole("button", { name: "Publish", exact: true })).toBeEnabled();
+  await studio.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(studio.getByRole("status")).toContainText("Downstream compatibility has been refreshed");
   await expect(studio.locator(".ontology-revision-history .release-table-row").first()).toBeVisible();
+
+  const consumerId = `browser_release_consumer_${suffix}`;
+  const bound = await page.request.post("/api/v1/ontology/contracts/bind", { data: {
+    project_id: "default", consumer_kind: "test", consumer_id: consumerId, consumer_version: "1",
+    payload: { object_type_id: objectTypeId, properties: [propertyName] }
+  } });
+  expect(bound.ok()).toBeTruthy();
+  await studio.getByRole("button", { name: "Refresh", exact: true }).click();
+  const contractHealth = studio.getByRole("region", { name: "Downstream Contract Health" });
+  await expect(contractHealth).toContainText(consumerId);
+  await expect(contractHealth).toContainText("CURRENT");
+
+  await studio.getByLabel("Operation").selectOption("archive_property");
+  await studio.getByLabel("Property API name").fill(propertyName);
+  await studio.getByLabel("Reason and description").fill("Browser acceptance for a governed breaking ontology change.");
+  await studio.getByRole("button", { name: "Create change set" }).click();
+  await studio.getByRole("button", { name: new RegExp(`^Archive ${propertyName}`) }).click();
+  await studio.getByRole("button", { name: "Validate", exact: true }).click();
+  const affectedConsumers = studio.getByRole("heading", { name: "Affected consumers" }).locator("..");
+  await expect(affectedConsumers).toBeVisible();
+  await expect(affectedConsumers.getByText(consumerId, { exact: false })).toBeVisible();
+  await studio.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(studio.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+  await studio.getByRole("checkbox", { name: /reviewed the migration plan/i }).check();
+  await expect(studio.getByRole("button", { name: "Publish", exact: true })).toBeEnabled();
+  await studio.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(studio.getByRole("status")).toContainText("Downstream compatibility has been refreshed");
+  await expect(contractHealth).toContainText("FAIL");
+  await expect(contractHealth).toContainText("BROKEN");
+  await expect(contractHealth).toContainText(consumerId);
 });
 
 test("ontology health center evaluates, remediates, and simulates policy", async ({ page }, testInfo) => {
@@ -931,6 +963,27 @@ test("pipeline ontology output previews and persists contract evidence", async (
     api_name: `BrowserContract${suffix}`, primary_key: "assetId", title_key: "name",
     properties: { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true } }
   } })).ok()).toBeTruthy();
+  const environmentsResponse = await page.request.get("/ontology/environments?project_id=default");
+  expect(environmentsResponse.ok()).toBeTruthy();
+  const environments = await environmentsResponse.json() as Array<{ name: string; current_revision_id?: string | null }>;
+  const activeRevisionId = environments.find((item) => item.name === "production")?.current_revision_id;
+  const contractRelease = await page.request.post("/ontology/change-sets", { data: {
+    project_id: "default", title: `Publish ${graphName}`,
+    ...(activeRevisionId ? { base_revision_id: activeRevisionId } : {}),
+    changes: activeRevisionId ? [{
+      operation: "add_object_type",
+      resource: {
+        id: objectTypeId, display_name: graphName, description: "Browser contract target",
+        primary_key: "assetId", title_key: "name", status: "ACTIVE",
+        properties: { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true } }
+      }
+    }] : []
+  } });
+  expect(contractRelease.ok()).toBeTruthy();
+  const contractChange = await contractRelease.json() as { id: string };
+  expect((await page.request.post(`/ontology/change-sets/${contractChange.id}/validate`)).ok()).toBeTruthy();
+  expect((await page.request.post(`/ontology/change-sets/${contractChange.id}/decision`, { data: { approve: true } })).ok()).toBeTruthy();
+  expect((await page.request.post(`/ontology/change-sets/${contractChange.id}/publish`, { data: { environment: "production" } })).ok()).toBeTruthy();
   expect((await page.request.post("/pipeline-builder/graphs", { data: {
     id: graphId, display_name: graphName, nodes: [
       { id: "input", type: "input_dataset", label: "Contract input", position: { x: 80, y: 120 }, config: { asset_id: assetId } },

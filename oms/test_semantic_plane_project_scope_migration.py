@@ -45,6 +45,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             assert project_id == expected, (table_name, project_id)
             assert f"ix_{table_name}_project_id" in indexes, (table_name, indexes)
 
-    assert version == "0041_drop_redundant_pk_indexes", version
+    assert version == "0042_stream_outer_joins", version
 
 print("\nSemantic data-plane project migration verified for 11 legacy tables.")

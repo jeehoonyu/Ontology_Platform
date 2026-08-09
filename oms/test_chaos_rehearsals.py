@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chaos_rehearsals import (  # noqa: E402
     RECONNECT_LIMIT_MS, aggregate, at_head, load, record, summarize,
 )
-from tier_b_evidence import current_head  # noqa: E402
+from tier_b_evidence import DOCS as EVIDENCE_DOCS, current_head  # noqa: E402
 
 HEAD = current_head()
 
@@ -33,23 +33,37 @@ def collab(reconnect=120.0, duplicates=0, missed=0):
 def cross(duplicate_pairs=0, missed_pairs=0):
     return {"subject": "cross_stream", "at": 2, "harness": "y", "migration_head": HEAD,
             "measurements": {
+        "join_mode": "inner",
         "duplicate_pairs": duplicate_pairs, "missed_pairs": missed_pairs,
         "emitted_pairs": 60, "expected_pairs": 60,
     }}
 
 
-both = summarize([collab(), cross()])
+def outer(duplicate_outer_rows=0, missed_outer_rows=0):
+    return {"subject": "cross_stream", "at": 3, "harness": "z", "migration_head": HEAD,
+            "measurements": {
+        "join_mode": "outer",
+        "duplicate_outer_rows": duplicate_outer_rows,
+        "missed_outer_rows": missed_outer_rows,
+        "emitted_outer_rows": 60,
+        "expected_outer_rows": 60,
+    }}
+
+
+both = summarize([collab(), cross(), outer()])
 check(both["collaboration_rehearsals"] == 1, "counts collaboration", both)
-check(both["cross_stream_rehearsals"] == 1, "counts cross-stream", both)
+check(both["cross_stream_rehearsals"] == 2, "counts cross-stream", both)
+check(both["cross_stream_inner_rehearsals"] == 1, "counts inner stream recovery", both)
+check(both["cross_stream_outer_rehearsals"] == 1, "counts outer stream recovery", both)
 check(both["subjects_covered"] == ["collaboration", "cross_stream"], "records coverage", both)
 
 # Losses are summed, not averaged. One clean rehearsal must not cancel a run
 # that dropped an event.
-summed = summarize([collab(missed=1), collab(missed=0), cross()])
+summed = summarize([collab(missed=1), collab(missed=0), cross(), outer()])
 check(summed["missed_events"] == 1, "missed events are summed across rehearsals", summed)
 
 # The worst reconnect across rehearsals is the reported figure.
-worst = summarize([collab(reconnect=100.0), collab(reconnect=900.0), cross()])
+worst = summarize([collab(reconnect=100.0), collab(reconnect=900.0), cross(), outer()])
 check(worst["reconnect_max_ms"] == 900.0, "the worst reconnect is reported", worst)
 
 
@@ -72,7 +86,7 @@ check(code == 1, "collaboration alone does not satisfy the gate", code)
 check(any("cross_stream" in b for b in payload["breaches"]), "the breach names the missing half",
       payload["breaches"])
 
-code, payload = evidence_for([cross()])
+code, payload = evidence_for([cross(), outer()])
 check(code == 1, "cross-stream alone does not satisfy the gate", code)
 check(any("collaboration" in b for b in payload["breaches"]), "the breach names the missing half",
       payload["breaches"])
@@ -86,14 +100,26 @@ code, payload = evidence_for([])
 check(code == 1, "an empty record does not satisfy the gate", code)
 
 code, payload = evidence_for([collab(), cross()])
-check(code == 0, "both subjects rehearsed satisfies the gate", payload.get("breaches"))
+check(code == 1, "inner recovery alone does not satisfy the stream gate", payload.get("breaches"))
+check(any("cross_stream_outer" in b for b in payload["breaches"]),
+      "the breach names missing outer recovery", payload["breaches"])
+
+code, payload = evidence_for([collab(), outer()])
+check(code == 1, "outer recovery alone does not satisfy the stream gate", payload.get("breaches"))
+check(any("cross_stream_inner" in b for b in payload["breaches"]),
+      "the breach names missing inner recovery", payload["breaches"])
+
+code, payload = evidence_for([collab(), cross(), outer()])
+check(code == 0, "all recovery semantics rehearsed satisfy the gate", payload.get("breaches"))
 check(payload["status"] == "PASS", "recorded PASS", payload["status"])
 check(payload["provenance"]["migration_head"], "carries provenance", payload["provenance"])
 
-code, payload = evidence_for([collab(duplicates=1), cross()])
+code, payload = evidence_for([collab(duplicates=1), cross(), outer()])
 check(code == 1, "a duplicated event fails the gate", code)
-code, payload = evidence_for([collab(), cross(missed_pairs=1)])
+code, payload = evidence_for([collab(), cross(missed_pairs=1), outer()])
 check(code == 1, "a lost pair fails the gate", code)
+code, payload = evidence_for([collab(), cross(), outer(missed_outer_rows=1)])
+check(code == 1, "a lost outer row fails the gate", code)
 
 try:
     record("bogus_subject", {}, harness="z")
@@ -118,16 +144,34 @@ check(RECONNECT_LIMIT_MS == 5000.0, "reconnect limit matches the contract")
 # is the non-completion rule violated from the inside rather than from outside.
 stale_collab = dict(collab(), migration_head="0001_runtime_baseline")
 stale_cross = dict(cross(), migration_head="0001_runtime_baseline")
+stale_outer = dict(outer(), migration_head="0001_runtime_baseline")
 check(at_head([stale_collab], HEAD) == [], "a rehearsal from an older head is dropped")
 check(at_head([collab()], HEAD) != [], "a rehearsal at the current head is kept")
 check(at_head([{"subject": "collaboration", "at": 1, "measurements": {}}], HEAD) == [],
       "a record predating the head field is dropped rather than assumed current")
 
-code, payload = evidence_for([stale_collab, stale_cross])
+code, payload = evidence_for([stale_collab, stale_cross, stale_outer])
 check(code == 1, "both subjects rehearsed at an older head do not satisfy the gate", code)
-check(payload["measurements"]["rehearsals_ignored_at_other_heads"] == 2,
+check(payload["measurements"]["rehearsals_ignored_at_other_heads"] == 3,
       "the evidence records how many rehearsals were ignored", payload["measurements"])
 check(payload["measurements"]["subjects_covered"] == [],
       "no subject is covered once stale rehearsals are dropped", payload["measurements"])
+
+# Keep the real PostgreSQL outer-finalization rehearsal in CI, and retain the
+# evidence that distinguishes an in-flight transaction interruption from an
+# arbitrary failed request.
+repo_root = Path(__file__).resolve().parent.parent
+check(EVIDENCE_DOCS == repo_root / "docs",
+      "source rehearsals write evidence to the repository docs directory", EVIDENCE_DOCS)
+workflow = (repo_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+outer_harness_path = repo_root / "oms" / "verify_cross_stream_outer_partition_postgres.py"
+outer_harness = outer_harness_path.read_text(encoding="utf-8")
+check(outer_harness_path.exists(), "outer-finalization partition harness exists")
+check("verify_cross_stream_outer_partition_postgres.py" in workflow,
+      "CI runs outer-finalization partition recovery")
+check("pg_stat_activity" in outer_harness and "pg_terminate_backend" in outer_harness,
+      "harness observes and terminates the active finalization transaction")
+check("receipts_before_retry == 0" in outer_harness and "output_before_retry == 0" in outer_harness,
+      "harness proves atomic rollback before replay")
 
 print(f"\nChaos rehearsal aggregation verified: {passed} assertions passed.")

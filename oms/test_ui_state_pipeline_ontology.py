@@ -102,7 +102,24 @@ assert any(row["id"] == "correlated_intelligence" for row in ontology_state["obj
 manager = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence"), "ontology manager state")
 assert manager["object_type"]["display_name"] == "Correlated Intelligence", manager["object_type"]
 assert manager["cards"]["properties"]["count"] >= 4, manager["cards"]["properties"]
-assert "overview" in manager["navigation"] and "history" in manager["navigation"], manager["navigation"]
+assert "overview" in manager["navigation"] and "contracts" in manager["navigation"] and "history" in manager["navigation"], manager["navigation"]
+assert manager["cards"]["contract_health"]["status"] == "PASS", manager["cards"]["contract_health"]
+
+release = ok(client.post("/ontology/change-sets", json={
+    "project_id": "default", "title": "Publish UI ontology baseline", "changes": [],
+}), "create UI ontology baseline", expect=201)
+ok(client.post(f"/ontology/change-sets/{release['id']}/validate"), "validate UI ontology baseline")
+ok(client.post(f"/ontology/change-sets/{release['id']}/decision", json={"approve": True}), "approve UI ontology baseline")
+ok(client.post(f"/ontology/change-sets/{release['id']}/publish", json={"environment": "production"}), "publish UI ontology baseline")
+ok(client.post("/api/v1/ontology/contracts/bind", json={
+    "project_id": "default", "consumer_kind": "test", "consumer_id": "ui_consumer", "consumer_version": "1",
+    "payload": {"object_type_id": "correlated_intelligence"},
+}), "bind UI ontology consumer")
+manager_with_contract = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence"), "ontology manager contract health")
+assert manager_with_contract["cards"]["contract_health"]["count"] == 1, manager_with_contract["cards"]["contract_health"]
+assert manager_with_contract["cards"]["contract_health"]["rows"][0]["status"] == "CURRENT", manager_with_contract["cards"]["contract_health"]
+contracts_section = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/sections/contracts"), "ontology contracts section")
+assert contracts_section["summary"]["status"] == "PASS" and len(contracts_section["rows"]) == 1, contracts_section
 
 walkthrough = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/walkthrough"), "ontology walkthrough")
 assert walkthrough["current_step_id"] == "object_type_overview", walkthrough

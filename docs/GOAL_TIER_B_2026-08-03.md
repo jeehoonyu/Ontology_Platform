@@ -243,6 +243,48 @@ Aggregate at any point to see budget burn; the aggregator reports how much windo
 remains and refuses to pass a short window however clean it is. The error budget at
 99.9% over 7 days is 604.8 seconds.
 
+### What the three pilot gates are actually waiting on
+
+**2026-08-09.** The harnesses were complete and the documented procedure for running
+them was not. Two defects would each have cost the full seven days, and neither is
+visible until aggregation:
+
+- The page said to schedule `pilot_window.py tick` every 30 seconds from cron or Task
+  Scheduler. Neither can express that — `schtasks /SC MINUTE` takes 1..1439 *minutes*
+  and cron's finest field is a minute — and an unwritten slot is scored as unavailable
+  by design. Measured against a target that answered 200 to every real probe: **57.1%**,
+  converging to 50%, against a 99.9% gate. `pilot_window.py run` now supervises the
+  window in one process at the contract's cadence.
+- Letting that process own availability fails a second way. A rehearsal blocks it for as
+  long as a restore takes, and every blocked slot is backfilled as downtime against a
+  604.8-second budget for the whole week — less than one PostgreSQL restore, against
+  roughly twelve rehearsals. The `pilot-observability` container owns the journal
+  instead and keeps probing throughout; the supervisor fails its tick when the observer
+  stops advancing, so a dead observer is loud rather than silent. `start` refuses
+  `--availability-writer scheduler`.
+
+`pilot_window.py preflight` now checks the rest before the clock starts, because every
+one of these is otherwise a seven-day round trip: health endpoints inside the 2,000 ms
+the contract allows, a recovery URL that is genuinely a different identity, disk, a live
+observer, and a recovery token that the API *accepts* rather than merely one that is long
+enough. That last check was wrong when first written — it read 404 as "no such run", but
+an API whose container never received `PILOT_RECOVERY_TOKEN` disables the protocol and
+also answers 404, so the likeliest misconfiguration passed. It now asks with a malformed
+run id, which a live route rejects with 422 only after accepting the credential.
+
+What remains is not code:
+
+| Prerequisite | State on 2026-08-09 |
+| --- | --- |
+| A pilot deployment with OIDC, TLS, and a real `.env.production` | Not created; `.env.production` does not exist in this checkout |
+| A second isolated Compose project for restores | `docker-compose.pilot-recovery.yml` exists and its topology validates |
+| **Seven days with a frozen migration head** | **The blocker.** Heads moved 0039 → 0042 in four days; `tick` aborts the window the moment the head changes |
+
+The head freeze is the real gate on starting. A window opened at `0042_stream_outer_joins`
+is void the moment `0043` lands, and the schema has been changing roughly daily. Nothing
+in the harness can soften this and it should not: pooling samples across schemas is
+exactly the non-completion rule this tier exists to enforce.
+
 ## Exit criteria
 
 - Ten gate evidence files in `docs/`, all at the then-current head, all in one schema.
