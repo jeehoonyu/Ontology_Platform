@@ -48,6 +48,9 @@ export interface OntologyChangeSet {
     affected_object_types?: string[];
     live_object_counts?: Record<string, number>;
     live_objects?: number;
+    affected_consumer_count?: number;
+    breaking_consumer_count?: number;
+    affected_consumers?: OntologyAffectedConsumer[];
     requires_approval?: boolean;
   };
   validation: { status?: string; summary?: JsonObject; issues?: Array<{ severity: string; path: string; code: string; message: string }> };
@@ -61,6 +64,53 @@ export interface OntologyChangeSet {
   reviewer?: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface OntologyAffectedConsumer {
+  binding_id: string;
+  consumer_kind: string;
+  consumer_id: string;
+  consumer_version: string;
+  object_type_id: string;
+  referenced_properties: string[];
+  changed_properties: string[];
+  bound_revision_id?: string | null;
+  breaking: boolean;
+}
+
+export type OntologyContractHealthStatus = "CURRENT" | "COMPATIBLE_STALE" | "BROKEN" | "UNVERSIONED" | "NO_ACTIVE_REVISION";
+
+export interface OntologyContractBindingHealth {
+  id: string;
+  ontology_revision_id?: string | null;
+  definition: {
+    consumer_kind: string;
+    consumer_id: string;
+    consumer_version: string;
+    target_kind: string;
+    target_id: string;
+    properties?: string[];
+    source_paths?: string[];
+  };
+  health: {
+    status: OntologyContractHealthStatus;
+    compatible: boolean;
+    reason?: string | null;
+    bound_revision_id?: string | null;
+    active_revision_id?: string | null;
+    same_checksum?: boolean;
+    missing_properties: string[];
+  };
+}
+
+export interface OntologyContractHealth {
+  project_id: string;
+  status: "PASS" | "WARN" | "FAIL";
+  active_revision_id?: string | null;
+  active_revision?: number | null;
+  counts: Record<OntologyContractHealthStatus, number>;
+  binding_count: number;
+  bindings: OntologyContractBindingHealth[];
 }
 
 export interface OntologyEnvironmentState {
@@ -97,6 +147,12 @@ export function listOntologyEnvironments(projectId = "default"): Promise<Ontolog
   return api<OntologyEnvironmentState[]>(`/ontology/environments?project_id=${encodeURIComponent(projectId)}`);
 }
 
+export function getOntologyContractHealth(projectId = "default", objectTypeId?: string): Promise<OntologyContractHealth> {
+  const query = new URLSearchParams({ project_id: projectId });
+  if (objectTypeId) query.set("object_type_id", objectTypeId);
+  return api<OntologyContractHealth>(`/api/v1/ontology/contracts/health?${query.toString()}`);
+}
+
 export function createOntologyChangeSet(input: {
   project_id: string;
   title: string;
@@ -115,14 +171,20 @@ export function decideOntologyChangeSet(changeSetId: string, approve: boolean): 
   return postJson<OntologyChangeSet>(`/ontology/change-sets/${encodeURIComponent(changeSetId)}/decision`, { approve });
 }
 
-export function publishOntologyChangeSet(changeSetId: string, checksum: string | null | undefined, allowBreaking: boolean): Promise<{ change_set: OntologyChangeSet; revision: OntologyRevisionSummary; environment: OntologyEnvironmentState }> {
+export function publishOntologyChangeSet(
+  changeSetId: string,
+  checksum: string | null | undefined,
+  allowBreaking: boolean,
+  acknowledgedConsumerBindingIds: string[] = []
+): Promise<{ change_set: OntologyChangeSet; revision: OntologyRevisionSummary; environment: OntologyEnvironmentState; downstream_contracts: OntologyContractHealth }> {
   return postJson(`/ontology/change-sets/${encodeURIComponent(changeSetId)}/publish`, {
     environment: "production",
     expected_checksum: checksum || undefined,
-    allow_breaking: allowBreaking
+    allow_breaking: allowBreaking,
+    acknowledged_consumer_binding_ids: acknowledgedConsumerBindingIds
   });
 }
 
-export function rollbackOntologyEnvironment(projectId: string, revisionId: string): Promise<{ revision: OntologyRevisionSummary; restored_from_revision_id: string }> {
+export function rollbackOntologyEnvironment(projectId: string, revisionId: string): Promise<{ revision: OntologyRevisionSummary; restored_from_revision_id: string; downstream_contracts: OntologyContractHealth }> {
   return postJson("/ontology/environments/production/rollback", { project_id: projectId, revision_id: revisionId });
 }

@@ -2432,6 +2432,18 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         contract_created_at += 1
     build.metrics = {**(build.metrics or {}), "ontology_contract_run_ids": contract_run_ids}
     run.metrics = {**(run.metrics or {}), "ontology_contract_run_ids": contract_run_ids}
+    from . import ontology_runtime_v1
+    contract_binding = ontology_runtime_v1.bind_ontology_contract(
+        db,
+        project_id=graph.project_id,
+        consumer_kind="pipeline",
+        consumer_id=graph.id,
+        consumer_version=build.id,
+        payload={"nodes": graph.nodes or [], "edges": graph.edges or []},
+        actor=principal.id,
+    )
+    build.metrics = {**(build.metrics or {}), "ontology_revision_id": contract_binding.get("ontology_revision_id"), "ontology_binding_count": contract_binding.get("binding_count", 0)}
+    run.metrics = {**(run.metrics or {}), "ontology_revision_id": contract_binding.get("ontology_revision_id"), "ontology_binding_count": contract_binding.get("binding_count", 0)}
     db.add(models_action.AuditLog(
         id=_new_id(),
         actor=principal.id,

@@ -7,7 +7,7 @@ param(
     [string]$ConnectorSecretKey = "",
     [string]$OidcScalePassword = "",
     [int]$OidcUserCount = 200,
-    [int]$OidcLoginConcurrency = 20,
+    [int]$OidcLoginConcurrency = 10,
     [switch]$KeepStack,
     [switch]$SkipRecovery
 )
@@ -81,6 +81,13 @@ function Invoke-OidcScaleAcceptance {
         $npmCommand = if (Get-Command npm.cmd -ErrorAction SilentlyContinue) { "npm.cmd" } else { "npm" }
         & $npmCommand run test:production-oidc-scale
         if ($LASTEXITCODE -ne 0) { throw "Production OIDC identity-scale acceptance failed." }
+    } finally {
+        Pop-Location
+    }
+    Push-Location $projectRoot
+    try {
+        & python oms/identity_scale_evidence.py --run (Join-Path $projectRoot "docs/oidc-identity-scale-evidence.json")
+        if ($LASTEXITCODE -ne 0) { throw "OIDC identity-scale gate evidence did not pass." }
     } finally {
         Pop-Location
     }

@@ -222,6 +222,7 @@ missed_pairs = PAIRS - len(pairs)
 duplicate_outputs = len(output_ids) - len(set(output_ids))
 
 evidence = {
+    "join_mode": "inner",
     "expected_pairs": PAIRS,
     "emitted_pairs": len(pairs),
     "duplicate_pairs": duplicate_pairs,

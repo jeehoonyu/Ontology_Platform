@@ -104,12 +104,17 @@ $env:ONTOLOGY_BACKUP_EVIDENCE_PATH = "docs/ontology-scale-backup-restore-evidenc
 python oms/rehearse_ontology_scale_backup_restore.py
 ```
 
+By default the harness derives the pinned image digest from the source
+container. This guarantees PostgreSQL major-version and extension compatibility
+for the physical data directory. `ONTOLOGY_BACKUP_POSTGRES_IMAGE` is available
+only when an operator deliberately needs an equivalent override image.
+
 The backup duration is a measured protection window, not a continuous five-
 minute RPO claim. Continuous RPO requires WAL archival or a streaming replica.
 
-On the reference host, the 36.59 GB physical backup completed in 50.917
+On the current reference host, the 34.25 GB physical backup completed in 47.134
 seconds. A PostgreSQL process backed by the new volume became query-ready in
-1.144 seconds with identical migration, object, link, temporal-event, and index-
+2.149 seconds with identical migration, object, link, temporal-event, and index-
 plan state. Machine-readable evidence is stored in
 `docs/ontology-scale-backup-restore-evidence.json`.
 
@@ -122,7 +127,11 @@ the standby, and verifies that the committed probe and complete strict fixture
 remain available. The default gates are five minutes for committed-write replay
 and 30 minutes for promotion.
 
-The measured standby replayed the committed object/event probe in 0.015 seconds
-at an identical WAL LSN. After source termination, promotion completed in 0.686
+The replica harness likewise derives the source container image digest unless
+`ONTOLOGY_REPLICA_POSTGRES_IMAGE` is explicitly set, preventing a costly backup
+from reaching startup with an incompatible PostgreSQL major version.
+
+The measured standby replayed the committed object/event probe in 0.020 seconds
+at an identical WAL LSN. After source termination, promotion completed in 0.696
 seconds with the probe and complete fixture preserved. Machine-readable evidence
 is stored in `docs/ontology-scale-replica-failover-evidence.json`.

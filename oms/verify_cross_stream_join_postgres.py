@@ -85,8 +85,45 @@ with SessionLocal() as db:
     assert len(output.records) == 50
     assert len({row["_stream_join_id"] for row in output.records}) == 50
 
+# Advance both source watermarks without crossing the automatic one-day retention horizon.
+with TestClient(app) as client:
+    checked(client.post(f"/streams/{left_stream}/publish", json={"records": [
+        {"event_ts": 10000 + offset * 10, "asset_id": f"asset-{offset:03d}", "signal": offset + 50}
+        for offset in range(50)
+    ]}))
+    checked(client.post(f"/streams/{right_stream}/publish", json={"records": [
+        {"event_ts": 10002 + offset * 10, "asset_id": f"asset-{offset:03d}", "work_order": offset + 50}
+        for offset in range(50)
+    ]}))
+    advanced = checked(client.post(f"/api/v1/streams/processors/{processor_id}/process", json={
+        "max_records": 100,
+    }))
+assert advanced["joins_emitted"] == 50
+assert advanced["metrics"]["join_compaction"]["inputs_compacted"] == 0
+
+
+def compact(worker_number):
+    with TestClient(app) as thread_client:
+        return checked(thread_client.post(
+            f"/api/v1/streams/processors/{processor_id}/compact",
+            json={"retention_seconds": 0, "max_inputs": 1000},
+            headers={"X-Actor": f"postgres-compaction-worker-{worker_number}"},
+        ))
+
+
+# The processor row lock serializes concurrent maintenance, so one call owns each deletion.
+with ThreadPoolExecutor(max_workers=2) as pool:
+    compacted = list(pool.map(compact, range(2)))
+assert sorted(row["inputs_compacted"] for row in compacted) == [0, 100], compacted
+with SessionLocal() as db:
+    assert db.query(StreamJoinInput).filter(StreamJoinInput.processor_id == processor_id).count() == 100
+    assert db.query(StreamJoinReceipt).filter(StreamJoinReceipt.processor_id == processor_id).count() == 100
+    output = db.get(DataAsset, output_id)
+    assert len(output.records) == 100
+    assert len({row["_stream_join_id"] for row in output.records}) == 100
+
 indexes = {row["name"] for row in inspect(engine).get_indexes("stream_join_inputs")}
 assert "ix_stream_join_inputs_match" in indexes
 
-print("PostgreSQL concurrent cross-stream interval join rehearsal passed.")
+print("PostgreSQL concurrent cross-stream interval join and state compaction rehearsal passed.")
 engine.dispose()

@@ -3694,6 +3694,101 @@ pre {
   margin-top: 12px;
 }
 
+.ontology-contract-health {
+  display: grid;
+  gap: 10px;
+}
+
+.contract-health-summary,
+.manager-contract-counts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.contract-health-summary > div,
+.manager-contract-counts > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #dce3e6;
+  border-radius: 5px;
+  background: #f7f9fa;
+}
+
+.contract-health-summary span,
+.manager-contract-counts span {
+  color: #65747e;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.contract-health-summary strong,
+.manager-contract-counts strong {
+  color: #20333f;
+  font-size: 18px;
+}
+
+.contract-consumer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.contract-consumer-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(120px, auto);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #dce3e6;
+  border-radius: 5px;
+}
+
+.contract-consumer-list article > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.contract-consumer-list strong,
+.contract-consumer-list span,
+.contract-consumer-list small,
+.contract-health-reason {
+  overflow-wrap: anywhere;
+}
+
+.contract-consumer-list span,
+.contract-consumer-list small,
+.contract-health-reason {
+  color: #65747e;
+  font-size: 11px;
+}
+
+.breaking-acknowledgement {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  color: #5c3b12;
+  background: #fff7e8;
+  border: 1px solid #e2b96c;
+  border-radius: 5px;
+  font-weight: 650;
+}
+
+.breaking-acknowledgement input {
+  margin-top: 2px;
+}
+
+.release-no-consumers {
+  margin: 0;
+  color: #65747e;
+  font-size: 12px;
+}
+
 .release-table {
   display: grid;
   gap: 5px;
@@ -4644,8 +4739,18 @@ pre {
   .property-field-row,
   .resource-create-row,
   .ontology-resource-row,
+  .contract-health-summary,
+  .manager-contract-counts,
   .manager-grid {
     grid-template-columns: 1fr;
+  }
+
+  .contract-consumer-list article {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .contract-health-reason {
+    grid-column: 2;
   }
 
   .ontology-release-grid,

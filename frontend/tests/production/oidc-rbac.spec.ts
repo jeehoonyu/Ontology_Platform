@@ -80,7 +80,25 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
     });
     const draftValidation = await request(`/ontology-generator/drafts/${draftId}/validate`, "POST");
     const applied = await request(`/ontology-generator/drafts/${draftId}/apply`, "POST", {});
-    const delivered = applied.status === 200
+    const changeSet = applied.status === 200
+      ? await request("/ontology/change-sets", "POST", {
+          project_id: "default",
+          title: `Publish imported asset ontology ${suffix}`,
+          description: "Production OIDC rehearsal ontology release.",
+          capture_current: true,
+          changes: []
+        })
+      : { status: 0, body: {} };
+    const changeSetValidation = changeSet.status === 201
+      ? await request(`/ontology/change-sets/${changeSet.body.id}/validate`, "POST")
+      : { status: 0, body: {} };
+    const changeSetDecision = changeSetValidation.status === 200
+      ? await request(`/ontology/change-sets/${changeSet.body.id}/decision`, "POST", { approve: true })
+      : { status: 0, body: {} };
+    const ontologyPublication = changeSetDecision.status === 200
+      ? await request(`/ontology/change-sets/${changeSet.body.id}/publish`, "POST", { environment: "production" })
+      : { status: 0, body: {} };
+    const delivered = ontologyPublication.status === 200
       ? await request(`/pipeline-builder/graphs/${applied.body.pipeline_graph_id}/deliver`, "POST", {})
       : { status: 0, body: {} };
     const objects = await request(`/objects/${objectTypeId}`);
@@ -95,7 +113,10 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
       nodes: [],
       edges: []
     });
-    return { created, validated, generated, draftValidation, applied, delivered, objects, detail, outsideProject, outsidePipeline };
+    return {
+      created, validated, generated, draftValidation, applied, changeSet, changeSetValidation,
+      changeSetDecision, ontologyPublication, delivered, objects, detail, outsideProject, outsidePipeline
+    };
   }, adminMutation.body.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12));
   expect(onboarding.created.status).toBe(201);
   expect(onboarding.created.body.project_id).toBe("default");
@@ -104,7 +125,12 @@ test("real OIDC login and backend RBAC enforcement", async ({ page }) => {
   expect(onboarding.generated.body.draft.draft.__project_id).toBe("default");
   expect(["PASS", "WARN"]).toContain(onboarding.draftValidation.body.status);
   expect(onboarding.applied.status).toBe(200);
-  expect(onboarding.delivered.status).toBe(200);
+  expect(onboarding.changeSet.status, JSON.stringify(onboarding.changeSet.body)).toBe(201);
+  expect(onboarding.changeSetValidation.status, JSON.stringify(onboarding.changeSetValidation.body)).toBe(200);
+  expect(onboarding.changeSetValidation.body.status, JSON.stringify(onboarding.changeSetValidation.body)).toBe("VALIDATED");
+  expect(onboarding.changeSetDecision.status, JSON.stringify(onboarding.changeSetDecision.body)).toBe(200);
+  expect(onboarding.ontologyPublication.status, JSON.stringify(onboarding.ontologyPublication.body)).toBe(200);
+  expect(onboarding.delivered.status, JSON.stringify(onboarding.delivered.body)).toBe(200);
   expect(onboarding.objects.body).toHaveLength(2);
   expect(onboarding.detail.body.project_id).toBe("default");
   expect(onboarding.outsideProject.status).toBe(403);

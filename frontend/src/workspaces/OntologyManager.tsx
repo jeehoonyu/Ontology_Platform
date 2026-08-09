@@ -410,6 +410,14 @@ function ManagerSurface({
         />
         <ActionTypeEditor objectTypeId={manager.object_type.id} rows={manager.cards.action_types.rows} onMutation={onResourceMutation} />
         <LinkTypeEditor rows={manager.cards.link_types.rows} fallback={manager.object_type.display_name} onMutation={onResourceMutation} />
+        <Panel title={`Downstream Contracts ${manager.cards.contract_health.count}`} action={<StatusBadge value={manager.cards.contract_health.status} />}>
+          <div className="manager-contract-counts">
+            {Object.entries(manager.cards.contract_health.counts).map(([status, count]) => (
+              <span key={status}><strong>{count}</strong>{status.replace(/_/g, " ")}</span>
+            ))}
+          </div>
+          <DataTable rows={manager.cards.contract_health.rows} empty="No published consumer contracts reference this object type." />
+        </Panel>
         <Panel title={`Dependents ${manager.cards.dependents.count}`}>
           <DataTable rows={manager.cards.dependents.rows} />
         </Panel>

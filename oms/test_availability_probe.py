@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -14,6 +15,9 @@ from availability_probe import (  # noqa: E402
     WINDOW_SECONDS,
     aggregate,
     summarize,
+)
+from app.pilot_evidence import (  # noqa: E402
+    JournalIntegrityError, append_observation, current_migration_head, load_journal,
 )
 
 passed = 0
@@ -31,6 +35,15 @@ def samples(pattern):
         {"at": 1_700_000_000 + index * PROBE_INTERVAL_SECONDS, "available": char == "u"}
         for index, char in enumerate(pattern)
     ]
+
+
+def write_journal(path, rows):
+    for row in rows:
+        append_observation(
+            path, run_id="pilot_test", kind="availability", target="http://pilot",
+            migration_head=current_migration_head(), scheduled_at=row["at"],
+            observed_at=row["at"], payload={"available": row["available"]},
+        )
 
 
 empty = summarize([])
@@ -76,14 +89,25 @@ expected_budget = round(WINDOW_SECONDS * (100 - AVAILABILITY_TARGET_PCT) / 100, 
 check(budget["error_budget_seconds"] == expected_budget, "error budget is derived from the target", budget)
 check(expected_budget < 700, "a 99.9% budget over 7 days is under 12 minutes", expected_budget)
 
+# Observer downtime is downtime. Missing a scheduled record cannot shrink the
+# denominator and make the platform look healthier.
+gapped = summarize([
+    {"at": 1_700_000_000, "available": True},
+    {"at": 1_700_000_000 + 2 * PROBE_INTERVAL_SECONDS, "available": True},
+])
+check(gapped["missing_samples"] == 1, "a missing cadence slot is explicit", gapped)
+check(gapped["availability_pct"] == 66.6667, "a missing slot costs availability", gapped)
+
 # A short window cannot satisfy the gate however clean it is. This is the check
 # that stops a green ten-minute run from being read as a passing week.
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
     samples_file = Path(tmpdir) / "samples.jsonl"
-    samples_file.write_text(
-        "\n".join(json.dumps(sample, sort_keys=True) for sample in samples("u" * 30)) + "\n",
-        encoding="utf-8",
-    )
+    recent_start = int(time.time()) - 29 * PROBE_INTERVAL_SECONDS
+    recent = [
+        {"at": recent_start + index * PROBE_INTERVAL_SECONDS, "available": True}
+        for index in range(30)
+    ]
+    write_journal(samples_file, recent)
     # Emit into the temporary directory. A test must never write a file the
     # Tier B auditor would count as gate evidence.
     evidence_dir = Path(tmpdir) / "evidence"
@@ -112,14 +136,50 @@ check(
     "test-written evidence would be counted by the auditor",
 )
 
-# Torn trailing lines are normal for an interrupted append-only probe.
+# A torn record is detected. Silently skipping it would let observer loss erase
+# an unavailable interval from the denominator.
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
     from availability_probe import load_samples
 
     torn = Path(tmpdir) / "torn.jsonl"
-    torn.write_text('{"at": 1, "available": true}\n{"at": 2, "avail', encoding="utf-8")
-    recovered = load_samples(torn)
-    check(len(recovered) == 1, "a torn final line is skipped, not fatal", recovered)
+    write_journal(torn, samples("u"))
+    with torn.open("ab") as handle:
+        handle.write(b'{"schema_version":1')
+    try:
+        load_samples(torn)
+        raise AssertionError("torn journal was accepted")
+    except JournalIntegrityError:
+        passed += 1
+
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    altered = Path(tmpdir) / "altered.jsonl"
+    write_journal(altered, samples("uu"))
+    text = altered.read_text(encoding="utf-8").replace('"available":true', '"available":false', 1)
+    altered.write_text(text, encoding="utf-8")
+    try:
+        load_journal(altered)
+        raise AssertionError("modified evidence was accepted")
+    except JournalIntegrityError:
+        passed += 1
+
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    rolled_back = Path(tmpdir) / "rolled-back.jsonl"
+    write_journal(rolled_back, samples("uu"))
+    complete = load_journal(rolled_back)
+    state = Path(tmpdir) / "state.json"
+    state.write_text(json.dumps({
+        "run_id": "pilot_test",
+        "target": "http://pilot",
+        "migration_head": current_migration_head(),
+        "last_record_hash": complete[-1]["record_hash"],
+    }) + "\n", encoding="utf-8")
+    rolled_back.write_text(rolled_back.read_text(encoding="utf-8").splitlines()[0] + "\n",
+                           encoding="utf-8")
+    output = Path(tmpdir) / "evidence"
+    code = aggregate(rolled_back, output_dir=output, state_file=state)
+    evidence = json.loads((output / "tier-b-availability-evidence.json").read_text(encoding="utf-8"))
+    check(code == 1 and evidence["measurements"]["integrity_failures"] == 1,
+          "aggregate rejects rollback behind the durable anchor", evidence)
 
 check(CONSECUTIVE_FAILURES_TO_OPEN == 2, "outage rule matches the measurement contract", CONSECUTIVE_FAILURES_TO_OPEN)
 

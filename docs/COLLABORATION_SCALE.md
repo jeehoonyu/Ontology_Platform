@@ -23,12 +23,13 @@ OntologyOS visual artifacts use a server-authoritative PostgreSQL command log. T
 6. Performs 200 simultaneous reads across both replicas and verifies identical committed state.
 7. Verifies the durable collaboration event count and unique lock versions.
 
-Two consecutive local rehearsals on July 31, 2026 produced:
+Two consecutive local rehearsals on July 31, 2026 and the current-head August 8 refresh produced:
 
 | Run | Editor acknowledgement p50 | Editor acknowledgement p95 | 200-reader batch | Lost updates |
 |---|---:|---:|---:|---:|
 | 1 | 127.460 ms | 206.458 ms | 0.567 s | 0 |
 | 2 | 134.197 ms | 224.866 ms | 0.623 s | 0 |
+| `0042` refresh | 112.105 ms | 177.515 ms | 0.495 s | 0 |
 
 These figures are regression evidence from the development host, not a universal capacity claim. CI repeats the same correctness and 250 ms p95 contract on its PostgreSQL job.
 

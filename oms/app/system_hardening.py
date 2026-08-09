@@ -76,13 +76,38 @@ def health_live():
     return {"status": "LIVE", "timestamp": int(time.time())}
 
 
+def _migration_identity(db: Session) -> Dict[str, Any]:
+    from .pilot_evidence import current_migration_head
+
+    runtime_head = current_migration_head()
+    try:
+        database_head = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+    except Exception:
+        database_head = None
+        db.rollback()
+    return {
+        "status": "PASS" if database_head == runtime_head else "WARN",
+        "database_head": database_head,
+        "runtime_head": runtime_head,
+    }
+
+
 @router.get("/health/ready", include_in_schema=False)
 def health_ready(db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
         health = schema_health(db)
-        ready = health.get("status") == "PASS"
-        return {"status": "READY" if ready else "NOT_READY", "schema": health, "timestamp": int(time.time())}
+        migration = _migration_identity(db)
+        require_migration_match = os.getenv("APP_ENV", "development").strip().lower() == "production"
+        ready = health.get("status") == "PASS" and (
+            migration["status"] == "PASS" or not require_migration_match
+        )
+        return {
+            "status": "READY" if ready else "NOT_READY",
+            "schema": health,
+            "migration": migration,
+            "timestamp": int(time.time()),
+        }
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Database readiness check failed: {exc}") from exc
 
@@ -199,6 +224,7 @@ CORE_TABLES = [
     "stream_processing_receipts",
     "stream_join_inputs",
     "stream_join_receipts",
+    "stream_join_outer_receipts",
     "stream_quarantine_records",
     "stream_processing_runs",
     "schedules",
@@ -482,6 +508,7 @@ def _ensure_runtime_tables(db: Session) -> None:
             stream_processing.StreamProcessingReceipt.__table__,
             stream_processing.StreamJoinInput.__table__,
             stream_processing.StreamJoinReceipt.__table__,
+            stream_processing.StreamJoinOuterReceipt.__table__,
             stream_processing.StreamQuarantineRecord.__table__,
             stream_processing.StreamProcessingRun.__table__,
             schedules.Schedule.__table__,
@@ -885,7 +912,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
                 "id", "project_id", "stream_id", "display_name", "timestamp_field",
                 "partition_key_field", "allowed_lateness_seconds", "late_policy",
                 "window_size_seconds", "value_field", "aggregation", "target_asset_id",
-                "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds",
+                "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds", "join_type",
                 "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
                 "created_by", "created_at", "updated_at",
             ]) for row in db.query(stream_processing.StreamProcessor).all()
@@ -922,6 +949,12 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
                 "run_id", "created_at",
             ]) for row in db.query(stream_processing.StreamJoinReceipt).all()
         ],
+        "stream_join_outer_receipts": [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "side", "output_record_id",
+                "join_key", "event_time", "opposite_watermark", "run_id", "created_at",
+            ]) for row in db.query(stream_processing.StreamJoinOuterReceipt).all()
+        ],
         "stream_quarantine_records": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
@@ -932,7 +965,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             _row_dict(row, [
                 "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
                 "backlog_after", "records_processed", "records_late", "records_quarantined",
-                "windows_emitted", "joins_emitted", "metrics", "error", "created_at", "completed_at",
+                "windows_emitted", "joins_emitted", "outer_joins_emitted", "metrics", "error", "created_at", "completed_at",
             ]) for row in db.query(stream_processing.StreamProcessingRun).all()
         ],
         "schedules": [
@@ -1171,6 +1204,7 @@ _SNAPSHOT_CHILD_RELATIONS = {
     "stream_processing_receipts": ("stream_processors", "processor_id", "id"),
     "stream_join_inputs": ("stream_processors", "processor_id", "id"),
     "stream_join_receipts": ("stream_processors", "processor_id", "id"),
+    "stream_join_outer_receipts": ("stream_processors", "processor_id", "id"),
     "stream_quarantine_records": ("stream_processors", "processor_id", "id"),
     "stream_processing_runs": ("stream_processors", "processor_id", "id"),
     "platform_artifact_revisions": ("platform_artifacts", "artifact_id", "id"),
@@ -1487,6 +1521,7 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "stream_processing_receipts",
         "stream_join_inputs",
         "stream_join_receipts",
+        "stream_join_outer_receipts",
         "stream_quarantine_records",
         "stream_processing_runs",
         "schedules",
@@ -2116,6 +2151,8 @@ def _validate_snapshot_project_scope(
         ("stream_join_receipts", "left_record_id", "stream_records"),
         ("stream_join_receipts", "right_record_id", "stream_records"),
         ("stream_join_receipts", "run_id", "stream_processing_runs"),
+        ("stream_join_outer_receipts", "record_id", "stream_records"),
+        ("stream_join_outer_receipts", "run_id", "stream_processing_runs"),
         ("webhook_listeners", "target_asset_id", "data_assets"),
         ("webhooks", "source_id", "connection_sources"),
         ("ops_alerts", "rule_id", "ops_alert_rules"),
@@ -2562,7 +2599,7 @@ def import_project(
             "id", "project_id", "stream_id", "display_name", "timestamp_field",
             "partition_key_field", "allowed_lateness_seconds", "late_policy",
             "window_size_seconds", "value_field", "aggregation", "target_asset_id",
-            "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds",
+            "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds", "join_type",
             "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
             "created_by", "created_at", "updated_at",
         ]),
@@ -2588,6 +2625,10 @@ def import_project(
             "output_record_id", "join_key", "left_event_time", "right_event_time",
             "run_id", "created_at",
         ]),
+        ("stream_join_outer_receipts", stream_processing.StreamJoinOuterReceipt, [
+            "id", "processor_id", "project_id", "record_id", "side", "output_record_id",
+            "join_key", "event_time", "opposite_watermark", "run_id", "created_at",
+        ]),
         ("stream_quarantine_records", stream_processing.StreamQuarantineRecord, [
             "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
             "watermark", "reason", "payload", "status", "created_at", "resolved_at",
@@ -2595,12 +2636,16 @@ def import_project(
         ("stream_processing_runs", stream_processing.StreamProcessingRun, [
             "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
             "backlog_after", "records_processed", "records_late", "records_quarantined",
-            "windows_emitted", "joins_emitted", "metrics", "error", "created_at", "completed_at",
+            "windows_emitted", "joins_emitted", "outer_joins_emitted", "metrics", "error", "created_at", "completed_at",
         ]),
     ]
     for snapshot_key, model_class, fields in processor_restore_specs:
         for row in snapshot.get(snapshot_key) or []:
             row.setdefault("project_id", "default")
+            if snapshot_key == "stream_processors":
+                row.setdefault("join_type", "inner")
+            elif snapshot_key == "stream_processing_runs":
+                row.setdefault("outer_joins_emitted", 0)
             track(_upsert_model(db, model_class, row, fields))
     for row in snapshot.get("event_stream_bindings") or []:
         row.setdefault("project_id", "default")

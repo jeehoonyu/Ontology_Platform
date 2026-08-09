@@ -32,7 +32,7 @@ import tempfile
 # `.contains()` resolving to string LIKE, and `.astext` not existing on a
 # with_variant column -- were found only by running it there, after every
 # SQLite assertion was green.
-tmpdir = tempfile.TemporaryDirectory()
+tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'read_path.db')}"
 
@@ -639,4 +639,8 @@ def main():
           f"on {engine.dialect.name}.")
 
 
-main()
+try:
+    main()
+finally:
+    engine.dispose()
+    tmpdir.cleanup()

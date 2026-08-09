@@ -14,6 +14,9 @@ from rto_rehearsal import (  # noqa: E402
     load_rehearsals,
     summarize,
 )
+from app.pilot_evidence import (  # noqa: E402
+    JournalIntegrityError, append_observation, current_migration_head,
+)
 
 passed = 0
 
@@ -63,10 +66,12 @@ check(unattended["unattended_rehearsals"] == 1, "counts unattended rehearsals", 
 def evidence_for(rehearsals):
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         path = Path(tmpdir) / "rehearsals.jsonl"
-        if rehearsals:
-            path.write_text(
-                "\n".join(json.dumps(item, sort_keys=True) for item in rehearsals) + "\n",
-                encoding="utf-8",
+        for index, item in enumerate(rehearsals):
+            append_observation(
+                path, run_id=f"rto_test_{index}", kind="rto_rehearsal",
+                target="http://recovery.test", migration_head=current_migration_head(),
+                scheduled_at=1_700_000_000 + index, observed_at=1_700_000_000 + index,
+                payload=item,
             )
         output_dir = Path(tmpdir) / "evidence"
         code = aggregate(path, output_dir=output_dir)
@@ -111,9 +116,24 @@ check(
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
     torn = Path(tmpdir) / "torn.jsonl"
-    torn.write_text('{"at": 1, "elapsed_seconds": 5, "recovered": true}\n{"at": 2, "elap',
-                    encoding="utf-8")
-    check(len(load_rehearsals(torn)) == 1, "a torn final line is skipped", None)
+    append_observation(
+        torn, run_id="rto_torn", kind="rto_rehearsal",
+        target="http://recovery.test", migration_head=current_migration_head(),
+        scheduled_at=1, observed_at=1, payload=rehearsal(5),
+    )
+    with torn.open("ab") as handle:
+        handle.write(b'{"at":2')
+    try:
+        load_rehearsals(torn)
+        raise AssertionError("a torn RTO journal was accepted")
+    except JournalIntegrityError:
+        passed += 1
+
+    output = Path(tmpdir) / "evidence"
+    code = aggregate(torn, output_dir=output)
+    payload = json.loads((output / "tier-b-rto-evidence.json").read_text(encoding="utf-8"))
+    check(code == 1 and payload["measurements"]["integrity_failures"] == 1,
+          "torn evidence fails RTO aggregation", payload)
 
 docs_dir = Path(__file__).resolve().parent.parent / "docs"
 check(

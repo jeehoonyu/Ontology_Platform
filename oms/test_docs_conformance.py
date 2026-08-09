@@ -47,6 +47,20 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+# Generated clients require one stable operation ID per public operation.
+openapi_operations = [
+    operation["operationId"]
+    for path_item in app.openapi()["paths"].values()
+    for operation in path_item.values()
+    if isinstance(operation, dict) and operation.get("operationId")
+]
+assert_true(
+    len(openapi_operations) == len(set(openapi_operations)),
+    "public OpenAPI operation IDs are unique",
+    [item for item in openapi_operations if openapi_operations.count(item) > 1],
+)
+
+
 # ---------------------------------------------------------------------------
 # Evidence artifacts and workspace routes
 # ---------------------------------------------------------------------------
@@ -54,10 +68,29 @@ matrix = repo_root() / "foundry-docs" / "VALIDATION_MATRIX.md"
 report = repo_root() / "foundry-docs" / "VALIDATION_REPORT.md"
 assert_true(matrix.exists(), "validation matrix exists", matrix)
 assert_true(report.exists(), "validation report exists", report)
+pilot_driver = repo_root() / "oms" / "pilot_postgres_recovery.py"
+pilot_compose = repo_root() / "docker-compose.pilot-recovery.yml"
+assert_true(pilot_driver.exists(), "isolated pilot recovery driver exists", pilot_driver)
+assert_true(pilot_compose.exists(), "isolated pilot recovery topology exists", pilot_compose)
+pilot_source = pilot_driver.read_text(encoding="utf-8")
+assert_true(
+    'docker.recovery(("down", "-v", "--remove-orphans")' in pilot_source
+    and "Backup migration head is not the current runtime head" in pilot_source,
+    "pilot restore uses fresh isolated volumes and current-head evidence",
+)
 matrix_text = matrix.read_text(encoding="utf-8")
 report_text = report.read_text(encoding="utf-8")
-for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export", "Signed sandboxed extension runtime", "durable isolated execution"):
+for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export", "Signed sandboxed extension runtime", "durable isolated execution", "/api/v1/ontology/contracts/bind", "/api/v1/ontology/contracts/health", "test_ontology_contract_bindings.py"):
     assert_true(required in matrix_text, f"matrix includes {required}")
+assert_true((repo_root() / "oms" / "test_ontology_contract_bindings.py").exists(), "version-bound ontology contract test exists")
+runtime_core = (repo_root() / "docs" / "ONTOLOGYOS_RUNTIME_CORE.md").read_text(encoding="utf-8")
+assert_true("Version-Bound Consumer Contracts" in runtime_core and "ONTOLOGY_CONTRACT_ENFORCEMENT" in runtime_core, "runtime guide documents strict consumer contracts")
+assert_true(all(status in runtime_core for status in ("CURRENT", "COMPATIBLE_STALE", "BROKEN", "UNVERSIONED", "NO_ACTIVE_REVISION")), "runtime guide documents downstream contract health")
+release_ui = (repo_root() / "frontend" / "src" / "workspaces" / "OntologyReleasePanel.tsx").read_text(encoding="utf-8")
+assert_true("Downstream Contract Health" in release_ui and "affected_consumers" in release_ui, "ontology release UI exposes contract impact")
+assert_true("breakingAcknowledged" in release_ui and "reviewed the migration plan" in release_ui, "ontology release UI gates breaking publication on acknowledgement")
+versioning_source = (repo_root() / "oms" / "app" / "ontology_versioning.py").read_text(encoding="utf-8")
+assert_true("DOWNSTREAM_CONSUMER_ACKNOWLEDGEMENT_REQUIRED" in versioning_source and "acknowledged_consumer_binding_ids" in versioning_source, "ontology publication enforces exact downstream acknowledgement")
 assert_true("does not copy Palantir code" in report_text, "report states non-copying boundary")
 assert_true("not Palantir Foundry API compatibility" in report_text, "report states API boundary")
 assert_true((repo_root() / "docs" / "SIGNED_PLUGIN_RUNTIME.md").exists(), "signed plugin operations guide exists")
@@ -382,6 +415,37 @@ joined = ok(client.post("/api/v1/streams/processors/docs_asset_work_order_join/p
 assert_true(joined["joins_emitted"] == 1, "cross-stream processor emits one exact pair", joined)
 joined_output = ok(client.get("/data-assets/docs_stream_join_output"), "read stream join output")
 assert_true(len(joined_output["records"]) == 1 and joined_output["records"][0]["join_key"] == "asset_pump_4", "stream join materializes correlated evidence", joined_output)
+compaction = ok(client.post("/api/v1/streams/processors/docs_asset_work_order_join/compact", json={
+    "dry_run": True, "retention_seconds": 0, "max_inputs": 100,
+}), "evaluate stream join compaction")
+assert_true(compaction["status"] == "DRY_RUN" and "cutoffs" in compaction, "stream join exposes bounded compaction evidence", compaction)
+ok(client.post("/data-assets", json={
+    "id": "docs_stream_outer_output", "display_name": "Docs Stream Outer Output",
+    "kind": "dataset", "asset_schema": {}, "records": [],
+}), "create outer join output")
+for stream_id in ("docs_outer_left", "docs_outer_right"):
+    ok(client.post("/streams", json={
+        "id": stream_id, "display_name": stream_id,
+        "schema": {"ts": "number", "asset_id": "string"},
+    }), f"create {stream_id}")
+ok(client.post("/api/v1/streams/processors", json={
+    "id": "docs_full_outer_join", "stream_id": "docs_outer_left",
+    "join_stream_id": "docs_outer_right", "display_name": "Docs Full Outer Join",
+    "timestamp_field": "ts", "join_left_key": "asset_id", "join_right_key": "asset_id",
+    "join_time_tolerance_seconds": 10, "join_type": "full",
+    "target_asset_id": "docs_stream_outer_output",
+}), "create full outer interval join", expect=201)
+ok(client.post("/streams/docs_outer_left/publish", json={"records": [{
+    "event_id": "docs_outer_1", "asset_id": "asset_unmatched", "ts": 100,
+}]}), "publish unmatched outer input")
+outer_pending = ok(client.post("/api/v1/streams/processors/docs_full_outer_join/process", json={}), "retain unmatched outer input")
+assert_true(outer_pending["outer_joins_emitted"] == 0, "outer input waits for opposite watermark", outer_pending)
+outer_closed = ok(client.post("/api/v1/streams/processors/docs_full_outer_join/watermarks", json={
+    "side": "right", "join_key": "asset_unmatched", "watermark": 111,
+}), "finalize unmatched outer input")
+assert_true(outer_closed["outer_joins_emitted"] == 1, "outer watermark emits one unmatched record", outer_closed)
+outer_receipts = ok(client.get("/api/v1/streams/processors/docs_full_outer_join/outer-receipts"), "read outer receipts")
+assert_true(len(outer_receipts) == 1 and outer_receipts[0]["side"] == "left", "outer finalization is receipt-backed", outer_receipts)
 schema_health = ok(client.get("/system/schema-health"), "system schema health")
 assert_true(schema_health["status"] == "PASS", "system schema health passes", schema_health)
 migrations = ok(client.get("/system/migrations"), "system migrations")
@@ -392,7 +456,7 @@ project_validation = ok(client.get("/project/validate"), "project validation")
 assert_true(project_validation["sections"]["snapshot_coverage"]["status"] == "PASS", "project validation includes snapshot coverage", project_validation)
 project_snapshot = ok(client.get("/project/export"), "project export snapshot")
 assert_true(project_snapshot["snapshot_version"] >= 2 and project_snapshot["integrity"]["checksum"] and project_snapshot["data_assets"], "project export includes integrity-protected datasets", project_snapshot)
-for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "connection_sources", "streams", "stream_records", "stream_join_inputs", "stream_join_receipts", "incidents", "investigation_reports"):
+for key in ("workshop_modules", "object_explorer_explorations", "model_monitors", "connection_sources", "streams", "stream_records", "stream_join_inputs", "stream_join_receipts", "stream_join_outer_receipts", "incidents", "investigation_reports"):
     assert_true(key in project_snapshot, f"project export includes {key}", project_snapshot.keys())
 
 
@@ -684,6 +748,26 @@ runbook_execution = ok(client.post(f"/ops/runbooks/{runbook['id']}/execute", jso
 assert_true(runbook_execution["status"] == "SUCCESS", "runbook executes", runbook_execution)
 ops_summary = ok(client.get("/ops/summary"), "ops summary")
 assert_true(ops_summary["events"] >= 1, "ops events are recorded", ops_summary)
+pilot_availability = ok(client.get("/runtime/pilot-evidence/availability"), "pilot availability status")
+assert_true(
+    pilot_availability["status"] in {"COLLECTING", "COMPLETE"}
+    and pilot_availability["integrity"] == "PASS",
+    "pilot availability distinguishes a valid collection window from job success",
+    pilot_availability,
+)
+pilot_evidence = ok(client.get("/runtime/pilot-evidence"), "combined pilot recovery status")
+assert_true(
+    pilot_evidence["rpo"]["status"] in {"COLLECTING", "COMPLETE", "BREACHED"}
+    and pilot_evidence["rpo"]["integrity"] == "PASS",
+    "pilot status exposes integrity-checked restored-target RPO coverage",
+    pilot_evidence["rpo"],
+)
+assert_true(
+    pilot_evidence["rto"]["status"] in {"COLLECTING", "COMPLETE", "BREACHED"}
+    and pilot_evidence["rto"]["integrity"] == "PASS",
+    "pilot status exposes authenticated isolated RTO coverage",
+    pilot_evidence["rto"],
+)
 
 contract = ok(client.post("/reliability/data-contracts", json={
     "id": "docs_orders_contract",

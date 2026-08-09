@@ -186,6 +186,7 @@ class ChangeSetCreate(BaseModel):
     base_revision_id: Optional[str] = None
     branch_id: Optional[str] = None
     proposal_id: Optional[str] = None
+    capture_current: bool = False
     changes: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -197,6 +198,7 @@ class ChangeSetPublishRequest(BaseModel):
     environment: str = Field(default="production", pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
     expected_checksum: Optional[str] = None
     allow_breaking: bool = False
+    acknowledged_consumer_binding_ids: List[str] = Field(default_factory=list)
 
 
 class EnvironmentRollbackRequest(BaseModel):
@@ -205,6 +207,7 @@ class EnvironmentRollbackRequest(BaseModel):
 
 
 API_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+RESOURCE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 SUPPORTED_PROPERTY_TYPES = {
     "string", "integer", "long", "short", "byte", "number", "double", "float", "decimal",
     "boolean", "date", "timestamp", "json", "array", "struct", "enum", "geometry", "geoshape", "geo",
@@ -396,8 +399,8 @@ def _validate_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
         issues.append({"severity": "ERROR", "path": "object_types", "code": "DUPLICATE_ID", "message": "Object type IDs must be unique"})
     for index, item in enumerate(object_types):
         path = f"object_types[{index}]"
-        if not isinstance(item, dict) or not API_NAME.match(str(item.get("id", ""))):
-            issues.append({"severity": "ERROR", "path": f"{path}.id", "code": "INVALID_API_NAME", "message": "A valid object type API name is required"})
+        if not isinstance(item, dict) or not RESOURCE_ID.match(str(item.get("id", ""))):
+            issues.append({"severity": "ERROR", "path": f"{path}.id", "code": "INVALID_API_NAME", "message": "A valid object type resource ID is required"})
             continue
         properties = item.get("properties") or {}
         if not isinstance(properties, dict):
@@ -419,16 +422,16 @@ def _validate_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
                 issues.append({"severity": "ERROR", "path": f"{property_path}.base_type", "code": "UNSUPPORTED_TYPE", "message": f"Unsupported property type '{base_type}'"})
     for index, item in enumerate(links):
         path = f"link_types[{index}]"
-        if not isinstance(item, dict) or not API_NAME.match(str(item.get("id", ""))):
-            issues.append({"severity": "ERROR", "path": f"{path}.id", "code": "INVALID_API_NAME", "message": "A valid link type API name is required"})
+        if not isinstance(item, dict) or not RESOURCE_ID.match(str(item.get("id", ""))):
+            issues.append({"severity": "ERROR", "path": f"{path}.id", "code": "INVALID_API_NAME", "message": "A valid link type resource ID is required"})
             continue
         if item.get("source_object_type_id") not in object_ids or item.get("target_object_type_id") not in object_ids:
             issues.append({"severity": "ERROR", "path": path, "code": "INVALID_LINK_ENDPOINT", "message": "Link endpoints must reference object types in the revision"})
         if item.get("cardinality", "MANY_TO_MANY") not in {"ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_ONE", "MANY_TO_MANY"}:
             issues.append({"severity": "ERROR", "path": f"{path}.cardinality", "code": "INVALID_CARDINALITY", "message": "Unsupported link cardinality"})
     for index, item in enumerate(actions):
-        if not isinstance(item, dict) or not API_NAME.match(str(item.get("id", ""))):
-            issues.append({"severity": "ERROR", "path": f"action_types[{index}].id", "code": "INVALID_API_NAME", "message": "A valid action type API name is required"})
+        if not isinstance(item, dict) or not RESOURCE_ID.match(str(item.get("id", ""))):
+            issues.append({"severity": "ERROR", "path": f"action_types[{index}].id", "code": "INVALID_API_NAME", "message": "A valid action type resource ID is required"})
     errors = sum(issue["severity"] == "ERROR" for issue in issues)
     warnings = sum(issue["severity"] == "WARN" for issue in issues)
     return {
@@ -568,11 +571,49 @@ def _impact_and_migration(db: Session, project_id: str, diff: Dict[str, Any]) ->
             requires_backfill = True
         steps.append({"order": index, "strategy": strategy, "resource_type": item["resource_type"], "resource_id": item["resource_id"], "property_name": item.get("property_name"), "requires_backfill": requires_backfill, "preserves_existing_values": preserves_values})
     blocking = [step for step in steps if step["requires_backfill"]]
+    from . import ontology_runtime_v1
+    change_entries: Dict[str, List[Dict[str, Any]]] = {}
+    for item in diff.get("entries", []):
+        if item.get("resource_type") == "object_type":
+            change_entries.setdefault(str(item.get("resource_id")), []).append(item)
+    binding_rows = db.query(ontology_runtime_v1.OntologyResourceDefinition).filter(
+        ontology_runtime_v1.OntologyResourceDefinition.project_id == project_id,
+        ontology_runtime_v1.OntologyResourceDefinition.resource_kind == "contract_binding",
+        ontology_runtime_v1.OntologyResourceDefinition.status == "ACTIVE",
+        ontology_runtime_v1.OntologyResourceDefinition.object_type_id.in_(affected_types),
+    ).all() if affected_types else []
+    affected_consumers: List[Dict[str, Any]] = []
+    for binding in binding_rows:
+        definition = binding.definition or {}
+        entries = change_entries.get(str(binding.object_type_id), [])
+        changed_properties = {str(item.get("property_name")) for item in entries if item.get("property_name")}
+        whole_contract_change = any(item.get("kind") in {"REMOVED", "METADATA_CHANGED"} for item in entries)
+        referenced_properties = set(definition.get("properties") or [])
+        if changed_properties and referenced_properties and not whole_contract_change and changed_properties.isdisjoint(referenced_properties):
+            continue
+        relevant_entries = [
+            item for item in entries
+            if whole_contract_change or not item.get("property_name") or not referenced_properties or item.get("property_name") in referenced_properties
+        ]
+        affected_consumers.append({
+            "binding_id": binding.id,
+            "consumer_kind": definition.get("consumer_kind"),
+            "consumer_id": definition.get("consumer_id"),
+            "consumer_version": definition.get("consumer_version"),
+            "object_type_id": binding.object_type_id,
+            "referenced_properties": sorted(referenced_properties),
+            "changed_properties": sorted(changed_properties),
+            "bound_revision_id": binding.ontology_revision_id,
+            "breaking": any(bool(item.get("breaking")) for item in relevant_entries),
+        })
     impact = {
         "severity": "HIGH" if diff.get("summary", {}).get("breaking") else ("LOW" if diff.get("summary", {}).get("changes") else "NONE"),
         "affected_object_types": affected_types,
         "live_object_counts": object_counts,
         "live_objects": sum(object_counts.values()),
+        "affected_consumer_count": len(affected_consumers),
+        "affected_consumers": affected_consumers,
+        "breaking_consumer_count": sum(bool(item["breaking"]) for item in affected_consumers),
         "requires_approval": bool(diff.get("summary", {}).get("breaking")),
     }
     migration = {"status": "REVIEW_REQUIRED" if blocking else "READY", "steps": steps, "blocking_steps": len(blocking), "preserves_existing_values": True}
@@ -943,7 +984,11 @@ def create_ontology_change_set(body: ChangeSetCreate, principal: Principal = Dep
         base = db.get(OntologyRevision, environment.current_revision_id) if environment and environment.current_revision_id else None
         if not base:
             base = _new_revision(db, body.project_id, _capture_manifest(db, body.project_id), principal.id, status="BASELINE", branch_id=body.branch_id)
-    manifest = _apply_changes(base.manifest or {}, body.changes)
+    # Generator and structured manager edits already exist in the working
+    # ontology. Capture them explicitly so review compares working state with
+    # the published base instead of silently cloning an older revision.
+    working_manifest = _capture_manifest(db, body.project_id) if body.capture_current else (base.manifest or {})
+    manifest = _apply_changes(working_manifest, body.changes)
     draft = _new_revision(db, body.project_id, manifest, principal.id, parent_revision_id=base.id, branch_id=body.branch_id)
     diff = _ontology_diff(base.manifest or {}, manifest)
     impact, migration = _impact_and_migration(db, body.project_id, diff)
@@ -968,7 +1013,12 @@ def create_ontology_change_set(body: ChangeSetCreate, principal: Principal = Dep
         updated_at=now,
     )
     db.add(row)
-    _append_audit(db, principal.id, "ontology.change_set.created", "ontology_change_set", row.id, {"project_id": body.project_id, "draft_revision_id": draft.id, "classification": diff["classification"]})
+    _append_audit(db, principal.id, "ontology.change_set.created", "ontology_change_set", row.id, {
+        "project_id": body.project_id,
+        "draft_revision_id": draft.id,
+        "classification": diff["classification"],
+        "capture_current": body.capture_current,
+    })
     db.commit()
     return _change_set_dict(db, row)
 
@@ -1043,6 +1093,25 @@ def publish_ontology_change_set(change_set_id: str, body: ChangeSetPublishReques
         raise HTTPException(status_code=422, detail={"message": "Ontology validation failed", "validation": validation})
     if row.diff.get("classification") == "BREAKING" and not body.allow_breaking:
         raise HTTPException(status_code=409, detail={"message": "Breaking ontology changes require explicit acknowledgement", "diff": row.diff, "migration_plan": row.migration_plan})
+    current_impact, current_migration = _impact_and_migration(db, row.project_id, row.diff or {})
+    required_binding_ids = {
+        str(item["binding_id"])
+        for item in current_impact.get("affected_consumers", [])
+        if item.get("breaking") and item.get("binding_id")
+    }
+    acknowledged_binding_ids = {str(item) for item in body.acknowledged_consumer_binding_ids}
+    if acknowledged_binding_ids != required_binding_ids:
+        raise HTTPException(status_code=409, detail={
+            "code": "DOWNSTREAM_CONSUMER_ACKNOWLEDGEMENT_REQUIRED",
+            "message": "Downstream consumer impact changed or has not been acknowledged; validate and review the change set again",
+            "required_consumer_binding_ids": sorted(required_binding_ids),
+            "acknowledged_consumer_binding_ids": sorted(acknowledged_binding_ids),
+            "missing_consumer_binding_ids": sorted(required_binding_ids - acknowledged_binding_ids),
+            "stale_consumer_binding_ids": sorted(acknowledged_binding_ids - required_binding_ids),
+            "impact": current_impact,
+        })
+    row.impact = current_impact
+    row.migration_plan = current_migration
     applied = _apply_manifest(db, row.project_id, draft.manifest or {})
     environment = _environment(db, row.project_id, body.environment, principal.id)
     previous = db.get(OntologyRevision, environment.current_revision_id) if environment.current_revision_id else None
@@ -1064,13 +1133,14 @@ def publish_ontology_change_set(change_set_id: str, body: ChangeSetPublishReques
             branch = db.get(OntologyBranch, proposal.branch_id)
             if branch:
                 branch.status = "merged"
-    _append_audit(db, principal.id, "ontology.change_set.published", "ontology_change_set", row.id, {"project_id": row.project_id, "environment": body.environment, "revision_id": draft.id, "checksum": draft.checksum, "applied": applied})
+    _append_audit(db, principal.id, "ontology.change_set.published", "ontology_change_set", row.id, {"project_id": row.project_id, "environment": body.environment, "revision_id": draft.id, "checksum": draft.checksum, "applied": applied, "acknowledged_consumer_binding_ids": sorted(acknowledged_binding_ids)})
     from . import ontology_runtime_v1
     semantic_contract = ontology_runtime_v1.materialize_semantic_definitions(
         db, project_id=row.project_id, actor=principal.id, revision_id=draft.id,
     )
+    downstream_contracts = ontology_runtime_v1.contract_binding_health(db, project_id=row.project_id)
     db.commit()
-    return {"change_set": _change_set_dict(db, row), "revision": _revision_dict(draft), "environment": {"name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "applied": applied, "semantic_contract": semantic_contract}
+    return {"change_set": _change_set_dict(db, row), "revision": _revision_dict(draft), "environment": {"name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "applied": applied, "semantic_contract": semantic_contract, "downstream_contracts": downstream_contracts}
 
 
 @router.get("/ontology/environments")
@@ -1103,5 +1173,6 @@ def rollback_ontology_environment(environment_name: str, body: EnvironmentRollba
     semantic_contract = ontology_runtime_v1.materialize_semantic_definitions(
         db, project_id=body.project_id, actor=principal.id, revision_id=rollback.id,
     )
+    downstream_contracts = ontology_runtime_v1.contract_binding_health(db, project_id=body.project_id)
     db.commit()
-    return {"environment": {"id": environment.id, "project_id": environment.project_id, "name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "revision": _revision_dict(rollback), "restored_from_revision_id": target.id, "applied": applied, "semantic_contract": semantic_contract}
+    return {"environment": {"id": environment.id, "project_id": environment.project_id, "name": environment.name, "current_revision_id": environment.current_revision_id, "previous_revision_id": environment.previous_revision_id}, "revision": _revision_dict(rollback), "restored_from_revision_id": target.id, "applied": applied, "semantic_contract": semantic_contract, "downstream_contracts": downstream_contracts}

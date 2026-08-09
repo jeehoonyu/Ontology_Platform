@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         token_columns = {row[1] for row in connection.execute("PRAGMA table_info(admin_api_tokens)")}
 
     assert {"retrieval", "policy_summary", "execution_job_id"} <= columns, columns
-    assert version == "0041_drop_redundant_pk_indexes", version
+    assert version == "0042_stream_outer_joins", version
     assert legacy == ("legacy-run", "legacy answer"), legacy
     assert "ix_agent_tool_runs_execution_job_id" in indexes, indexes
     assert {"platform_artifact_collaborators", "platform_artifact_collaboration_events"} <= tables, tables
