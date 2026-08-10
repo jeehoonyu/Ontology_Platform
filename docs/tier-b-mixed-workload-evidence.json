@@ -2,34 +2,35 @@
   "gate_id": "mixed_workload",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "concurrent_read_p95_ms": 54.631,
+    "concurrent_read_p95_ms": 57.058,
     "indexed_plans_after_mutation": 1,
     "invalid_transitions": 0,
     "links": 50000000,
     "objects": 10000000,
     "performance_gate_failures": 0,
-    "read_samples": 86050,
+    "read_samples": 90244,
     "reader_workers": 8,
     "rollback_probes_passed": 1,
     "temporal_events": 100000,
-    "write_batch_p95_ms": 1095.063,
+    "write_batch_p95_ms": 1183.62,
     "writes": 100000,
-    "writes_per_second": 217.5
+    "writes_per_second": 201.45
   },
   "notes": "Profile 'reference' at 10000000 objects and 50000000 links with 100000 writes across 500 bounded transactions and 8 concurrent readers. The gate states no scale; reference-size behaviour belongs to the ontology_scale gate. Rollback atomicity and the post-mutation index plan are verified in the same run.",
   "provenance": {
-    "captured_at": 1786228776,
+    "captured_at": 1786387043,
     "entry_points": [
       "POST /api/v1/objects/query"
     ],
-    "git_commit": "5e2300c",
+    "git_commit": "f554924",
     "harness": "oms/benchmark_ontology_mixed_workload_postgres.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0041_drop_redundant_pk_indexes",
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
     "request_shapes": [
       "concurrent typed reads under transactional write load",
       "bounded batched writes with rollback"

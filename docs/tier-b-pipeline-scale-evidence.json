@@ -2,28 +2,29 @@
   "gate_id": "pipeline_scale",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "deliver_ms": 3843.096,
+    "deliver_ms": 3828.364,
     "input_rows": 10000000,
     "materialized_python_rows": 20,
     "output_partitions": 20,
-    "preview_p95_ms": 3485.443
+    "preview_p95_ms": 3743.131
   },
   "notes": "Reference profile over 10000000 rows in 8 immutable partitions, delivered to 20 output partitions.",
   "provenance": {
-    "captured_at": 1786228810,
+    "captured_at": 1786387156,
     "entry_points": [
       "POST /data-assets",
       "POST /pipeline-builder/graphs",
       "POST /pipeline-builder/workers/run-next"
     ],
-    "git_commit": "5e2300c",
+    "git_commit": "f554924",
     "harness": "oms/benchmark_pipeline_scale.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0041_drop_redundant_pk_indexes",
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": null,
     "request_shapes": [
       "partitioned dataset registration",
       "compiled pipeline graph preview",
