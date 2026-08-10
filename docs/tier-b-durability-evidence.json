@@ -3,31 +3,31 @@
   "goal": "GOAL_2026-08-03",
   "measurements": {
     "backup_restore_rehearsals": 1,
-    "backup_seconds": 47.134,
+    "backup_seconds": 41.467,
     "committed_probe_lost": 0,
-    "failover_promotion_seconds": 0.696,
+    "failover_promotion_seconds": 0.705,
     "failover_state_mismatches": 0,
     "fresh_volume_restores": 1,
     "promotions_out_of_recovery": 1,
     "replica_failover_rehearsals": 1,
-    "restore_readiness_seconds": 2.149,
+    "restore_readiness_seconds": 1.25,
     "restore_state_mismatches": 0
   },
-  "notes": "Derived from 2 rehearsal(s) at 0041_drop_redundant_pk_indexes; 0 recorded at other heads ignored.",
+  "notes": "Derived from 2 rehearsal(s) at 0042_stream_outer_joins; 2 recorded at other heads ignored.",
   "provenance": {
-    "captured_at": 1786234216,
+    "captured_at": 1786342853,
     "entry_points": [
       "aggregate of oms/rehearse_ontology_scale_backup_restore.py",
       "aggregate of oms/rehearse_ontology_scale_replica_failover.py"
     ],
-    "git_commit": "82848db",
+    "git_commit": "848e6ae",
     "harness": "oms/durability_rehearsals.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0041_drop_redundant_pk_indexes",
+    "migration_head": "0042_stream_outer_joins",
     "request_shapes": [
       "physical backup and restore onto a fresh volume",
       "streaming replica promotion with a committed probe"

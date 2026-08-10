@@ -1,9 +1,9 @@
 {
-  "basebackup_seconds": 46.641,
-  "committed_lsn": "10/3E021F48",
-  "committed_probe_id": "replica_probe_9fb06dcc5be4424fbef6e54bbc55dc90",
+  "basebackup_seconds": 43.595,
+  "committed_lsn": "10/47021960",
+  "committed_probe_id": "replica_probe_179da3cb6d514be8b1d732ae3754c2f6",
   "committed_probe_preserved": true,
-  "failover_promotion_seconds": 0.696,
+  "failover_promotion_seconds": 0.705,
   "host": {
     "platform": "Windows-11-10.0.26200-SP0",
     "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
@@ -13,19 +13,19 @@
   "promoted_out_of_recovery": true,
   "promoted_state": {
     "links": 50000000,
-    "migration": "0041_drop_redundant_pk_indexes",
+    "migration": "0042_stream_outer_joins",
     "mixed_events": 200000,
     "objects": 10000000
   },
-  "replayed_lsn": "10/3E021F48",
+  "replayed_lsn": "10/47021960",
   "replication_mode": "postgresql_physical_streaming",
   "replication_network_cidr": "172.22.0.0/16",
-  "replication_replay_seconds": 0.02,
+  "replication_replay_seconds": 0.014,
   "rpo_limit_seconds": 300.0,
   "rto_limit_seconds": 1800.0,
   "source_state": {
     "links": 50000000,
-    "migration": "0041_drop_redundant_pk_indexes",
+    "migration": "0042_stream_outer_joins",
     "mixed_events": 200000,
     "objects": 10000000
   },
