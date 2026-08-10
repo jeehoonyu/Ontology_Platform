@@ -403,10 +403,27 @@ for _ in range(SAMPLES):
 # The facet is served from a rollup when one exists and computed exactly
 # otherwise; both are legitimate and the response says which, so the evidence
 # records the source rather than assuming the fast path was taken.
+#
+# Until 2026-08-09 it always said "exact", because nothing in the application
+# ever populated the rollup: the table shipped at migration 0040 and the read
+# path used it, but no route, job or load hook wrote to it. A deployment could
+# not reach the fast path at all. Refreshing through the same door an operator
+# would use -- rather than by calling the internal function -- is what makes the
+# measurement evidence for a path the product actually has.
 facet_source = "unmeasured"
+facet_refresh_seconds = None
 try:
+    refresh_latency, refreshed = timed_post("/object-sets/facets/refresh", {
+        "object_type_id": OBJECT_TYPE_ID, "field": "category",
+    })
+    facet_refresh_seconds = round(refresh_latency / 1000.0, 3)
+    assert refreshed.get("groups"), refreshed
+
     for _ in range(max(3, SAMPLES // 4)):
-        latency, facet_result = timed_post("/object-sets/aggregate", facet_body)
+        # Bounded age, so a rollup abandoned by an earlier run cannot be
+        # mistaken for one this run just paid for.
+        latency, facet_result = timed_post(
+            "/object-sets/aggregate", {**facet_body, "max_rollup_age_seconds": 900})
         surface_latencies["facet"].append(latency)
         facet_source = facet_result.get("source", "unknown")
 except AssertionError:
@@ -422,6 +439,9 @@ evidence = {
     "explorer_filter_p95_ms": round(explorer_p95, 3) if explorer_p95 is not None else None,
     "facet_p95_ms": round(facet_p95, 3) if facet_p95 is not None else None,
     "facet_source": facet_source,
+    # The read is fast because a refresh paid for it. Recording only the
+    # read would describe half the cost of serving a facet.
+    "facet_refresh_seconds": facet_refresh_seconds,
     "reference_scale_achieved": OBJECT_COUNT >= REFERENCE_OBJECTS and LINK_COUNT >= REFERENCE_LINKS,
     "objects": OBJECT_COUNT,
     "links": LINK_COUNT,
@@ -484,6 +504,7 @@ if PROFILE == "reference":
             "explorer_filter_p95_ms": evidence["explorer_filter_p95_ms"],
             "facet_p95_ms": evidence["facet_p95_ms"],
             "facet_source": evidence["facet_source"],
+            "facet_refresh_seconds": evidence["facet_refresh_seconds"],
         },
         harness="oms/benchmark_ontology_scale_postgres.py",
         # The schema this run actually measured, not the one the repo declares.

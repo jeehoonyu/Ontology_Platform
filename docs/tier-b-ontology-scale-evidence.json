@@ -2,25 +2,26 @@
   "gate_id": "ontology_scale",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "explorer_filter_p95_ms": 11.637,
-    "facet_p95_ms": 2713.288,
-    "facet_source": "exact",
-    "graph_two_hop_p95_ms": 16.242,
+    "explorer_filter_p95_ms": 9.335,
+    "facet_p95_ms": 9.235,
+    "facet_refresh_seconds": 2.724,
+    "facet_source": "rollup",
+    "graph_two_hop_p95_ms": 14.351,
     "links": 50000000,
-    "object_lookup_p95_ms": 10.557,
-    "object_range_p95_ms": 13.205,
+    "object_lookup_p95_ms": 9.139,
+    "object_range_p95_ms": 11.321,
     "objects": 10000000
   },
-  "notes": "Reference profile over 10000000 objects and 50000000 links, 20 samples per query shape, physical index plans verified. Covers both typed-read implementations: the v1 keyset select and the Object Explorer path. Facet served from exact.",
+  "notes": "Reference profile over 10000000 objects and 50000000 links, 20 samples per query shape, physical index plans verified. Covers both typed-read implementations: the v1 keyset select and the Object Explorer path. Facet served from rollup.",
   "provenance": {
-    "captured_at": 1786386530,
+    "captured_at": 1786396366,
     "entry_points": [
       "POST /api/v1/objects/query",
       "POST /api/v1/graph/query",
       "POST /object-explorer/query",
       "POST /object-sets/aggregate"
     ],
-    "git_commit": "f554924",
+    "git_commit": "b09979d",
     "harness": "oms/benchmark_ontology_scale_postgres.py",
     "host": {
       "cpu_count": 20,
