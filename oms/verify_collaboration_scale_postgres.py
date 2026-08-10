@@ -220,6 +220,27 @@ with ExitStack() as stack:
     print("PostgreSQL collaboration scale rehearsal measurements:")
     print(json.dumps(evidence, indent=2, sort_keys=True))
 
+    def served_migration_head(replica_urls):
+        """The schema the replicas are actually serving.
+
+        This harness never opens a database connection -- it drives two API
+        replicas over HTTP -- so the head comes from the readiness endpoint,
+        which already reports the database's alembic_version beside the
+        runtime's. Asking both is the stronger check anyway: they are started
+        independently, and a disagreement means they are not the pair of
+        replicas over one database that this gate claims to have measured.
+        """
+        heads = set()
+        for url in replica_urls:
+            _status, payload = request(url, "GET", "/health/ready")
+            reported = ((payload or {}).get("migration") or {}).get("database_head")
+            if not reported:
+                raise RuntimeError(f"{url}/health/ready reported no database migration head")
+            heads.add(str(reported))
+        if len(heads) != 1:
+            raise RuntimeError(f"Replicas disagree about the database schema: {sorted(heads)}")
+        return heads.pop()
+
     from tier_b_evidence import write_evidence
 
     path, status, breaches = write_evidence(
@@ -241,6 +262,8 @@ with ExitStack() as stack:
             "unique_revisions": len({event["lock_version"] for event in command_events}),
         },
         harness="oms/verify_collaboration_scale_postgres.py",
+        # The schema this run actually measured, not the one the repo declares.
+        observed_head=served_migration_head(replicas),
         entry_points=[
             "POST /artifacts (two independently started API replicas)",
             "GET /health/live",

@@ -49,6 +49,30 @@ def current_head() -> str:
     return heads.pop()
 
 
+def database_head(connectable: Any) -> str:
+    """The migration head of the database a harness actually measured.
+
+    `current_head()` above reads the repository's migration files: it reports
+    what the code declares, which is not the same claim. A fixture left at an
+    older schema, or a DATABASE_URL pointing somewhere stale, produces numbers
+    that get stamped with today's head and no way to tell from the file.
+
+    That is not theoretical. The durability rehearsals default to a container
+    whose volume sits nine migrations back; the runs on 2026-08-08 reached the
+    right database only because an operator passed environment overrides.
+    """
+    from sqlalchemy import text
+
+    with connectable.connect() as connection:
+        head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    if not head:
+        raise RuntimeError(
+            "The measured database has no alembic_version row, so the schema it "
+            "was on cannot be established. Migrate it before measuring."
+        )
+    return str(head)
+
+
 def compare(thresholds: Dict[str, Any], measurements: Dict[str, Any]) -> List[str]:
     """Return one message per threshold the measurements do not satisfy.
 
@@ -92,6 +116,7 @@ def write_evidence(
     harness: str,
     entry_points: List[str] | None = None,
     request_shapes: List[str] | None = None,
+    observed_head: str | None = None,
     notes: str = "",
     output_dir: Path | None = None,
     supersede: bool = False,
@@ -115,6 +140,16 @@ def write_evidence(
     the auditor would count is indistinguishable from evidence until someone
     reads the provenance.
     """
+    head = current_head()
+    if observed_head is not None and observed_head != head:
+        # Refused rather than recorded as a breach: a breach is a measurement
+        # that failed, and this is a measurement whose subject is unknown. There
+        # is no threshold to fail, because nothing here says what was measured.
+        raise RuntimeError(
+            f"{harness} measured a database at {observed_head!r} while the repository "
+            f"declares {head!r}. Writing this would stamp a schema the run never "
+            "touched. Migrate the fixture, or measure the database that matches."
+        )
     breaches = compare(thresholds, measurements)
     status = "PASS" if not breaches else "FAIL"
     payload = {
@@ -125,7 +160,11 @@ def write_evidence(
         "thresholds": thresholds,
         "measurements": measurements,
         "provenance": {
-            "migration_head": current_head(),
+            "migration_head": head,
+            # The head read from the database this run measured, when it measured
+            # one. Absent means the harness did not touch a database, or did not
+            # say -- which the auditor reports rather than assumes.
+            "observed_migration_head": observed_head,
             "git_commit": _git_commit(),
             "captured_at": int(time.time()),
             "harness": harness,

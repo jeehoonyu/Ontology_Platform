@@ -208,6 +208,11 @@ def aggregate(rehearsals_file: Optional[Path] = None,
         measurements={key: value for key, value in summary.items()
                       if key not in {"subjects_covered", "rehearsals_ignored_at_other_heads"}},
         harness="oms/durability_rehearsals.py",
+        # Every surviving row was checked against this head by `record`, and
+        # `at_head` dropped the ones that were not, so the aggregate can state
+        # the schema its rehearsals actually ran on rather than only the one the
+        # repository declares.
+        observed_head=head if current else None,
         entry_points=[
             "aggregate of oms/rehearse_ontology_scale_backup_restore.py",
             "aggregate of oms/rehearse_ontology_scale_replica_failover.py",
