@@ -400,7 +400,7 @@ print(serialized)
 # ontology_scale and pipeline_scale this gate is satisfiable below reference
 # size and evidence is emitted for either profile. The scale is recorded in the
 # measurements so a reader can judge rather than infer.
-from tier_b_evidence import write_evidence  # noqa: E402
+from tier_b_evidence import database_head, write_evidence  # noqa: E402
 
 _gate_path, _gate_status, _gate_breaches = write_evidence(
     "mixed_workload",
@@ -430,6 +430,8 @@ _gate_path, _gate_status, _gate_breaches = write_evidence(
         "temporal_events": evidence["temporal_events"],
     },
     harness="oms/benchmark_ontology_mixed_workload_postgres.py",
+    # The schema this run actually measured, not the one the repo declares.
+    observed_head=database_head(engine),
         entry_points=["POST /api/v1/objects/query"],
         request_shapes=[
             "concurrent typed reads under transactional write load",
