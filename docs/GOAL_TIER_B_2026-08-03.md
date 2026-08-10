@@ -97,21 +97,30 @@ check the auditor performs — current head, thresholds present, measurements pr
 thresholds satisfied — while proving only that someone typed numbers that pass. The other
 eight gates cannot do this; these two did.
 
-### The durability gate measured a schema it never touched
+### The durability gate could not show which schema it measured
 
-**2026-08-09.** The emitter worked. What it recorded was false.
+**2026-08-09.** `durability_rehearsals.record()` stamped each rehearsal with
+`current_head()`, which derives the head from the *repository's* migration files. That is
+what the code declares, not what any database contains. Both rehearsal scripts already
+read `alembic_version` from the database they measured, and neither passed it on. So the
+gate whose entire subject is whether a schema survives being backed up and restored had
+no way to show which schema it had touched.
 
-`durability_rehearsals.record()` stamped each rehearsal with `current_head()`, which
-derives the head from the *repository's* migration files. That is what the code declares,
-not what any database contains. The rehearsals that ran on 2026-08-08 were pointed at the
-`ontology_scale_reference` volume, nine days old and still at
-`0031_artifact_review_workflows` — verified structurally rather than by version string:
-no `geo_min_lat` column (added at 0039), no `object_facet_counts` table (added at 0040).
-They were journalled as `0041_drop_redundant_pk_indexes`, and the gate read PASS.
+**A correction, recorded because the first account of this was wrong.** On finding the
+`ontology_scale_reference` volume at `0031_artifact_review_workflows` — nine migrations
+stale, with no `geo_min_lat` column (0039) and no `object_facet_counts` table (0040) —
+and seeing that both harnesses *default* to that container, this document initially
+asserted that the 2026-08-08 rehearsals had measured it and that the gate's PASS was
+false. That was an inference presented as a finding, and it was not true. The harness
+evidence from those runs records `source_container: ontology_postgres` with
+`source_state.migration: 0041_drop_redundant_pk_indexes` on both the source and the
+restored target. The runs were correct and their provenance was accurate.
 
-Both rehearsal scripts already read `alembic_version` from the database they measured.
-Neither passed it on. So the gate whose entire subject is whether a schema survives being
-backed up and restored was certifying a schema eleven migrations from the one it claimed.
+The hole was real regardless: those runs avoided the stale volume only because an
+operator passed environment overrides. The default path stamps today's repository head
+onto a measurement of a nine-day-old schema, and nothing in the resulting file would show
+it. Both rows were re-run rather than trusted — not because they were wrong, but because
+"the file happens to be accurate" is not a property the gate can check.
 
 The fix is structural, not an edit to the journal:
 

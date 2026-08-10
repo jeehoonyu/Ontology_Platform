@@ -146,15 +146,22 @@ def at_head(rehearsals: List[Dict[str, Any]], head: str) -> List[Dict[str, Any]]
     """Rehearsals that ran at `head` *and* verified the database was there too.
 
     A row must carry `observed_migration_head` matching `migration_head`. Rows
-    without the field are excluded rather than trusted, because they predate the
-    check and at least two of them were wrong: the rehearsals recorded on
-    2026-08-08 stamped `0041_drop_redundant_pk_indexes` from the repository while
-    the reference fixture they measured was still at `0031_artifact_review_workflows`
-    -- eleven migrations behind, missing the geo columns and the facet rollup
-    table entirely. The gate read PASS on a schema the run never touched.
+    written before the check are excluded rather than trusted -- not because they
+    are known to be wrong, but because nothing in them can show they are right.
 
-    Excluding them costs two rehearsals that have to be run again. Trusting them
-    costs the meaning of the gate.
+    The two rows recorded on 2026-08-08 were in fact correct: their harness
+    evidence names `source_container: ontology_postgres` at
+    `0041_drop_redundant_pk_indexes`, matching what they claimed. They were
+    excluded anyway, and re-run, because "the file happens to be accurate" is not
+    a property the gate can check.
+
+    The hole was real even though it had not yet produced a bad file. Both
+    harnesses default to the `ontology_scale_reference` container, whose volume
+    sits at `0031_artifact_review_workflows` -- eleven migrations back, with no
+    geo columns and no facet rollup table. Those runs only avoided it because an
+    operator passed environment overrides. Without this check, the default path
+    stamps today's repository head onto a measurement of a schema from nine days
+    ago, and the file gives no way to tell.
     """
     return [row for row in rehearsals
             if row.get("migration_head") == head
