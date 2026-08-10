@@ -407,3 +407,38 @@ preflight`, `pilot_window.py start`, then `register-pilot-window.ps1` and
 
 External evaluator runs, external SDK registry publication, and compatibility-route
 retirement are Tier C. Work advancing them does not advance Tier B.
+
+### Seven of ten, and no stale gate
+
+**2026-08-09.** The three gates left stale at `0041` were re-run at
+`0042_stream_outer_joins` against the 10,000,000 object / 50,000,000 link fixture, in an
+order chosen so the read-only gate measured the fixture before the mutating one touched
+it:
+
+| Gate | Result | Verified database head |
+| --- | --- | --- |
+| `ontology_scale` | PASS — lookup p95 10.557 ms, range p95 13.205 ms, two-hop p95 16.242 ms | `0042` |
+| `mixed_workload` | PASS — 201.45 writes/s, write batch p95 1,183.62 ms, 0 invalid transitions, governed index plan intact after 100,000 mutations | `0042` |
+| `pipeline_scale` | PASS — 10,000,020 rows scanned, preview p95 3,743.131 ms | none, by design |
+
+`ontology_scale` reused the existing fixture rather than re-seeding, and records
+`reused_existing_fixture: true` so the file does not imply a fresh load.
+
+**`pipeline_scale` declares no database head on purpose.** The first attempt to wire it
+failed with `no such table: alembic_version` on SQLite, because that harness overrides
+`DATABASE_URL` to a throwaway file before importing the app: its subject is DuckDB
+snapshot execution, and the ontology store is incidental. The scratch database is built by
+`create_all` and has no migration head to report, so any value would have been invented —
+the exact claim the argument exists to prevent. The reason now sits at the call site
+rather than being an omission someone later repairs by supplying a number.
+
+That failure is the check working. Under a wrong assumption it refused and crashed instead
+of emitting a gate with a defaulted head.
+
+Tier B stands at **7 of 10 with no stale gate**: `ontology_scale`, `mixed_workload`,
+`pipeline_scale`, `collaboration`, `identity`, `durability`, and `chaos` all PASS at
+`0042`. The verified-head floor is 3 and rises when `collaboration` is next re-run — it
+passes at the current head but was emitted before the check existed, so it carries no
+observed head yet. Only `availability`, `rpo`, and `rto` remain MISSING, and they are
+waiting on a pilot host and seven frozen days rather than on anything in this repository.
+
