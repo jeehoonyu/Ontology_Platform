@@ -2,20 +2,20 @@
   "gate_id": "collaboration",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "ack_p95_ms": 177.515,
+    "ack_p95_ms": 187.34,
     "editors": 20,
     "lost_updates": 0,
-    "reader_batch_seconds": 0.495,
+    "reader_batch_seconds": 0.48,
     "replicas": 2,
     "unique_revisions": 20
   },
   "provenance": {
-    "captured_at": 1786253567,
+    "captured_at": 1786389914,
     "entry_points": [
       "POST /artifacts (two independently started API replicas)",
       "GET /health/live"
     ],
-    "git_commit": "82848db",
+    "git_commit": "2ea93b2",
     "harness": "oms/verify_collaboration_scale_postgres.py",
     "host": {
       "cpu_count": 20,
@@ -23,6 +23,7 @@
       "release": "11"
     },
     "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
     "request_shapes": [
       "concurrent artifact commands from 20 editors across 2 replicas",
       "revision-fenced read-back under write load"
