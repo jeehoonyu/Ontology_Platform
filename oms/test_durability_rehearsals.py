@@ -43,16 +43,18 @@ THRESHOLDS = {
 }
 
 
-def restore(readiness=12.0, mismatches=0, fresh=1, head=HEAD):
+def restore(readiness=12.0, mismatches=0, fresh=1, head=HEAD, observed=None):
     return {"subject": "backup_restore", "at": 1, "harness": "x", "migration_head": head,
+            "observed_migration_head": head if observed is None else observed,
             "measurements": {"fresh_volume_restores": fresh,
                              "restore_readiness_seconds": readiness,
                              "backup_seconds": 3.0,
                              "restore_state_mismatches": mismatches}}
 
 
-def failover(promotion=9.0, mismatches=0, promoted=1, probe_lost=0, head=HEAD):
+def failover(promotion=9.0, mismatches=0, promoted=1, probe_lost=0, head=HEAD, observed=None):
     return {"subject": "replica_failover", "at": 1, "harness": "x", "migration_head": head,
+            "observed_migration_head": head if observed is None else observed,
             "measurements": {"promotions_out_of_recovery": promoted,
                              "failover_promotion_seconds": promotion,
                              "failover_state_mismatches": mismatches,
@@ -96,24 +98,61 @@ mixed = [restore(head="0001_runtime_baseline"), failover()]
 check(len(at_head(mixed, HEAD)) == 1, "rehearsals at other heads are excluded")
 check(verdict(at_head(mixed, HEAD)), "and what remains is judged incomplete")
 
+# The row that claims the current head while having measured an older database.
+# This is not hypothetical: it is what the 2026-08-08 rehearsals did, stamping
+# 0041 from the repository while the fixture sat at 0031.
+misattributed = [restore(observed="0031_artifact_review_workflows"), failover()]
+check(len(at_head(misattributed, HEAD)) == 1,
+      "a rehearsal whose database was at another head is excluded")
+check(verdict(at_head(misattributed, HEAD)),
+      "so a gate cannot pass on a schema its run never touched")
+
+# Rows written before the check existed cannot be shown to be sound, so they are
+# excluded rather than trusted.
+legacy = [{k: v for k, v in restore().items() if k != "observed_migration_head"}, failover()]
+check(len(at_head(legacy, HEAD)) == 1, "rows with no observed head are excluded")
+
 # Round-trip through the journal, so `record` and `load` agree on the shape.
 with tempfile.TemporaryDirectory() as directory:
     journal = Path(directory) / "durability.jsonl"
     record("backup_restore", {"fresh_volume_restores": 1, "restore_readiness_seconds": 5.0,
                               "backup_seconds": 1.0, "restore_state_mismatches": 0},
-           harness="test", rehearsals_file=journal)
+           harness="test", observed_head=HEAD, rehearsals_file=journal)
     record("replica_failover", {"promotions_out_of_recovery": 1,
                                 "failover_promotion_seconds": 4.0,
                                 "failover_state_mismatches": 0, "committed_probe_lost": 0},
-           harness="test", rehearsals_file=journal)
+           harness="test", observed_head=HEAD, rehearsals_file=journal)
     rows = load(journal)
     check(len(rows) == 2, "both rehearsals round-trip through the journal", len(rows))
     check(all(row["migration_head"] == HEAD for row in rows),
           "each records the head it ran at")
+    check(all(row["observed_migration_head"] == HEAD for row in rows),
+          "and the head of the database it actually touched")
     check(not verdict(rows), "and together they satisfy the gate", verdict(rows))
 
+    # current_head() reads the repository's migration files, not any database.
+    # A fixture left at an older schema would otherwise be stamped with today's
+    # head -- a true-looking provenance field asserting something false, in the
+    # gate whose whole subject is whether a schema survives a restore.
+    try:
+        record("backup_restore", {"fresh_volume_restores": 1}, harness="test",
+               observed_head="0001_runtime_baseline", rehearsals_file=journal)
+        raise AssertionError("a rehearsal on a stale fixture was recorded as current")
+    except ValueError as error:
+        check("never touched" in str(error), "the refusal explains the misattribution", error)
+
+    for absent in ("", None):
+        try:
+            record("backup_restore", {"fresh_volume_restores": 1}, harness="test",
+                   observed_head=absent, rehearsals_file=journal)
+            raise AssertionError("a rehearsal that reported no database head was accepted")
+        except ValueError:
+            passed += 1
+
+    check(len(load(journal)) == 2, "and none of the refusals reached the journal")
+
 try:
-    record("not_a_subject", {}, harness="test")
+    record("not_a_subject", {}, harness="test", observed_head=HEAD)
     raise AssertionError("an unknown subject was accepted")
 except ValueError:
     passed += 1

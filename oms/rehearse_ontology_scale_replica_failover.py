@@ -305,7 +305,8 @@ record("replica_failover", {
     "committed_probe_lost": 0 if evidence.get("committed_probe_preserved") else 1,
     "committed_lsn": evidence.get("committed_lsn"),
     "replayed_lsn": evidence.get("replayed_lsn"),
-}, harness="oms/rehearse_ontology_scale_replica_failover.py")
+}, harness="oms/rehearse_ontology_scale_replica_failover.py",
+   observed_head=str(source_state["migration"]))
 
 print("PostgreSQL ontology scale replica failover rehearsal passed:")
 print(serialized)
