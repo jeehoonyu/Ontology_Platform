@@ -98,9 +98,10 @@ mixed = [restore(head="0001_runtime_baseline"), failover()]
 check(len(at_head(mixed, HEAD)) == 1, "rehearsals at other heads are excluded")
 check(verdict(at_head(mixed, HEAD)), "and what remains is judged incomplete")
 
-# The row that claims the current head while having measured an older database.
-# This is not hypothetical: it is what the 2026-08-08 rehearsals did, stamping
-# 0041 from the repository while the fixture sat at 0031.
+# A row that claims the current head while having measured an older database.
+# Reachable by default rather than by accident: both harnesses default to the
+# ontology_scale_reference container, whose volume is at 0031, so a run without
+# environment overrides stamps today's head onto a nine-day-old schema.
 misattributed = [restore(observed="0031_artifact_review_workflows"), failover()]
 check(len(at_head(misattributed, HEAD)) == 1,
       "a rehearsal whose database was at another head is excluded")
