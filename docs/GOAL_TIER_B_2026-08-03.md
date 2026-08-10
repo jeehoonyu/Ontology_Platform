@@ -435,10 +435,20 @@ rather than being an omission someone later repairs by supplying a number.
 That failure is the check working. Under a wrong assumption it refused and crashed instead
 of emitting a gate with a defaulted head.
 
+`collaboration` was re-run the same day to pick up the check, and is the first live
+exercise of the `/health/ready` path: both independently started replicas reported
+`0042_stream_outer_joins` and agreed, so the gate records the schema its replicas actually
+served. Ack p95 187.34 ms against a 250 ms limit, zero lost updates, 20 editors over 2
+replicas with 200 readers. That is slower than the 177.515 ms it recorded before, which is
+what an honest re-measurement looks like.
+
 Tier B stands at **7 of 10 with no stale gate**: `ontology_scale`, `mixed_workload`,
 `pipeline_scale`, `collaboration`, `identity`, `durability`, and `chaos` all PASS at
-`0042`. The verified-head floor is 3 and rises when `collaboration` is next re-run — it
-passes at the current head but was emitted before the check existed, so it carries no
-observed head yet. Only `availability`, `rpo`, and `rto` remain MISSING, and they are
-waiting on a pilot host and seven frozen days rather than on anything in this repository.
+`0042`. The verified-head floor is **4** — every gate that measures a database now names
+it. The three that do not each have a reason in the file rather than a silence:
+`pipeline_scale` measures a scratch SQLite database with no `alembic_version`, and `chaos`
+and `identity` aggregate rehearsals and a browser run rather than one measured database.
+
+Only `availability`, `rpo`, and `rto` remain MISSING, and they are waiting on a pilot host
+and seven frozen days rather than on anything in this repository.
 
