@@ -97,6 +97,47 @@ check the auditor performs — current head, thresholds present, measurements pr
 thresholds satisfied — while proving only that someone typed numbers that pass. The other
 eight gates cannot do this; these two did.
 
+### The durability gate measured a schema it never touched
+
+**2026-08-09.** The emitter worked. What it recorded was false.
+
+`durability_rehearsals.record()` stamped each rehearsal with `current_head()`, which
+derives the head from the *repository's* migration files. That is what the code declares,
+not what any database contains. The rehearsals that ran on 2026-08-08 were pointed at the
+`ontology_scale_reference` volume, nine days old and still at
+`0031_artifact_review_workflows` — verified structurally rather than by version string:
+no `geo_min_lat` column (added at 0039), no `object_facet_counts` table (added at 0040).
+They were journalled as `0041_drop_redundant_pk_indexes`, and the gate read PASS.
+
+Both rehearsal scripts already read `alembic_version` from the database they measured.
+Neither passed it on. So the gate whose entire subject is whether a schema survives being
+backed up and restored was certifying a schema eleven migrations from the one it claimed.
+
+The fix is structural, not an edit to the journal:
+
+- `record()` now takes `observed_head` as a **required** argument and refuses when it
+  differs from the repository head. Required rather than optional, because an optional
+  provenance check is one the next harness forgets.
+- `at_head()` demands `observed_migration_head == migration_head`, so rows written before
+  the check are excluded rather than trusted. That costs two rehearsals that must be run
+  again; trusting them would cost the meaning of the gate.
+
+**This hole is not specific to durability.** None of `benchmark_ontology_scale_postgres.py`,
+`benchmark_ontology_mixed_workload_postgres.py`, `benchmark_pipeline_scale.py`, or
+`verify_collaboration_scale_postgres.py` reads `alembic_version` either — all four stamp
+the repository head. Whether each is actually misattributed depends on which database it
+ran against; the absent check is common to all of them.
+
+A related defect in the emitter itself: `aggregate` wrote only into `docs/`, and a
+recorded FAIL at the current head is sticky by design, so running it merely to inspect
+the journal replaced real evidence with a failure that then outlived its own reason. It
+now accepts `--output-dir`.
+
+No schema migration was needed to repair the gate. The development database is the
+current fixture — head `0042`, 10,000,000 objects, 50,000,000 links, 200,000 mixed-workload
+events, both `ix_oi_property_*` indexes, `wal_level=logical` — matching every harness
+default. The rehearsals had simply been aimed at a stale volume.
+
 **Both emitters were written on 2026-08-08.** What remains for these two gates is now
 machine time and infrastructure, the same as the other seven:
 

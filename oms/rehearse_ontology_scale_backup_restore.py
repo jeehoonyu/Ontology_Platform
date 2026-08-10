@@ -211,7 +211,8 @@ record("backup_restore", {
     "restore_readiness_seconds": evidence["restore_readiness_seconds"],
     "backup_seconds": evidence["backup_seconds"],
     "restore_state_mismatches": 0 if evidence["source_state"] == evidence["target_state"] else 1,
-}, harness="oms/rehearse_ontology_scale_backup_restore.py")
+}, harness="oms/rehearse_ontology_scale_backup_restore.py",
+   observed_head=str(source_state["migration"]))
 
 print("PostgreSQL ontology scale backup/restore rehearsal passed:")
 print(serialized)
