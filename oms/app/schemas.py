@@ -98,6 +98,25 @@ class ObjectSetAggregateRequest(BaseModel):
     filters: Any = Field(default_factory=dict)
     group_by: Optional[str] = None
     metrics: List[Dict[str, Any]] = Field(default_factory=list)
+    # How stale a stored count may be and still be served. Omitted means any
+    # age is acceptable, which is the existing behaviour: a rollup computed once
+    # would otherwise be served forever, and a caller that cannot bound the age
+    # cannot tell a current answer from an abandoned one.
+    max_rollup_age_seconds: Optional[int] = None
+
+
+class FacetRollupRefreshRequest(BaseModel):
+    object_type_id: str
+    field: str
+
+
+class FacetRollupRefreshResponse(BaseModel):
+    object_type_id: str
+    field: str
+    project_id: str
+    computed_at: int
+    groups: List[Dict[str, Any]] = Field(default_factory=list)
+    refresh_seconds: float
 
 class ObjectSetAggregateResponse(BaseModel):
     object_type_id: str

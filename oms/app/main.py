@@ -138,6 +138,7 @@ from .runtime import (
     execute_pipeline_steps,
     extract_document_intelligence,
     generate_cron_from_prompt,
+    refresh_facet_counts,
     evaluate_geofence,
     evaluate_saved_object_set,
     list_aip_tool_catalog,
@@ -811,9 +812,40 @@ def aggregate_object_sets(request: schemas.ObjectSetAggregateRequest,
             filters=request.filters,
             group_by=request.group_by,
             metrics=request.metrics,
+            max_rollup_age_seconds=request.max_rollup_age_seconds,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/object-sets/facets/refresh", response_model=schemas.FacetRollupRefreshResponse)
+def refresh_object_set_facets(request: schemas.FacetRollupRefreshRequest,
+                              db: Session = Depends(get_db),
+                              principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    """Recompute the stored facet counts for one property of one object type.
+
+    The rollup existed since migration 0040 and the read path used it whenever it
+    was populated -- but nothing in this application ever populated it, so no
+    deployment could reach that path and every facet read paid the exact
+    aggregate. Storing counts nothing writes is a capability only on paper.
+
+    Behind "edit" rather than "view" because it both writes stored state and
+    pays a full scan of the object type. At ten million objects that is tens of
+    seconds of database work, which is not something a reader should be able to
+    start.
+    """
+    object_type = semantic_scope.object_type_for(db, principal, request.object_type_id, "edit")
+    started = time.perf_counter()
+    try:
+        stored = refresh_facet_counts(
+            db, object_type_id=request.object_type_id,
+            field=request.field, project_id=object_type.project_id,
+        )
+    except ValueError as exc:
+        # A field SQL cannot group the way Python renders it. Storing counts the
+        # exact path would disagree with is worse than not storing any.
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {**stored, "refresh_seconds": round(time.perf_counter() - started, 3)}
 
 
 @app.post("/object-sets/search-around", response_model=schemas.ObjectSetSearchAroundResponse)
