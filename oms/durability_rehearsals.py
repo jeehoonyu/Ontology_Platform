@@ -41,16 +41,45 @@ FAILOVER_PROMOTION_LIMIT_SECONDS = 1800.0
 
 
 def record(subject: str, measurements: Dict[str, Any], harness: str,
+           observed_head: str,
            rehearsals_file: Optional[Path] = None) -> Dict[str, Any]:
+    """Append one rehearsal, refusing to misattribute the schema it ran on.
+
+    `observed_head` is `alembic_version` read from the database the rehearsal
+    actually touched. It is required, and it must match, because `current_head()`
+    derives the head from the *repository's* migration files -- it says what the
+    code declares, not what any database contains. A rehearsal against a fixture
+    left at an older schema would otherwise be stamped with today's head and
+    counted as current evidence.
+
+    That would be a well-formed provenance field asserting something false, in
+    the one gate whose subject is whether a schema survives being backed up and
+    restored. An optional check is one a future harness forgets, so it is a
+    required argument.
+    """
     if subject not in SUBJECTS:
         raise ValueError(f"unknown durability subject {subject!r}; expected one of {SUBJECTS}")
     from tier_b_evidence import current_head
 
+    head = current_head()
+    if not observed_head:
+        raise ValueError(
+            f"{harness} did not report the migration head of the database it "
+            "rehearsed. Read alembic_version and pass it as observed_head."
+        )
+    if observed_head != head:
+        raise ValueError(
+            f"This rehearsal ran against a database at {observed_head!r} while the "
+            f"repository declares {head!r}. Recording it would stamp the journal with "
+            "a schema the measurement never touched. Migrate the fixture and rehearse "
+            "again, or rehearse at the matching checkout."
+        )
     path = Path(rehearsals_file) if rehearsals_file else DEFAULT_REHEARSALS
     # Each rehearsal records the head it ran at, so the aggregate cannot combine
     # work from different schemas into one file claiming a single current head.
     entry = {"subject": subject, "at": int(time.time()), "harness": harness,
-             "migration_head": current_head(), "measurements": measurements}
+             "migration_head": head, "observed_migration_head": observed_head,
+             "measurements": measurements}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
@@ -114,10 +143,35 @@ def summarize(rehearsals: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def at_head(rehearsals: List[Dict[str, Any]], head: str) -> List[Dict[str, Any]]:
-    return [row for row in rehearsals if row.get("migration_head") == head]
+    """Rehearsals that ran at `head` *and* verified the database was there too.
+
+    A row must carry `observed_migration_head` matching `migration_head`. Rows
+    without the field are excluded rather than trusted, because they predate the
+    check and at least two of them were wrong: the rehearsals recorded on
+    2026-08-08 stamped `0041_drop_redundant_pk_indexes` from the repository while
+    the reference fixture they measured was still at `0031_artifact_review_workflows`
+    -- eleven migrations behind, missing the geo columns and the facet rollup
+    table entirely. The gate read PASS on a schema the run never touched.
+
+    Excluding them costs two rehearsals that have to be run again. Trusting them
+    costs the meaning of the gate.
+    """
+    return [row for row in rehearsals
+            if row.get("migration_head") == head
+            and row.get("observed_migration_head") == head]
 
 
-def aggregate(rehearsals_file: Optional[Path] = None) -> int:
+def aggregate(rehearsals_file: Optional[Path] = None,
+              output_dir: Optional[Path] = None) -> int:
+    """Emit the gate. `output_dir` redirects the file away from docs/.
+
+    Inspection needs somewhere to go. A recorded FAIL at the current head is
+    sticky by design -- a gate that passes only after repeated attempts has not
+    passed -- so running this merely to see where the journal stands writes a
+    failure that then outlives its own reason. That is not hypothetical: it
+    happened here on 2026-08-09, replacing a real emitted PASS with a FAIL that
+    measured nothing but an empty journal.
+    """
     from tier_b_evidence import current_head, write_evidence
 
     path = Path(rehearsals_file) if rehearsals_file else DEFAULT_REHEARSALS
@@ -159,6 +213,7 @@ def aggregate(rehearsals_file: Optional[Path] = None) -> int:
             f"Derived from {len(current)} rehearsal(s) at {head}; "
             f"{summary['rehearsals_ignored_at_other_heads']} recorded at other heads ignored."
         ),
+        output_dir=output_dir,
     )
     print(f"\nTier B evidence {status}: {gate_path.name}")
     for breach in breaches:
@@ -171,8 +226,15 @@ def main() -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("mode", choices=["aggregate"])
     parser.add_argument("--rehearsals-file", default=None)
+    parser.add_argument(
+        "--output-dir", default=None,
+        help="Write the gate here instead of docs/. Use this to inspect the "
+             "journal: a FAIL recorded in docs/ at the current head is sticky.")
     args = parser.parse_args()
-    return aggregate(Path(args.rehearsals_file) if args.rehearsals_file else None)
+    return aggregate(
+        Path(args.rehearsals_file) if args.rehearsals_file else None,
+        Path(args.output_dir) if args.output_dir else None,
+    )
 
 
 if __name__ == "__main__":
