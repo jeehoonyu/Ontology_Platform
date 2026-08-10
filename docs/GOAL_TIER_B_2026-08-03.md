@@ -278,7 +278,7 @@ What remains is not code:
 | --- | --- |
 | A pilot deployment with OIDC, TLS, and a real `.env.production` | Not created; `.env.production` does not exist in this checkout |
 | A second isolated Compose project for restores | `docker-compose.pilot-recovery.yml` exists and its topology validates |
-| **Seven days with a frozen migration head** | **Declared 2026-08-09** at `0042_stream_outer_joins`, enforced in CI |
+| **Seven days with a frozen migration head** | Mechanism built and proven; freeze **opened and closed on 2026-08-09** without collecting, because no host arrived |
 
 The head freeze is the real gate on starting, and it is now mechanical rather than an
 intention. `docs/SCHEMA_FREEZE.json` declares the frozen head with an owner and an end
@@ -288,6 +288,14 @@ destructive to cheap. `pilot_window.py tick` already refused to pool two schemas
 could only discover the change after the fact, when the days were spent and the migration
 was merged. Now the pull request goes red instead. An expired freeze also fails, so the
 file cannot quietly become a thing that looks like protection and is not.
+
+The freeze was opened at `0042_stream_outer_joins` and **closed the same day, having
+protected nothing**, because no pilot host materialised. That is the correct outcome
+rather than a wasted step: a freeze blocks every migration in the repository, so one left
+open around a window that is not running is pure cost, and a build that is red for a
+reason nobody remembers is how a ratchet becomes something people route around. The file
+retains why it was opened and why it closed. Reopen it at the then-current head when a
+host exists; the mechanism is in place and tested, and opening it again is one commit.
 
 ### What was verified locally on 2026-08-09, and what was not
 
