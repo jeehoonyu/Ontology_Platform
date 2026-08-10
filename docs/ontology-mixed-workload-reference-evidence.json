@@ -1,7 +1,7 @@
 {
   "batch_size": 200,
-  "concurrent_read_p50_ms": 40.207,
-  "concurrent_read_p95_ms": 53.635,
+  "concurrent_read_p50_ms": 41.87,
+  "concurrent_read_p95_ms": 57.058,
   "connection_recovery": "PASS",
   "gate_failures": [],
   "host": {
@@ -11,15 +11,15 @@
   },
   "index_stats": [
     {
-      "idx_scan": 88281,
-      "idx_tup_fetch": 9113926,
-      "idx_tup_read": 29015775,
+      "idx_scan": 45102,
+      "idx_tup_fetch": 4555302,
+      "idx_tup_read": 4555302,
       "indexrelname": "ix_oi_property_333984857ac3f4a13ff9"
     },
     {
-      "idx_scan": 88281,
-      "idx_tup_fetch": 88281,
-      "idx_tup_read": 88281,
+      "idx_scan": 45105,
+      "idx_tup_fetch": 45105,
+      "idx_tup_read": 45105,
       "indexrelname": "ix_oi_property_e18d75eec8db1d235039"
     }
   ],
@@ -30,18 +30,18 @@
   "objects": 10000000,
   "profile": "reference",
   "read_p95_limit_ms": 300.0,
-  "read_samples": 88980,
+  "read_samples": 90244,
   "reader_workers": 8,
   "reference_scale_achieved": true,
   "rollback_probe": "PASS",
-  "run_id": "mixed_f539dc1f2fb5453da9ee427b4d3c00c5",
+  "run_id": "mixed_66be756c171047bfa3874df659cee636",
   "status": "PASS",
   "temporal_events": 100000,
-  "write_batch_p50_ms": 905.325,
-  "write_batch_p95_ms": 1117.156,
+  "write_batch_p50_ms": 947.289,
+  "write_batch_p95_ms": 1183.62,
   "write_p95_limit_ms": 2000.0,
-  "writes": 100000,
-  "write_seconds": 467.438,
+  "write_seconds": 496.402,
   "write_transactions": 500,
-  "writes_per_second": 213.932
+  "writes": 100000,
+  "writes_per_second": 201.45
 }

@@ -331,8 +331,7 @@ print(serialized)
 # of the rows; letting it emit would overwrite a real reference PASS with a FAIL
 # on every CI run.
 if PROFILE == "reference":
-    from app.database import engine as _gate_engine
-    from tier_b_evidence import database_head, write_evidence
+    from tier_b_evidence import write_evidence
 
     gate_path, gate_status, gate_breaches = write_evidence(
         "pipeline_scale",
@@ -364,8 +363,12 @@ if PROFILE == "reference":
             "materialized_python_rows": evidence["materialized_python_rows"],
         },
         harness="oms/benchmark_pipeline_scale.py",
-        # The schema this run actually measured, not the one the repo declares.
-        observed_head=database_head(_gate_engine),
+        # No observed_head: unlike the other scale gates this one does not
+        # measure a migrated database. Line 39 points DATABASE_URL at a
+        # throwaway SQLite file built by create_all, because the subject here
+        # is DuckDB snapshot execution and the ontology store is incidental.
+        # That file has no alembic_version, so any head reported for it would
+        # be invented -- exactly the claim this argument exists to prevent.
         entry_points=[
             "POST /data-assets",
             "POST /pipeline-builder/graphs",
