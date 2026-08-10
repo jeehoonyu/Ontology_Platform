@@ -99,6 +99,32 @@ def scan(head: str) -> List[Dict[str, str]]:
     return rows
 
 
+def verified_database_heads() -> int:
+    """Gate files that name the database head their run measured.
+
+    `migration_head` is the repository's declared head -- what the code says.
+    `observed_migration_head` is what the measured database reported. A harness
+    that stops passing it still produces a well-formed file, so this is counted
+    and ratcheted: without a floor, dropping the argument is invisible, which is
+    the difference between a ratchet and an intention.
+
+    Not every gate measures a database. The floor therefore protects the number
+    that has been earned rather than demanding one from every file.
+    """
+    total = 0
+    for path in sorted(DOCS.glob("*evidence*.json")):
+        if path.name == BASELINE.name:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        provenance = payload.get("provenance")
+        if isinstance(provenance, dict) and provenance.get("observed_migration_head"):
+            total += 1
+    return total
+
+
 def load_baseline() -> Dict[str, Any]:
     if not BASELINE.exists():
         return {}
@@ -127,19 +153,24 @@ def main() -> int:
         print(f"  {row['file'].ljust(width)}  {row['state'].ljust(14)}  {row['detail']}")
 
     unprovenanced = tally.get(UNPROVENANCED, 0)
+    verified = verified_database_heads()
     print(f"\n{len(rows)} evidence files: " +
           ", ".join(f"{state} {count}" for state, count in sorted(tally.items())))
+    print(f"{verified} declare the database head they measured")
 
     if args.set_baseline:
         BASELINE.write_text(
             json.dumps({
                 "unprovenanced_ceiling": unprovenanced,
+                "verified_database_head_floor": verified,
                 "recorded_at_head": head,
-                "note": "Ratchet ceiling. May be lowered, never raised.",
+                "note": "Ratchet. The ceiling may be lowered, never raised; "
+                        "the floor may be raised, never lowered.",
             }, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        print(f"\nBaseline set: unprovenanced ceiling {unprovenanced}.")
+        print(f"\nBaseline set: unprovenanced ceiling {unprovenanced}, "
+              f"verified-head floor {verified}.")
         return 0
 
     baseline = load_baseline()
@@ -155,6 +186,19 @@ def main() -> int:
         print("Evidence added without a migration head cannot be shown to be stale, so")
         print("it never expires. Record provenance, or lower a different file's debt first.")
         return 1
+    floor = baseline.get("verified_database_head_floor")
+    if floor is not None:
+        print(f"Verified-head floor:   {floor}")
+        if verified < floor:
+            print(f"\nRATCHET BROKEN: {verified} files declare the database head they "
+                  f"measured, below the floor of {floor}.")
+            print("A harness that stops reporting observed_migration_head still writes a")
+            print("well-formed file, so the loss is otherwise invisible. Pass observed_head")
+            print("to write_evidence, or lower the floor deliberately with --set-baseline.")
+            return 1
+        if verified > floor:
+            print(f"\nRatchet tightened: {verified} > {floor} verified heads. "
+                  "Re-run with --set-baseline to lock in the improvement.")
     if unprovenanced < ceiling:
         print(f"\nRatchet tightened: {unprovenanced} < {ceiling}. "
               "Re-run with --set-baseline to lock in the improvement.")

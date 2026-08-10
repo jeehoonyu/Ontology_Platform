@@ -131,11 +131,28 @@ The fix is structural, not an edit to the journal:
   the check are excluded rather than trusted. That costs two rehearsals that must be run
   again; trusting them would cost the meaning of the gate.
 
-**This hole is not specific to durability.** None of `benchmark_ontology_scale_postgres.py`,
-`benchmark_ontology_mixed_workload_postgres.py`, `benchmark_pipeline_scale.py`, or
-`verify_collaboration_scale_postgres.py` reads `alembic_version` either — all four stamp
-the repository head. Whether each is actually misattributed depends on which database it
-ran against; the absent check is common to all of them.
+**This hole was not specific to durability, and is now closed everywhere.** None of
+`benchmark_ontology_scale_postgres.py`, `benchmark_ontology_mixed_workload_postgres.py`,
+`benchmark_pipeline_scale.py`, or `verify_collaboration_scale_postgres.py` read
+`alembic_version` either — all four stamped the repository head.
+
+The rule lives in one place rather than four that can drift. `write_evidence` takes an
+`observed_head`, refuses to write when it differs from the repository head, and records it
+as `provenance.observed_migration_head`. Refusing rather than recording a breach is
+deliberate: a breach is a measurement that failed a threshold, while this is a measurement
+whose subject is unknown, and there is no threshold for that.
+
+Collaboration is the interesting case. It never opens a database — it drives two
+independently started API replicas over HTTP — so it reads `/health/ready`, which already
+reports the database's `alembic_version` beside the runtime's, and rejects a disagreement
+between the two replicas. That measures what the replicas actually serve, which is a
+stronger claim than what a separate connection would have found.
+
+A floor in `audit_evidence_corpus.py` keeps it: the number of gates declaring a verified
+database head may rise, never fall. Without it, deleting the argument still produces a
+well-formed file and nothing notices. Verified by removing the field from a gate and
+confirming the audit exits 1. The floor starts at 1 — only durability has been re-emitted
+— and rises as the other three are re-run.
 
 A related defect in the emitter itself: `aggregate` wrote only into `docs/`, and a
 recorded FAIL at the current head is sticky by design, so running it merely to inspect

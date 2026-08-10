@@ -460,7 +460,7 @@ print(serialized)
 # attempt at the gate; letting it emit would overwrite a genuine reference PASS
 # with a FAIL every CI run and destroy the evidence it took hours to produce.
 if PROFILE == "reference":
-    from tier_b_evidence import write_evidence
+    from tier_b_evidence import database_head, write_evidence
 
     gate_path, gate_status, gate_breaches = write_evidence(
         "ontology_scale",
@@ -486,6 +486,8 @@ if PROFILE == "reference":
             "facet_source": evidence["facet_source"],
         },
         harness="oms/benchmark_ontology_scale_postgres.py",
+        # The schema this run actually measured, not the one the repo declares.
+        observed_head=database_head(engine),
         # Superseding a recorded failure requires naming what was fixed. The
         # guard in tier_b_evidence exists because a gate that passes on the
         # fourth attempt has not passed, and it cannot distinguish a repaired

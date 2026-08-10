@@ -15,12 +15,12 @@
   },
   "notes": "Derived from 2 rehearsal(s) at 0042_stream_outer_joins; 2 recorded at other heads ignored.",
   "provenance": {
-    "captured_at": 1786342853,
+    "captured_at": 1786381163,
     "entry_points": [
       "aggregate of oms/rehearse_ontology_scale_backup_restore.py",
       "aggregate of oms/rehearse_ontology_scale_replica_failover.py"
     ],
-    "git_commit": "848e6ae",
+    "git_commit": "7b3c747",
     "harness": "oms/durability_rehearsals.py",
     "host": {
       "cpu_count": 20,
@@ -28,6 +28,7 @@
       "release": "11"
     },
     "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
     "request_shapes": [
       "physical backup and restore onto a fresh volume",
       "streaming replica promotion with a committed probe"
