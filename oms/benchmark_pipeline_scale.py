@@ -331,7 +331,8 @@ print(serialized)
 # of the rows; letting it emit would overwrite a real reference PASS with a FAIL
 # on every CI run.
 if PROFILE == "reference":
-    from tier_b_evidence import write_evidence
+    from app.database import engine as _gate_engine
+    from tier_b_evidence import database_head, write_evidence
 
     gate_path, gate_status, gate_breaches = write_evidence(
         "pipeline_scale",
@@ -363,6 +364,8 @@ if PROFILE == "reference":
             "materialized_python_rows": evidence["materialized_python_rows"],
         },
         harness="oms/benchmark_pipeline_scale.py",
+        # The schema this run actually measured, not the one the repo declares.
+        observed_head=database_head(_gate_engine),
         entry_points=[
             "POST /data-assets",
             "POST /pipeline-builder/graphs",
