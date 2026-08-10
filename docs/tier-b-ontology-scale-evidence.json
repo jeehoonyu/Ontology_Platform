@@ -2,32 +2,33 @@
   "gate_id": "ontology_scale",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "explorer_filter_p95_ms": 7.144,
-    "facet_p95_ms": 2648.826,
+    "explorer_filter_p95_ms": 11.637,
+    "facet_p95_ms": 2713.288,
     "facet_source": "exact",
-    "graph_two_hop_p95_ms": 13.185,
+    "graph_two_hop_p95_ms": 16.242,
     "links": 50000000,
-    "object_lookup_p95_ms": 8.118,
-    "object_range_p95_ms": 10.311,
+    "object_lookup_p95_ms": 10.557,
+    "object_range_p95_ms": 13.205,
     "objects": 10000000
   },
-  "notes": "Reference profile over 10000000 objects and 50000000 links, 20 samples per query shape, physical index plans verified. Covers both typed-read implementations: the v1 keyset select and the Object Explorer path. Facet served from exact. Supersedes an earlier failure at this head: GOAL2-010 fixed: object_explorer_query computed an exact count(*) over every match and discarded it; with_total=False removes 345/346ths of the response time",
+  "notes": "Reference profile over 10000000 objects and 50000000 links, 20 samples per query shape, physical index plans verified. Covers both typed-read implementations: the v1 keyset select and the Object Explorer path. Facet served from exact.",
   "provenance": {
-    "captured_at": 1786223947,
+    "captured_at": 1786386530,
     "entry_points": [
       "POST /api/v1/objects/query",
       "POST /api/v1/graph/query",
       "POST /object-explorer/query",
       "POST /object-sets/aggregate"
     ],
-    "git_commit": "8bc82aa",
+    "git_commit": "f554924",
     "harness": "oms/benchmark_ontology_scale_postgres.py",
     "host": {
       "cpu_count": 20,
       "platform": "windows",
       "release": "11"
     },
-    "migration_head": "0041_drop_redundant_pk_indexes",
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
     "request_shapes": [
       "typed lookup, equality filter on an indexed property",
       "typed range read, gte filter with ordering",
