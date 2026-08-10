@@ -1272,9 +1272,22 @@ def refresh_facet_counts(db: Session, *, object_type_id: str, field: str,
                          project_id: Optional[str] = None) -> Dict[str, Any]:
     """Recompute and store the facet counts for one property.
 
-    This pays the aggregate -- 56,487.9 ms at ten million objects -- so that
-    reads do not. Run it on a schedule, or after a load, at whatever staleness
-    the deployment is willing to show.
+    This pays the aggregate so that reads do not. On the ten-million-object
+    reference fixture, grouping `category` cost **2.724 s** through
+    `POST /object-sets/facets/refresh`, against a **9.235 ms** read from the
+    stored counts and 2,713.288 ms computing it exactly. Run it on a schedule,
+    or after a load, at whatever staleness the deployment will show.
+
+    An earlier version of this docstring cited 56,487.9 ms here. That figure
+    comes from `measure_read_path_bounds.py`, which times a different shape, and
+    it does not describe what this function costs. Left corrected rather than
+    deleted: a cost written into a docstring is what an operator sizes a refresh
+    schedule against.
+
+    Nothing called this until 2026-08-09. The table shipped at migration 0040
+    and `aggregate_object_set` read from it whenever it was populated, but no
+    route, job or load hook ever wrote to it, so every deployment computed every
+    facet exactly and the stored path was unreachable in practice.
 
     Returns the counts it stored, so a caller can refresh and render in one go.
     """
