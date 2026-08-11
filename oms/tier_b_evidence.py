@@ -92,6 +92,11 @@ def compare(thresholds: Dict[str, Any], measurements: Dict[str, Any]) -> List[st
             continue
         if name not in measurements:
             breaches.append(f"{name} not measured")
+        elif measurements[name] is None:
+            # A harness that could not take a reading records None. Comparing it
+            # would raise and abort the run before any evidence was written, so
+            # the gate would vanish instead of failing. Absent is a breach.
+            breaches.append(f"{name} not measured (recorded as null)")
         elif not ok(measurements[name], limit):
             breaches.append(f"{name}={measurements[name]} vs {key}={limit}")
     return breaches

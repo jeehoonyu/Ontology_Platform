@@ -494,6 +494,16 @@ if PROFILE == "reference":
             # typed read it parallels. Without this the gate certifies one
             # implementation of a typed read and says nothing about the other.
             "explorer_filter_p95_ms_max": OBJECT_P95_LIMIT_MS,
+            # A facet is a surface a user waits on, so it is held to the same
+            # bound as the other reads rather than to a bespoke one. Three
+            # observations on the reference fixture read 9.235, 8.394 and
+            # 9.686 ms, against 2,713.288 ms computing it exactly: the bound is
+            # not knife-edge in either direction.
+            "facet_p95_ms_max": OBJECT_P95_LIMIT_MS,
+            # And the path is asserted directly rather than inferred from the
+            # latency. Which path ran is the thing that silently changed for
+            # three days, and a number only implies it.
+            "facet_from_rollup_min": 1,
         },
         measurements={
             "objects": OBJECT_COUNT,
@@ -505,6 +515,7 @@ if PROFILE == "reference":
             "facet_p95_ms": evidence["facet_p95_ms"],
             "facet_source": evidence["facet_source"],
             "facet_refresh_seconds": evidence["facet_refresh_seconds"],
+            "facet_from_rollup": 1 if evidence["facet_source"] == "rollup" else 0,
         },
         harness="oms/benchmark_ontology_scale_postgres.py",
         # The schema this run actually measured, not the one the repo declares.
