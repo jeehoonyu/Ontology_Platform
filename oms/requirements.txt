@@ -25,3 +25,8 @@ kafka-python==2.3.2  # >=2.0.2,<3; Kafka partition-offset ingestion
 duckdb==1.5.5  # >=1.1,<2; deterministic Arrow/Parquet preview execution
 pyarrow==21.0.0  # >=17,<22; columnar dataset snapshots and Parquet interchange
 boto3==1.43.59  # >=1.35,<2; optional S3-compatible snapshot storage adapter
+httpx==0.28.1  # required by starlette.testclient, which every
+                    # TestClient-based harness uses. Undeclared until 2026-08-13:
+                    # a clean install from this file could not import the suite,
+                    # and it only ever worked here because an unrelated project
+                    # had installed httpx into the shared interpreter.

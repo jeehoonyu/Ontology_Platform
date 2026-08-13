@@ -1,0 +1,61 @@
+# Full transitive lock, per D1 of GOAL_REPRODUCIBILITY_2026-08-13.
+#
+# requirements.txt pins the 17 declared dependencies. That is not enough to
+# determine an environment, and D4 proved it: a clean install from the pinned
+# declarations alone resolved 11 of 42 transitive packages differently --
+# starlette 1.2.1 against 1.6.0, greenlet, anyio, and pydantic's validation
+# machinery among them -- and the resulting interpreter could not import the
+# test suite at all.
+#
+# Install from this file to reproduce a measurement:
+#     python -m venv .venv
+#     .venv/bin/pip install -r oms/requirements.lock
+#
+# closure digest: a727fd9a41cfa7b6
+# declared roots: 17   locked distributions: 45
+
+alembic==1.18.4
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+authlib==1.7.2
+bcrypt==5.0.0
+boto3==1.43.59
+botocore==1.43.59
+certifi==2026.7.22
+cffi==2.1.0
+click==8.4.1
+colorama==0.4.6
+cryptography==49.0.0
+duckdb==1.5.5
+fastapi==0.136.3
+greenlet==3.5.1
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+jmespath==1.1.0
+joserfc==1.7.4
+kafka-python==2.3.2
+mako==1.3.12
+markupsafe==3.0.3
+paramiko==3.5.1
+psycopg2-binary==2.9.12
+pyarrow==21.0.0
+pycparser==3.0
+pydantic==2.13.4
+pydantic-core==2.46.4
+pydantic-settings==2.14.1
+pynacl==1.6.2
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-multipart==0.0.32
+s3transfer==0.19.2
+six==1.17.0
+sqlalchemy==2.0.50
+starlette==1.2.1
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+urllib3==2.7.0
+uvicorn==0.49.0
+websockets==15.0.1

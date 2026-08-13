@@ -137,6 +137,73 @@ unhomed-check defect C2 had just fixed. D1's enforcement therefore lives in the 
 `test_dependency_provenance.py` asserts `unpinned() == []` against the live requirements
 file. Checked explicitly rather than assumed.
 
+## D4 closed 2026-08-13, and it found two defects before it found a number
+
+The reproduction was attempted in a fresh `git clone` with a virtualenv built only from the
+pinned manifest. It failed, twice, for reasons nothing in this repository could have
+surfaced without actually doing it:
+
+**`httpx` was required and undeclared.** `starlette.testclient` imports it, and nearly
+every harness here uses `TestClient`. It was absent from `requirements.txt` entirely and
+worked only because an unrelated project had installed it into the shared global
+interpreter. A stranger cloning this repository and installing from the manifest **could
+not import the test suite at all** — not "got different numbers", could not run.
+
+**Pinning the declarations does not determine the closure.** A clean install from the
+17 pinned declarations resolved **11 of 42** transitive distributions differently:
+`starlette` 1.2.1 against **1.6.0**, plus `greenlet`, `anyio`, `botocore`, `cffi`,
+`click`, `mako`, and three packages in pydantic's validation path. The starlette
+difference is what produced the import failure — 1.6.0 wants `httpx2` where 1.2.1 wants
+`httpx`.
+
+Both are fixed. `httpx` is declared and pinned, and `oms/requirements.lock` pins the full
+**45-distribution** closure. Verified rather than asserted: a fresh venv built from the
+lock reports digest `a727fd9a41cfa7b6`, identical to the environment that produced the
+evidence. That is the first environment this repository has been able to rebuild.
+
+### The reproduction
+
+`pipeline_scale` re-run in that locked environment, from a fresh clone. Verdict **PASS**
+in both, matching the recorded gate.
+
+| | recorded | reproduced | |
+| --- | ---: | ---: | --- |
+| `input_rows` | 10,000,000 | 10,000,000 | exact |
+| `output_partitions` | 20 | 20 | exact |
+| `complex_union_rows` | 20,000,000 | 20,000,000 | exact |
+| `geofence_total_positions` | 9,218 | 9,218 | exact |
+| `complex_pivot_cardinality` | 512 | 512 | exact |
+| `complex_deliver_ms` | 1,803.904 | 1,841.579 | +2.1% |
+| `complex_preview_ms` | 1,241.171 | 1,311.522 | +5.7% |
+| `preview_p95_ms` | 1,459.595 | 1,718.212 | **+17.7%** |
+| `deliver_ms` | 1,515.835 | 2,015.763 | **+33.0%** |
+
+**Every deterministic measurement reproduced exactly. Every timing did not**, by up to a
+third — on the same machine, with a byte-identical dependency closure. That is a floor on
+timing variance, not a ceiling; different hardware would be worse.
+
+This gate is unthreatened: its bounds are 30,000 ms and 60,000 ms against measurements
+near 1,500 ms. But it puts a number on something the project has been doing by feel. A
+latency threshold set within ~33% of a measured value cannot distinguish a regression from
+the same run twice, which is exactly the collaboration ack bound that "breaches roughly one
+run in three". Thresholds should be set against the spread, not against a single reading.
+
+The recorded gate carries no dependency digest and the reproduction does — the
+`UNRECORDED` state D3 will report, showing up on its own.
+
+### A near-miss worth recording
+
+The first reproduction attempt was reported here as succeeding, with a table of measurements
+matching to the last decimal. It had not succeeded. The run crashed at import, the clone's
+evidence file was never rewritten, and the comparison was between the committed file and
+itself.
+
+A reproduction that silently no-ops produces *perfect* agreement, which is precisely what a
+careless reader hopes to see. The check that catches it is not "do the numbers match" but
+"did the file change, **and then** match" — `git status` on the evidence file before any
+comparison. That is now how D4 is verified, and it is the shape of check any future
+reproduction condition needs.
+
 ## Explicit non-goals
 
 **Not** reproducible builds in the Nix or Bazel sense. The aim is that a measurement names
