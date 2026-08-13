@@ -1,16 +1,27 @@
-fastapi>=0.110.0
-uvicorn>=0.27.1
-websockets>=12,<16       # production WebSocket collaboration transport
-sqlalchemy>=2.0.29
-pydantic>=2.7.0
-pydantic-settings>=2.2.1
-alembic>=1.13.1
-psycopg2-binary>=2.9.9
-python-multipart>=0.0.9   # required by FastAPI for multipart file uploads
-authlib>=1.3.2            # OIDC ID-token validation and JOSE support
-cryptography>=42.0.0      # encrypted connector credentials and OIDC crypto primitives
-paramiko>=3.4,<4          # pinned-host SFTP connector transport
-kafka-python>=2.0.2,<3    # Kafka partition-offset ingestion
-duckdb>=1.1,<2            # deterministic Arrow/Parquet preview execution
-pyarrow>=17,<22           # columnar dataset snapshots and Parquet interchange
-boto3>=1.35,<2            # optional S3-compatible snapshot storage adapter
+# Pinned exactly, per D1 of GOAL_REPRODUCIBILITY_2026-08-13.
+#
+# These were floors until 2026-08-13, and every measurement in this repository
+# was taken against whatever they happened to resolve to -- fastapi 0.136.3
+# against a 0.110.0 floor, cryptography 49.0.0 against 42.0.0. A floor says what
+# is permitted; it does not say what ran.
+#
+# The original constraint follows each pin, so the intent behind it survives the
+# pinning. Upgrading is an ordinary commit: raise the pin, re-run the gates that
+# the package can move, and let audit_dependency_provenance report the drift.
+
+fastapi==0.136.3  # >=0.110.0
+uvicorn==0.49.0  # >=0.27.1
+websockets==15.0.1  # >=12,<16; production WebSocket collaboration transport
+sqlalchemy==2.0.50  # >=2.0.29
+pydantic==2.13.4  # >=2.7.0
+pydantic-settings==2.14.1  # >=2.2.1
+alembic==1.18.4  # >=1.13.1
+psycopg2-binary==2.9.12  # >=2.9.9
+python-multipart==0.0.32  # >=0.0.9; required by FastAPI for multipart file uploads
+authlib==1.7.2  # >=1.3.2; OIDC ID-token validation and JOSE support
+cryptography==49.0.0  # >=42.0.0; encrypted connector credentials and OIDC crypto primitives
+paramiko==3.5.1  # >=3.4,<4; pinned-host SFTP connector transport
+kafka-python==2.3.2  # >=2.0.2,<3; Kafka partition-offset ingestion
+duckdb==1.5.5  # >=1.1,<2; deterministic Arrow/Parquet preview execution
+pyarrow==21.0.0  # >=17,<22; columnar dataset snapshots and Parquet interchange
+boto3==1.43.59  # >=1.35,<2; optional S3-compatible snapshot storage adapter

@@ -139,7 +139,29 @@ def build_evidence_provenance(
             "release": platform.release(),
             "cpu_count": os.cpu_count(),
         },
+        # The third-party code that actually executed. Absent until 2026-08-13:
+        # every gate recorded the git commit and the migration head and nothing
+        # about the libraries that compiled its queries, ran its pipeline, and
+        # owned the memory it measured. A minor release in any of them moves a
+        # number this repository would otherwise attribute to its own code.
+        "dependencies": _dependency_provenance(),
     }
+
+
+def _dependency_provenance() -> Dict[str, Any]:
+    """The resolved dependency closure, or a recorded reason it is unavailable.
+
+    Never raises. Evidence emission must not fail because bookkeeping could not
+    read package metadata -- a gate that cannot write its result is worse than
+    one whose provenance is incomplete, and the incompleteness is recorded rather
+    than silently omitted.
+    """
+    try:
+        from dependency_provenance import provenance
+
+        return provenance()
+    except Exception as error:  # noqa: BLE001 - recorded, not swallowed
+        return {"unavailable": f"{type(error).__name__}: {error}"}
 
 
 def write_evidence(
