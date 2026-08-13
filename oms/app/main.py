@@ -102,6 +102,7 @@ from . import (
     event_outbox,
     industrial_workflow,
     semantic_scope,
+    api_v1_compat,
 )
 from .database import engine, get_db
 from .domain_maintenance import bootstrap_maintenance_copilot, maintenance_summary
@@ -434,6 +435,7 @@ def read_root():
             "normalized_ontology_definitions",
             "typed_object_query_v1",
             "typed_graph_query_v1",
+            "compatibility_preserving_api_v1",
             "append_only_object_change_events",
             "immutable_dataset_snapshots",
             "portable_pipeline_execution_plans",
@@ -2528,3 +2530,8 @@ def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
     return db.query(models_action.AuditLog).order_by(
         models_action.AuditLog.created_at.desc()
     ).limit(limit).all()
+
+
+# Install compatibility aliases only after every router and locally declared
+# endpoint exists. Explicit /api/v1 implementations remain authoritative.
+api_v1_compat.install_api_v1_compatibility(app)

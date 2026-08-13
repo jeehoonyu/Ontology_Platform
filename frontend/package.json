@@ -12,6 +12,7 @@
     "test:production-oidc": "playwright test -c playwright.production.config.ts oidc-rbac.spec.ts",
     "test:production-oidc-scale": "playwright test -c playwright.production.config.ts oidc-scale.spec.ts",
     "test:production-plugin-executor": "playwright test -c playwright.production.config.ts plugin-executor.spec.ts",
+    "test:production-pipeline-worker": "playwright test -c playwright.production.config.ts pipeline-worker-recovery.spec.ts",
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {

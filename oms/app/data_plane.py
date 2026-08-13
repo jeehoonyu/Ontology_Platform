@@ -12,6 +12,7 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -23,7 +24,7 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, JSON, String, UniqueConstraint, func
+from sqlalchemy import Integer, JSON, String, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import models, pipeline_builder_ops, platform_runtime, semantic_scope, tenancy
@@ -96,6 +97,8 @@ class PlanCompileRequest(BaseModel):
 
 class PlanExecuteRequest(BaseModel):
     mode: str = Field(default="preview", pattern="^(preview|deliver)$")
+    execution_strategy: str = Field(default="single", pattern="^(single|auto|partitioned)$")
+    max_partitions: int = Field(default=16, ge=2, le=100)
     output_asset_id: Optional[str] = None
     limit: int = Field(default=100, ge=1, le=500)
     parameters: Dict[str, Any] = Field(default_factory=dict)
@@ -450,8 +453,28 @@ class LocalDurablePipelineExecutor:
         db: Session,
     ) -> Dict[str, Any]:
         if self.name == "duckdb":
+            if request.execution_strategy == "partitioned" and request.mode != "deliver":
+                raise HTTPException(
+                    status_code=422,
+                    detail="Partitioned execution is supported only for durable delivery",
+                )
+            distribution = None
+            if request.execution_strategy in {"auto", "partitioned"} and request.mode == "deliver":
+                distribution = _partition_execution_spec(
+                    db, plan, graph, request.max_partitions, request.parameters,
+                )
+                if distribution["eligible"]:
+                    return _enqueue_partitioned_duckdb_execution(
+                        db, plan, graph, request, principal, distribution,
+                    )
+                if request.execution_strategy == "partitioned":
+                    raise HTTPException(status_code=422, detail={
+                        "message": "Pipeline is not safe for independent partition execution",
+                        "blocking_operations": distribution["blocking_operations"],
+                        "reasons": distribution["reasons"],
+                    })
             job_type = "pipeline.duckdb.deliver" if request.mode == "deliver" else "pipeline.duckdb.preview"
-            return platform_runtime.create_job(platform_runtime.JobCreate(
+            result = platform_runtime.create_job(platform_runtime.JobCreate(
                 project_id=plan.project_id,
                 job_type=job_type,
                 subject_type="pipeline_execution_plan",
@@ -463,12 +486,18 @@ class LocalDurablePipelineExecutor:
                     "output_asset_id": request.output_asset_id,
                     "limit": request.limit,
                     "parameters": request.parameters,
+                    "execution_strategy": "single",
+                    **({"strategy_fallback": distribution} if request.execution_strategy == "auto" and distribution is not None else {}),
                 },
                 priority=50,
                 max_attempts=3,
                 timeout_seconds=3600,
                 idempotency_key=request.idempotency_key,
             ), principal, db)
+            result["execution_strategy"] = "single"
+            if request.execution_strategy == "auto" and distribution is not None:
+                result["strategy_fallback"] = distribution
+            return result
         if request.mode == "deliver":
             return pipeline_builder_ops.enqueue_graph_delivery(
                 graph.id,
@@ -505,6 +534,164 @@ _DUCKDB_SNAPSHOT_OPERATIONS = {
     "window", "validate", "derive_geo_point", "derive_mgrs", "spatial_filter", "spatial_join",
     "dataset_output", "output_dataset",
 }
+
+_PARTITION_SAFE_DUCKDB_OPERATIONS = {
+    "input_dataset", "dataset_input", "filter", "project", "select", "rename",
+    "cast", "derive", "fill_nulls", "normalize", "validate",
+    "derive_geo_point", "derive_mgrs", "spatial_filter",
+    "dataset_output", "output_dataset",
+}
+
+
+def _partition_execution_spec(
+    db: Session,
+    plan: PipelineExecutionPlan,
+    graph: pipeline_builder_ops.PipelineBuilderGraph,
+    max_partitions: int,
+    parameters: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    parameters = parameters or {}
+    ordered = pipeline_builder_ops._topological_nodes(graph)
+    operations = [pipeline_builder_ops._node_type(node) for _node_id, node in ordered]
+    blocking = sorted(set(operations) - _PARTITION_SAFE_DUCKDB_OPERATIONS)
+    input_nodes = [
+        (node_id, node) for node_id, node in ordered
+        if pipeline_builder_ops._node_type(node) in {"input_dataset", "dataset_input"}
+    ]
+    reasons: List[str] = []
+    source_snapshot = None
+    files: List[str] = []
+    if len(input_nodes) != 1:
+        reasons.append("Partition execution requires exactly one dataset input")
+    else:
+        _node_id, input_node = input_nodes[0]
+        config = {
+            **pipeline_builder_ops._config(input_node),
+            **(parameters.get(_node_id, {}) if isinstance(parameters.get(_node_id), dict) else {}),
+        }
+        snapshot_id = str(config.get("snapshot_id") or "")
+        asset_id = str(config.get("asset_id") or config.get("dataset_id") or "")
+        source_snapshot = db.get(DataAssetSnapshot, snapshot_id) if snapshot_id else None
+        if source_snapshot is None and asset_id:
+            source_snapshot = db.query(DataAssetSnapshot).filter(
+                DataAssetSnapshot.project_id == plan.project_id,
+                DataAssetSnapshot.asset_id == asset_id,
+                DataAssetSnapshot.status == "AVAILABLE",
+            ).order_by(DataAssetSnapshot.snapshot_number.desc()).first()
+        if not source_snapshot or source_snapshot.project_id != plan.project_id:
+            reasons.append("The input has no project-owned immutable snapshot")
+        else:
+            manifest = (source_snapshot.partition_spec or {}).get("_manifest") or {}
+            files = list(manifest.get("files") or []) if isinstance(manifest, dict) else []
+            if len(files) < 2:
+                reasons.append("The input snapshot must contain at least two immutable files")
+    if blocking:
+        reasons.append("The plan contains operations that require global or multi-input state")
+    if ordered:
+        final_node_id, final_node = ordered[-1]
+        final_config = {
+            **pipeline_builder_ops._config(final_node),
+            **(parameters.get(final_node_id, {}) if isinstance(parameters.get(final_node_id), dict) else {}),
+            **(parameters.get("__output__", {}) if isinstance(parameters.get("__output__"), dict) else {}),
+        }
+    else:
+        final_config = {}
+    if _output_partition_fields(final_config):
+        reasons.append("Field-partitioned outputs require a global final repartition step")
+    shard_count = min(max(2, int(max_partitions)), len(files)) if files else 0
+    groups = [files[index::shard_count] for index in range(shard_count)] if shard_count else []
+    eligible = not reasons and not blocking and bool(source_snapshot) and len(groups) >= 2
+    return {
+        "eligible": eligible,
+        "strategy": "partitioned" if eligible else "single",
+        "source_snapshot_id": source_snapshot.id if source_snapshot else None,
+        "source_file_count": len(files),
+        "partition_count": len(groups),
+        "partitions": groups if eligible else [],
+        "blocking_operations": blocking,
+        "reasons": reasons,
+    }
+
+
+def _partition_idempotency_key(base: Optional[str], plan_id: str, group_id: str, index: int) -> Optional[str]:
+    if not base:
+        return None
+    digest = hashlib.sha256(f"{base}:{plan_id}:{group_id}:{index}".encode("utf-8")).hexdigest()
+    return f"partition-{digest}"
+
+
+def _enqueue_partitioned_duckdb_execution(
+    db: Session,
+    plan: PipelineExecutionPlan,
+    graph: pipeline_builder_ops.PipelineBuilderGraph,
+    request: PlanExecuteRequest,
+    principal: Principal,
+    distribution: Dict[str, Any],
+) -> Dict[str, Any]:
+    seed = request.idempotency_key or uuid.uuid4().hex
+    group_id = hashlib.sha256(f"{plan.project_id}:{plan.id}:{seed}".encode("utf-8")).hexdigest()[:32]
+    child_jobs = []
+    for index, source_files in enumerate(distribution["partitions"]):
+        child_jobs.append(platform_runtime.create_job(platform_runtime.JobCreate(
+            project_id=plan.project_id,
+            job_type="pipeline.duckdb.partition",
+            subject_type="pipeline_execution_plan",
+            subject_id=plan.id,
+            payload={
+                "plan_id": plan.id,
+                "graph_id": graph.id,
+                "execution_group_id": group_id,
+                "partition_index": index,
+                "partition_count": distribution["partition_count"],
+                "source_snapshot_id": distribution["source_snapshot_id"],
+                "source_files": source_files,
+                "parameters": request.parameters,
+            },
+            priority=50,
+            max_attempts=3,
+            timeout_seconds=3600,
+            idempotency_key=_partition_idempotency_key(
+                request.idempotency_key, plan.id, group_id, index,
+            ),
+        ), principal, db))
+    child_ids = [str(job["id"]) for job in child_jobs]
+    partition_execution = {
+        "group_id": group_id,
+        "partition_count": len(child_jobs),
+        "partition_job_ids": child_ids,
+        "source_snapshot_id": distribution["source_snapshot_id"],
+        "source_file_count": distribution["source_file_count"],
+    }
+    finalizer_key = None
+    if request.idempotency_key:
+        finalizer_key = "finalize-" + hashlib.sha256(
+            f"{request.idempotency_key}:{plan.id}:{group_id}".encode("utf-8")
+        ).hexdigest()
+    finalizer = platform_runtime.create_job(platform_runtime.JobCreate(
+        project_id=plan.project_id,
+        job_type="pipeline.duckdb.finalize",
+        subject_type="pipeline_execution_plan",
+        subject_id=plan.id,
+        payload={
+            "plan_id": plan.id,
+            "graph_id": graph.id,
+            "execution_group_id": group_id,
+            "partition_job_ids": child_ids,
+            "source_snapshot_id": distribution["source_snapshot_id"],
+            "output_asset_id": request.output_asset_id,
+            "parameters": request.parameters,
+            "execution_strategy": "partitioned",
+            "partition_execution": partition_execution,
+        },
+        priority=50,
+        max_attempts=3,
+        timeout_seconds=3600,
+        idempotency_key=finalizer_key,
+        depends_on=child_ids,
+    ), principal, db)
+    finalizer["execution_strategy"] = "partitioned"
+    finalizer["partition_execution"] = partition_execution
+    return finalizer
 
 
 def _file_uri_path(storage_uri: str) -> Path:
@@ -615,9 +802,9 @@ def _s3_registration_metadata(
     return metadata, normalized_uri, partitioned, len(objects)
 
 
-def _snapshot_local_paths(row: DataAssetSnapshot) -> List[Path]:
+def _snapshot_local_paths(row: DataAssetSnapshot, requested_files: Optional[List[str]] = None) -> List[Path]:
     if row.storage_uri.startswith("s3://"):
-        return _cache_s3_snapshot(row)
+        return _cache_s3_snapshot(row, requested_files)
     target = _local_snapshot_target(row.storage_uri)
     manifest = (row.partition_spec or {}).get("_manifest") or {}
     relative_files = manifest.get("files") if isinstance(manifest, dict) else None
@@ -627,13 +814,18 @@ def _snapshot_local_paths(row: DataAssetSnapshot) -> List[Path]:
         if isinstance(entry, dict) and isinstance(entry.get("path"), str)
     } if isinstance(manifest, dict) else {}
     if not relative_files:
+        if requested_files is not None and requested_files != ["snapshot.parquet"]:
+            raise HTTPException(status_code=422, detail="Requested snapshot files are not in the immutable manifest")
         if not target.is_file():
             raise HTTPException(status_code=422, detail="Partitioned snapshot is missing its immutable file manifest")
         return [target]
     if not target.is_dir():
         raise HTTPException(status_code=422, detail="Partitioned snapshot storage URI is not a directory")
+    requested = list(requested_files) if requested_files is not None else list(relative_files)
+    if not requested or any(relative not in relative_files for relative in requested):
+        raise HTTPException(status_code=422, detail="Requested snapshot files are not in the immutable manifest")
     files = []
-    for relative in relative_files:
+    for relative in requested:
         if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
             raise HTTPException(status_code=422, detail="Partitioned snapshot manifest contains an invalid relative path")
         path = (target / Path(relative)).resolve()
@@ -807,7 +999,7 @@ def _ensure_cached_s3_file(
         return target
 
 
-def _cache_s3_snapshot(row: DataAssetSnapshot) -> List[Path]:
+def _cache_s3_snapshot(row: DataAssetSnapshot, requested_files: Optional[List[str]] = None) -> List[Path]:
     manifest = (row.partition_spec or {}).get("_manifest") or {}
     relative_files = manifest.get("files") if isinstance(manifest, dict) else None
     entries = {
@@ -815,7 +1007,10 @@ def _cache_s3_snapshot(row: DataAssetSnapshot) -> List[Path]:
         for entry in (manifest.get("entries") or [])
         if isinstance(entry, dict) and isinstance(entry.get("path"), str)
     } if isinstance(manifest, dict) else {}
-    requested = list(relative_files or ["snapshot.parquet"])
+    available = list(relative_files or ["snapshot.parquet"])
+    requested = list(requested_files) if requested_files is not None else available
+    if not requested or any(relative not in available for relative in requested):
+        raise HTTPException(status_code=422, detail="Requested S3 snapshot files are not in the immutable manifest")
     cache_root = _snapshot_cache_root()
     cache_key = hashlib.sha256(f"{row.project_id}:{row.asset_id}:{row.id}".encode("utf-8")).hexdigest()
     cache_dir = (cache_root / cache_key[:2] / cache_key).resolve()
@@ -836,10 +1031,10 @@ def _cache_s3_snapshot(row: DataAssetSnapshot) -> List[Path]:
     return paths
 
 
-def _duckdb_parquet_relation(row: DataAssetSnapshot) -> str:
+def _duckdb_parquet_relation(row: DataAssetSnapshot, requested_files: Optional[List[str]] = None) -> str:
     if row.storage_format != "parquet":
         raise HTTPException(status_code=422, detail="DuckDB pipeline execution requires a Parquet input snapshot")
-    files = _snapshot_local_paths(row)
+    files = _snapshot_local_paths(row, requested_files)
     paths = ", ".join(_duckdb_literal(path.as_posix()) for path in files)
     hive_partitioning = bool((row.partition_spec or {}).get("hive_partitioning"))
     hive_option = ", hive_partitioning = true" if hive_partitioning else ""
@@ -940,6 +1135,101 @@ def _output_partition_fields(config: Dict[str, Any]) -> List[str]:
     if len(set(normalized)) != len(normalized):
         raise HTTPException(status_code=422, detail="Dataset output partition fields must be unique")
     return normalized
+
+
+def _lock_snapshot_publication(
+    db: Session,
+    *,
+    project_id: str,
+    asset_id: str,
+    display_name: str,
+    execution_idempotency_key: Optional[str],
+    execution_fence_job_id: Optional[str],
+    execution_lease_token: Optional[str],
+) -> tuple[models.DataAsset, Optional[DataAssetSnapshot]]:
+    """Serialize one output namespace and fence stale workers before publish.
+
+    DuckDB computation happens outside this critical section. PostgreSQL uses a
+    transaction advisory lock because an output asset may not exist yet; the
+    process-local lock at the caller supplies equivalent serialization for the
+    single-process SQLite development runtime.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"snapshot-publish:{project_id}:{asset_id}".encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+    # A replacement worker may have completed while this worker was computing.
+    # Returning that immutable result is safe even when the caller's lease is
+    # stale because this branch performs no publication or metadata mutation.
+    prior = None
+    if execution_idempotency_key:
+        prior = db.query(DataAssetSnapshot).filter(
+            DataAssetSnapshot.project_id == project_id,
+            DataAssetSnapshot.asset_id == asset_id,
+        ).order_by(DataAssetSnapshot.snapshot_number.desc()).limit(100).all()
+        prior = next((
+            row for row in prior
+            if str((row.lineage or {}).get("execution_job_id") or "") == execution_idempotency_key
+        ), None)
+
+    asset_query = db.query(models.DataAsset).filter(
+        models.DataAsset.id == asset_id,
+    )
+    if db.get_bind().dialect.name == "postgresql":
+        asset_query = asset_query.with_for_update()
+    asset = asset_query.populate_existing().first()
+    if asset and asset.project_id != project_id:
+        raise HTTPException(status_code=409, detail="Output asset belongs to another project")
+    if prior:
+        if asset is None:
+            raise HTTPException(status_code=409, detail="Committed snapshot references a missing output asset")
+        return asset, prior
+
+    if execution_fence_job_id:
+        if not execution_lease_token:
+            raise HTTPException(status_code=409, detail="Snapshot delivery requires the current worker lease token")
+        job_query = db.query(platform_runtime.PlatformJob).filter(
+            platform_runtime.PlatformJob.id == execution_fence_job_id,
+        )
+        lease_query = db.query(platform_runtime.PlatformJobLease).filter(
+            platform_runtime.PlatformJobLease.job_id == execution_fence_job_id,
+        )
+        if db.get_bind().dialect.name == "postgresql":
+            job_query = job_query.with_for_update()
+            lease_query = lease_query.with_for_update()
+        job = job_query.populate_existing().first()
+        lease = lease_query.populate_existing().first()
+        if (
+            not job
+            or job.status != "RUNNING"
+            or not lease
+            or lease.token != execution_lease_token
+            or lease.expires_at <= int(time.time())
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Snapshot delivery was cancelled or lost its worker lease before publish",
+            )
+
+    if asset is None:
+        asset = models.DataAsset(
+            id=asset_id,
+            project_id=project_id,
+            display_name=display_name,
+            description="DuckDB snapshot pipeline output",
+            kind="dataset",
+            asset_schema={},
+            records=[],
+            created_at=int(time.time()),
+            updated_at=int(time.time()),
+        )
+        db.add(asset)
+        db.flush()
+    return asset, None
 
 
 def _remove_internal_output_path(path: Path, root: Path) -> None:
@@ -1112,27 +1402,93 @@ def _polygon_rings(value: Any) -> List[List[tuple[float, float]]]:
     return rings
 
 
-def _duckdb_ring_expression(longitude: str, latitude: str, ring: List[tuple[float, float]]) -> str:
-    crossings = []
+def _duckdb_ring_edges(ring: List[tuple[float, float]]) -> List[List[float]]:
+    """Return non-horizontal ray-crossing edges as one typed DuckDB value.
+
+    Binding an edge list keeps compiled SQL bounded for operational polygons
+    with thousands of vertices. The former implementation emitted one CASE
+    expression per edge, which eventually hit parser depth and query-size
+    limits before the executor could evaluate the data.
+    """
+    edges: List[List[float]] = []
     previous = ring[-1]
     for current in ring:
         lon_i, lat_i = current
         lon_j, lat_j = previous
         if lat_i != lat_j:
-            intersection = f"({lon_j - lon_i}) * (({latitude}) - ({lat_i})) / ({lat_j - lat_i}) + ({lon_i})"
-            crossings.append(
-                f"CASE WHEN (({lat_i} > ({latitude})) <> ({lat_j} > ({latitude}))) "
-                f"AND ({longitude}) < ({intersection}) THEN 1 ELSE 0 END"
-            )
+            edges.append([lon_i, lat_i, lon_j, lat_j])
         previous = current
-    return "FALSE" if not crossings else f"mod(({' + '.join(crossings)}), 2) = 1"
+    return edges
 
 
-def _duckdb_polygon_expression(latitude: str, longitude: str, polygon: Any) -> str:
+def _duckdb_ring_predicate(
+    longitude: str,
+    latitude: str,
+    ring: List[tuple[float, float]],
+    bind: Any,
+) -> str:
+    edges = _duckdb_ring_edges(ring)
+    if not edges:
+        return "FALSE"
+    # DuckDB's Python client recursively infers nested list/struct parameters;
+    # a 9K-edge operational boundary can spend tens of seconds in binding
+    # before query execution. Compact JSON is one scalar parameter and is
+    # decoded set-wise by DuckDB in milliseconds.
+    edge_parameter = bind(json.dumps(edges, separators=(",", ":")))
+    return (
+        "mod((SELECT count(*) FROM (SELECT "
+        "CAST(json_extract(value, '$[0]') AS DOUBLE) AS lon_i, "
+        "CAST(json_extract(value, '$[1]') AS DOUBLE) AS lat_i, "
+        "CAST(json_extract(value, '$[2]') AS DOUBLE) AS lon_j, "
+        "CAST(json_extract(value, '$[3]') AS DOUBLE) AS lat_j "
+        f"FROM json_each({edge_parameter})) AS polygon_edge WHERE "
+        f"((polygon_edge.lat_i > ({latitude})) <> (polygon_edge.lat_j > ({latitude}))) "
+        f"AND ({longitude}) < ((polygon_edge.lon_j - polygon_edge.lon_i) * "
+        f"(({latitude}) - polygon_edge.lat_i) / "
+        "(polygon_edge.lat_j - polygon_edge.lat_i) + polygon_edge.lon_i)), 2) = 1"
+    )
+
+
+def _duckdb_polygon_filter_sql(
+    current_sql: str,
+    config: Dict[str, Any],
+    polygon: Any,
+    bind: Any,
+) -> str:
+    """Evaluate a polygon once per distinct coordinate, then restore rows.
+
+    Industrial telemetry commonly repeats coordinates across millions of
+    observations. A distinct point relation avoids multiplying every repeated
+    observation by every polygon edge while retaining exact point-in-polygon
+    semantics, including holes.
+    """
     rings = _polygon_rings(polygon)
-    outer = _duckdb_ring_expression(longitude, latitude, rings[0])
-    holes = [_duckdb_ring_expression(longitude, latitude, ring) for ring in rings[1:]]
-    return f"({outer})" + "".join(f" AND NOT ({hole})" for hole in holes)
+    point_latitude, point_longitude = _duckdb_point_expressions("point_rows", config)
+    source_latitude, source_longitude = _duckdb_point_expressions("source_rows", config)
+    outer_longitudes = [position[0] for position in rings[0]]
+    outer_latitudes = [position[1] for position in rings[0]]
+    min_lon, max_lon = min(outer_longitudes), max(outer_longitudes)
+    min_lat, max_lat = min(outer_latitudes), max(outer_latitudes)
+    outer = _duckdb_ring_predicate("polygon_lon", "polygon_lat", rings[0], bind)
+    holes = [
+        _duckdb_ring_predicate("polygon_lon", "polygon_lat", ring, bind)
+        for ring in rings[1:]
+    ]
+    predicate = f"({outer})" + "".join(f" AND NOT ({hole})" for hole in holes)
+    return (
+        f"WITH polygon_source AS ({current_sql}), polygon_points AS ("
+        f"SELECT DISTINCT CAST({point_latitude} AS DOUBLE) AS polygon_lat, "
+        f"CAST({point_longitude} AS DOUBLE) AS polygon_lon "
+        "FROM polygon_source AS point_rows "
+        f"WHERE {point_latitude} IS NOT NULL AND {point_longitude} IS NOT NULL "
+        f"AND {point_longitude} BETWEEN {bind(min_lon)}::DOUBLE AND {bind(max_lon)}::DOUBLE "
+        f"AND {point_latitude} BETWEEN {bind(min_lat)}::DOUBLE AND {bind(max_lat)}::DOUBLE), "
+        f"polygon_inside AS (SELECT polygon_lat, polygon_lon FROM polygon_points WHERE {predicate}) "
+        "SELECT source_rows.* FROM polygon_source AS source_rows "
+        "INNER JOIN polygon_inside ON "
+        f"CAST({source_latitude} AS DOUBLE) = polygon_inside.polygon_lat AND "
+        f"CAST({source_longitude} AS DOUBLE) = polygon_inside.polygon_lon"
+    )
 
 
 def _compile_duckdb_plan(
@@ -1140,6 +1496,7 @@ def _compile_duckdb_plan(
     plan: PipelineExecutionPlan,
     graph: pipeline_builder_ops.PipelineBuilderGraph,
     parameters: Dict[str, Any],
+    source_file_overrides: Optional[Dict[str, List[str]]] = None,
 ) -> tuple[str, Dict[str, Any], List[DataAssetSnapshot], List[Dict[str, Any]]]:
     ordered = pipeline_builder_ops._topological_nodes(graph)
     predecessors = pipeline_builder_ops._predecessors(graph)
@@ -1181,7 +1538,8 @@ def _compile_duckdb_plan(
         if snapshot.project_id != plan.project_id or (asset_id and snapshot.asset_id != asset_id):
             raise HTTPException(status_code=409, detail="Input snapshot belongs to another project or asset")
         source_snapshots[snapshot.id] = snapshot
-        return f"SELECT * FROM {_duckdb_parquet_relation(snapshot)}", snapshot
+        requested_files = (source_file_overrides or {}).get(snapshot.id)
+        return f"SELECT * FROM {_duckdb_parquet_relation(snapshot, requested_files)}", snapshot
 
     for node_id, node in ordered:
         node_type = pipeline_builder_ops._node_type(node)
@@ -1511,10 +1869,11 @@ def _compile_duckdb_plan(
                     f"WHERE {latitude} IS NOT NULL AND {longitude} IS NOT NULL AND {distance} <= bounds.radius_meters"
                 )
             elif mode in {"geofence", "polygon"}:
-                predicate = _duckdb_polygon_expression(latitude, longitude, config.get("polygon") or config.get("geofence"))
-                current_sql = (
-                    f"SELECT input_rows.* FROM ({current_sql}) AS input_rows WHERE "
-                    f"{latitude} IS NOT NULL AND {longitude} IS NOT NULL AND {predicate}"
+                current_sql = _duckdb_polygon_filter_sql(
+                    current_sql,
+                    config,
+                    config.get("polygon") or config.get("geofence"),
+                    bind,
                 )
             else:
                 raise HTTPException(status_code=422, detail=f"Unsupported DuckDB spatial filter mode '{mode}'")
@@ -1593,6 +1952,280 @@ def _compile_duckdb_plan(
     return sql_by_node[final_node_id], parameters_by_node[final_node_id], list(source_snapshots.values()), metrics
 
 
+def execute_duckdb_snapshot_partition(
+    db: Session,
+    plan_id: str,
+    *,
+    source_snapshot_id: str,
+    source_files: List[str],
+    parameters: Dict[str, Any],
+    execution_group_id: str,
+    partition_index: int,
+    partition_count: int,
+    actor: str,
+) -> Dict[str, Any]:
+    """Execute one manifest subset and publish an immutable intermediate fragment."""
+    try:
+        import duckdb  # type: ignore
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="DuckDB execution requires the duckdb dependency") from exc
+    if not re.fullmatch(r"[a-f0-9]{32}", execution_group_id):
+        raise HTTPException(status_code=422, detail="Invalid distributed execution group")
+    if partition_index < 0 or partition_count < 2 or partition_index >= partition_count:
+        raise HTTPException(status_code=422, detail="Invalid distributed partition coordinates")
+    plan = db.get(PipelineExecutionPlan, plan_id)
+    if not plan or plan.executor != "duckdb":
+        raise HTTPException(status_code=404, detail="DuckDB pipeline execution plan not found")
+    graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, plan.graph_id)
+    if not graph or graph.project_id != plan.project_id or graph.updated_at != plan.graph_updated_at:
+        raise HTTPException(status_code=409, detail="Pipeline changed after this distributed plan was compiled")
+    source_snapshot = db.get(DataAssetSnapshot, source_snapshot_id)
+    if not source_snapshot or source_snapshot.project_id != plan.project_id:
+        raise HTTPException(status_code=404, detail="Distributed source snapshot not found")
+    distribution = _partition_execution_spec(db, plan, graph, partition_count, parameters)
+    if not distribution["eligible"] or distribution["source_snapshot_id"] != source_snapshot.id:
+        raise HTTPException(status_code=422, detail="Pipeline is no longer safe for partition execution")
+    expected_files = list(distribution["partitions"][partition_index])
+    if list(source_files) != expected_files:
+        raise HTTPException(status_code=409, detail="Distributed partition assignment no longer matches the immutable plan")
+    allowed_files = set((source_snapshot.partition_spec or {}).get("_manifest", {}).get("files") or [])
+    if not source_files or len(source_files) > 10_000 or any(item not in allowed_files for item in source_files):
+        raise HTTPException(status_code=422, detail="Distributed partition references files outside the immutable manifest")
+
+    sql, sql_parameters, source_snapshots, compile_metrics = _compile_duckdb_plan(
+        db, plan, graph, parameters,
+        source_file_overrides={source_snapshot.id: list(source_files)},
+    )
+    if [snapshot.id for snapshot in source_snapshots] != [source_snapshot.id]:
+        raise HTTPException(status_code=422, detail="Distributed partition resolved an unexpected input snapshot")
+    started = time.perf_counter()
+    connection = duckdb.connect(database=":memory:")
+    try:
+        connection.execute("SET preserve_insertion_order = false")
+        connection.execute("SET threads = 4")
+        with tempfile.TemporaryDirectory(prefix="ontology-pipeline-partition-") as temporary:
+            fragment = Path(temporary) / f"part-{partition_index:05d}.parquet"
+            connection.execute(
+                f"COPY ({sql}) TO {_duckdb_literal(fragment.as_posix())} (FORMAT PARQUET, COMPRESSION ZSTD)",
+                sql_parameters,
+            )
+            metadata = _parquet_manifest_metadata(fragment.parent, [fragment], partitioned=False)
+            project_key = hashlib.sha256(plan.project_id.encode("utf-8")).hexdigest()[:20]
+            key = f"pipeline-fragments/{project_key}/{execution_group_id}/part-{partition_index:05d}.parquet"
+            storage_uri = _storage().put(key, fragment.read_bytes(), "application/vnd.apache.parquet")
+    except (duckdb.BinderException, duckdb.ConversionException, duckdb.InvalidInputException) as exc:
+        raise HTTPException(status_code=422, detail=f"DuckDB partition execution rejected plan: {exc}") from exc
+    finally:
+        connection.close()
+    return {
+        "engine": "duckdb-distributed-partition",
+        "plan_id": plan.id,
+        "plan_hash": plan.plan_hash,
+        "execution_group_id": execution_group_id,
+        "partition_index": partition_index,
+        "partition_count": partition_count,
+        "source_snapshot_id": source_snapshot.id,
+        "source_files": list(source_files),
+        "fragment": {
+            "storage_uri": storage_uri,
+            "content_hash": metadata["content_hash"],
+            "row_count": int(metadata["row_count"]),
+            "byte_size": int(metadata["byte_size"]),
+            "schema": metadata["schema"],
+        },
+        "metrics": {
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+            "compile_steps": compile_metrics,
+            "materialized_python_rows": 0,
+        },
+        "actor": actor,
+    }
+
+
+def finalize_duckdb_snapshot_partitions(
+    db: Session,
+    plan_id: str,
+    *,
+    partition_job_ids: List[str],
+    source_snapshot_id: str,
+    output_asset_id: Optional[str],
+    parameters: Dict[str, Any],
+    execution_group_id: str,
+    actor: str,
+    execution_job_id: str,
+    execution_lease_token: str,
+) -> Dict[str, Any]:
+    """Validate shard results and publish one lease-fenced immutable snapshot."""
+    if not partition_job_ids or len(partition_job_ids) > 256 or len(set(partition_job_ids)) != len(partition_job_ids):
+        raise HTTPException(status_code=422, detail="Distributed finalizer requires unique partition jobs")
+    plan = db.get(PipelineExecutionPlan, plan_id)
+    if not plan or plan.executor != "duckdb":
+        raise HTTPException(status_code=404, detail="DuckDB pipeline execution plan not found")
+    graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, plan.graph_id)
+    if not graph or graph.project_id != plan.project_id or graph.updated_at != plan.graph_updated_at:
+        raise HTTPException(status_code=409, detail="Pipeline changed after this distributed plan was compiled")
+    source_snapshot = db.get(DataAssetSnapshot, source_snapshot_id)
+    if not source_snapshot or source_snapshot.project_id != plan.project_id:
+        raise HTTPException(status_code=404, detail="Distributed source snapshot not found")
+    jobs_by_id = {
+        row.id: row for row in db.query(platform_runtime.PlatformJob).filter(
+            platform_runtime.PlatformJob.id.in_(partition_job_ids),
+        ).all()
+    }
+    if len(jobs_by_id) != len(partition_job_ids):
+        raise HTTPException(status_code=409, detail="Distributed finalizer is missing partition jobs")
+    fragments = []
+    for job_id in partition_job_ids:
+        job = jobs_by_id[job_id]
+        result = dict(job.result or {})
+        fragment = dict(result.get("fragment") or {})
+        if (
+            job.project_id != plan.project_id
+            or job.job_type != "pipeline.duckdb.partition"
+            or job.status != "SUCCEEDED"
+            or result.get("execution_group_id") != execution_group_id
+            or result.get("source_snapshot_id") != source_snapshot.id
+            or int(result.get("partition_count") or 0) != len(partition_job_ids)
+            or not fragment.get("storage_uri")
+        ):
+            raise HTTPException(status_code=409, detail=f"Partition job '{job_id}' is not a valid completed shard")
+        fragments.append({"job_id": job_id, "partition_index": int(result["partition_index"]), **fragment})
+    fragments.sort(key=lambda item: (item["partition_index"], item["job_id"]))
+    if [item["partition_index"] for item in fragments] != list(range(len(fragments))):
+        raise HTTPException(status_code=409, detail="Distributed partition results are incomplete or duplicated")
+
+    ordered_nodes = pipeline_builder_ops._topological_nodes(graph)
+    if ordered_nodes:
+        final_node_id, final_node = ordered_nodes[-1]
+        final_config = {
+            **pipeline_builder_ops._config(final_node),
+            **(parameters.get(final_node_id, {}) if isinstance(parameters.get(final_node_id), dict) else {}),
+            **(parameters.get("__output__", {}) if isinstance(parameters.get("__output__"), dict) else {}),
+        }
+    else:
+        final_config = {}
+    asset_id = str(output_asset_id or final_config.get("asset_id") or final_config.get("dataset_id") or final_config.get("output_asset_id") or f"{graph.id}_output")
+    output_snapshot_id = f"dataset_snapshot_{hashlib.sha256(f'{plan.project_id}:{asset_id}:{execution_job_id}'.encode('utf-8')).hexdigest()[:32]}"
+    prior = db.get(DataAssetSnapshot, output_snapshot_id)
+    if prior and (prior.project_id != plan.project_id or prior.asset_id != str(asset_id)):
+        raise HTTPException(status_code=409, detail="Distributed execution snapshot identity conflicts with another output")
+    if prior:
+        return {
+            "engine": "duckdb-distributed-finalizer", "mode": "deliver", "plan_id": plan.id,
+            "plan_hash": plan.plan_hash, "execution_group_id": execution_group_id,
+            "partition_count": len(fragments), "input_row_count": source_snapshot.row_count,
+            "row_count": prior.row_count, "schema": prior.schema or {},
+            "output_snapshot": _snapshot_dict(prior), "idempotent_replay": True,
+        }
+
+    root = LocalSnapshotStorage().root.resolve()
+    publish_dir = (root / plan.project_id / str(asset_id)).resolve()
+    if root not in publish_dir.parents:
+        raise HTTPException(status_code=422, detail="Dataset output path escaped DATA_SNAPSHOT_ROOT")
+    publish_dir.mkdir(parents=True, exist_ok=True)
+    stable_suffix = hashlib.sha256(f"{plan.project_id}:{asset_id}:{execution_job_id}".encode("utf-8")).hexdigest()[:12]
+    staging = publish_dir / f".distributed-{stable_suffix}-{uuid.uuid4().hex}.tmp"
+    started = time.perf_counter()
+    try:
+        staging.mkdir(parents=True, exist_ok=False)
+        staged_files = []
+        for item in fragments:
+            payload = _storage_for_uri(str(item["storage_uri"])).get(str(item["storage_uri"]))
+            if len(payload) != int(item["byte_size"]) or hashlib.sha256(payload).hexdigest() != item["content_hash"]:
+                raise HTTPException(status_code=409, detail=f"Partition fragment {item['job_id']} failed integrity validation")
+            target_file = staging / f"part-{item['partition_index']:05d}.parquet"
+            target_file.write_bytes(payload)
+            staged_files.append(target_file)
+        metadata = _parquet_manifest_metadata(staging, staged_files, partitioned=True)
+        schema = metadata["schema"]
+        with _cache_file_lock(publish_dir / ".publish.lock"):
+            asset, concurrent_prior = _lock_snapshot_publication(
+                db,
+                project_id=plan.project_id,
+                asset_id=str(asset_id),
+                display_name=f"{graph.display_name} output",
+                execution_idempotency_key=execution_job_id,
+                execution_fence_job_id=execution_job_id,
+                execution_lease_token=execution_lease_token,
+            )
+            if concurrent_prior:
+                _remove_internal_output_path(staging, root)
+                return {
+                    "engine": "duckdb-distributed-finalizer", "mode": "deliver", "plan_id": plan.id,
+                    "plan_hash": plan.plan_hash, "execution_group_id": execution_group_id,
+                    "partition_count": len(fragments), "input_row_count": source_snapshot.row_count,
+                    "row_count": concurrent_prior.row_count, "schema": concurrent_prior.schema or {},
+                    "output_snapshot": _snapshot_dict(concurrent_prior), "idempotent_replay": True,
+                }
+            snapshot_number = int(db.query(func.max(DataAssetSnapshot.snapshot_number)).filter(
+                DataAssetSnapshot.project_id == plan.project_id,
+                DataAssetSnapshot.asset_id == asset_id,
+            ).scalar() or 0) + 1
+            target = publish_dir / f"{snapshot_number}-{stable_suffix}"
+            if target.exists():
+                _remove_internal_output_path(target, root)
+            os.replace(staging, target)
+            storage_uri = _publish_output_snapshot(
+                target, project_id=plan.project_id, asset_id=str(asset_id),
+                metadata=metadata, partitioned=True,
+            )
+            snapshot = DataAssetSnapshot(
+                id=output_snapshot_id,
+                project_id=plan.project_id, asset_id=str(asset_id), snapshot_number=snapshot_number,
+                status="AVAILABLE", storage_format="parquet", storage_uri=storage_uri,
+                content_hash=metadata["content_hash"], row_count=int(metadata["row_count"]),
+                byte_size=int(metadata["byte_size"]), schema=schema,
+                partition_spec={
+                    "fields": [], "hive_partitioning": False,
+                    "execution_partitions": len(fragments), "_manifest": metadata["manifest"],
+                },
+                lineage={
+                    "source_snapshot_id": source_snapshot.id,
+                    "source_snapshot_ids": [source_snapshot.id],
+                    "pipeline_plan_id": plan.id, "plan_hash": plan.plan_hash,
+                    "execution_job_id": execution_job_id,
+                    "execution_fence_job_id": execution_job_id,
+                    "distributed_execution_group_id": execution_group_id,
+                    "partition_job_ids": partition_job_ids,
+                    "file_count": len(fragments), "distributed": True,
+                },
+                created_by=actor, created_at=int(time.time()),
+            )
+            db.add(snapshot)
+            asset.records = []
+            asset.asset_schema = {**schema, "project_id": plan.project_id, "storage_mode": "snapshot"}
+            asset.updated_at = int(time.time())
+            create_audit_log(
+                db, actor=actor, event_type="pipeline.duckdb.distributed_delivered",
+                subject_type="data_asset_snapshot", subject_id=snapshot.id,
+                payload={
+                    "project_id": plan.project_id, "plan_id": plan.id,
+                    "source_snapshot_id": source_snapshot.id, "output_asset_id": asset_id,
+                    "row_count": snapshot.row_count, "content_hash": snapshot.content_hash,
+                    "partition_count": len(fragments), "partition_job_ids": partition_job_ids,
+                    "execution_group_id": execution_group_id, "execution_job_id": execution_job_id,
+                    "lease_fenced": True,
+                },
+            )
+            db.commit()
+            output_snapshot = _snapshot_dict(snapshot)
+    except Exception:
+        if staging.exists():
+            _remove_internal_output_path(staging, root)
+        raise
+    return {
+        "engine": "duckdb-distributed-finalizer", "mode": "deliver", "plan_id": plan.id,
+        "plan_hash": plan.plan_hash, "execution_group_id": execution_group_id,
+        "partition_count": len(fragments), "partition_job_ids": partition_job_ids,
+        "input_row_count": source_snapshot.row_count, "row_count": int(metadata["row_count"]),
+        "schema": schema, "output_snapshot": output_snapshot, "idempotent_replay": False,
+        "metrics": {
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+            "materialized_python_rows": 0, "fragment_bytes": int(metadata["byte_size"]),
+        },
+    }
+
+
 def execute_duckdb_snapshot_plan(
     db: Session,
     plan_id: str,
@@ -1603,6 +2236,8 @@ def execute_duckdb_snapshot_plan(
     parameters: Dict[str, Any],
     actor: str,
     execution_job_id: Optional[str] = None,
+    execution_fence_job_id: Optional[str] = None,
+    execution_lease_token: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         import duckdb  # type: ignore
@@ -1636,6 +2271,22 @@ def execute_duckdb_snapshot_plan(
         or final_config.get("output_asset_id")
         or f"{graph.id}_output"
     )
+
+    def replay_payload(prior: DataAssetSnapshot) -> Dict[str, Any]:
+        return {
+            "engine": "duckdb-snapshot", "mode": mode, "plan_id": plan.id,
+            "plan_hash": plan.plan_hash, "source_snapshot_id": source_snapshot.id,
+            "source_snapshot_ids": source_snapshot_ids,
+            "input_row_count": input_row_count, "row_count": prior.row_count,
+            "rows": [], "schema": prior.schema or {}, "output_snapshot": _snapshot_dict(prior),
+            "idempotent_replay": True,
+            "metrics": {
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                "operations": len(compile_metrics), "compile_steps": compile_metrics,
+                "materialized_python_rows": 0,
+            },
+        }
+
     if mode == "deliver" and execution_job_id:
         prior_snapshots = db.query(DataAssetSnapshot).filter(
             DataAssetSnapshot.project_id == plan.project_id,
@@ -1646,19 +2297,7 @@ def execute_duckdb_snapshot_plan(
             if str((row.lineage or {}).get("execution_job_id") or "") == execution_job_id
         ), None)
         if prior:
-            return {
-                "engine": "duckdb-snapshot", "mode": mode, "plan_id": plan.id,
-                "plan_hash": plan.plan_hash, "source_snapshot_id": source_snapshot.id,
-                "source_snapshot_ids": source_snapshot_ids,
-                "input_row_count": input_row_count, "row_count": prior.row_count,
-                "rows": [], "schema": prior.schema or {}, "output_snapshot": _snapshot_dict(prior),
-                "idempotent_replay": True,
-                "metrics": {
-                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
-                    "operations": len(compile_metrics), "compile_steps": compile_metrics,
-                    "materialized_python_rows": 0,
-                },
-            }
+            return replay_payload(prior)
     connection = duckdb.connect(database=":memory:")
     try:
         connection.execute("SET preserve_insertion_order = false")
@@ -1687,27 +2326,14 @@ def execute_duckdb_snapshot_plan(
             ]}
             output_snapshot = None
         else:
-            asset = db.get(models.DataAsset, asset_id)
-            if asset and asset.project_id != plan.project_id:
-                raise HTTPException(status_code=409, detail="Output asset belongs to another project")
-            if asset is None:
-                asset = models.DataAsset(
-                    id=asset_id, project_id=plan.project_id, display_name=f"{graph.display_name} output",
-                    description="DuckDB snapshot pipeline output", kind="dataset", asset_schema={}, records=[],
-                    created_at=int(time.time()), updated_at=int(time.time()),
-                )
-                db.add(asset)
-            snapshot_number = int(db.query(func.max(DataAssetSnapshot.snapshot_number)).filter(
-                DataAssetSnapshot.project_id == plan.project_id,
-                DataAssetSnapshot.asset_id == asset_id,
-            ).scalar() or 0) + 1
             root = LocalSnapshotStorage().root.resolve()
             output_token = execution_job_id or uuid.uuid4().hex
             stable_suffix = hashlib.sha256(
                 f"{plan.project_id}:{asset_id}:{output_token}".encode("utf-8")
             ).hexdigest()[:12]
-            target_name = f"{snapshot_number}-{stable_suffix}" if partition_fields else f"{snapshot_number}-{stable_suffix}.parquet"
-            target = root / plan.project_id / asset_id / target_name
+            publish_dir = (root / plan.project_id / asset_id).resolve()
+            if root not in publish_dir.parents:
+                raise HTTPException(status_code=422, detail="Dataset output path escaped DATA_SNAPSHOT_ROOT")
             description = connection.execute(
                 f"DESCRIBE SELECT * FROM ({sql}) AS output_rows",
                 sql_parameters,
@@ -1720,8 +2346,11 @@ def execute_duckdb_snapshot_plan(
                     status_code=422,
                     detail=f"Dataset output partition fields are missing from the output schema: {', '.join(missing_partitions)}",
                 )
-            target.parent.mkdir(parents=True, exist_ok=True)
-            staging = target.with_name(f".{target.name}.tmp-{uuid.uuid4().hex}")
+            publish_dir.mkdir(parents=True, exist_ok=True)
+            staging_name = f".delivery-{stable_suffix}-{uuid.uuid4().hex}.tmp"
+            if not partition_fields:
+                staging_name += ".parquet"
+            staging = publish_dir / staging_name
             try:
                 if partition_fields:
                     partition_clause = ", ".join(_quoted_identifier(field) for field in partition_fields)
@@ -1750,63 +2379,90 @@ def execute_duckdb_snapshot_plan(
                         sql_parameters,
                     )
                     metadata = _parquet_manifest_metadata(staging.parent, [staging], partitioned=False)
-                if target.exists():
-                    _remove_internal_output_path(target, root)
-                os.replace(staging, target)
+                with _cache_file_lock(publish_dir / ".publish.lock"):
+                    asset, concurrent_prior = _lock_snapshot_publication(
+                        db,
+                        project_id=plan.project_id,
+                        asset_id=asset_id,
+                        display_name=f"{graph.display_name} output",
+                        execution_idempotency_key=execution_job_id,
+                        execution_fence_job_id=execution_fence_job_id,
+                        execution_lease_token=execution_lease_token,
+                    )
+                    if concurrent_prior:
+                        _remove_internal_output_path(staging, root)
+                        return replay_payload(concurrent_prior)
+                    snapshot_number = int(db.query(func.max(DataAssetSnapshot.snapshot_number)).filter(
+                        DataAssetSnapshot.project_id == plan.project_id,
+                        DataAssetSnapshot.asset_id == asset_id,
+                    ).scalar() or 0) + 1
+                    target_name = (
+                        f"{snapshot_number}-{stable_suffix}"
+                        if partition_fields
+                        else f"{snapshot_number}-{stable_suffix}.parquet"
+                    )
+                    target = publish_dir / target_name
+                    if target.exists():
+                        _remove_internal_output_path(target, root)
+                    os.replace(staging, target)
+                    row_count = int(metadata["row_count"])
+                    partition_spec = {
+                        "fields": partition_fields,
+                        "hive_partitioning": True,
+                        "_manifest": metadata["manifest"],
+                    } if partition_fields else {}
+                    storage_uri = _publish_output_snapshot(
+                        target,
+                        project_id=plan.project_id,
+                        asset_id=asset_id,
+                        metadata=metadata,
+                        partitioned=bool(partition_fields),
+                    )
+                    snapshot_id = (
+                        f"dataset_snapshot_{hashlib.sha256(f'{plan.project_id}:{asset_id}:{execution_job_id}'.encode('utf-8')).hexdigest()[:32]}"
+                        if execution_job_id else f"dataset_snapshot_{uuid.uuid4().hex}"
+                    )
+                    snapshot = DataAssetSnapshot(
+                        id=snapshot_id, project_id=plan.project_id,
+                        asset_id=asset_id, snapshot_number=snapshot_number, status="AVAILABLE",
+                        storage_format="parquet", storage_uri=storage_uri, content_hash=metadata["content_hash"],
+                        row_count=row_count, byte_size=int(metadata["byte_size"]), schema=schema,
+                        partition_spec=partition_spec, lineage={
+                            "source_snapshot_id": source_snapshot.id, "source_snapshot_ids": source_snapshot_ids,
+                            "pipeline_plan_id": plan.id,
+                            "plan_hash": plan.plan_hash, "execution_job_id": execution_job_id,
+                            "execution_fence_job_id": execution_fence_job_id,
+                            "file_count": int(metadata["manifest"]["file_count"]),
+                            "partition_by": partition_fields,
+                        }, created_by=actor, created_at=int(time.time()),
+                    )
+                    db.add(snapshot)
+                    asset.records = []
+                    asset.asset_schema = {**schema, "project_id": plan.project_id, "storage_mode": "snapshot"}
+                    asset.updated_at = int(time.time())
+                    create_audit_log(
+                        db, actor=actor, event_type="pipeline.duckdb.delivered",
+                        subject_type="data_asset_snapshot", subject_id=snapshot.id,
+                        payload={
+                            "project_id": plan.project_id, "plan_id": plan.id,
+                            "source_snapshot_id": source_snapshot.id,
+                            "source_snapshot_ids": source_snapshot_ids,
+                            "output_asset_id": asset_id,
+                            "row_count": row_count, "content_hash": snapshot.content_hash,
+                            "file_count": int(metadata["manifest"]["file_count"]),
+                            "partition_by": partition_fields,
+                            "execution_job_id": execution_job_id,
+                            "execution_fence_job_id": execution_fence_job_id,
+                            "lease_fenced": bool(execution_fence_job_id),
+                        },
+                    )
+                    db.commit()
+                    output_snapshot = _snapshot_dict(snapshot)
+                    rows = []
             except Exception:
                 if staging.exists():
                     _remove_internal_output_path(staging, root)
                 raise
-            row_count = int(metadata["row_count"])
-            partition_spec = {
-                "fields": partition_fields,
-                "hive_partitioning": True,
-                "_manifest": metadata["manifest"],
-            } if partition_fields else {}
-            storage_uri = _publish_output_snapshot(
-                target,
-                project_id=plan.project_id,
-                asset_id=asset_id,
-                metadata=metadata,
-                partitioned=bool(partition_fields),
-            )
-            snapshot_id = (
-                f"dataset_snapshot_{hashlib.sha256(f'{plan.project_id}:{asset_id}:{execution_job_id}'.encode('utf-8')).hexdigest()[:32]}"
-                if execution_job_id else f"dataset_snapshot_{uuid.uuid4().hex}"
-            )
-            snapshot = DataAssetSnapshot(
-                id=snapshot_id, project_id=plan.project_id,
-                asset_id=asset_id, snapshot_number=snapshot_number, status="AVAILABLE",
-                storage_format="parquet", storage_uri=storage_uri, content_hash=metadata["content_hash"],
-                row_count=row_count, byte_size=int(metadata["byte_size"]), schema=schema,
-                partition_spec=partition_spec, lineage={
-                    "source_snapshot_id": source_snapshot.id, "source_snapshot_ids": source_snapshot_ids,
-                    "pipeline_plan_id": plan.id,
-                    "plan_hash": plan.plan_hash, "execution_job_id": execution_job_id,
-                    "file_count": int(metadata["manifest"]["file_count"]),
-                    "partition_by": partition_fields,
-                }, created_by=actor, created_at=int(time.time()),
-            )
-            db.add(snapshot)
-            asset.records = []
-            asset.asset_schema = {**schema, "project_id": plan.project_id, "storage_mode": "snapshot"}
-            asset.updated_at = int(time.time())
-            create_audit_log(
-                db, actor=actor, event_type="pipeline.duckdb.delivered",
-                subject_type="data_asset_snapshot", subject_id=snapshot.id,
-                payload={
-                    "project_id": plan.project_id, "plan_id": plan.id,
-                    "source_snapshot_id": source_snapshot.id,
-                    "source_snapshot_ids": source_snapshot_ids,
-                    "output_asset_id": asset_id,
-                    "row_count": row_count, "content_hash": snapshot.content_hash,
-                    "file_count": int(metadata["manifest"]["file_count"]),
-                    "partition_by": partition_fields,
-                },
-            )
-            db.commit()
-            output_snapshot = _snapshot_dict(snapshot)
-            rows = []
     except (duckdb.BinderException, duckdb.ConversionException, duckdb.InvalidInputException) as exc:
         raise HTTPException(status_code=422, detail=f"DuckDB execution rejected plan: {exc}") from exc
     finally:

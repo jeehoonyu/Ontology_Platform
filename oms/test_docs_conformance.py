@@ -80,7 +80,7 @@ assert_true(
 )
 matrix_text = matrix.read_text(encoding="utf-8")
 report_text = report.read_text(encoding="utf-8")
-for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export", "Signed sandboxed extension runtime", "durable isolated execution", "/api/v1/ontology/contracts/bind", "/api/v1/ontology/contracts/health", "test_ontology_contract_bindings.py"):
+for required in ("MATCH", "LOCAL_ANALOG", "INTENTIONAL_DIFFERENCE", "Pipeline Builder", "Object Explorer", "Ontology Generator", "Data imports", "Import transforms", "Hybrid connector preview", "Stream replay", "React/Vite frontend", "Validation dashboard", "Project export", "Migration metadata", "Scenario report export", "Signed sandboxed extension runtime", "durable isolated execution", "/api/v1/ontology/contracts/bind", "/api/v1/ontology/contracts/health", "test_ontology_contract_bindings.py", "Compatibility-preserving API v1", "/api/v1/compatibility/manifest", "test_api_v1_compatibility.py"):
     assert_true(required in matrix_text, f"matrix includes {required}")
 assert_true((repo_root() / "oms" / "test_ontology_contract_bindings.py").exists(), "version-bound ontology contract test exists")
 runtime_core = (repo_root() / "docs" / "ONTOLOGYOS_RUNTIME_CORE.md").read_text(encoding="utf-8")

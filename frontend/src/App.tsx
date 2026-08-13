@@ -380,6 +380,11 @@ function CommandCenter() {
   const [industrialResult, setIndustrialResult] = useState<JsonObject | null>(null);
   const [industrialJob, setIndustrialJob] = useState<PlatformJob | null>(null);
   const [industrialWorkflow, setIndustrialWorkflow] = useState<IndustrialWorkflowState | null>(null);
+  const [evaluatorBundle, setEvaluatorBundle] = useState<JsonObject | null>(null);
+  const [evaluatorEvidence, setEvaluatorEvidence] = useState({
+    teamId: "", organizationId: "", deploymentId: "", evaluatorAlias: "",
+    externalTeamConfirmation: false, ownDataConfirmation: false
+  });
   const ui = useAsyncState<CommandCenterUiState>(getCommandCenterState, [refreshKey]);
   const workflow = ui.value?.workflow || null;
   const summary: CommandCenterSummary = workflow?.summary || {};
@@ -404,7 +409,7 @@ function CommandCenter() {
   }, []);
 
   useEffect(() => {
-    if (!industrialJob?.id || !["QUEUED", "RUNNING"].includes(industrialJob.status)) return;
+    if (!industrialJob?.id || !["BLOCKED", "QUEUED", "RUNNING"].includes(industrialJob.status)) return;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -546,6 +551,39 @@ function CommandCenter() {
     setRefreshKey((key) => key + 1);
   }
 
+  async function exportEvaluatorEvidence() {
+    if (!industrialWorkflow) return;
+    setGovernanceBusy(true);
+    setGovernanceError(null);
+    try {
+      const bundle = await postJson<JsonObject>("/api/v1/industrial/workflows/asset-reliability/evaluator-evidence", {
+        project_id: industrialWorkflow.project_id,
+        team_id: evaluatorEvidence.teamId,
+        organization_id: evaluatorEvidence.organizationId,
+        deployment_id: evaluatorEvidence.deploymentId,
+        evaluator_alias: evaluatorEvidence.evaluatorAlias,
+        external_team_confirmation: evaluatorEvidence.externalTeamConfirmation,
+        own_data_confirmation: evaluatorEvidence.ownDataConfirmation
+      });
+      setEvaluatorBundle(bundle);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${evaluatorEvidence.teamId}-ontologyos-evaluation.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      const qualification = bundle.qualification as JsonObject | undefined;
+      setGovernanceMessage(qualification?.qualifies === true
+        ? "Qualifying evaluator evidence downloaded. Submit the sealed JSON bundle for independent corpus verification."
+        : "Evaluator evidence downloaded, but it is not yet qualifying. Review the listed requirements.");
+    } catch (error) {
+      setGovernanceError(error instanceof Error ? error.message : "Evaluator evidence export failed");
+    } finally {
+      setGovernanceBusy(false);
+    }
+  }
+
   async function onboardPromotedDataset() {
     setGovernanceBusy(true);
     setGovernanceError(null);
@@ -641,6 +679,30 @@ function CommandCenter() {
           <span>Background onboarding {industrialJob.progress}%</span>
           <span>Attempt {industrialJob.attempt}</span>
           {industrialJob.error ? <span>{industrialJob.error}</span> : null}
+        </div> : null}
+      </Panel>
+      <Panel title="Independent evaluator evidence" action={<StatusBadge value={asString((evaluatorBundle?.qualification as JsonObject | undefined)?.qualifies === true ? "QUALIFYING" : "NOT_VERIFIED")} />}>
+        <p className="panel-intro">Export a privacy-preserving proof that an external team completed the full workflow with its own promoted data on a pinned OIDC release. Evaluator aliases are hashed before export.</p>
+        <div className="form-grid evaluator-evidence-grid">
+          <label><span>External team ID</span><input value={evaluatorEvidence.teamId} placeholder="reliability-team-west" onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, teamId: event.target.value }))} /></label>
+          <label><span>Organization ID</span><input value={evaluatorEvidence.organizationId} placeholder="external-organization" onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, organizationId: event.target.value }))} /></label>
+          <label><span>Deployment ID</span><input value={evaluatorEvidence.deploymentId} placeholder="pilot-deployment-001" onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, deploymentId: event.target.value }))} /></label>
+          <label><span>Evaluator alias</span><input value={evaluatorEvidence.evaluatorAlias} placeholder="operator-01" onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, evaluatorAlias: event.target.value }))} /></label>
+        </div>
+        <div className="attestation-list">
+          <label><input type="checkbox" checked={evaluatorEvidence.externalTeamConfirmation} onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, externalTeamConfirmation: event.target.checked }))} /><span>This team is independent from OntologyOS development.</span></label>
+          <label><input type="checkbox" checked={evaluatorEvidence.ownDataConfirmation} onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, ownDataConfirmation: event.target.checked }))} /><span>The workflow used this organization&apos;s operational data, not the bundled sample scenario.</span></label>
+        </div>
+        <div className="button-row">
+          <button onClick={() => void exportEvaluatorEvidence()} disabled={governanceBusy || !industrialWorkflow || !evaluatorEvidence.teamId.trim() || !evaluatorEvidence.organizationId.trim() || !evaluatorEvidence.deploymentId.trim() || !evaluatorEvidence.evaluatorAlias.trim() || !evaluatorEvidence.externalTeamConfirmation || !evaluatorEvidence.ownDataConfirmation}>Export sealed evaluator evidence</button>
+          <a className="button-link" href="https://github.com/jeehoonyu/Ontology_Platform/blob/master/docs/EXTERNAL_EVALUATOR_GUIDE.md" target="_blank" rel="noreferrer">Open evaluator guide</a>
+        </div>
+        {evaluatorBundle ? <div className="evaluation-qualification" role="status">
+          <StatusBadge value={(evaluatorBundle.qualification as JsonObject | undefined)?.qualifies === true ? "QUALIFYING" : "INCOMPLETE"} />
+          <span>Bundle {asString(evaluatorBundle.bundle_hash, "not sealed")}</span>
+          {((evaluatorBundle.qualification as JsonObject | undefined)?.reasons as unknown[] | undefined)?.length
+            ? <ul>{((evaluatorBundle.qualification as JsonObject).reasons as unknown[]).map((reason) => <li key={String(reason)}>{String(reason).replaceAll("_", " ")}</li>)}</ul>
+            : <span>All server-side qualification checks passed.</span>}
         </div> : null}
       </Panel>
       <section className="stepper">

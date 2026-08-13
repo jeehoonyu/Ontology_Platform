@@ -42,3 +42,19 @@ jobs:
           path: docs/plugin-executor-production-evidence.json
           if-no-files-found: ignore
           retention-days: 30
+      - name: Upload pipeline worker recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-pipeline-worker-recovery-evidence
+          path: docs/pipeline-worker-container-recovery-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Upload independent-daemon worker recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-pipeline-worker-multidaemon-evidence
+          path: docs/pipeline-worker-multidaemon-recovery-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const routes = [
   "command-center",
@@ -281,6 +286,24 @@ test("command center completes Connect-to-Report with a promoted project dataset
   await page.locator(".top-actions").getByRole("button", { name: "Export proof report" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("default-asset-reliability-report.md");
+
+  const evaluatorPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Independent evaluator evidence" }) });
+  const evidenceButton = evaluatorPanel.getByRole("button", { name: "Export sealed evaluator evidence" });
+  await expect(evidenceButton).toBeDisabled();
+  await evaluatorPanel.getByLabel("External team ID").fill("browser-external-team");
+  await evaluatorPanel.getByLabel("Organization ID").fill("browser-external-org");
+  await evaluatorPanel.getByLabel("Deployment ID").fill("browser-deployment-001");
+  await evaluatorPanel.getByLabel("Evaluator alias").fill("browser-operator");
+  await evaluatorPanel.getByLabel("This team is independent from OntologyOS development.").check();
+  await evaluatorPanel.getByLabel("The workflow used this organization's operational data, not the bundled sample scenario.").check();
+  await expect(evidenceButton).toBeEnabled();
+  const evidenceDownloadPromise = page.waitForEvent("download");
+  await evidenceButton.click();
+  const evidenceDownload = await evidenceDownloadPromise;
+  expect(evidenceDownload.suggestedFilename()).toBe("browser-external-team-ontologyos-evaluation.json");
+  await expect(evaluatorPanel.getByRole("status")).toContainText("INCOMPLETE");
+  await expect(evaluatorPanel.getByRole("status")).toContainText("oidc authentication required");
+  await expect(evaluatorPanel.getByRole("status")).toContainText("own data provenance required");
   await page.screenshot({ path: `test-results/screenshots/${testInfo.project.name}-industrial-connect-to-report.png`, fullPage: true });
 });
 
@@ -944,6 +967,77 @@ test("pipeline preview runs through durable worker evidence", async ({ page }, t
   await expect(page.locator(".workbench-status-strip")).toContainText(/preview succeeded/i);
 });
 
+test("pipeline deploys an immutable snapshot through visible partition-worker controls", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the distributed Pipeline workflow once on desktop.");
+  const suffix = Date.now();
+  const assetId = `browser_distributed_asset_${suffix}`;
+  const graphId = `browser_distributed_pipeline_${suffix}`;
+  const graphName = `Browser distributed pipeline ${suffix}`;
+  const snapshotRoot = join(tmpdir(), "ontology-platform-snapshots");
+  mkdirSync(snapshotRoot, { recursive: true });
+  const fixture = mkdtempSync(join(snapshotRoot, "browser-partitions-"));
+  try {
+    const python = process.env.PYTHON_BIN || "python";
+    execFileSync(python, ["-c", [
+      "import pathlib, sys",
+      "import pyarrow as pa",
+      "import pyarrow.parquet as pq",
+      "root = pathlib.Path(sys.argv[1])",
+      "root.mkdir(parents=True, exist_ok=True)",
+      "for index in range(4):",
+      "    rows = [{'asset_id': f'asset-{index}-high', 'score': 90 + index}, {'asset_id': f'asset-{index}-low', 'score': 20 + index}]",
+      "    pq.write_table(pa.Table.from_pylist(rows), root / f'part-{index:03d}.parquet', compression='zstd')"
+    ].join("\n"), fixture]);
+    expect((await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: graphName, kind: "dataset", asset_schema: {}, records: []
+    } })).ok()).toBeTruthy();
+    const registeredResponse = await page.request.post(`/api/v1/datasets/${assetId}/snapshots/register`, { data: {
+      storage_uri: pathToFileURL(fixture).href, storage_format: "parquet"
+    } });
+    const registeredBody = await registeredResponse.text();
+    expect(registeredResponse.ok(), registeredBody).toBeTruthy();
+    const snapshot = JSON.parse(registeredBody) as { id: string };
+    expect((await page.request.post("/pipeline-builder/graphs", { data: {
+      id: graphId, display_name: graphName,
+      nodes: [
+        { id: "input", type: "input_dataset", config: { asset_id: assetId, snapshot_id: snapshot.id } },
+        { id: "filter", type: "filter", config: { field: "score", operator: "gte", value: 80 } },
+        { id: "output", type: "dataset_output", config: { asset_id: `${assetId}_output` } }
+      ],
+      edges: [{ source: "input", target: "filter" }, { source: "filter", target: "output" }]
+    } })).ok()).toBeTruthy();
+
+    await page.goto("/workspace/pipeline");
+    await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+    await page.getByLabel("Engine").selectOption("duckdb");
+    await page.getByLabel("Delivery strategy").selectOption("partitioned");
+    await page.getByLabel("Maximum partitions").fill("3");
+    await page.getByRole("button", { name: "Deploy", exact: true }).click();
+    const execution = page.locator(".pipeline-execution-state");
+    await expect(execution).toContainText("SUCCEEDED", { timeout: 30_000 });
+    await expect(execution).toContainText("partitioned");
+    const partitions = execution.getByText("Partition jobs (3)").locator("xpath=..");
+    await expect(partitions).toBeVisible();
+    await expect(partitions.locator("tbody tr")).toHaveCount(3);
+    await expect(partitions.locator("tbody")).toContainText("pipeline.duckdb.partition");
+    await expect(partitions.locator("tbody")).not.toContainText("FAILED");
+
+    const jobId = (await execution.locator("dt", { hasText: "job id" }).locator("xpath=following-sibling::dd").textContent())?.trim();
+    expect(jobId).toBeTruthy();
+    const jobResponse = await page.request.get(`/jobs/${jobId}`);
+    expect(jobResponse.ok()).toBeTruthy();
+    const job = await jobResponse.json() as { result: { row_count: number; output_snapshot: { id: string } } };
+    expect(job.result.row_count).toBe(4);
+    const outputRows = await page.request.post(`/api/v1/dataset-snapshots/${job.result.output_snapshot.id}/query`, { data: {
+      fields: ["asset_id", "score"], order_by: "asset_id", limit: 20
+    } });
+    expect(outputRows.ok()).toBeTruthy();
+    expect(((await outputRows.json()) as { rows: unknown[] }).rows).toHaveLength(4);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test("pipeline ontology output previews and persists contract evidence", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful ontology contract workflow once on desktop.");
   const suffix = Date.now();
@@ -1064,8 +1158,14 @@ test("AIP agent runtime exposes durable policy and citation evidence", async ({ 
   await runtime.getByRole("button", { name: "Add parameter" }).click();
   await runtime.getByLabel("Parameter 1 name").fill("incident_id");
   await runtime.getByLabel("Parameter 1 value").fill(objectId);
+  await expect(runtime.getByLabel("Execution mode")).toHaveValue("graph");
   await runtime.getByRole("button", { name: "Run agent" }).click();
   await expect(runtime.locator(".agent-job-state")).toContainText("SUCCEEDED");
+  const taskGraph = runtime.getByLabel("Agent task graph");
+  await expect(taskGraph).toContainText("2 independently retryable tool stages");
+  await expect(taskGraph.locator("tbody tr")).toHaveCount(4);
+  await expect(taskGraph).toContainText("Context");
+  await expect(taskGraph).toContainText("Synthesis");
   await expect(runtime).toContainText("APPROVAL_REQUIRED");
   await expect(runtime).toContainText("1 objects retrieved");
   await expect(runtime).toContainText("Approval ");

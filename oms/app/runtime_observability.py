@@ -189,7 +189,11 @@ def record_job_queued(db: Session, job: Any, estimates: Dict[str, float], admiss
         token_units=float(estimates.get("token_units", 0.0)), record_units=float(estimates.get("record_units", 0.0)),
         estimated_cost_usd=float(estimates.get("estimated_cost_usd", 0.0)),
         metrics={"estimates": estimates, "admission": admission},
-        spans=[{"name": "queue", "status": "QUEUED", "timestamp": now}], error=None,
+        spans=[{
+            "name": "dependency_wait" if job.status == "BLOCKED" else "queue",
+            "status": job.status,
+            "timestamp": now,
+        }], error=None,
         created_at=now, updated_at=now, completed_at=None,
     )
     db.add(row)
