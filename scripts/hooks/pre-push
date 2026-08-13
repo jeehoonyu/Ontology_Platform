@@ -1,0 +1,56 @@
+#!/bin/sh
+# Run the enforcement checks before anything leaves this machine.
+#
+# GOAL_2026-08-13 C1 asks that a CI run provisions a runner and executes a step.
+# It cannot be satisfied from the repository. GitHub's own annotation on every
+# run since 2026-07-26 reads:
+#
+#   "The job was not started because recent account payments have failed or your
+#    spending limit needs to be increased."
+#
+# That is fixed in Settings -> Billing & plans, by the account owner, and no
+# amount of YAML changes it. This hook is the part that *is* reachable: it makes
+# the static enforcement checks run automatically on every push, on this machine,
+# with no runner and no minutes.
+#
+# Only the checks that need nothing to provision are here. The PostgreSQL
+# verifiers, the broker and object-store rehearsals and the browser matrix are
+# declared MANUAL in oms/check_registry.py with their cadences, and belong to a
+# runner that can start services. Putting them here would make the hook slow
+# enough to be bypassed, which is the failure mode this whole goal is about.
+#
+# Measured at about 10 seconds total. To skip in an emergency: git push --no-verify
+# -- stated plainly, because a hook that pretends to be unavoidable is not.
+
+set -e
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+python=${PYTHON:-python}
+checks="audit_enforcement audit_check_coverage audit_evidence_corpus audit_query_bounds audit_extensibility audit_route_coverage validate_schema_freeze"
+
+echo "pre-push: running enforcement checks"
+failed=""
+for check in $checks; do
+    if "$python" "oms/$check.py" >/tmp/pre-push-$check.log 2>&1; then
+        printf '  ok    %s\n' "$check"
+    else
+        printf '  FAIL  %s\n' "$check"
+        failed="$failed $check"
+    fi
+done
+
+if [ -n "$failed" ]; then
+    echo
+    echo "pre-push blocked. Failing checks:$failed"
+    for check in $failed; do
+        echo "--- $check ---"
+        tail -12 "/tmp/pre-push-$check.log"
+    done
+    echo
+    echo "Fix the ratchet, or push with --no-verify if you have a reason and will say what it is."
+    exit 1
+fi
+
+echo "pre-push: all enforcement checks passed"
+exit 0
