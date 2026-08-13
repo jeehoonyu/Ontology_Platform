@@ -284,4 +284,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from enforcement_runs import recording  # noqa: E402
+    sys.exit(recording("audit_query_bounds", main))

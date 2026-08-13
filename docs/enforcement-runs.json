@@ -1,0 +1,50 @@
+{
+  "audit_evidence_corpus": {
+    "at": 1786587592,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "audit_extensibility": {
+    "at": 1786587593,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "audit_query_bounds": {
+    "at": 1786587595,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "audit_route_coverage": {
+    "at": 1786587598,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "validate_docs_conformance": {
+    "at": 1786587599,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "validate_external_evaluations": {
+    "at": 1786588081,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "validate_schema_freeze": {
+    "at": 1786587599,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
+  "validate_tier_b_evidence": {
+    "at": 1786587599,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "FAIL"
+  }
+}

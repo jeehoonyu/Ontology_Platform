@@ -63,6 +63,14 @@ jobs:
         # re-earned; catching it here is the difference between a ratchet and
         # an intention.
         run: python oms/audit_evidence_corpus.py
+      - name: Audit which enforcement checks have run
+        # Reports CURRENT/STALE/NEVER per declared check and fails when one that
+        # used to run stops running. Its real home is test_enforcement_runs.py in
+        # the suite above -- a check whose only caller is a CI job is precisely
+        # the defect this audits, and this repository's CI has never once
+        # provisioned a runner. This step is the CI half of the same picture, and
+        # records `environment: ci` when it finally executes here.
+        run: python oms/audit_enforcement.py
       - name: Enforce the schema freeze
         # Fails the build when a migration would land during an open pilot
         # window. pilot_window.py already refuses to pool two schemas, but it

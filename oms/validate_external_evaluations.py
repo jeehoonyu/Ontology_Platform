@@ -27,4 +27,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from enforcement_runs import recording  # noqa: E402
+    raise SystemExit(recording("validate_external_evaluations", main))

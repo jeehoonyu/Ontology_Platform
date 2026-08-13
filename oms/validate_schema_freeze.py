@@ -93,4 +93,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    sys.exit(main())
+    from enforcement_runs import recording  # noqa: E402
+    sys.exit(recording("validate_schema_freeze", main))
