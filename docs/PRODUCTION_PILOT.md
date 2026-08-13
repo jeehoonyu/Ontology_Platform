@@ -180,6 +180,24 @@ Run the supervisor. Do **not** schedule `tick`:
 python oms/pilot_window.py run
 ```
 
+This form is for watching a window interactively, and it inherits
+`PILOT_EVIDENCE_ROOT` and `PILOT_RECOVERY_TOKEN` from the shell that starts it.
+A seven-day window should not depend on that shell surviving seven days, so the
+registered form below passes the evidence root explicitly and reads the token
+from a protected file:
+
+```powershell
+python oms/pilot_window.py `
+  --evidence-root 'C:\ontology-pilot-evidence' `
+  --environment-file 'C:\ontology-secrets\pilot-runtime.env' `
+  --token-file 'C:\ontology-secrets\pilot-recovery-token' `
+  run
+```
+
+The two are the same supervisor; only how it is bound differs. Prefer the second
+for anything that must outlive a terminal, and pass the same flags to `status`
+and `aggregate` so they read the window the supervisor is actually writing.
+
 `pilot_window.py run` is one process that ticks every 30 seconds for the whole
 window. An earlier revision of this page said to schedule `tick` every 30 seconds
 from cron or Task Scheduler. Neither can do that. `schtasks /SC MINUTE` takes
@@ -192,9 +210,46 @@ to 50%, against a 99.9% gate.
 To survive reboots across the seven days, register the supervisor at startup:
 
 ```powershell
-./scripts/register-pilot-window.ps1 -EvidenceRoot 'C:\ontology-pilot-evidence'
+New-Item -ItemType File -Path 'C:\ontology-secrets\pilot-recovery-token' -Force
+# Write the same 32+ character recovery token used by both APIs, then restrict
+# this file to the scheduled-task account before registration.
+./scripts/register-pilot-window.ps1 `
+  -EvidenceRoot 'C:\ontology-pilot-evidence' `
+  -TokenFile 'C:\ontology-secrets\pilot-recovery-token' `
+  -EnvironmentFile 'C:\ontology-secrets\pilot-runtime.env'
 Start-ScheduledTask -TaskName OntologyPilotWindow
 ```
+
+The runtime environment file contains the persistent `PILOT_SOURCE_*`,
+`PILOT_RECOVERY_*`, backup, image, and integrity settings from the validated
+preflight environment. Keep the bearer token in its separate token file. The
+task action contains only paths: it passes the evidence root explicitly and
+loads both protected files at process start, so it does not depend on the shell
+that opened the window or place a secret in the Task Scheduler command line.
+Registration rejects either protected file when it is readable by Everyone,
+Authenticated Users, or the built-in Users group.
+
+On a systemd host, keep the nonsecret recovery-driver variables in a root-owned
+environment file and the recovery token in a separate mode-`0600` file readable
+by the service account:
+
+```bash
+sudo ./scripts/install-pilot-window-systemd.sh \
+  --evidence-root /var/lib/ontology/pilot-evidence \
+  --token-file /etc/ontology/pilot-recovery-token \
+  --environment-file /etc/ontology/pilot-runtime.env \
+  --user ontology
+journalctl -fu ontology-pilot-window.service
+```
+
+Both installers refuse an unopened window or a stale availability observer.
+They also reject broad token permissions; the systemd path proves the service
+account can read the token and, for the Compose recovery driver, reach Docker.
+Before registration, `verify-runtime` checks that the protected files still
+name the window's source and isolated recovery targets, match the frozen
+migration head, and authenticate against the live recovery protocol.
+The generated service starts after Docker and network readiness and restarts
+only after the 150-second single-writer lock has become reclaimable.
 
 The supervisor takes a single-writer lock on the evidence root. Concurrent
 journal appends are already serialized and duplicate slots rejected, so a second
@@ -365,6 +420,31 @@ The rehearsal executes the SDK example and confirms that filesystem, network, su
 Register every production worker, set project queue concurrency, and drain workers before replacement. Monitor `/ui-state/worker-fleet` together with runtime SLOs; restored worker registrations remain offline until an operator resumes them. See `docs/WORKER_FLEET_CONTROL.md`.
 
 After the API is healthy, create a same-organization worker service account in **Control Panel -> Auth**, issue its one-time project execution token, set `WORKER_TOKEN`, and start the optional `workers` Compose profile. Worker tokens are stored as hashes and must use distinct stable `WORKER_NAME` values per replica. See `docs/WORKER_DAEMON.md`.
+
+Before a release, the container-specific worker gate can be repeated without
+the longer plugin, identity-scale, and backup stages:
+
+```powershell
+./scripts/rehearse-production-acceptance.ps1 -OnlyPipelineWorkers
+```
+
+It still uses the production image, real Keycloak OIDC, PostgreSQL, an
+execute-only worker identity, digest-pinned MinIO/Toxiproxy, distinct tmpfs
+caches, abrupt container loss, lease expiry, replacement execution, and fenced
+single-snapshot publication. Passing this focused mode does not replace the
+complete production acceptance or seven-day pilot.
+
+For the stronger independent-runtime boundary, run:
+
+```powershell
+./scripts/rehearse-production-acceptance.ps1 -OnlyPipelineMultiDaemon
+```
+
+This profile loads the production image into two separate Docker daemons,
+kills the first worker, and requires the replacement daemon to rebuild its
+private cache and publish through the same PostgreSQL lease fence. The result
+proves daemon-level isolation on one physical host; it does not replace a
+provider-network or true host-loss rehearsal.
 
 Configure runtime-wide execution, compute, token, record, and cost budgets before opening a project to users. The Control Panel Runtime tab and `/runtime/observability/summary` expose project SLOs and correlated durable-job evidence. See `docs/RUNTIME_OBSERVABILITY.md`.
 
