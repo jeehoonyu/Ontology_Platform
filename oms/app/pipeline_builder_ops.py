@@ -2154,15 +2154,17 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
         db, principal, body.worker_id, [
             "pipeline.preview", "pipeline.deliver",
             "pipeline.duckdb.preview", "pipeline.duckdb.deliver",
+            "pipeline.duckdb.partition", "pipeline.duckdb.finalize",
             "industrial.ontology_hydrate",
         ],
     )
-    claimed = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
+    claim_result = platform_runtime.claim_job(platform_runtime.JobClaimRequest(
         worker_id=body.worker_id,
         supported_job_types=supported_job_types,
         lease_seconds=body.lease_seconds,
         job_id=body.job_id,
-    ), principal, db).get("job")
+    ), principal, db)
+    claimed = claim_result.get("job")
     if not claimed:
         return {"job": None, "result": None}
 
@@ -2204,17 +2206,43 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
                 lease_token=lease_token, lease_seconds=industrial_lease_seconds,
                 principal=principal,
             )
+        elif claimed["job_type"] == "pipeline.duckdb.partition":
+            from . import data_plane
+            result = data_plane.execute_duckdb_snapshot_partition(
+                db,
+                str(payload.get("plan_id") or claimed.get("subject_id") or ""),
+                source_snapshot_id=str(payload.get("source_snapshot_id") or ""),
+                source_files=list(payload.get("source_files") or []),
+                parameters=dict(payload.get("parameters") or {}),
+                execution_group_id=str(payload.get("execution_group_id") or ""),
+                partition_index=int(payload.get("partition_index") or 0),
+                partition_count=int(payload.get("partition_count") or 0),
+                actor=principal.id,
+            )
+        elif claimed["job_type"] == "pipeline.duckdb.finalize":
+            from . import data_plane
+            result = data_plane.finalize_duckdb_snapshot_partitions(
+                db,
+                str(payload.get("plan_id") or claimed.get("subject_id") or ""),
+                partition_job_ids=list(payload.get("partition_job_ids") or []),
+                source_snapshot_id=str(payload.get("source_snapshot_id") or ""),
+                output_asset_id=payload.get("output_asset_id"),
+                parameters=dict(payload.get("parameters") or {}),
+                execution_group_id=str(payload.get("execution_group_id") or ""),
+                actor=principal.id,
+                execution_job_id=job_id,
+                execution_lease_token=lease_token,
+            )
         elif claimed["job_type"].startswith("pipeline.duckdb."):
             from . import data_plane
             result = data_plane.execute_duckdb_snapshot_plan(
                 db,
                 str(payload.get("plan_id") or claimed.get("subject_id") or ""),
                 mode="deliver" if claimed["job_type"] == "pipeline.duckdb.deliver" else "preview",
-                limit=int(payload.get("limit") or 100),
-                output_asset_id=payload.get("output_asset_id"),
-                parameters=dict(payload.get("parameters") or {}),
-                actor=principal.id,
-                execution_job_id=job_id,
+                limit=int(payload.get("limit") or 100), output_asset_id=payload.get("output_asset_id"),
+                parameters=dict(payload.get("parameters") or {}), actor=principal.id,
+                execution_job_id=job_id, execution_fence_job_id=job_id,
+                execution_lease_token=lease_token,
             )
         elif claimed["job_type"] == "pipeline.preview":
             result = preview_graph(graph_id, PipelinePreviewRequest(
@@ -2476,7 +2504,13 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         active_lease = db.query(platform_runtime.PlatformJobLease).filter(
             platform_runtime.PlatformJobLease.job_id == body.execution_job_id,
         ).with_for_update().first()
-        if not active_job or active_job.status != "RUNNING" or not active_lease or active_lease.token != body.execution_lease_token:
+        if (
+            not active_job
+            or active_job.status != "RUNNING"
+            or not active_lease
+            or active_lease.token != body.execution_lease_token
+            or active_lease.expires_at <= _now()
+        ):
             db.rollback()
             raise HTTPException(status_code=409, detail="Pipeline delivery was cancelled or lost its worker lease before commit")
     db.commit()

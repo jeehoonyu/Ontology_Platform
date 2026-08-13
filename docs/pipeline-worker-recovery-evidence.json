@@ -1,0 +1,34 @@
+{
+  "status": "PASS",
+  "provenance": {
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
+    "harness": "oms/rehearse_pipeline_worker_recovery.py"
+  },
+  "run_id": "23b659ab6539",
+  "database": "postgresql",
+  "storage": "s3-compatible",
+  "input": {
+    "rows": 100000,
+    "partitions": 32,
+    "snapshot_id": "dataset_snapshot_9c16b68eb3104e508135176b99463c69"
+  },
+  "failure": {
+    "worker": "recovery-worker-1-23b659ab6539",
+    "exit_code": 1,
+    "cache_files_before_kill": 1,
+    "lease_seconds": 10
+  },
+  "recovery": {
+    "worker": "recovery-worker-2-23b659ab6539",
+    "attempt": 2,
+    "claim_count": 2,
+    "replacement_cache_files": 32,
+    "job_id": "job_6a6b5ebafa884b85",
+    "output_snapshot_id": "dataset_snapshot_01891a759ece14e9fe38cc72b8bce02f",
+    "output_snapshot_count": 1,
+    "output_rows": 10000,
+    "execution_fenced": true
+  },
+  "verified_at": 1786488183
+}

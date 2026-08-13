@@ -4,6 +4,7 @@ services:
     environment:
       APP_ENV: production
       AUTH_MODE: oidc
+      ONTOLOGYOS_RELEASE_COMMIT: ${ONTOLOGYOS_RELEASE_COMMIT:-development}
       ONTOLOGY_CONTRACT_ENFORCEMENT: strict
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
       OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER}
@@ -85,6 +86,8 @@ services:
     command: ["python", "-m", "app.worker_daemon"]
     restart: unless-stopped
     environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
       WORKER_API_URL: http://oms-api:8000
       WORKER_TOKEN: ${WORKER_TOKEN:-}
       WORKER_NAME: ${WORKER_NAME:-ontology-worker-1}
@@ -95,8 +98,24 @@ services:
       WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
       WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-20}
       WORKER_HEALTH_PORT: "8091"
+      DATA_SNAPSHOT_BACKEND: ${DATA_SNAPSHOT_BACKEND:-local}
+      DATA_SNAPSHOT_ROOT: ${DATA_SNAPSHOT_ROOT:-/var/lib/ontology/snapshots}
+      DATA_SNAPSHOT_BUCKET: ${DATA_SNAPSHOT_BUCKET:-}
+      DATA_SNAPSHOT_S3_ENDPOINT: ${DATA_SNAPSHOT_S3_ENDPOINT:-}
+      DATA_SNAPSHOT_S3_REGION: ${DATA_SNAPSHOT_S3_REGION:-us-east-1}
+      DATA_SNAPSHOT_S3_ADDRESSING_STYLE: ${DATA_SNAPSHOT_S3_ADDRESSING_STYLE:-auto}
+      DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: "false"
+      # Deliberately not a shared volume: each scaled worker owns a distinct
+      # execution cache and must tolerate independent loss/repopulation.
+      DATA_SNAPSHOT_CACHE_ROOT: /var/cache/ontology/snapshots
+      DATA_SNAPSHOT_CACHE_MAX_BYTES: ${DATA_SNAPSHOT_CACHE_MAX_BYTES:-21474836480}
+      DATA_SNAPSHOT_CACHE_LEASE_SECONDS: ${DATA_SNAPSHOT_CACHE_LEASE_SECONDS:-3600}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     expose:
       - "8091"
+    volumes:
+      - ontology_snapshots:/var/lib/ontology/snapshots
     depends_on:
       oms-api:
         condition: service_healthy

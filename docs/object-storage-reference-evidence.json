@@ -1,38 +1,72 @@
 {
   "cache_metrics": {
-    "downloaded_bytes": 935552,
-    "evicted_bytes": 467776,
-    "evictions": 1,
-    "hits": 128,
+    "downloaded_bytes": 1403328,
+    "evicted_bytes": 935552,
+    "evictions": 2,
+    "hits": 152,
     "integrity_failures": 0,
-    "misses": 16
+    "misses": 24
   },
   "cold_pipeline_limit_ms": 30000.0,
-  "cold_pipeline_ms": 351.269,
+  "cold_pipeline_ms": 502.387,
   "cold_query_limit_ms": 30000.0,
-  "cold_query_ms": 128.102,
-  "generate_and_upload_ms": 467.135,
+  "cold_query_ms": 534.057,
+  "concurrent_cache_delta": {
+    "downloaded_bytes": 467776,
+    "evictions": 0,
+    "hits": 24,
+    "integrity_failures": 0,
+    "misses": 8
+  },
+  "concurrent_cold_pipeline_limit_ms": 30000.0,
+  "concurrent_cold_pipeline_ms": 540.532,
+  "concurrent_job_ids": [
+    "job_935e246e51a646b7",
+    "job_adf23fd2165041d7",
+    "job_d9578bd73e6c450b",
+    "job_bc3a61f22c594b70"
+  ],
+  "concurrent_workers": 4,
+  "generate_and_upload_ms": 1082.576,
   "host": {
     "duckdb": "1.5.5",
-    "endpoint": "http://127.0.0.1:9000",
+    "endpoint": "http://127.0.0.1:19001",
     "platform": "Windows-11-10.0.26200-SP0",
     "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
     "python": "3.12.10"
   },
-  "network_scope": "local-docker-loopback",
+  "network_fault_profile": {
+    "endpoint": "http://127.0.0.1:19001",
+    "listen": "[::]:9000",
+    "proxy": "minio-latency",
+    "toxics": [
+      {
+        "attributes": {
+          "jitter": 5,
+          "latency": 40
+        },
+        "name": "object-store-response-latency",
+        "stream": "downstream",
+        "toxicity": 1
+      }
+    ],
+    "upstream": "ontologyos-object-storage-minio:9000",
+    "verified_latency_ms": 40
+  },
+  "network_scope": "toxiproxy-40ms-downstream-jitter-5ms",
   "partitions": 8,
-  "plan_id": "pipeline_plan_436327ab2b134e98846792d276768643",
+  "plan_id": "pipeline_plan_52aaf014fed7490f9ad2bb89194ec88b",
   "profile": "reference",
   "reference_scale_achieved": true,
   "registration_limit_ms": 120000.0,
-  "registration_ms": 281.585,
+  "registration_ms": 884.284,
   "rows": 1000000,
-  "snapshot_id": "dataset_snapshot_1f61901b8f71493395aba652bb7d974c",
+  "snapshot_id": "dataset_snapshot_df0ccd3a0b974c4a9b84e00f8e0f4375",
   "uploaded_bytes": 467776,
-  "warm_pipeline_p50_ms": 44.021,
+  "warm_pipeline_p50_ms": 96.006,
   "warm_pipeline_p95_limit_ms": 10000.0,
-  "warm_pipeline_p95_ms": 49.161,
-  "warm_query_p50_ms": 76.26,
+  "warm_pipeline_p95_ms": 97.444,
+  "warm_query_p50_ms": 151.958,
   "warm_query_p95_limit_ms": 5000.0,
-  "warm_query_p95_ms": 87.243
+  "warm_query_p95_ms": 172.907
 }

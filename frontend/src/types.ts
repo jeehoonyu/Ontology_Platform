@@ -254,12 +254,52 @@ export interface PlatformJob {
   attempt: number;
   error?: string | null;
   result: JsonObject;
+  payload?: JsonObject;
   execution: JsonObject;
+  dependencies?: Array<{ id: string; job_type: string; status: string }>;
+  execution_strategy?: "single" | "partitioned";
+  partition_execution?: {
+    group_id: string;
+    partition_count: number;
+    partition_job_ids: string[];
+    source_snapshot_id: string;
+    source_file_count: number;
+  };
+  strategy_fallback?: {
+    eligible: boolean;
+    blocking_operations: string[];
+    reasons: string[];
+  };
+  agent_task_graph?: {
+    group_id: string;
+    context_job_id: string;
+    tool_job_ids: string[];
+    tool_count: number;
+    agent_config_hash: string;
+  };
   lease?: JsonObject | null;
   events?: PlatformJobEvent[];
   created_at: number;
   updated_at: number;
   completed_at?: number | null;
+}
+
+export type PipelineExecutionStrategy = "single" | "auto" | "partitioned";
+
+export interface PipelineExecutionPlan {
+  id: string;
+  project_id: string;
+  graph_id: string;
+  status: string;
+  executor: "local" | "duckdb";
+  plan_hash: string;
+  validation: JsonObject;
+  created_at: number;
+}
+
+export interface PipelinePlanExecutionResponse {
+  plan: PipelineExecutionPlan;
+  execution: PlatformJob;
 }
 
 export interface AgentDefinition {
@@ -317,6 +357,7 @@ export interface AgentRunResult {
   run_id: string;
   execution_job_id?: string | null;
   created_at: number;
+  task_graph_id?: string;
 }
 
 export interface PipelineGraph {

@@ -1,5 +1,7 @@
 """SQL-native advanced transforms over immutable Parquet snapshots."""
 
+import json
+import math
 import os
 import tempfile
 
@@ -245,6 +247,53 @@ hole_plan = graph("advanced_snapshot_polygon_hole", hole_nodes, [
 ])
 hole_rows = preview(hole_plan, "advanced-polygon-hole-preview")["result"]["rows"]
 assert {row["asset_id"] for row in hole_rows} == {"a2", "a4"}, hole_rows
+
+
+def ellipse_ring(center_lon, center_lat, radius, vertices):
+    ring = [[
+        center_lon + radius * math.cos(2 * math.pi * index / vertices),
+        center_lat + radius * math.sin(2 * math.pi * index / vertices),
+    ] for index in range(vertices)]
+    return [*ring, ring[0]]
+
+
+high_vertex_polygon = {
+    "type": "Polygon",
+    "coordinates": [
+        ellipse_ring(-122.4195, 37.7750, 0.001, 8192),
+        ellipse_ring(-122.4194, 37.7749, 0.00003, 1024),
+    ],
+}
+high_vertex_plan = graph("advanced_snapshot_high_vertex_geofence", [
+    mgrs_geofence_nodes[0],
+    {"id": "geofence", "type": "spatial_filter", "config": {
+        "mode": "polygon", "latitude_field": "latitude",
+        "longitude_field": "longitude", "polygon": high_vertex_polygon,
+    }},
+], [{"source": "input", "target": "geofence"}])
+high_vertex_run = preview(high_vertex_plan, "advanced-high-vertex-geofence-preview")
+assert high_vertex_run["job"]["status"] == "SUCCEEDED", high_vertex_run
+assert {row["asset_id"] for row in high_vertex_run["result"]["rows"]} == {"a2", "a4"}
+
+# Polygon edges are typed values, not thousands of generated CASE clauses.
+# This pins bounded compiler output independently from runtime correctness.
+from app.data_plane import PipelineExecutionPlan, _compile_duckdb_plan  # noqa: E402
+from app.database import SessionLocal  # noqa: E402
+from app.pipeline_builder_ops import PipelineBuilderGraph  # noqa: E402
+
+with SessionLocal() as compile_db:
+    stored_plan = compile_db.get(PipelineExecutionPlan, high_vertex_plan["id"])
+    stored_graph = compile_db.get(PipelineBuilderGraph, stored_plan.graph_id)
+    compiled_sql, compiled_parameters, _snapshots, _metrics = _compile_duckdb_plan(
+        compile_db, stored_plan, stored_graph, {},
+    )
+edge_parameters = [
+    value for value in compiled_parameters.values()
+    if isinstance(value, str) and value.startswith("[[")
+]
+assert len(compiled_sql) < 12_000, len(compiled_sql)
+assert sum(len(json.loads(value)) for value in edge_parameters) >= 9_000
+assert len(edge_parameters) == 2
 
 invalid_mgrs_plan = graph("invalid_snapshot_mgrs", [
     mgrs_geofence_nodes[0],

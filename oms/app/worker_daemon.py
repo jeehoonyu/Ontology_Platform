@@ -16,8 +16,16 @@ from typing import Any, Dict, List, Optional
 
 
 JOB_ENDPOINTS = {
-    "pipeline": ("pipeline.preview", "pipeline.deliver", "pipeline.duckdb.preview", "pipeline.duckdb.deliver", "industrial.ontology_hydrate", "/pipeline-builder/workers/run-next"),
-    "aip": ("aip.agent.invoke", "/aip/agents/workers/run-next"),
+    "pipeline": ("pipeline.preview", "pipeline.deliver", "industrial.ontology_hydrate", "/pipeline-builder/workers/run-next"),
+    "pipeline-duckdb": (
+        "pipeline.duckdb.preview", "pipeline.duckdb.deliver",
+        "pipeline.duckdb.partition", "pipeline.duckdb.finalize",
+        "worker-local://pipeline-duckdb",
+    ),
+    "aip": (
+        "aip.agent.invoke", "aip.agent.context", "aip.agent.tool", "aip.agent.synthesize",
+        "/aip/agents/workers/run-next",
+    ),
     "ingestion": ("ingestion.connector_sync", "ingestion.stream_replay", "/ingestion/workers/run-next"),
     "events": ("event.dispatch", "/api/v1/outbox/workers/run-next"),
     "events-kafka": ("event.kafka.dispatch", "/api/v1/outbox/kafka/workers/run-next"),
@@ -183,8 +191,167 @@ class WorkerDaemon:
             except WorkerApiError as exc:
                 self._record(api_errors_increment=1, last_error=str(exc))
 
+    def _record_job(self, job: Dict[str, Any]) -> None:
+        status = str(job.get("status") or "")
+        self._record(
+            jobs_seen_increment=1,
+            jobs_succeeded_increment=1 if status in {"SUCCEEDED", "PUBLISHED", "DELIVERED"} else 0,
+            jobs_failed_increment=1 if status in {"FAILED", "CANCELLED", "DEAD_LETTER"} else 0,
+            last_job_id=job.get("id"),
+            last_error=job.get("error") if status == "FAILED" else None,
+        )
+
+    def _execute_local_duckdb_once(self) -> bool:
+        """Claim and execute one snapshot plan inside this worker process.
+
+        The API remains the authoritative scheduler and lease owner. Compute,
+        object-store cache access, and staged output happen here, so separate
+        worker containers have real failure and cache boundaries. Publication
+        still validates the API-issued lease directly in PostgreSQL.
+        """
+        job_types = sorted(set(self.config.supported_job_types).intersection({
+            "pipeline.duckdb.preview", "pipeline.duckdb.deliver",
+            "pipeline.duckdb.partition", "pipeline.duckdb.finalize",
+        }))
+        if not job_types:
+            return False
+        try:
+            response = self.api.request("POST", "/jobs/claim", {
+                "worker_id": self.config.worker_name,
+                "supported_job_types": job_types,
+                "project_id": self.config.project_id,
+                "lease_seconds": self.config.lease_seconds,
+            })
+        except WorkerApiError as exc:
+            self._record(api_errors_increment=1, last_error=str(exc))
+            if exc.status in {401, 403}:
+                self.stop_event.set()
+            return False
+        job = response.get("job")
+        if not isinstance(job, dict):
+            return False
+        self._record(jobs_seen_increment=1, last_job_id=job.get("id"), last_error=None)
+        job_id = str(job.get("id") or "")
+        lease_token = str(job.get("lease_token") or "")
+        payload = dict(job.get("payload") or {})
+        heartbeat_stop = threading.Event()
+        heartbeat_interval = max(1.0, min(
+            self.config.heartbeat_interval_seconds,
+            self.config.lease_seconds / 3,
+        ))
+
+        def maintain_job_lease() -> None:
+            while not heartbeat_stop.wait(heartbeat_interval):
+                try:
+                    self.api.request("POST", f"/jobs/{urllib.parse.quote(job_id, safe='')}/heartbeat", {
+                        "lease_token": lease_token,
+                        "progress": 50,
+                        "message": f"Worker-local {job.get('job_type')} execution is running",
+                        "metrics": {
+                            "executor": "duckdb", "worker_local": True,
+                            "job_type": job.get("job_type"),
+                        },
+                        "lease_seconds": self.config.lease_seconds,
+                    })
+                except WorkerApiError as exc:
+                    self._record(api_errors_increment=1, last_error=str(exc))
+                    heartbeat_stop.set()
+
+        heartbeat_thread = threading.Thread(
+            target=maintain_job_lease,
+            name=f"job-heartbeat-{job_id}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
+        try:
+            from fastapi.encoders import jsonable_encoder
+            from .data_plane import (
+                execute_duckdb_snapshot_partition,
+                execute_duckdb_snapshot_plan,
+                finalize_duckdb_snapshot_partitions,
+            )
+            from .database import SessionLocal
+
+            with SessionLocal() as db:
+                if job.get("job_type") == "pipeline.duckdb.partition":
+                    result = execute_duckdb_snapshot_partition(
+                        db,
+                        str(payload.get("plan_id") or job.get("subject_id") or ""),
+                        source_snapshot_id=str(payload.get("source_snapshot_id") or ""),
+                        source_files=list(payload.get("source_files") or []),
+                        parameters=dict(payload.get("parameters") or {}),
+                        execution_group_id=str(payload.get("execution_group_id") or ""),
+                        partition_index=int(payload.get("partition_index") or 0),
+                        partition_count=int(payload.get("partition_count") or 0),
+                        actor=self.config.worker_name,
+                    )
+                elif job.get("job_type") == "pipeline.duckdb.finalize":
+                    result = finalize_duckdb_snapshot_partitions(
+                        db,
+                        str(payload.get("plan_id") or job.get("subject_id") or ""),
+                        partition_job_ids=list(payload.get("partition_job_ids") or []),
+                        source_snapshot_id=str(payload.get("source_snapshot_id") or ""),
+                        output_asset_id=payload.get("output_asset_id"),
+                        parameters=dict(payload.get("parameters") or {}),
+                        execution_group_id=str(payload.get("execution_group_id") or ""),
+                        actor=self.config.worker_name,
+                        execution_job_id=job_id,
+                        execution_lease_token=lease_token,
+                    )
+                else:
+                    result = execute_duckdb_snapshot_plan(
+                        db,
+                        str(payload.get("plan_id") or job.get("subject_id") or ""),
+                        mode="deliver" if job.get("job_type") == "pipeline.duckdb.deliver" else "preview",
+                        limit=int(payload.get("limit") or 100),
+                        output_asset_id=payload.get("output_asset_id"),
+                        parameters=dict(payload.get("parameters") or {}),
+                        actor=self.config.worker_name,
+                        execution_job_id=job_id,
+                        execution_fence_job_id=job_id,
+                        execution_lease_token=lease_token,
+                    )
+            completed = self.api.request("POST", f"/jobs/{urllib.parse.quote(job_id, safe='')}/complete", {
+                "lease_token": lease_token,
+                "result": jsonable_encoder(result),
+            })
+            self._record(
+                jobs_succeeded_increment=1,
+                last_job_id=job_id,
+                last_error=None,
+            )
+            return True
+        except BaseException as exc:
+            # SystemExit/KeyboardInterrupt are intentionally not translated;
+            # abrupt process loss must leave the lease for another worker.
+            if not isinstance(exc, Exception):
+                raise
+            try:
+                from fastapi import HTTPException
+                retriable = not isinstance(exc, HTTPException) or exc.status_code >= 500
+                failed = self.api.request("POST", f"/jobs/{urllib.parse.quote(job_id, safe='')}/fail", {
+                    "lease_token": lease_token,
+                    "error": str(getattr(exc, "detail", exc))[:4000] or type(exc).__name__,
+                    "retriable": retriable,
+                    "details": {
+                        "executor": "duckdb", "worker_local": True,
+                        "exception_type": type(exc).__name__,
+                    },
+                })
+                if str(failed.get("status") or "") in {"FAILED", "CANCELLED", "DEAD_LETTER"}:
+                    self._record(jobs_failed_increment=1)
+            except Exception as callback_error:
+                self._record(api_errors_increment=1, last_error=str(callback_error))
+            self._record(last_job_id=job_id, last_error=str(exc))
+            return True
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=2)
+
     def _execute_once(self, endpoint: str) -> bool:
         self._record(requests_increment=1)
+        if endpoint == "worker-local://pipeline-duckdb":
+            return self._execute_local_duckdb_once()
         try:
             response = self.api.request("POST", endpoint, {
                 "worker_id": self.config.worker_name,
@@ -201,14 +368,7 @@ class WorkerDaemon:
         job = response.get("job") or response.get("delivery") or response.get("outbox")
         if not isinstance(job, dict):
             return False
-        status = str(job.get("status") or "")
-        self._record(
-            jobs_seen_increment=1,
-            jobs_succeeded_increment=1 if status in {"SUCCEEDED", "PUBLISHED", "DELIVERED"} else 0,
-            jobs_failed_increment=1 if status in {"FAILED", "CANCELLED", "DEAD_LETTER"} else 0,
-            last_job_id=job.get("id"),
-            last_error=job.get("error") if status == "FAILED" else None,
-        )
+        self._record_job(job)
         return True
 
     def _start_health_server(self) -> None:

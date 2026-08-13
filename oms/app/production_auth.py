@@ -426,15 +426,22 @@ def _permission_for_request(method: str, path: str) -> str:
     if method.upper() in {"GET", "HEAD", "OPTIONS"}:
         return "view"
     lowered = path.lower()
+    # Additive API-version aliases must never weaken or change the permission
+    # inferred for the same legacy operation. Explicit v1 resources use the
+    # same normalized vocabulary (plugins, jobs, publish, restore, and so on).
+    if lowered == "/api/v1":
+        lowered = "/"
+    elif lowered.startswith("/api/v1/"):
+        lowered = lowered[len("/api/v1"):]
     if (
         lowered.startswith("/runtime/workers/")
         or lowered == "/jobs/claim"
-        or lowered.startswith("/api/v1/plugins/workers/")
+        or lowered.startswith("/plugins/workers/")
         or lowered.endswith("/workers/run-next")
         or (lowered.startswith("/jobs/") and any(part in lowered for part in ("/heartbeat", "/complete", "/fail")))
     ):
         return "execute"
-    if "/approve" in lowered or "/reject" in lowered or "/decisions" in lowered:
+    if "/approve" in lowered or "/reject" in lowered or "/decision" in lowered:
         return "approve"
     if "/deploy" in lowered:
         return "deploy"

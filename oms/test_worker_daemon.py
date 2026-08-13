@@ -208,6 +208,35 @@ queued = ok(client.post(f"/pipeline-builder/graphs/{graph_id}/preview/async", js
     "limit": 10, "idempotency_key": "worker-daemon-e2e",
 }), "queue daemon pipeline preview", 202)
 
+snapshot = ok(client.post(f"/api/v1/datasets/{asset_id}/snapshots", json={
+    "storage_format": "parquet",
+}), "snapshot daemon input", 201)
+duckdb_graph_id = "worker-daemon-duckdb-pipeline"
+ok(client.post("/pipeline-builder/graphs", json={
+    "id": duckdb_graph_id, "display_name": "Worker-local DuckDB pipeline",
+    "nodes": [
+        {"id": "input", "type": "input_dataset", "config": {
+            "asset_id": asset_id, "snapshot_id": snapshot["id"],
+        }},
+        {"id": "filter", "type": "filter", "config": {
+            "field": "risk", "operator": "gte", "value": 80,
+        }},
+        {"id": "output", "type": "dataset_output", "config": {
+            "asset_id": "worker-daemon-duckdb-output",
+        }},
+    ],
+    "edges": [
+        {"source": "input", "target": "filter"},
+        {"source": "filter", "target": "output"},
+    ],
+}), "create worker-local DuckDB pipeline", 201)
+duckdb_plan = ok(client.post(f"/api/v1/pipelines/{duckdb_graph_id}/plans", json={
+    "executor": "duckdb",
+}), "compile worker-local DuckDB plan", 201)
+duckdb_queued = ok(client.post(f"/api/v1/pipeline-plans/{duckdb_plan['id']}/execute", json={
+    "mode": "preview", "limit": 10, "idempotency_key": "worker-daemon-duckdb-e2e",
+}), "queue worker-local DuckDB preview", 202)["execution"]
+
 with socket.socket() as api_socket, socket.socket() as health_socket:
     api_socket.bind(("127.0.0.1", 0))
     api_port = api_socket.getsockname()[1]
@@ -234,6 +263,26 @@ try:
     assert completed["status"] == "SUCCEEDED" and e2e_snapshot["jobs_succeeded"] == 1, (completed, e2e_snapshot)
     assert completed["result"]["row_count"] == 1, completed["result"]
     passed += 2
+
+    with socket.socket() as local_health_socket:
+        local_health_socket.bind(("127.0.0.1", 0))
+        local_health_port = local_health_socket.getsockname()[1]
+    local_daemon = WorkerDaemon(WorkerConfig(
+        api_url=f"http://127.0.0.1:{api_port}", token=secret,
+        worker_name="worker-local-duckdb", project_id="default",
+        supported_job_types=["pipeline.duckdb.preview"], max_concurrency=1,
+        lease_seconds=10, poll_interval_seconds=0.02, heartbeat_interval_seconds=1,
+        request_timeout_seconds=30, health_host="127.0.0.1", health_port=local_health_port,
+    ))
+    os.environ["AUTH_MODE"] = "oidc"
+    local_snapshot = local_daemon.run(max_cycles=2)
+    os.environ["AUTH_MODE"] = "local"
+    worker_completed = ok(client.get(f"/jobs/{duckdb_queued['id']}"), "inspect worker-local DuckDB job")
+    assert worker_completed["status"] == "SUCCEEDED", worker_completed
+    assert worker_completed["result"]["engine"] == "duckdb-snapshot"
+    assert worker_completed["result"]["row_count"] == 1
+    assert local_snapshot["jobs_seen"] == 1 and local_snapshot["jobs_succeeded"] == 1, local_snapshot
+    passed += 4
 finally:
     os.environ["AUTH_MODE"] = "local"
     server.should_exit = True

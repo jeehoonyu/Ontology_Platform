@@ -12,9 +12,11 @@ it is:
             The typed route already covers it, so the plain path is
             compatibility and is retirable once callers have moved.
   V1_ONLY   only under /api/v1. Already typed; nothing owed.
-  PLAIN_ONLY only outside /api/v1. These are not compatibility routes with a
-            typed successor -- they are surface with no typed equivalent yet, so
-            retiring them would remove capability rather than duplication.
+  GENERATED  an unversioned handler eligible for the generated same-handler v1
+             adapter in api_v1_compat.py. Both paths use one typed FastAPI route
+             contract, so behavior and authorization cannot drift.
+  PLAIN_ONLY only outside /api/v1 and explicitly excluded from generation. These
+             are browser/auth/health/deployment surfaces, not product APIs.
 
   python oms/audit_route_coverage.py
   python oms/audit_route_coverage.py --write docs/ROUTE_COVERAGE.md
@@ -22,51 +24,62 @@ it is:
 from __future__ import annotations
 
 import argparse
-import re
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, Set
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from app.api_v1_compat import (  # noqa: E402
+    handler_id,
+    iter_assembled_api_routes,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-APP = REPO_ROOT / "oms" / "app"
+def handlers() -> tuple[Dict[str, Set[str]], Set[tuple[str, str]], Set[tuple[str, str]]]:
+    """Read assembled routes without creating or migrating a database.
 
-DECORATOR = re.compile(
-    r'^@(?:\w+)\.(get|post|put|patch|delete)\(\s*["\']([^"\']+)["\']', re.MULTILINE
-)
-DEF_LINE = re.compile(r"^(?:async\s+)?def\s+(\w+)", re.MULTILINE)
-
-
-def handlers() -> Dict[str, Set[str]]:
-    """Map handler identity to the set of METHOD PATH it is registered at.
-
-    Decorators stack directly above the function, so the routes belonging to one
-    handler are the run of consecutive decorator lines preceding its def.
+    Source parsing cannot resolve ``APIRouter(prefix=...)`` and previously
+    misclassified v1-only router modules as plain routes. The assembled FastAPI
+    graph is the authoritative contract and generated aliases identify their
+    source through an OpenAPI extension.
     """
+    os.environ["SKIP_CREATE_ALL"] = "1"
+    os.environ["APP_ENV"] = "test"
+    os.environ["AUTH_MODE"] = "local"
+    from fastapi.routing import APIRoute
+    from app.main import app
+
     registrations: Dict[str, Set[str]] = defaultdict(set)
-    for source_path in sorted(APP.glob("*.py")):
-        lines = source_path.read_text(encoding="utf-8", errors="ignore").split("\n")
-        pending: List[str] = []
-        for line in lines:
-            decorator = DECORATOR.match(line)
-            if decorator:
-                pending.append(f"{decorator.group(1).upper()} {decorator.group(2)}")
-                continue
-            definition = DEF_LINE.match(line)
-            if definition and pending:
-                key = f"{source_path.name}:{definition.group(1)}"
-                registrations[key].update(pending)
-                pending = []
-            elif definition:
-                pending = []
-            elif line.strip() and not line.startswith((" ", ")", "@", "#")):
-                # Any other top-level statement breaks a decorator run.
-                pending = []
-    return registrations
+    generated_sources: Set[tuple[str, str]] = set()
+    authoritative_sources: Set[tuple[str, str]] = set()
+    for route in iter_assembled_api_routes(app.routes):
+        methods = {method.upper() for method in (route.methods or set()) if method not in {"HEAD", "OPTIONS"}}
+        source = (route.openapi_extra or {}).get("x-ontologyos-compatibility-source")
+        if source:
+            continue
+        key = handler_id(route)
+        registrations[key].update(f"{method} {route.path}" for method in methods)
+    for row in app.state.api_v1_compatibility:
+        generated_sources.update(
+            (row["source_handler"], f"{method} {row['source_path']}")
+            for method in row["methods"]
+        )
+    for row in app.state.api_v1_authoritative:
+        authoritative_sources.update(
+            (row["source_handler"], f"{method} {row['source_path']}")
+            for method in row["methods"]
+        )
+    return registrations, generated_sources, authoritative_sources
 
 
-def classify(registrations: Dict[str, Set[str]]):
-    dual, v1_only, plain_only = {}, {}, {}
+def classify(
+    registrations: Dict[str, Set[str]],
+    generated_sources: Set[tuple[str, str]],
+    authoritative_sources: Set[tuple[str, str]],
+):
+    dual, v1_only, generated, authoritative, plain_only = {}, {}, {}, {}, {}
     for handler, routes in registrations.items():
         v1 = {r for r in routes if " /api/v1" in r}
         plain = routes - v1
@@ -74,13 +87,17 @@ def classify(registrations: Dict[str, Set[str]]):
             dual[handler] = sorted(routes)
         elif v1:
             v1_only[handler] = sorted(routes)
+        elif plain and all((handler, route) in generated_sources for route in plain):
+            generated[handler] = sorted(routes)
+        elif plain and all((handler, route) in authoritative_sources for route in plain):
+            authoritative[handler] = sorted(routes)
         elif plain:
             plain_only[handler] = sorted(routes)
-    return dual, v1_only, plain_only
+    return dual, v1_only, generated, authoritative, plain_only
 
 
-def render(dual, v1_only, plain_only) -> str:
-    total = len(dual) + len(v1_only) + len(plain_only)
+def render(dual, v1_only, generated, authoritative, plain_only) -> str:
+    total = len(dual) + len(v1_only) + len(generated) + len(authoritative) + len(plain_only)
     lines = [
         "# Route Coverage: Typed `/api/v1` Against Compatibility Paths",
         "",
@@ -95,15 +112,16 @@ def render(dual, v1_only, plain_only) -> str:
         f"| Population | Handlers | Meaning |",
         f"| --- | --- | --- |",
         f"| Dual-registered | {len(dual)} | Typed route exists; the plain path is compatibility and is retirable once callers move |",
+        f"| Generated same-handler aliases | {len(generated)} | The assembly-time adapter adds typed `/api/v1` paths backed by the exact legacy endpoint and dependencies |",
+        f"| Explicit v1 successors | {len(authoritative)} | An explicit v1 route owns the same method/shape; generation correctly defers to it |",
         f"| `/api/v1` only | {len(v1_only)} | Already typed; nothing owed |",
-        f"| Plain only | {len(plain_only)} | No typed equivalent yet; retiring these removes capability, not duplication |",
+        f"| Deliberately unversioned | {len(plain_only)} | Browser, authentication, probe, documentation, or deployment surfaces excluded from product API versioning |",
         f"| **Total handlers** | **{total}** | |",
         "",
-        "The distinction matters. A raw count of non-`/api/v1` paths reads as a large",
-        "compatibility surface, but most of it has no typed twin to be redundant against.",
-        "Only the dual-registered handlers are retirable on the strength of typed coverage;",
-        "the plain-only ones need a typed route built first, which is work rather than",
-        "cleanup.",
+        "Generated aliases are real FastAPI `APIRoute` contracts, not HTTP forwarding:",
+        "request validation, response models, dependencies, status codes, and endpoint",
+        "identity are cloned while explicit v1 route-shape collisions remain authoritative.",
+        "`GET /api/v1/compatibility/manifest` exposes the runtime inventory.",
         "",
         "## Dual-registered handlers, retirable once callers move",
         "",
@@ -122,21 +140,37 @@ def render(dual, v1_only, plain_only) -> str:
         lines.append("_None._")
     lines += [
         "",
-        "## Plain-only handlers, no typed equivalent",
+        "## Generated same-handler compatibility aliases",
         "",
-        f"{len(plain_only)} handlers are registered outside `/api/v1` with no typed twin.",
-        "These are not retirement candidates under the Tier C condition: the condition",
-        "presumes equivalent typed coverage, and there is none to point at. Listing them",
-        "here keeps the gap visible rather than letting the summary imply the surface is",
-        "already typed.",
+        f"{len(generated)} handlers receive additive typed aliases from",
+        "`oms/app/api_v1_compat.py` after application assembly. The source path remains",
+        "available during migration and an explicit v1 implementation always wins a",
+        "method/route-shape collision.",
+        "",
+    ]
+    for handler in sorted(generated):
+        lines.append(f"- `{handler}`: " + ", ".join(f"`{route}`" for route in generated[handler]))
+    lines += [
+        "",
+        "## Plain handlers covered by explicit v1 successors",
+        "",
+        f"{len(authoritative)} handlers are not cloned because an explicit v1 route already",
+        "owns the same method and normalized route shape.",
+        "",
+        "",
+        "## Deliberately unversioned handlers",
+        "",
+        f"{len(plain_only)} handlers remain outside `/api/v1` because the compatibility",
+        "policy excludes browser pages, authentication callbacks, health probes, metrics,",
+        "and framework documentation from the versioned product API.",
         "",
         "## What this measurement does not cover",
         "",
-        "The parser reads a route path only when it appears on the decorator line itself.",
-        "Five of 1,041 decorators in `oms/app` span multiple lines and are invisible to it,",
-        "so the counts are accurate to roughly half a percent. That is stated rather than",
-        "rounded away because a coverage document whose error bar is unknown cannot be used",
-        "to justify deleting a route.",
+        "The inventory reads the fully assembled FastAPI route graph with database DDL",
+        "disabled. This resolves router prefixes and multiline declarations that source",
+        "parsing cannot. It does not exercise endpoint behavior; behavioral parity, project",
+        "authorization, OpenAPI shape, collisions, and idempotent installation are covered by",
+        "`oms/test_api_v1_compatibility.py`.",
         "",
         "The audit also proves only that a typed path is *registered*, not that it is",
         "behaviourally equivalent to its compatibility twin. Dual registration on one",
@@ -153,12 +187,17 @@ def main() -> int:
     parser.add_argument("--write", default="")
     args = parser.parse_args()
 
-    dual, v1_only, plain_only = classify(handlers())
-    total = len(dual) + len(v1_only) + len(plain_only)
+    registrations, generated_sources, authoritative_sources = handlers()
+    dual, v1_only, generated, authoritative, plain_only = classify(
+        registrations, generated_sources, authoritative_sources,
+    )
+    total = len(dual) + len(v1_only) + len(generated) + len(authoritative) + len(plain_only)
     print("Route coverage audit\n")
     print(f"  dual-registered (retirable)  {len(dual)}")
+    print(f"  generated typed aliases      {len(generated)}")
+    print(f"  explicit v1 successors       {len(authoritative)}")
     print(f"  /api/v1 only                 {len(v1_only)}")
-    print(f"  plain only (no typed twin)   {len(plain_only)}")
+    print(f"  deliberately unversioned     {len(plain_only)}")
     print(f"  total handlers               {total}")
     if dual:
         print("\n  Dual-registered handlers:")
@@ -170,7 +209,7 @@ def main() -> int:
     if args.write:
         destination = REPO_ROOT / args.write
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(render(dual, v1_only, plain_only), encoding="utf-8")
+        destination.write_text(render(dual, v1_only, generated, authoritative, plain_only), encoding="utf-8")
         print(f"\nWrote {args.write}")
     return 0
 

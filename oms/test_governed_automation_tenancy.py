@@ -129,6 +129,12 @@ async_job = ok(client.post("/aip/agents/alpha-agent/invoke/async", json={
     "prompt": "inspect case", "parameters": {}, "select": ["cases"], "idempotency_key": "alpha-agent-job",
 }), "enqueue alpha agent", 202)
 assert async_job["project_id"] == "alpha-automation"
+task_graph = ok(client.post("/api/v1/agents/alpha-agent/task-graphs", json={
+    "prompt": "inspect case", "parameters": {}, "select": ["cases"],
+    "idempotency_key": "alpha-agent-task-graph",
+}), "enqueue project-owned agent task graph", 202)
+assert task_graph["project_id"] == "alpha-automation"
+assert task_graph["agent_task_graph"]["tool_count"] == 1
 
 app.dependency_overrides[production_auth.current_principal] = lambda: beta
 assert ok(client.get("/action-types"), "filter beta actions") == []
@@ -143,6 +149,8 @@ for method, path, body in (
     (client.get, "/aip/agents/alpha-agent/tools", None),
     (client.post, "/aip/agents/alpha-agent/invoke", {"prompt": "steal", "parameters": {}}),
     (client.get, f"/jobs/{async_job['id']}", None),
+    (client.get, f"/api/v1/agents/tasks/{task_graph['id']}", None),
+    (client.post, "/api/v1/agents/alpha-agent/task-graphs", {"prompt": "steal", "parameters": {}}),
 ):
     response = method(path, json=body) if body is not None and method is not client.get else method(path)
     ok(response, f"deny cross-project {path}", 403)

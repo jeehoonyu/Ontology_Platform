@@ -1,0 +1,33 @@
+{
+    "status":  "PASS",
+    "provenance":  {
+                       "migration_head":  "0042_stream_outer_joins",
+                       "observed_migration_head":  "0042_stream_outer_joins",
+                       "harness":  "scripts/rehearse-production-acceptance.ps1"
+                   },
+    "profile":  "production-oidc-container-worker-recovery",
+    "generated_at":  "2026-08-11T23:13:42.8320882Z",
+    "job_id":  "job_040a38107e564963",
+    "input_snapshot_id":  "dataset_snapshot_2376d52167844a3d9bc92c43b650ff73",
+    "input_rows":  100000,
+    "input_partitions":  32,
+    "first_worker":  {
+                         "container":  "ontology_pipeline_worker_acceptance-pipeline-worker-one-1",
+                         "exit_code":  137,
+                         "private_cache_files_before_kill":  14
+                     },
+    "replacement_worker":  {
+                               "container":  "ontology_pipeline_worker_acceptance-pipeline-worker-two-1",
+                               "private_cache_files":  32,
+                               "attempt":  2
+                           },
+    "publication":  {
+                        "claim_count":  2,
+                        "requeue_count":  1,
+                        "success_count":  1,
+                        "output_snapshot_id":  "dataset_snapshot_dae37aac5ea4f1ce81a25c80863d472b",
+                        "output_rows":  10000,
+                        "output_snapshot_count":  1,
+                        "execution_fenced":  true
+                    }
+}

@@ -45,7 +45,9 @@ assert "stop plugin-executor plugin-oci-daemon plugin-registry" in script
 assert "PLUGIN_REHEARSAL_EVIDENCE_PATH" in script
 
 stop_script = (root / "scripts/stop-production-rehearsal.ps1").read_text(encoding="utf-8")
-assert '"--profile", "plugin-execution", "down"' in stop_script
+assert '"--profile", "plugin-execution"' in stop_script
+assert '"--profile", "pipeline-workers"' in stop_script
+assert '"down", "--remove-orphans"' in stop_script
 
 spec = (root / "frontend/tests/production/plugin-executor.spec.ts").read_text(encoding="utf-8")
 for evidence in (
