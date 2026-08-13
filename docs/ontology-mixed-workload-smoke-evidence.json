@@ -1,0 +1,42 @@
+{
+  "batch_size": 200,
+  "concurrent_read_p50_ms": 21.644,
+  "concurrent_read_p95_ms": 30.485,
+  "connection_recovery": "PASS",
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "index_stats": [
+    {
+      "idx_scan": 1107,
+      "idx_tup_fetch": 111807,
+      "idx_tup_read": 111807,
+      "indexrelname": "ix_oi_property_333984857ac3f4a13ff9"
+    },
+    {
+      "idx_scan": 1109,
+      "idx_tup_fetch": 1109,
+      "idx_tup_read": 1109,
+      "indexrelname": "ix_oi_property_e18d75eec8db1d235039"
+    }
+  ],
+  "indexed_plan_after_mutation": true,
+  "invalid_transitions": 0,
+  "links": 500000,
+  "minimum_writes_per_second": 100.0,
+  "objects": 100000,
+  "profile": "smoke",
+  "read_p95_limit_ms": 300.0,
+  "read_samples": 1114,
+  "reader_workers": 4,
+  "reference_scale_achieved": false,
+  "rollback_probe": "PASS",
+  "temporal_events": 2000,
+  "write_batch_p50_ms": 638.586,
+  "write_batch_p95_ms": 858.462,
+  "write_p95_limit_ms": 2000.0,
+  "writes": 2000,
+  "writes_per_second": 307.459
+}

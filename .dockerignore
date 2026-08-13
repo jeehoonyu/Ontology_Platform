@@ -7,4 +7,12 @@ pgdata/
 chdata/
 oms/venv/
 oms/.venv/
+oms/venv*/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+foundry-docs/
+foundry-docs-full/
+backups/
 uvicorn*.log

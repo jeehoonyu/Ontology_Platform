@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import runtime, models
+from . import models, production_auth, runtime, semantic_scope
 
 router = APIRouter(tags=["object_explorer_ops"])
 
@@ -25,7 +25,8 @@ router = APIRouter(tags=["object_explorer_ops"])
 class ObjectExplorerExploration(Base):
     __tablename__ = "object_explorer_explorations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     object_type_id: Mapped[str] = mapped_column(String, index=True)
@@ -40,6 +41,7 @@ class ObjectExplorerExploration(Base):
 
 class ExplorationCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     description: Optional[str] = None
     object_type_id: str
@@ -65,6 +67,7 @@ class ExplorationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     description: Optional[str] = None
     object_type_id: str
@@ -108,10 +111,8 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
-def _require_object_type(db: Session, object_type_id: str) -> None:
-    """Raise 404 when the object type does not exist (instead of silently returning empty results)."""
-    if not db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first():
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def _require_object_type(db: Session, object_type_id: str, principal: production_auth.Principal) -> models.ObjectType:
+    return semantic_scope.object_type_for(db, principal, object_type_id, "view")
 
 
 class HistogramRequest(BaseModel):
@@ -127,8 +128,8 @@ class PropertyStatsRequest(BaseModel):
     filters: Dict[str, Any] = Field(default_factory=dict)
 
 
-def _values(db: Session, body) -> List[Any]:
-    rows, _ = runtime._logic_object_rows(db, body.object_type_id, body.filters, limit=10 ** 9)
+def _values(db: Session, body, project_id: str) -> List[Any]:
+    rows, _ = runtime._logic_object_rows(db, body.object_type_id, body.filters, limit=10 ** 9, project_id=project_id)
     return [(r.properties or {}).get(body.field) for r in rows]
 
 
@@ -193,9 +194,9 @@ def _facet(field: str, objects: List[Dict[str, Any]], bins: int = 8) -> Dict[str
     }
 
 
-def _available_actions(db: Session, object_type_id: str) -> List[Dict[str, Any]]:
+def _available_actions(db: Session, object_type_id: str, project_id: str) -> List[Dict[str, Any]]:
     actions: List[Dict[str, Any]] = []
-    for action in db.query(models.ActionType).all():
+    for action in db.query(models.ActionType).filter(models.ActionType.project_id == project_id).all():
         rules = action.rules or {}
         parameters = action.parameters or {}
         explicit_types = (
@@ -221,22 +222,28 @@ def _available_actions(db: Session, object_type_id: str) -> List[Dict[str, Any]]
     return actions
 
 
-def _get_exploration_or_404(db: Session, exploration_id: str) -> ObjectExplorerExploration:
+def _get_exploration_or_404(db: Session, exploration_id: str, principal: production_auth.Principal, permission: str = "view") -> ObjectExplorerExploration:
     row = db.query(ObjectExplorerExploration).filter(ObjectExplorerExploration.id == exploration_id).first()
     if not row:
         raise HTTPException(status_code=404, detail=f"ObjectExplorerExploration '{exploration_id}' not found")
+    semantic_scope.assert_project(db, principal, row.project_id, permission)
     return row
 
 
 @router.post("/object-explorer/explorations", response_model=ExplorationRead, status_code=201)
-def create_exploration(body: ExplorationCreate, db: Session = Depends(get_db)):
-    _require_object_type(db, body.object_type_id)
+def create_exploration(body: ExplorationCreate, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
+    if object_type.project_id != body.project_id:
+        raise HTTPException(status_code=409, detail="Object type belongs to another project")
     exploration_id = body.id or _new_id()
     if db.get(ObjectExplorerExploration, exploration_id):
         raise HTTPException(status_code=400, detail="ObjectExplorerExploration already exists")
     now = _now()
     row = ObjectExplorerExploration(
         id=exploration_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         description=body.description,
         object_type_id=body.object_type_id,
@@ -255,21 +262,26 @@ def create_exploration(body: ExplorationCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/object-explorer/explorations", response_model=List[ExplorationRead])
-def list_explorations(db: Session = Depends(get_db)):
-    return db.query(ObjectExplorerExploration).order_by(ObjectExplorerExploration.updated_at.desc()).all()
+def list_explorations(db: Session = Depends(get_db),
+                      principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.accessible_query(db, principal, ObjectExplorerExploration).order_by(ObjectExplorerExploration.updated_at.desc()).all()
 
 
 @router.get("/object-explorer/explorations/{exploration_id}", response_model=ExplorationRead)
-def get_exploration(exploration_id: str, db: Session = Depends(get_db)):
-    return _get_exploration_or_404(db, exploration_id)
+def get_exploration(exploration_id: str, db: Session = Depends(get_db),
+                    principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return _get_exploration_or_404(db, exploration_id, principal)
 
 
 @router.patch("/object-explorer/explorations/{exploration_id}", response_model=ExplorationRead)
-def update_exploration(exploration_id: str, body: ExplorationUpdate, db: Session = Depends(get_db)):
-    row = _get_exploration_or_404(db, exploration_id)
+def update_exploration(exploration_id: str, body: ExplorationUpdate, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    row = _get_exploration_or_404(db, exploration_id, principal, "edit")
     patch = body.model_dump(exclude_unset=True)
     if "object_type_id" in patch:
-        _require_object_type(db, patch["object_type_id"])
+        object_type = _require_object_type(db, patch["object_type_id"], principal)
+        if object_type.project_id != row.project_id:
+            raise HTTPException(status_code=409, detail="Object type belongs to another project")
     for field, value in patch.items():
         setattr(row, field, value)
     if patch:
@@ -280,14 +292,26 @@ def update_exploration(exploration_id: str, body: ExplorationUpdate, db: Session
 
 
 @router.post("/object-explorer/query", response_model=ObjectExplorerQueryResponse)
-def object_explorer_query(body: ObjectExplorerQueryRequest, db: Session = Depends(get_db)):
-    _require_object_type(db, body.object_type_id)
-    object_type = db.get(models.ObjectType, body.object_type_id)
+def object_explorer_query(body: ObjectExplorerQueryRequest, db: Session = Depends(get_db),
+                          principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = _require_object_type(db, body.object_type_id, principal)
     result = runtime.query_object_set(
         db,
         object_type_id=body.object_type_id,
+        project_id=object_type.project_id,
         filters=body.filters,
         limit=max(1, min(body.limit, 10000)),
+        # The total was computed and discarded: `result_count` below is the size
+        # of the returned page, and nothing here ever read `result["total"]`.
+        # Counting every match is the most expensive thing this endpoint did --
+        # at ten million objects a filter matching 500,000 rows cost 621.9 ms
+        # with the count and 1.8 ms without, so 345/346ths of the response time
+        # produced a number that was thrown away. That is GOAL2-010.
+        #
+        # `query_object_set` also accepts `max_total` for callers that do want a
+        # total without paying for the whole match set; this one does not need
+        # one at all.
+        with_total=False,
         include_lineage=body.include_lineage,
     )
     objects = [obj for obj in result["objects"] if _matches_text(obj, body.query)]
@@ -296,7 +320,7 @@ def object_explorer_query(body: ObjectExplorerQueryRequest, db: Session = Depend
     selected_objects = []
     for selected_id in body.selected_ids[:10]:
         try:
-            selected_objects.append(runtime.build_object_profile(db, object_type_id=body.object_type_id, object_id=selected_id))
+            selected_objects.append(runtime.build_object_profile(db, object_type_id=body.object_type_id, object_id=selected_id, project_id=object_type.project_id))
         except ValueError:
             continue
     return {
@@ -307,7 +331,7 @@ def object_explorer_query(body: ObjectExplorerQueryRequest, db: Session = Depend
         "columns": selected_columns,
         "facets": [_facet(field, objects) for field in chart_fields if field],
         "selected_objects": selected_objects,
-        "available_actions": _available_actions(db, body.object_type_id),
+        "available_actions": _available_actions(db, body.object_type_id, object_type.project_id),
         "object_type": {
             "id": object_type.id,
             "display_name": object_type.display_name,
@@ -318,9 +342,10 @@ def object_explorer_query(body: ObjectExplorerQueryRequest, db: Session = Depend
 
 
 @router.post("/object-explorer/histogram")
-def histogram(body: HistogramRequest, db: Session = Depends(get_db)):
-    _require_object_type(db, body.object_type_id)
-    values = [v for v in _values(db, body) if v is not None]
+def histogram(body: HistogramRequest, db: Session = Depends(get_db),
+              principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    values = [v for v in _values(db, body, object_type.project_id) if v is not None]
     nums = [v for v in values if _is_num(v)]
     if nums and len(nums) == len(values):
         lo, hi = min(nums), max(nums)
@@ -344,9 +369,10 @@ def histogram(body: HistogramRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/object-explorer/property-stats")
-def property_stats(body: PropertyStatsRequest, db: Session = Depends(get_db)):
-    _require_object_type(db, body.object_type_id)
-    values = _values(db, body)
+def property_stats(body: PropertyStatsRequest, db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    values = _values(db, body, object_type.project_id)
     non_null = [v for v in values if v is not None]
     nums = [v for v in non_null if _is_num(v)]
     stats: Dict[str, Any] = {
@@ -396,16 +422,17 @@ class GridPlotRequest(BaseModel):
     filters: Dict[str, Any] = Field(default_factory=dict)
 
 
-def _field_values(db: Session, object_type_id: str, field: str, filters: Dict[str, Any]) -> List[Any]:
-    rows, _ = runtime._logic_object_rows(db, object_type_id, filters, limit=10 ** 9)
+def _field_values(db: Session, object_type_id: str, field: str, filters: Dict[str, Any], project_id: str) -> List[Any]:
+    rows, _ = runtime._logic_object_rows(db, object_type_id, filters, limit=10 ** 9, project_id=project_id)
     return [(r.properties or {}).get(field) for r in rows]
 
 
 @router.post("/object-explorer/listogram")
-def listogram(body: ListogramRequest, db: Session = Depends(get_db)):
+def listogram(body: ListogramRequest, db: Session = Depends(get_db),
+              principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     """Categorical value counts with keep/exclude category filtering."""
-    _require_object_type(db, body.object_type_id)
-    values = [str(v) for v in _field_values(db, body.object_type_id, body.field, body.filters) if v is not None]
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    values = [str(v) for v in _field_values(db, body.object_type_id, body.field, body.filters, object_type.project_id) if v is not None]
     counts: Dict[str, int] = {}
     for v in values:
         counts[v] = counts.get(v, 0) + 1
@@ -421,10 +448,11 @@ def listogram(body: ListogramRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/object-explorer/statistics-table")
-def statistics_table(body: StatisticsTableRequest, db: Session = Depends(get_db)):
+def statistics_table(body: StatisticsTableRequest, db: Session = Depends(get_db),
+                     principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     """Per-field count/min/max/avg/sum table over the object set."""
-    _require_object_type(db, body.object_type_id)
-    rows, _ = runtime._logic_object_rows(db, body.object_type_id, body.filters, limit=10 ** 9)
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    rows, _ = runtime._logic_object_rows(db, body.object_type_id, body.filters, limit=10 ** 9, project_id=object_type.project_id)
     table = []
     for field in body.fields:
         vals = [(r.properties or {}).get(field) for r in rows]
@@ -439,10 +467,11 @@ def statistics_table(body: StatisticsTableRequest, db: Session = Depends(get_db)
 
 
 @router.post("/object-explorer/single-statistic")
-def single_statistic(body: SingleStatisticRequest, db: Session = Depends(get_db)):
+def single_statistic(body: SingleStatisticRequest, db: Session = Depends(get_db),
+                     principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     """A single aggregate value over one field."""
-    _require_object_type(db, body.object_type_id)
-    vals = _field_values(db, body.object_type_id, body.field, body.filters)
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    vals = _field_values(db, body.object_type_id, body.field, body.filters, object_type.project_id)
     non_null = [v for v in vals if v is not None]
     nums = [v for v in non_null if _is_num(v)]
     stat = body.statistic.lower()
@@ -464,10 +493,11 @@ def single_statistic(body: SingleStatisticRequest, db: Session = Depends(get_db)
 
 
 @router.post("/object-explorer/grid-plot")
-def grid_plot(body: GridPlotRequest, db: Session = Depends(get_db)):
+def grid_plot(body: GridPlotRequest, db: Session = Depends(get_db),
+              principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     """Two-way (row_field x col_field) count grid."""
-    _require_object_type(db, body.object_type_id)
-    rows, _ = runtime._logic_object_rows(db, body.object_type_id, body.filters, limit=10 ** 9)
+    object_type = _require_object_type(db, body.object_type_id, principal)
+    rows, _ = runtime._logic_object_rows(db, body.object_type_id, body.filters, limit=10 ** 9, project_id=object_type.project_id)
     grid: Dict[str, Dict[str, int]] = {}
     row_keys, col_keys = set(), set()
     for r in rows:

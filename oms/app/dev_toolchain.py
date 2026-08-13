@@ -35,7 +35,7 @@ def _audit(db: Session, actor: str, event_type: str, subject_type: str, subject_
 # ---------------------------------------------------------------------------
 class CodeRepository(Base):
     __tablename__ = "code_repositories"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     language: Mapped[str] = mapped_column(String, default="python")  # python/java/sql/typescript
@@ -47,7 +47,7 @@ class CodeRepository(Base):
 
 class CodeBranch(Base):
     __tablename__ = "code_branches"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     repository_id: Mapped[str] = mapped_column(String, ForeignKey("code_repositories.id"), index=True)
     name: Mapped[str] = mapped_column(String)
     base_branch: Mapped[str] = mapped_column(String, default="master")
@@ -56,7 +56,7 @@ class CodeBranch(Base):
 
 class CodeFile(Base):
     __tablename__ = "code_files"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     repository_id: Mapped[str] = mapped_column(String, ForeignKey("code_repositories.id"), index=True)
     branch: Mapped[str] = mapped_column(String, index=True)
     path: Mapped[str] = mapped_column(String, index=True)
@@ -66,7 +66,7 @@ class CodeFile(Base):
 
 class CodeCommit(Base):
     __tablename__ = "code_commits"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     repository_id: Mapped[str] = mapped_column(String, ForeignKey("code_repositories.id"), index=True)
     branch: Mapped[str] = mapped_column(String, index=True)
     message: Mapped[str] = mapped_column(String)
@@ -78,7 +78,7 @@ class CodeCommit(Base):
 
 class CodeWorkspace(Base):
     __tablename__ = "code_workspaces"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     kind: Mapped[str] = mapped_column(String, default="vscode")  # vscode/jupyter
     status: Mapped[str] = mapped_column(String, default="running")
@@ -90,7 +90,7 @@ class CodeWorkspace(Base):
 
 class CodeWorkbook(Base):
     __tablename__ = "code_workbooks"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     language: Mapped[str] = mapped_column(String, default="python")  # python/r/sql
     environment: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -101,7 +101,7 @@ class CodeWorkbook(Base):
 
 class CodeWorkbookRun(Base):
     __tablename__ = "code_workbook_runs"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     workbook_id: Mapped[str] = mapped_column(String, ForeignKey("code_workbooks.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     node_results: Mapped[list] = mapped_column(JSON, default=list)
@@ -117,7 +117,7 @@ class BranchProtection(Base):
     repository with no protection row for the target branch merges freely.
     """
     __tablename__ = "code_branch_protections"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     repository_id: Mapped[str] = mapped_column(String, ForeignKey("code_repositories.id"), index=True)
     branch: Mapped[str] = mapped_column(String, index=True)  # the protected (target) branch
     required_approvals: Mapped[int] = mapped_column(Integer, default=1)
@@ -129,7 +129,7 @@ class BranchProtection(Base):
 class CodePullRequest(Base):
     """A pull request from a source branch into a target branch."""
     __tablename__ = "code_pull_requests"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     repository_id: Mapped[str] = mapped_column(String, ForeignKey("code_repositories.id"), index=True)
     title: Mapped[str] = mapped_column(String)
     source_branch: Mapped[str] = mapped_column(String, index=True)
@@ -149,7 +149,7 @@ class ComputeModuleDef(Base):
     routers; this is the dev-toolchain Functions-tab + Overview lifecycle model.
     """
     __tablename__ = "devtools_compute_modules"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     namespace: Mapped[str] = mapped_column(String, default="default")
     language: Mapped[str] = mapped_column(String, default="python")  # python/java/typescript
@@ -162,7 +162,7 @@ class ComputeModuleDef(Base):
 class ComputeModuleFunction(Base):
     """A typed function registered on a compute module (Functions tab)."""
     __tablename__ = "devtools_compute_module_functions"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     module_id: Mapped[str] = mapped_column(String, ForeignKey("devtools_compute_modules.id"), index=True)
     name: Mapped[str] = mapped_column(String, index=True)
     api_name: Mapped[str] = mapped_column(String, index=True)  # com.<ns>.computemodules.<Name>
@@ -393,6 +393,7 @@ def create_repository(body: RepoCreate, db: Session = Depends(get_db)):
                           language=body.language, template=body.template,
                           default_branch=body.default_branch, created_at=now, updated_at=now)
     db.add(repo)
+    db.flush()
     # seed the default branch
     db.add(CodeBranch(id=uuid.uuid4().hex, repository_id=rid, name=body.default_branch,
                       base_branch=body.default_branch, created_at=now))

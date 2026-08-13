@@ -1,0 +1,2 @@
+{"asset_id":"asset_sftp_1","name":"SFTP Pump","status":"DEGRADED","criticality":"high"}
+{"asset_id":"asset_sftp_2","name":"SFTP Chiller","status":"RUNNING","criticality":"medium"}

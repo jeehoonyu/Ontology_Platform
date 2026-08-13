@@ -20,7 +20,7 @@ router = APIRouter(tags=["observability"])
 class MonitoringView(Base):
     __tablename__ = "monitoring_views"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     scope: Mapped[dict] = mapped_column(JSON, default=dict)
     checks: Mapped[list] = mapped_column(JSON, default=list)
@@ -30,7 +30,7 @@ class MonitoringView(Base):
 class PlatformTrace(Base):
     __tablename__ = "platform_traces"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     workflow: Mapped[str] = mapped_column(String, nullable=False)
     spans: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String, default="ok")
@@ -40,7 +40,7 @@ class PlatformTrace(Base):
 class PlatformMetric(Base):
     __tablename__ = "platform_metrics"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     subject_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
     subject_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)

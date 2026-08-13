@@ -20,7 +20,10 @@ const SECTIONS = [
   { id: "groups", label: "Groups" },
   { id: "roles", label: "Roles" },
   { id: "auth", label: "Auth" },
-  { id: "usage", label: "Usage" }
+  { id: "usage", label: "Usage" },
+  { id: "recovery", label: "Recovery" },
+  { id: "extensions", label: "Extensions" },
+  { id: "operations", label: "Runtime" }
 ];
 
 const SCOPE_TYPES = ["enrollment", "organization", "space", "project"];
@@ -31,6 +34,8 @@ const PROTOCOLS = ["saml", "oidc"];
 const USAGE_METRICS = ["compute_seconds", "storage_bytes", "rows"];
 const QUOTA_SCOPES = ["project", "organization"];
 const GROUP_BY = ["project", "principal", "organization", "resource", "metric"];
+const RUNTIME_METRICS = ["executions", "compute_seconds", "token_units", "record_units", "estimated_cost_usd"];
+const SLO_METRICS = ["availability", "error_rate", "latency_p95_ms", "queue_p95_ms", "cost_usd", "throughput_per_minute"];
 
 function toOptions(values: string[]): Array<{ value: string; label: string }> {
   return values.map((value) => ({ value, label: value }));
@@ -74,6 +79,9 @@ export function ControlPanel() {
       {section === "roles" && <RolesSection />}
       {section === "auth" && <AuthSection />}
       {section === "usage" && <UsageSection />}
+      {section === "recovery" && <RecoverySection />}
+      {section === "extensions" && <ExtensionsSection />}
+      {section === "operations" && <RuntimeOperationsSection />}
     </Page>
   );
 }
@@ -615,6 +623,10 @@ function AuthSection() {
   const oauthClients = useAsyncState<admin.OAuthClient[]>(admin.listOAuthClients, [refreshKey]);
 
   const [providerForm, setProviderForm] = useState({ name: "", protocol: "saml" });
+  const [serviceForm, setServiceForm] = useState({ id: "", displayName: "", organizationId: "local" });
+  const [tokenForm, setTokenForm] = useState({ principalId: "", projectId: "default", ttlHours: "720" });
+  const [issuedToken, setIssuedToken] = useState<admin.IssuedApiToken | null>(null);
+  const [revokeTokenId, setRevokeTokenId] = useState("");
 
   const reload = () => setRefreshKey((key) => key + 1);
 
@@ -623,6 +635,49 @@ function AuthSection() {
     try {
       await admin.createAuthProvider({ name: providerForm.name.trim(), protocol: providerForm.protocol });
       setProviderForm({ name: "", protocol: "saml" });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function submitServiceAccount() {
+    if (!serviceForm.id.trim() || !serviceForm.displayName.trim()) return;
+    try {
+      const account = await admin.createServiceAccount({
+        id: serviceForm.id.trim(), display_name: serviceForm.displayName.trim(),
+        organization_id: serviceForm.organizationId.trim() || null
+      });
+      setTokenForm((current) => ({ ...current, principalId: account.id }));
+      setServiceForm({ id: "", displayName: "", organizationId: serviceForm.organizationId });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function submitWorkerToken() {
+    if (!tokenForm.principalId || !tokenForm.projectId.trim()) return;
+    try {
+      setIssuedToken(await admin.issueToken({
+        principal_type: "service_account", principal_id: tokenForm.principalId,
+        scopes: [`project:${tokenForm.projectId.trim()}:execute`],
+        ttl_seconds: Math.max(1, Number(tokenForm.ttlHours) || 1) * 3600
+      }));
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function revokeWorkerToken() {
+    if (!revokeTokenId) return;
+    try {
+      await admin.revokeToken(revokeTokenId);
+      setRevokeTokenId("");
       setError("");
       reload();
     } catch (err) {
@@ -659,10 +714,31 @@ function AuthSection() {
         </Panel>
       </div>
       <div className="two-col">
+        <Panel title="Create Worker Service Account" action={<button onClick={submitServiceAccount} disabled={!serviceForm.id.trim() || !serviceForm.displayName.trim()}>Create</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Service account ID" value={serviceForm.id} onChange={(value) => setServiceForm({ ...serviceForm, id: value })} placeholder="pipeline-worker-prod" />
+            <TextField label="Display name" value={serviceForm.displayName} onChange={(value) => setServiceForm({ ...serviceForm, displayName: value })} placeholder="Production pipeline worker" />
+            <TextField label="Organization ID" value={serviceForm.organizationId} onChange={(value) => setServiceForm({ ...serviceForm, organizationId: value })} placeholder="acme" />
+          </div>
+        </Panel>
+        <Panel title="Issue Project Worker Token" action={<button onClick={submitWorkerToken} disabled={!tokenForm.principalId || !tokenForm.projectId.trim()}>Issue once</button>}>
+          <div className="metadata-edit-grid">
+            <SelectField label="Service account" value={tokenForm.principalId} onChange={(value) => setTokenForm({ ...tokenForm, principalId: value })} placeholder="Choose account" options={(serviceAccounts.value || []).map((account) => ({ value: account.id, label: account.display_name }))} />
+            <TextField label="Project ID" value={tokenForm.projectId} onChange={(value) => setTokenForm({ ...tokenForm, projectId: value })} placeholder="operations" />
+            <TextField label="Lifetime (hours)" value={tokenForm.ttlHours} onChange={(value) => setTokenForm({ ...tokenForm, ttlHours: value })} type="number" />
+          </div>
+          {issuedToken ? <div className="one-time-secret" role="status">
+            <strong>Copy this token now</strong>
+            <span>It is shown once and cannot be retrieved again.</span>
+            <div><input aria-label="One-time worker token" readOnly value={issuedToken.token} /><button onClick={() => navigator.clipboard.writeText(issuedToken.token)}>Copy</button></div>
+          </div> : null}
+        </Panel>
+      </div>
+      <div className="two-col">
         <Panel title="Service Accounts">
           <DataTable rows={serviceAccounts.value || []} empty="No service accounts yet." />
         </Panel>
-        <Panel title="API Tokens">
+        <Panel title="API Tokens" action={<div className="button-row"><select aria-label="Token to revoke" value={revokeTokenId} onChange={(event) => setRevokeTokenId(event.target.value)}><option value="">Choose token</option>{(tokens.value || []).filter((token) => !token.revoked).map((token) => <option key={token.id} value={token.id}>{token.token_prefix || token.id}</option>)}</select><button onClick={revokeWorkerToken} disabled={!revokeTokenId}>Revoke</button></div>}>
           <DataTable rows={tokens.value || []} empty="No tokens issued yet." />
         </Panel>
       </div>
@@ -826,6 +902,586 @@ function UsageSection() {
           ) : (
             <EmptyState title="No quota check run" description="Compare current usage against a configured quota." />
           )}
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+async function fileBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+  return btoa(binary);
+}
+
+function RecoverySection() {
+  const [snapshot, setSnapshot] = useState<admin.PortableSnapshot | null>(null);
+  const [validation, setValidation] = useState<admin.SnapshotValidation | null>(null);
+  const [result, setResult] = useState<admin.SnapshotImportResult | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  async function downloadSnapshot() {
+    setBusy("export");
+    try {
+      const exported = await admin.exportPortableSnapshot();
+      setSnapshot(exported);
+      const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `ontology-platform-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+      setValidation(await admin.validatePortableSnapshot(exported));
+      setError("");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function loadSnapshot(file: File | undefined) {
+    if (!file) return;
+    setBusy("validate");
+    setResult(null);
+    setConfirmation("");
+    try {
+      const parsed = JSON.parse(await file.text()) as admin.PortableSnapshot;
+      const checked = await admin.validatePortableSnapshot(parsed);
+      setSnapshot(parsed);
+      setValidation(checked);
+      setError("");
+    } catch (err) {
+      setSnapshot(null);
+      setValidation(null);
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runRestore(dryRun: boolean) {
+    if (!snapshot) return;
+    setBusy(dryRun ? "dry-run" : "restore");
+    try {
+      const next = await admin.importPortableSnapshot(snapshot, dryRun);
+      setResult(next);
+      setValidation(next.validation);
+      if (!dryRun) setConfirmation("");
+      setError("");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <ErrorBanner message={error} />
+      <div className="two-col">
+        <Panel title="Portable Snapshot" action={<button onClick={downloadSnapshot} disabled={Boolean(busy)}>{busy === "export" ? "Exporting..." : "Download snapshot"}</button>}>
+          <p className="panel-description">Exports versioned platform resources with a SHA-256 integrity manifest. Runtime credentials and login sessions are excluded.</p>
+          <label className="file-picker">
+            <span>Load snapshot for recovery</span>
+            <input type="file" accept="application/json,.json" onChange={(event) => loadSnapshot(event.target.files?.[0])} />
+          </label>
+          {snapshot ? <KeyValueGrid data={{
+            format: snapshot.snapshot_format,
+            version: snapshot.snapshot_version,
+            resources: snapshot.integrity?.resource_count,
+            checksum: snapshot.integrity?.checksum,
+            exported_at: new Date(snapshot.exported_at * 1000).toLocaleString()
+          }} /> : <EmptyState title="No snapshot loaded" description="Download the current state or choose a portable JSON snapshot to validate." />}
+        </Panel>
+        <Panel title="Recovery Validation" action={validation ? <StatusBadge value={validation.status} /> : undefined}>
+          {busy === "validate" ? <LoadingState label="Validating snapshot..." /> : null}
+          {validation ? <>
+            <div className="metric-grid compact-metrics">
+              <Metric label="Resources" value={validation.resource_count} />
+              <Metric label="Credential rebinds" value={validation.rebind_required.length} />
+              <Metric label="Errors" value={validation.errors.length} />
+            </div>
+            {validation.errors.map((message) => <div key={message} className="inline-alert error">{message}</div>)}
+            {validation.warnings.map((message) => <div key={message} className="inline-alert warning">{message}</div>)}
+            {validation.rebind_required.length ? <DataTable rows={validation.rebind_required} empty="No credential rebinds required." /> : null}
+          </> : <EmptyState title="Validation required" description="A snapshot must pass integrity validation before dry run or restore." />}
+        </Panel>
+      </div>
+      <Panel title="Restore Controls">
+        <p className="panel-description">Dry run first. Restore uses transactional merge semantics and preserves existing credential bindings when the portable snapshot contains redacted values.</p>
+        <div className="recovery-action-row">
+          <button onClick={() => runRestore(true)} disabled={!snapshot || validation?.status !== "VALID" || Boolean(busy)}>{busy === "dry-run" ? "Checking..." : "Run dry run"}</button>
+          <label><span>Type RESTORE to confirm</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+          <button className="danger-button" onClick={() => runRestore(false)} disabled={!snapshot || validation?.status !== "VALID" || confirmation !== "RESTORE" || Boolean(busy)}>{busy === "restore" ? "Restoring..." : "Restore snapshot"}</button>
+          {result ? <StatusBadge value={result.status} /> : null}
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+function ExtensionsSection() {
+  const [projectId, setProjectId] = useState("default");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const catalog = useAsyncState(() => admin.getPluginCatalog(projectId), [projectId, refreshKey]);
+  const [selected, setSelected] = useState<admin.PluginVersion | null>(null);
+  const [executions, setExecutions] = useState<admin.PluginExecution[]>([]);
+  const [keyForm, setKeyForm] = useState({ id: "", organization_id: "local", display_name: "" });
+  const [publicKeyFile, setPublicKeyFile] = useState<File | null>(null);
+  const [packageForm, setPackageForm] = useState({ signer_key_id: "" });
+  const [manifestFile, setManifestFile] = useState<File | null>(null);
+  const [bundleFile, setBundleFile] = useState<File | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [registered, setRegistered] = useState<admin.PluginVersion | null>(null);
+  const [operation, setOperation] = useState("");
+  const [operationInput, setOperationInput] = useState<Record<string, string>>({});
+  const [invoking, setInvoking] = useState(false);
+
+  function reload() {
+    setRefreshKey((value) => value + 1);
+  }
+
+  async function encodedKey(file: File, expectedBytes: number): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.length === expectedBytes) return fileBase64(file);
+    return new TextDecoder().decode(bytes).trim();
+  }
+
+  async function saveTrustKey() {
+    if (!publicKeyFile) return;
+    try {
+      await admin.createPluginTrustKey({
+        id: keyForm.id.trim() || undefined,
+        organization_id: keyForm.organization_id.trim(),
+        display_name: keyForm.display_name.trim(),
+        public_key: await encodedKey(publicKeyFile, 32)
+      });
+      setError("");
+      setNotice("Trust key registered. Signed packages from this vendor can now be verified.");
+      setPackageForm({ signer_key_id: keyForm.id.trim() });
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function registerPackage() {
+    if (!manifestFile || !bundleFile || !signatureFile) return;
+    try {
+      const manifest = JSON.parse(await manifestFile.text()) as Record<string, unknown>;
+      const next = await admin.registerPlugin({
+        project_id: projectId,
+        manifest,
+        bundle_base64: await fileBase64(bundleFile),
+        signer_key_id: packageForm.signer_key_id.trim(),
+        signature: await encodedKey(signatureFile, 64)
+      });
+      setRegistered(next);
+      setError("");
+      setNotice(`${next.plugin_id} ${next.version} passed signature and bundle verification.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function activate(version: admin.PluginVersion) {
+    try {
+      const next = await admin.activatePlugin(version.id);
+      setRegistered(next);
+      setError("");
+      setNotice(`${next.plugin_id} ${next.version} is active.`);
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function inspect(version: admin.PluginVersion) {
+    try {
+      const result = await admin.listPluginExecutions(version.id);
+      setSelected(version);
+      setExecutions(result.executions);
+      setOperation(Object.keys(version.operations)[0] || "");
+      setOperationInput({});
+      setError("");
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  const operationDefinition = selected && operation
+    ? (selected.operations[operation] as Record<string, unknown> | undefined)
+    : undefined;
+  const inputSchema = operationDefinition?.input_schema as Record<string, unknown> | undefined;
+  const inputProperties = (inputSchema?.properties as Record<string, Record<string, unknown>> | undefined) || {};
+  const requiredInput = new Set(Array.isArray(inputSchema?.required) ? inputSchema.required.map(String) : []);
+
+  async function invokeSelected() {
+    if (!selected || !operation) return;
+    const input = Object.fromEntries(Object.entries(inputProperties).filter(([name, spec]) => (
+      requiredInput.has(name) || spec.type === "boolean" || Boolean(operationInput[name])
+    )).map(([name, spec]) => {
+      const value = operationInput[name] || "";
+      if (spec.type === "integer") return [name, Number.parseInt(value, 10)];
+      if (spec.type === "number") return [name, Number(value)];
+      if (spec.type === "boolean") return [name, value === "true"];
+      return [name, value];
+    }));
+    try {
+      setInvoking(true);
+      const run = await admin.invokePluginAsync(selected.id, {
+        operation,
+        input,
+        idempotency_key: crypto.randomUUID(),
+        priority: 50,
+        max_attempts: 3
+      });
+      setExecutions((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      setError("");
+      setNotice(`${selected.plugin_id} queued as ${run.job_id || run.id}.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setInvoking(false);
+    }
+  }
+
+  const activeRows = (catalog.value?.plugins || []).map((plugin) => ({
+    id: plugin.id,
+    plugin: plugin.plugin_id,
+    version: plugin.version,
+    kind: plugin.kind,
+    capabilities: plugin.capabilities.join(", ") || "isolated",
+    operations: Object.keys(plugin.operations).join(", "),
+    status: plugin.status,
+    signer: plugin.signer_key_id
+  }));
+
+  return (
+    <>
+      <ErrorBanner message={error || catalog.error} />
+      {notice ? <div className="inline-success" role="status">{notice}</div> : null}
+      {catalog.loading ? <LoadingState label="Loading signed extensions..." /> : null}
+      <Panel title="Extension Scope" action={<button onClick={reload}>Refresh</button>}>
+        <div className="metadata-edit-grid">
+          <TextField label="Project" value={projectId} onChange={setProjectId} placeholder="default" />
+          <div className="key-value"><span>Execution boundary</span><strong>{catalog.value?.runtime || "signed_sandbox_v1"}</strong></div>
+          <div className="key-value"><span>SDK API</span><strong>v{catalog.value?.sdk_api_version || 1}</strong></div>
+        </div>
+      </Panel>
+      <div className="two-col">
+        <Panel title="Vendor Trust Key" action={<button onClick={saveTrustKey} disabled={!keyForm.organization_id.trim() || !keyForm.display_name.trim() || !publicKeyFile}>Register key</button>}>
+          <p className="panel-description">Add an organization-approved Ed25519 public key. Private signing material never enters OntologyOS.</p>
+          <div className="metadata-edit-grid">
+            <TextField label="Key ID (optional)" value={keyForm.id} onChange={(value) => setKeyForm({ ...keyForm, id: value })} placeholder="vendor-production-2026" />
+            <TextField label="Organization" value={keyForm.organization_id} onChange={(value) => setKeyForm({ ...keyForm, organization_id: value })} />
+            <TextField label="Vendor" value={keyForm.display_name} onChange={(value) => setKeyForm({ ...keyForm, display_name: value })} />
+            <label><span>Ed25519 public key</span><input type="file" accept=".pub,.key,text/plain,application/octet-stream" onChange={(event) => setPublicKeyFile(event.target.files?.[0] || null)} /></label>
+          </div>
+        </Panel>
+        <Panel title="Signed Package" action={<button onClick={registerPackage} disabled={!packageForm.signer_key_id.trim() || !manifestFile || !bundleFile || !signatureFile}>Verify package</button>}>
+          <p className="panel-description">The manifest signature and exact bundle digest are checked before an immutable version is registered.</p>
+          <div className="metadata-edit-grid">
+            <TextField label="Signer key ID" value={packageForm.signer_key_id} onChange={(value) => setPackageForm({ signer_key_id: value })} />
+            <label><span>Manifest</span><input type="file" accept="application/json,.json" onChange={(event) => setManifestFile(event.target.files?.[0] || null)} /></label>
+            <label><span>Plugin bundle</span><input type="file" accept="application/zip,.zip" onChange={(event) => setBundleFile(event.target.files?.[0] || null)} /></label>
+            <label><span>Ed25519 signature</span><input type="file" accept=".sig,text/plain,application/octet-stream" onChange={(event) => setSignatureFile(event.target.files?.[0] || null)} /></label>
+          </div>
+          {registered ? (
+            <div className="runtime-slo-row">
+              <span><strong>{registered.plugin_id} {registered.version}</strong><small>{registered.kind} · {registered.status}</small></span>
+              <StatusBadge value={registered.status} />
+              {registered.status === "VERIFIED" ? <button onClick={() => activate(registered)}>Activate</button> : null}
+            </div>
+          ) : null}
+        </Panel>
+      </div>
+      <Panel title="Active Extensions" action={<StatusBadge value={`${activeRows.length} active`} />}>
+        {activeRows.length ? <DataTable rows={activeRows} empty="No active extensions." /> : <EmptyState title="No active extensions" description="Register a vendor trust key, verify a signed package, then activate its immutable version." />}
+        {(catalog.value?.plugins || []).length ? (
+          <div className="button-row extension-inspect-actions">
+            {(catalog.value?.plugins || []).map((plugin) => <button key={plugin.id} onClick={() => inspect(plugin)}>Runs: {plugin.plugin_id}</button>)}
+          </div>
+        ) : null}
+      </Panel>
+      {selected ? (
+        <>
+          <Panel title={`Run ${selected.plugin_id}`} action={<button onClick={invokeSelected} disabled={!operation || invoking || Object.entries(inputProperties).some(([name, spec]) => requiredInput.has(name) && spec.type !== "boolean" && !operationInput[name])}>{invoking ? "Queueing..." : "Run extension"}</button>}>
+            <p className="panel-description">Inputs are generated from the signed operation contract. Execution is queued to the isolated plugin worker and remains recoverable by job ID.</p>
+            <div className="metadata-edit-grid">
+              <SelectField label="Operation" value={operation} onChange={(value) => { setOperation(value); setOperationInput({}); }} options={toOptions(Object.keys(selected.operations))} />
+              {Object.entries(inputProperties).map(([name, spec]) => spec.type === "boolean" ? (
+                <SelectField key={name} label={`${name}${requiredInput.has(name) ? " (required)" : ""}`} value={operationInput[name] || "false"} onChange={(value) => setOperationInput({ ...operationInput, [name]: value })} options={toOptions(["false", "true"])} />
+              ) : (
+                <TextField key={name} label={`${name}${requiredInput.has(name) ? " (required)" : ""}`} value={operationInput[name] || ""} onChange={(value) => setOperationInput({ ...operationInput, [name]: value })} type={spec.type === "integer" || spec.type === "number" ? "number" : "text"} />
+              ))}
+            </div>
+            {!Object.keys(inputProperties).length ? <p className="muted-copy">This operation has no declared input fields.</p> : null}
+          </Panel>
+          <Panel title={`${selected.plugin_id} execution evidence`} action={<div className="button-row"><StatusBadge value={selected.status} /><button onClick={() => inspect(selected)}>Refresh runs</button></div>}>
+            <DataTable rows={executions.map((run) => ({ id: run.id, job_id: run.job_id || "direct", operation: run.operation, status: run.status, duration_ms: run.duration_ms, sandbox: String(run.sandbox.mode || (run.status === "QUEUED" ? "pending" : "unknown")), error: run.error || "", actor: run.actor, created_at: run.created_at }))} empty="This extension has not run yet." />
+          </Panel>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function RuntimeOperationsSection() {
+  const [projectId, setProjectId] = useState("default");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [error, setError] = useState("");
+  const summary = useAsyncState(() => admin.getRuntimeSummary(projectId), [projectId, refreshKey]);
+  const pilotEvidence = useAsyncState(() => admin.getPilotEvidence(), [refreshKey]);
+  const jobs = useAsyncState(() => admin.listRuntimeJobs(projectId), [projectId, refreshKey]);
+  const budgets = useAsyncState(() => admin.listRuntimeBudgets(projectId), [projectId, refreshKey]);
+  const slos = useAsyncState(() => admin.listRuntimeSlos(projectId), [projectId, refreshKey]);
+  const fleet = useAsyncState(() => admin.getWorkerFleet(projectId), [projectId, refreshKey]);
+  const [budgetForm, setBudgetForm] = useState({ metric: "executions", limit_value: "1000", window_seconds: "86400", enforcement: "HARD" });
+  const [sloForm, setSloForm] = useState({ display_name: "Runtime availability", job_type: "", metric: "availability", operator: "gte", threshold: "0.99", window_seconds: "86400", severity: "warning" });
+  const [workerForm, setWorkerForm] = useState({ worker_name: "pipeline-worker-1", job_types: "pipeline.preview,pipeline.deliver", max_concurrency: "2" });
+  const [queueForm, setQueueForm] = useState({ weight: "1", max_concurrency: "10", paused: false });
+
+  const reload = () => setRefreshKey((key) => key + 1);
+
+  async function saveBudget() {
+    try {
+      await admin.upsertRuntimeBudget({
+        project_id: projectId,
+        metric: budgetForm.metric,
+        limit_value: Number(budgetForm.limit_value),
+        window_seconds: Number(budgetForm.window_seconds),
+        enforcement: budgetForm.enforcement,
+        enabled: true
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function saveSlo() {
+    try {
+      await admin.createRuntimeSlo({
+        project_id: projectId,
+        display_name: sloForm.display_name,
+        job_type: sloForm.job_type || null,
+        metric: sloForm.metric,
+        operator: sloForm.operator,
+        threshold: Number(sloForm.threshold),
+        window_seconds: Number(sloForm.window_seconds),
+        severity: sloForm.severity,
+        enabled: true
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function evaluate(policyId: string) {
+    try {
+      await admin.evaluateRuntimeSlo(policyId);
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function saveWorker() {
+    try {
+      await admin.registerRuntimeWorker(workerForm.worker_name, {
+        project_id: projectId,
+        supported_job_types: splitList(workerForm.job_types),
+        max_concurrency: Number(workerForm.max_concurrency),
+        labels: { pool: "default" }
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function setDrain(workerName: string, draining: boolean) {
+    try {
+      await admin.setRuntimeWorkerDrain(workerName, draining);
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function saveQueuePolicy() {
+    try {
+      await admin.upsertRuntimeQueuePolicy(projectId, {
+        weight: Number(queueForm.weight),
+        max_concurrency: Number(queueForm.max_concurrency),
+        paused: queueForm.paused
+      });
+      setError("");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  const loading = summary.loading || pilotEvidence.loading || jobs.loading || budgets.loading || slos.loading || fleet.loading;
+  const pilotAvailability = pilotEvidence.value?.availability;
+  const pilotRpo = pilotEvidence.value?.rpo;
+  const pilotRto = pilotEvidence.value?.rto;
+  return (
+    <>
+      <ErrorBanner message={error || summary.error || pilotEvidence.error || jobs.error || budgets.error || slos.error || fleet.error} />
+      {loading && <LoadingState label="Loading runtime operations..." />}
+      <Panel title="Runtime Scope" action={<button onClick={reload}>Refresh</button>}>
+        <div className="metadata-edit-grid">
+          <TextField label="Project" value={projectId} onChange={setProjectId} placeholder="default" />
+        </div>
+      </Panel>
+      <div className="grid metrics">
+        <Metric label="Job success" value={`${Math.round((summary.value?.availability || 0) * 10000) / 100}%`} />
+        <Metric label="Pilot availability" value={`${pilotAvailability?.measurements.availability_pct || 0}%`} />
+        <Metric label="Worst RPO" value={pilotRpo?.measurements.samples ? `${pilotRpo.measurements.max_rpo_seconds}s` : "Waiting"} />
+        <Metric label="Worst RTO" value={pilotRto?.measurements.rehearsals ? `${pilotRto.measurements.max_elapsed_seconds}s` : "Waiting"} />
+        <Metric label="P95 execution" value={`${summary.value?.latency_p95_ms || 0} ms`} />
+        <Metric label="P95 queue" value={`${summary.value?.queue_p95_ms || 0} ms`} />
+        <Metric label="Estimated cost" value={`$${(summary.value?.estimated_cost_usd || 0).toFixed(4)}`} />
+        <Metric label="Active workers" value={fleet.value?.summary.active || 0} />
+        <Metric label="Active jobs" value={fleet.value?.summary.active_jobs || 0} />
+      </div>
+      {(summary.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      {(fleet.value?.warnings || []).map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      {[pilotAvailability?.warning, pilotRpo?.warning, pilotRto?.warning]
+        .filter((warning): warning is string => Boolean(warning))
+        .map((warning) => <ErrorBanner key={warning} message={warning} />)}
+      <Panel title="Production Pilot Evidence" action={<StatusBadge value={pilotAvailability?.status || "COLLECTING"} />}>
+        {pilotAvailability ? (
+          <div className="runtime-slo-list">
+            <div className="runtime-slo-row">
+              <span>
+                <strong>Seven-day availability window</strong>
+                <small>
+                  {Math.round(pilotAvailability.measurements.observed_seconds / 360) / 10} hours observed
+                  {" · "}{Math.round(pilotAvailability.remaining_seconds / 360) / 10} hours remaining
+                </small>
+              </span>
+              <StatusBadge value={pilotAvailability.integrity} />
+            </div>
+            <div className="runtime-slo-row">
+              <span>
+                <strong>{pilotAvailability.measurements.samples.toLocaleString()} scheduled probes</strong>
+                <small>
+                  {pilotAvailability.measurements.missing_samples} missing slots
+                  {" · "}{pilotAvailability.measurements.unavailable_seconds}s unavailable
+                  {" · "}{pilotAvailability.measurements.outages} outages
+                </small>
+              </span>
+              <StatusBadge value={pilotAvailability.migration_head ? "CURRENT" : "WAITING"} />
+            </div>
+            <div className="runtime-slo-row">
+              <span>
+                <strong>Recovery point objective</strong>
+                <small>
+                  {pilotRpo?.measurements.samples || 0}/10 restored-target samples
+                  {" · "}{pilotRpo?.measurements.pre_backup_samples || 0}/2 pre-backup
+                  {" · "}{pilotRpo?.measurements.samples ? `${pilotRpo.measurements.max_rpo_seconds}s worst gap` : "no measured gap"}
+                </small>
+              </span>
+              <StatusBadge value={pilotRpo?.status || "COLLECTING"} />
+            </div>
+            <div className="runtime-slo-row">
+              <span>
+                <strong>Recovery time objective</strong>
+                <small>
+                  {pilotRto?.measurements.rehearsals || 0}/4 isolated rehearsals
+                  {" · "}{pilotRto?.measurements.unattended_rehearsals || 0} unattended
+                  {" · "}{pilotRto?.measurements.rehearsals ? `${pilotRto.measurements.max_elapsed_seconds}s worst recovery` : "no measured recovery"}
+                </small>
+              </span>
+              <StatusBadge value={pilotRto?.status || "COLLECTING"} />
+            </div>
+          </div>
+        ) : <EmptyState title="Pilot observer is not collecting" description="Enable the pilot-observability deployment profile to begin a tamper-evident availability window." />}
+      </Panel>
+      <Panel title="Durable Job Telemetry">
+        <DataTable rows={jobs.value || []} empty="No durable jobs have run in this project." />
+      </Panel>
+      <div className="two-col">
+        <Panel title="Worker Fleet" action={<button onClick={saveWorker} disabled={!workerForm.worker_name.trim() || Number(workerForm.max_concurrency) < 1}>Register worker</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Worker name" value={workerForm.worker_name} onChange={(value) => setWorkerForm({ ...workerForm, worker_name: value })} />
+            <TextField label="Job types" value={workerForm.job_types} onChange={(value) => setWorkerForm({ ...workerForm, job_types: value })} placeholder="pipeline.preview,agent.invoke" />
+            <TextField label="Concurrency" type="number" value={workerForm.max_concurrency} onChange={(value) => setWorkerForm({ ...workerForm, max_concurrency: value })} />
+          </div>
+          {fleet.value?.sections.workers.length ? (
+            <div className="runtime-slo-list">
+              {fleet.value.sections.workers.map((worker) => (
+                <div key={worker.id} className="runtime-slo-row runtime-worker-row">
+                  <span><strong>{worker.worker_name}</strong><small>{worker.active_jobs}/{worker.max_concurrency} jobs · {worker.supported_job_types.join(", ") || "all job types"}</small></span>
+                  <StatusBadge value={worker.status} />
+                  <button onClick={() => setDrain(worker.worker_name, worker.configured_status === "ACTIVE")}>
+                    {worker.configured_status === "ACTIVE" ? "Drain" : "Resume"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState title="No workers registered" description="Register a project-scoped worker before enabling scheduled execution." />}
+        </Panel>
+        <Panel title="Queue Policy" action={<button onClick={saveQueuePolicy} disabled={!projectId || Number(queueForm.max_concurrency) < 1}>Save policy</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Fair-share weight" type="number" value={queueForm.weight} onChange={(value) => setQueueForm({ ...queueForm, weight: value })} />
+            <TextField label="Project concurrency" type="number" value={queueForm.max_concurrency} onChange={(value) => setQueueForm({ ...queueForm, max_concurrency: value })} />
+            <CheckboxField label="Pause new claims" checked={queueForm.paused} onChange={(value) => setQueueForm({ ...queueForm, paused: value })} />
+          </div>
+          <DataTable rows={fleet.value?.sections.queue_policies || []} empty="This project uses the default fair-share queue policy." />
+        </Panel>
+      </div>
+      <div className="two-col">
+        <Panel title="Project Budgets" action={<button onClick={saveBudget} disabled={!projectId || Number(budgetForm.limit_value) <= 0}>Save budget</button>}>
+          <div className="metadata-edit-grid">
+            <SelectField label="Metric" value={budgetForm.metric} onChange={(value) => setBudgetForm({ ...budgetForm, metric: value })} options={toOptions(RUNTIME_METRICS)} />
+            <TextField label="Limit" type="number" value={budgetForm.limit_value} onChange={(value) => setBudgetForm({ ...budgetForm, limit_value: value })} />
+            <TextField label="Window seconds" type="number" value={budgetForm.window_seconds} onChange={(value) => setBudgetForm({ ...budgetForm, window_seconds: value })} />
+            <SelectField label="Enforcement" value={budgetForm.enforcement} onChange={(value) => setBudgetForm({ ...budgetForm, enforcement: value })} options={toOptions(["HARD", "WARN"])} />
+          </div>
+          <DataTable rows={budgets.value || []} empty="No runtime budgets configured." />
+        </Panel>
+        <Panel title="Service Objectives" action={<button onClick={saveSlo} disabled={!sloForm.display_name.trim()}>Create SLO</button>}>
+          <div className="metadata-edit-grid">
+            <TextField label="Name" value={sloForm.display_name} onChange={(value) => setSloForm({ ...sloForm, display_name: value })} />
+            <TextField label="Job type (optional)" value={sloForm.job_type} onChange={(value) => setSloForm({ ...sloForm, job_type: value })} placeholder="pipeline.preview" />
+            <SelectField label="Metric" value={sloForm.metric} onChange={(value) => setSloForm({ ...sloForm, metric: value })} options={toOptions(SLO_METRICS)} />
+            <SelectField label="Operator" value={sloForm.operator} onChange={(value) => setSloForm({ ...sloForm, operator: value })} options={[{ value: "gte", label: "At least" }, { value: "lte", label: "At most" }]} />
+            <TextField label="Threshold" type="number" value={sloForm.threshold} onChange={(value) => setSloForm({ ...sloForm, threshold: value })} />
+            <TextField label="Window seconds" type="number" value={sloForm.window_seconds} onChange={(value) => setSloForm({ ...sloForm, window_seconds: value })} />
+          </div>
+          {slos.value?.length ? (
+            <div className="runtime-slo-list">
+              {slos.value.map((slo) => (
+                <div key={slo.id} className="runtime-slo-row">
+                  <span><strong>{slo.display_name}</strong><small>{slo.metric} {slo.operator} {slo.threshold}</small></span>
+                  <StatusBadge value={slo.severity} />
+                  <button onClick={() => evaluate(slo.id)}>Evaluate</button>
+                </div>
+              ))}
+            </div>
+          ) : <EmptyState title="No SLOs configured" description="Create an availability, latency, queue, cost, or throughput objective." />}
         </Panel>
       </div>
     </>

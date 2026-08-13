@@ -39,9 +39,20 @@ venv.bak/
 
 # Database files
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 pgdata/
 chdata/
+backups/
+frontend/playwright-report/
+frontend/playwright-production-report/
+frontend/playwright.db
+frontend/test-results/
+oms/backend-tests-*.log
+.ontology-studio-server.err
+.ontology-studio-server.log
+ontology-studio-dev.*.bak
 
 # OS generated files
 .DS_Store

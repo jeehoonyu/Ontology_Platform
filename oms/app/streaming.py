@@ -4,11 +4,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean
+from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, update
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from .database import Base, get_db
-from . import models, models_action, ops_control
+from . import models, models_action, ops_control, tenancy
+from .production_auth import Principal, require_permission
 
 # ---------------------------------------------------------------------------
 # SQLAlchemy ORM models
@@ -17,13 +18,15 @@ from . import models, models_action, ops_control
 class Stream(Base):
     __tablename__ = "streams"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     schema_: Mapped[dict] = mapped_column("schema", JSON, default=dict)
     retention_seconds: Mapped[int] = mapped_column(Integer, default=86400)
     # Auto-archive policy: {"max_age_seconds": int|None, "max_records": int|None}.
     # Empty dict means no policy configured (default for existing rows).
     archive_policy: Mapped[dict] = mapped_column(JSON, default=dict)
+    next_sequence: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[int] = mapped_column(Integer)
 
     records: Mapped[list] = relationship("StreamRecord", back_populates="stream", cascade="all, delete-orphan")
@@ -32,8 +35,9 @@ class Stream(Base):
 class StreamRecord(Base):
     __tablename__ = "stream_records"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     stream_id: Mapped[str] = mapped_column(String, ForeignKey("streams.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     ts: Mapped[int] = mapped_column(Integer)
     # Set when an auto-archive policy moves the record out of the live window.
@@ -51,6 +55,7 @@ class StreamRecord(Base):
 
 class StreamCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     schema_: Dict[str, Any] = Field(default_factory=dict, alias="schema")
     retention_seconds: int = 86400
@@ -60,6 +65,7 @@ class StreamCreate(BaseModel):
 
 class StreamRead(BaseModel):
     id: str
+    project_id: str
     display_name: str
     schema_: Dict[str, Any] = Field(alias="schema")
     retention_seconds: int
@@ -71,6 +77,7 @@ class StreamRead(BaseModel):
     def from_orm_obj(cls, obj: Stream) -> "StreamRead":
         return cls(
             id=obj.id,
+            project_id=obj.project_id,
             display_name=obj.display_name,
             schema=obj.schema_,
             retention_seconds=obj.retention_seconds,
@@ -81,6 +88,7 @@ class StreamRead(BaseModel):
 class StreamRecordRead(BaseModel):
     id: str
     stream_id: str
+    sequence: int
     payload: Dict[str, Any]
     ts: int
     created_at: int
@@ -159,16 +167,35 @@ def _now() -> int:
     return int(time.time())
 
 
-def _get_stream_or_404(stream_id: str, db: Session) -> Stream:
+def _get_stream_or_404(stream_id: str, db: Session, principal: Optional[Principal] = None, permission: str = "view") -> Stream:
     stream = db.query(Stream).filter(Stream.id == stream_id).first()
     if not stream:
         raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
+    if principal:
+        tenancy.assert_project_permission(db, principal, stream.project_id, permission)
     return stream
+
+
+def allocate_sequences(db: Session, stream_id: str, count: int) -> List[int]:
+    """Reserve a contiguous arrival-order range for one stream."""
+    if count <= 0:
+        return []
+    last = db.execute(
+        update(Stream)
+        .where(Stream.id == stream_id)
+        .values(next_sequence=Stream.next_sequence + count)
+        .returning(Stream.next_sequence)
+    ).scalar_one_or_none()
+    if last is None:
+        raise HTTPException(status_code=404, detail=f"Stream '{stream_id}' not found")
+    first = int(last) - count + 1
+    return list(range(first, first + count))
 
 
 # POST /streams - create a stream
 @router.post("/streams", response_model=StreamRead)
-def create_stream(body: StreamCreate, db: Session = Depends(get_db)):
+def create_stream(body: StreamCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "edit")
     stream_id = body.id or uuid.uuid4().hex
     existing = db.query(Stream).filter(Stream.id == stream_id).first()
     if existing:
@@ -177,9 +204,11 @@ def create_stream(body: StreamCreate, db: Session = Depends(get_db)):
     now = _now()
     db_stream = Stream(
         id=stream_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         schema_=body.schema_,
         retention_seconds=body.retention_seconds,
+        next_sequence=0,
         created_at=now,
     )
     db.add(db_stream)
@@ -190,15 +219,23 @@ def create_stream(body: StreamCreate, db: Session = Depends(get_db)):
 
 # GET /streams - list all streams
 @router.get("/streams", response_model=List[StreamRead])
-def list_streams(db: Session = Depends(get_db)):
-    streams = db.query(Stream).order_by(Stream.created_at.desc()).all()
+def list_streams(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(Stream)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(Stream.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal)
+        if accessible is not None:
+            query = query.filter(Stream.project_id.in_(accessible))
+    streams = query.order_by(Stream.created_at.desc()).all()
     return [StreamRead.from_orm_obj(s) for s in streams]
 
 
 # GET /streams/{id} - get a single stream
 @router.get("/streams/{stream_id}", response_model=StreamRead)
-def get_stream(stream_id: str, db: Session = Depends(get_db)):
-    stream = _get_stream_or_404(stream_id, db)
+def get_stream(stream_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    stream = _get_stream_or_404(stream_id, db, principal)
     return StreamRead.from_orm_obj(stream)
 
 
@@ -207,15 +244,20 @@ def get_stream(stream_id: str, db: Session = Depends(get_db)):
 def publish_to_stream(
     stream_id: str,
     body: PublishRequest,
+    principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
-    _get_stream_or_404(stream_id, db)
+    _get_stream_or_404(stream_id, db, principal, "execute")
+    from . import stream_processing
+    stream_processing.enforce_publish_capacity(db, stream_id, len(body.records))
 
     now = _now()
-    for record_payload in body.records:
+    sequences = allocate_sequences(db, stream_id, len(body.records))
+    for record_payload, sequence in zip(body.records, sequences):
         db.add(StreamRecord(
             id=uuid.uuid4().hex,
             stream_id=stream_id,
+            sequence=sequence,
             payload=record_payload,
             ts=now,
             created_at=now,
@@ -230,14 +272,15 @@ def publish_to_stream(
 def get_stream_records(
     stream_id: str,
     limit: int = Query(default=100, ge=1, le=10000),
+    principal: Principal = Depends(require_permission("view")),
     db: Session = Depends(get_db),
 ):
-    _get_stream_or_404(stream_id, db)
+    _get_stream_or_404(stream_id, db, principal)
 
     rows = (
         db.query(StreamRecord)
         .filter(StreamRecord.stream_id == stream_id)
-        .order_by(StreamRecord.ts.desc(), StreamRecord.created_at.desc())
+        .order_by(StreamRecord.sequence.desc())
         .limit(limit)
         .all()
     )
@@ -250,9 +293,10 @@ def archive_stream(
     stream_id: str,
     body: ArchiveRequest,
     actor: str = "system",
+    principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
-    _get_stream_or_404(stream_id, db)
+    _get_stream_or_404(stream_id, db, principal, "execute")
 
     asset = db.query(models.DataAsset).filter(models.DataAsset.id == body.target_asset_id).first()
     if not asset:
@@ -264,7 +308,7 @@ def archive_stream(
     rows = (
         db.query(StreamRecord)
         .filter(StreamRecord.stream_id == stream_id)
-        .order_by(StreamRecord.ts.asc())
+        .order_by(StreamRecord.sequence.asc())
         .all()
     )
 
@@ -301,8 +345,8 @@ def archive_stream(
 
 
 @router.post("/streams/{stream_id}/replay")
-def replay_stream(stream_id: str, body: StreamReplayRequest, db: Session = Depends(get_db)):
-    stream = _get_stream_or_404(stream_id, db)
+def replay_stream(stream_id: str, body: StreamReplayRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    stream = _get_stream_or_404(stream_id, db, principal, "execute")
     now = body.start_ts if body.start_ts is not None else _now()
     records = [dict(row or {}) for row in body.records]
     if not records:
@@ -312,9 +356,12 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, db: Session = Depen
         records = [dict(row) for row in cfg_records if isinstance(row, dict)]
     if not records:
         raise HTTPException(status_code=400, detail="Replay requires records or stream schema sample_records")
+    from . import stream_processing
+    stream_processing.enforce_publish_capacity(db, stream_id, len(records))
 
     created_records: List[StreamRecord] = []
-    for index, payload in enumerate(records):
+    sequences = allocate_sequences(db, stream_id, len(records))
+    for index, (payload, sequence) in enumerate(zip(records, sequences)):
         ts = now + (index * body.interval_seconds)
         if body.timestamp_field and payload.get(body.timestamp_field) not in (None, ""):
             try:
@@ -324,6 +371,7 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, db: Session = Depen
         row = StreamRecord(
             id=uuid.uuid4().hex,
             stream_id=stream_id,
+            sequence=sequence,
             payload=payload,
             ts=ts,
             created_at=now,
@@ -338,10 +386,11 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, db: Session = Depen
         if not asset and body.create_target_asset:
             asset = models.DataAsset(
                 id=target_asset_id,
+                project_id=stream.project_id,
                 display_name=body.target_display_name or f"{stream.display_name} Replay Archive",
                 description=f"Archived replay records from stream {stream.id}.",
                 kind="dataset",
-                asset_schema={"source_stream_id": stream.id, "record_count": len(records)},
+                asset_schema={"project_id": stream.project_id, "source_stream_id": stream.id, "record_count": len(records)},
                 records=[],
                 created_at=now,
                 updated_at=now,
@@ -349,6 +398,8 @@ def replay_stream(stream_id: str, body: StreamReplayRequest, db: Session = Depen
             db.add(asset)
         if not asset:
             raise HTTPException(status_code=404, detail=f"DataAsset '{target_asset_id}' not found")
+        if asset.project_id != stream.project_id:
+            raise HTTPException(status_code=409, detail="Target dataset belongs to another project")
         asset.records = list(asset.records or []) + records
         asset.updated_at = now
         archived = len(records)
@@ -397,9 +448,10 @@ def set_archive_policy(
     stream_id: str,
     body: ArchivePolicyRequest,
     actor: str = "system",
+    principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
-    stream = _get_stream_or_404(stream_id, db)
+    stream = _get_stream_or_404(stream_id, db, principal, "edit")
 
     policy: Dict[str, Any] = {}
     if body.max_age_seconds is not None:
@@ -429,8 +481,8 @@ def set_archive_policy(
 
 # GET /streams/{id}/archive-policy - read the configured policy
 @router.get("/streams/{stream_id}/archive-policy", response_model=ArchivePolicyRead)
-def get_archive_policy(stream_id: str, db: Session = Depends(get_db)):
-    stream = _get_stream_or_404(stream_id, db)
+def get_archive_policy(stream_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    stream = _get_stream_or_404(stream_id, db, principal)
     policy = dict(stream.archive_policy or {})
     return ArchivePolicyRead(
         stream_id=stream_id,
@@ -445,6 +497,7 @@ def apply_archive_policy(
     stream_id: str,
     body: ApplyArchivePolicyRequest,
     actor: str = "system",
+    principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
     """
@@ -454,14 +507,14 @@ def apply_archive_policy(
     `max_records` live records and archives the rest. Idempotent: already-archived
     records are never re-counted.
     """
-    stream = _get_stream_or_404(stream_id, db)
+    stream = _get_stream_or_404(stream_id, db, principal, "execute")
     policy = dict(stream.archive_policy or {})
     now = body.now if body.now is not None else _now()
 
     live = (
         db.query(StreamRecord)
         .filter(StreamRecord.stream_id == stream_id, StreamRecord.archived == False)  # noqa: E712
-        .order_by(StreamRecord.ts.asc(), StreamRecord.created_at.asc())
+        .order_by(StreamRecord.sequence.asc())
         .all()
     )
 
@@ -476,7 +529,7 @@ def apply_archive_policy(
     max_records = policy.get("max_records")
     if max_records is not None:
         # Keep the newest max_records live records; archive older overflow.
-        ordered = sorted(live, key=lambda r: (r.ts, r.created_at))
+        ordered = sorted(live, key=lambda r: r.sequence)
         overflow = len(ordered) - int(max_records)
         if overflow > 0:
             for r in ordered[:overflow]:
@@ -509,8 +562,8 @@ def apply_archive_policy(
 
 # GET /streams/{id}/metrics - record throughput metrics over record timestamps
 @router.get("/streams/{stream_id}/metrics", response_model=StreamMetricsRead)
-def get_stream_metrics(stream_id: str, db: Session = Depends(get_db)):
-    _get_stream_or_404(stream_id, db)
+def get_stream_metrics(stream_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    _get_stream_or_404(stream_id, db, principal)
 
     rows = (
         db.query(StreamRecord)

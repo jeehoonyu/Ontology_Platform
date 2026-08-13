@@ -1,0 +1,351 @@
+services:
+  postgres:
+    image: postgis/postgis@sha256:3f4a5d48e0be9580ed70ed618cd039ce57bbb2dd113053d3836e28513f1f87cd
+    environment:
+      POSTGRES_USER: ontology
+      POSTGRES_PASSWORD: ${REHEARSAL_POSTGRES_PASSWORD:?set REHEARSAL_POSTGRES_PASSWORD}
+      POSTGRES_DB: ontology
+    volumes:
+      - rehearsal_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ontology -d ontology"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: rehearsal-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${REHEARSAL_KEYCLOAK_ADMIN_PASSWORD:?set REHEARSAL_KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: http://idp.localhost:18080
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./deploy/keycloak-realm.json:/opt/keycloak/data/import/ontology-realm.json:ro
+      - ./deploy/keycloak-user-profile.json:/opt/keycloak/conf/ontology-user-profile.json:ro
+    ports:
+      - "127.0.0.1:18080:8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -q '200 OK' <&3"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  oms-api:
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    environment:
+      APP_ENV: production
+      AUTH_MODE: oidc
+      DATABASE_URL: postgresql+psycopg2://ontology:${REHEARSAL_POSTGRES_PASSWORD}@postgres:5432/ontology
+      OIDC_ISSUER: http://idp.localhost:18080/realms/ontology
+      OIDC_BACKCHANNEL_BASE_URL: http://keycloak:8080
+      OIDC_CLIENT_ID: ontology-platform
+      OIDC_REDIRECT_URI: http://localhost:18000/auth/callback
+      PUBLIC_BASE_URL: http://localhost:18000
+      WEBSOCKET_ALLOWED_ORIGINS: http://localhost:18000,http://localhost:18001
+      SESSION_TTL_SECONDS: "3600"
+      FORWARDED_ALLOW_IPS: "*"
+      CONNECTOR_SECRET_KEY: ${REHEARSAL_CONNECTOR_SECRET_KEY:?set REHEARSAL_CONNECTOR_SECRET_KEY}
+      CONNECTOR_SECRET_KEY_ID: rehearsal-v1
+      CONNECTOR_ALLOW_PRIVATE_NETWORKS: "false"
+      DATA_SNAPSHOT_BACKEND: local
+      DATA_SNAPSHOT_ROOT: /var/lib/ontology/snapshots
+      DATA_SNAPSHOT_BUCKET: ontology-rehearsal
+      DATA_SNAPSHOT_S3_ENDPOINT: http://minio:9000
+      DATA_SNAPSHOT_S3_REGION: us-east-1
+      DATA_SNAPSHOT_S3_ADDRESSING_STYLE: path
+      DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: "false"
+      AWS_ACCESS_KEY_ID: ontology
+      AWS_SECRET_ACCESS_KEY: ontology-rehearsal-storage
+      MODEL_GATEWAY_ALLOWED_HOSTS: ""
+      MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS: "false"
+      PLUGIN_EXECUTION_MODE: worker
+      PLUGIN_BUNDLE_ROOT: /var/lib/ontology/plugins
+      PLUGIN_BUNDLE_MAX_BYTES: "10485760"
+    extra_hosts:
+      - "idp.localhost:host-gateway"
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    volumes:
+      - rehearsal_snapshots:/var/lib/ontology/snapshots
+      - rehearsal_plugin_bundles:/var/lib/ontology/plugins
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  oms-api-peer:
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    environment:
+      APP_ENV: production
+      AUTH_MODE: oidc
+      DATABASE_URL: postgresql+psycopg2://ontology:${REHEARSAL_POSTGRES_PASSWORD}@postgres:5432/ontology
+      OIDC_ISSUER: http://idp.localhost:18080/realms/ontology
+      OIDC_BACKCHANNEL_BASE_URL: http://keycloak:8080
+      OIDC_CLIENT_ID: ontology-platform
+      OIDC_REDIRECT_URI: http://localhost:18000/auth/callback
+      PUBLIC_BASE_URL: http://localhost:18000
+      WEBSOCKET_ALLOWED_ORIGINS: http://localhost:18000,http://localhost:18001
+      SESSION_TTL_SECONDS: "3600"
+      FORWARDED_ALLOW_IPS: "*"
+      CONNECTOR_SECRET_KEY: ${REHEARSAL_CONNECTOR_SECRET_KEY:?set REHEARSAL_CONNECTOR_SECRET_KEY}
+      CONNECTOR_SECRET_KEY_ID: rehearsal-v1
+      CONNECTOR_ALLOW_PRIVATE_NETWORKS: "false"
+      DATA_SNAPSHOT_BACKEND: local
+      DATA_SNAPSHOT_ROOT: /var/lib/ontology/snapshots
+      DATA_SNAPSHOT_BUCKET: ontology-rehearsal
+      DATA_SNAPSHOT_S3_ENDPOINT: http://minio:9000
+      DATA_SNAPSHOT_S3_REGION: us-east-1
+      DATA_SNAPSHOT_S3_ADDRESSING_STYLE: path
+      DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: "false"
+      AWS_ACCESS_KEY_ID: ontology
+      AWS_SECRET_ACCESS_KEY: ontology-rehearsal-storage
+      MODEL_GATEWAY_ALLOWED_HOSTS: ""
+      MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS: "false"
+      PLUGIN_EXECUTION_MODE: worker
+      PLUGIN_BUNDLE_ROOT: /var/lib/ontology/plugins
+      PLUGIN_BUNDLE_MAX_BYTES: "10485760"
+    extra_hosts:
+      - "idp.localhost:host-gateway"
+    ports:
+      - "127.0.0.1:18001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    volumes:
+      - rehearsal_snapshots:/var/lib/ontology/snapshots
+      - rehearsal_plugin_bundles:/var/lib/ontology/plugins
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  minio:
+    profiles: ["pipeline-workers"]
+    image: minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ontology
+      MINIO_ROOT_PASSWORD: ontology-rehearsal-storage
+    ports:
+      - "127.0.0.1:19000:9000"
+    volumes:
+      - rehearsal_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  snapshot-proxy:
+    profiles: ["pipeline-workers"]
+    image: ghcr.io/shopify/toxiproxy@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+    ports:
+      - "127.0.0.1:18575:8474"
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  pipeline-worker-one:
+    profiles: ["pipeline-workers"]
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    command: ["python", "-m", "app.worker_daemon"]
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg2://ontology:${REHEARSAL_POSTGRES_PASSWORD}@postgres:5432/ontology
+      WORKER_API_URL: http://oms-api:8000
+      WORKER_TOKEN: ${REHEARSAL_PIPELINE_WORKER_TOKEN:-}
+      WORKER_NAME: rehearsal-pipeline-worker-one
+      WORKER_PROJECT_ID: default
+      WORKER_JOB_TYPES: pipeline.duckdb.deliver
+      WORKER_CONCURRENCY: "1"
+      WORKER_LEASE_SECONDS: "10"
+      WORKER_POLL_SECONDS: "0.1"
+      WORKER_HEARTBEAT_SECONDS: "2"
+      WORKER_HEALTH_PORT: "8091"
+      DATA_SNAPSHOT_BACKEND: s3
+      DATA_SNAPSHOT_ROOT: /var/lib/ontology/snapshots
+      DATA_SNAPSHOT_BUCKET: ontology-rehearsal
+      DATA_SNAPSHOT_S3_ENDPOINT: http://snapshot-proxy:9000
+      DATA_SNAPSHOT_S3_REGION: us-east-1
+      DATA_SNAPSHOT_S3_ADDRESSING_STYLE: path
+      DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: "false"
+      DATA_SNAPSHOT_CACHE_ROOT: /var/cache/ontology/snapshots
+      DATA_SNAPSHOT_CACHE_MAX_BYTES: "2147483648"
+      DATA_SNAPSHOT_CACHE_LEASE_SECONDS: "0"
+      AWS_ACCESS_KEY_ID: ontology
+      AWS_SECRET_ACCESS_KEY: ontology-rehearsal-storage
+    tmpfs:
+      - /var/cache/ontology/snapshots:rw,noexec,nosuid,nodev,size=256m,mode=0700
+    volumes:
+      - rehearsal_snapshots:/var/lib/ontology/snapshots
+    depends_on:
+      oms-api:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      snapshot-proxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health/ready', timeout=3).read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  pipeline-worker-two:
+    profiles: ["pipeline-workers"]
+    extends:
+      service: pipeline-worker-one
+    environment:
+      WORKER_NAME: rehearsal-pipeline-worker-two
+
+  pipeline-worker-daemon-one:
+    profiles: ["pipeline-multidaemon"]
+    image: docker:27-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+    command: ["--host=tcp://0.0.0.0:2375", "--tls=false"]
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    ports:
+      - "127.0.0.1:12375:2375"
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  pipeline-worker-daemon-two:
+    profiles: ["pipeline-multidaemon"]
+    image: docker:27-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+    command: ["--host=tcp://0.0.0.0:2375", "--tls=false"]
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    ports:
+      - "127.0.0.1:22375:2375"
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  plugin-registry:
+    profiles: ["plugin-execution"]
+    image: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19050:5000"
+    volumes:
+      - rehearsal_plugin_registry:/var/lib/registry
+
+  plugin-oci-daemon:
+    profiles: ["plugin-execution"]
+    image: docker:27-dind@sha256:aa3df78ecf320f5fafdce71c659f1629e96e9de0968305fe1de670e0ca9176ce
+    command: ["--host=tcp://0.0.0.0:2375", "--tls=false", "--insecure-registry=plugin-registry:5000"]
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - rehearsal_plugin_oci:/var/lib/docker
+    networks:
+      - default
+      - plugin_runtime
+    depends_on:
+      - plugin-registry
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  plugin-executor:
+    profiles: ["plugin-execution"]
+    build:
+      context: .
+      dockerfile: oms/plugin-executor.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PLUGIN_EXECUTOR_API_URL: http://oms-api:8000
+      PLUGIN_EXECUTOR_TOKEN: ${REHEARSAL_PLUGIN_EXECUTOR_TOKEN:-}
+      PLUGIN_EXECUTOR_NAME: rehearsal-plugin-executor
+      PLUGIN_EXECUTOR_PROJECT_ID: default
+      PLUGIN_EXECUTOR_LEASE_SECONDS: ${REHEARSAL_PLUGIN_LEASE_SECONDS:-10}
+      PLUGIN_EXECUTOR_HEARTBEAT_SECONDS: "2"
+      PLUGIN_EXECUTOR_POLL_SECONDS: "0.5"
+      PLUGIN_EXECUTOR_HEALTH_PORT: "8092"
+      PLUGIN_OCI_EXECUTABLE: docker
+      PLUGIN_SANDBOX_IMAGE: ${REHEARSAL_PLUGIN_SANDBOX_IMAGE:-}
+      PLUGIN_SANDBOX_RUNNER_PATH: /app/app/plugin_sandbox_runner.py
+      PLUGIN_SANDBOX_NETWORK: ontology-plugin-egress
+      PLUGIN_EGRESS_PROXY_URL: http://plugin-egress-proxy:8080
+      PLUGIN_EGRESS_PROXY_IMAGE: ${REHEARSAL_PLUGIN_EGRESS_PROXY_IMAGE:-}
+      PLUGIN_EGRESS_PROXY_NAME: plugin-egress-proxy
+      PLUGIN_EGRESS_TOKEN_SECRET: ${REHEARSAL_PLUGIN_EGRESS_TOKEN_SECRET:-}
+      PLUGIN_EGRESS_ALLOW_PRIVATE: "false"
+      DOCKER_HOST: tcp://plugin-oci-daemon:2375
+      HOME: /tmp
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    expose:
+      - "8092"
+    networks:
+      - default
+      - plugin_runtime
+    depends_on:
+      oms-api:
+        condition: service_healthy
+      plugin-oci-daemon:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health/ready', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+volumes:
+  rehearsal_pgdata:
+  rehearsal_snapshots:
+  rehearsal_plugin_bundles:
+  rehearsal_plugin_registry:
+  rehearsal_plugin_oci:
+  rehearsal_minio:
+
+networks:
+  plugin_runtime:

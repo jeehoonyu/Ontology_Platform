@@ -1,10 +1,11 @@
 import { useMemo, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
+import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
 
-export function Panel({ title, action, children, className }: { title: string; action?: ReactNode; children: ReactNode; className?: string }) {
+export function Panel({ title, action, children, className, ariaLabel }: { title: string; action?: ReactNode; children: ReactNode; className?: string; ariaLabel?: string }) {
   return (
-    <section className={classNames("panel", className)}>
+    <section className={classNames("panel", className)} aria-label={ariaLabel}>
       <header className="panel-header">
         <h2>{title}</h2>
         {action}
@@ -63,7 +64,13 @@ export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
   );
 }
 
-export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; empty?: string }) {
+/**
+ * `specs` is optional, so every existing caller keeps its current rendering.
+ * Supplied, cells are drawn by the base type the ontology declares rather than
+ * stringified -- the same dispatch `KeyValueGrid` uses, so a table and a detail
+ * pane of the same object agree on how its geometry or its timestamp reads.
+ */
+export function DataTable({ rows, specs, empty = "No records" }: { rows?: TableRow[]; specs?: Record<string, PropertySpec>; empty?: string }) {
   const safeRows = rows || [];
   const columns = useMemo(() => {
     const seen = new Set<string>();
@@ -72,7 +79,7 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   }, [safeRows]);
   if (!safeRows.length) return <div className="empty">{empty}</div>;
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" tabIndex={0} role="region" aria-label="Scrollable data table">
       <table>
         <thead>
           <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
@@ -80,8 +87,8 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
         <tbody>
           {safeRows.slice(0, 40).map((row, index) => (
             <tr key={index}>{columns.map((column) => {
-              const value = formatValue(row[column]);
-              return <td key={column} title={value}>{value}</td>;
+              const text = formatValue(row[column]);
+              return <td key={column} title={text}>{specs ? renderPropertyValue(row[column], specs[column]) : text}</td>;
             })}</tr>
           ))}
         </tbody>
@@ -90,7 +97,13 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   );
 }
 
-export function KeyValueGrid({ data }: { data: JsonObject }) {
+/**
+ * `specs` is optional so every existing caller keeps its current rendering.
+ * When the ontology's declared types are supplied, values are drawn by type --
+ * a geopoint as a location, a timestamp in the viewer's zone, a decimal with
+ * its unit -- instead of being stringified.
+ */
+export function KeyValueGrid({ data, specs }: { data: JsonObject; specs?: Record<string, PropertySpec> }) {
   const entries = Object.entries(data || {});
   if (!entries.length) return <div className="empty">No details available.</div>;
   return (
@@ -98,7 +111,7 @@ export function KeyValueGrid({ data }: { data: JsonObject }) {
       {entries.map(([key, value]) => (
         <div key={key}>
           <dt>{key.replace(/_/g, " ")}</dt>
-          <dd>{formatValue(value)}</dd>
+          <dd>{specs ? renderPropertyValue(value, specs[key]) : formatValue(value)}</dd>
         </div>
       ))}
     </dl>

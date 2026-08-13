@@ -99,6 +99,7 @@ def _upsert_data_asset(
 ) -> Dict[str, str]:
     existing = db.query(models.DataAsset).filter(models.DataAsset.id == id).first()
     if existing:
+        existing.project_id = str((asset_schema or {}).get("project_id") or "default")
         existing.display_name = display_name
         existing.description = description
         existing.records = records
@@ -108,6 +109,7 @@ def _upsert_data_asset(
 
     db.add(models.DataAsset(
         id=id,
+        project_id=str((asset_schema or {}).get("project_id") or "default"),
         display_name=display_name,
         description=description,
         kind="dataset",

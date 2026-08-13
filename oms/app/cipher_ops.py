@@ -29,7 +29,7 @@ def _now() -> int:
 
 class CipherKeyVersion(Base):
     __tablename__ = "cipher_key_versions"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     channel_id: Mapped[str] = mapped_column(String, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     key_ref: Mapped[str] = mapped_column(String)
@@ -39,7 +39,7 @@ class CipherKeyVersion(Base):
 
 class CipherToken(Base):
     __tablename__ = "cipher_token_vault"
-    token: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    token: Mapped[str] = mapped_column(String, primary_key=True)
     channel_id: Mapped[str] = mapped_column(String, index=True)
     value: Mapped[str] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(Integer)

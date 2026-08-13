@@ -28,7 +28,7 @@ def _now() -> int:
 
 class ResourceMarking(Base):
     __tablename__ = "resource_markings"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     resource_type: Mapped[str] = mapped_column(String, index=True)
     resource_id: Mapped[str] = mapped_column(String, index=True)
     marking_id: Mapped[str] = mapped_column(String, index=True)

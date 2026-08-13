@@ -14,8 +14,12 @@ Based on modern ontology-driven principles, this backend separates the data plan
    - Adds Object Set filtering, grouped aggregation, and Search Around traversal over ontology links.
    - Supports GIS-ready ontology properties using GeoJSON `geometry` fields.
    - Persists Saved Object Sets for reusable application, map, and agent contexts.
+   - Compiles legacy object/link/action metadata into normalized, project-scoped semantic definitions.
+   - Records append-only object changes with actor, source, transaction time, valid time, and evidence references.
+   - Exposes versioned typed object and graph queries at `/api/v1` with filters, aggregates, temporal reads, GIS radius constraints, masking, and cursor pagination.
 2. **Data Plane and Pipeline Builder**
-   - `DataAsset` records hold local tabular JSON datasets.
+   - `DataAsset` remains the compatibility metadata/resource model; immutable dataset snapshots store bulk rows as Parquet or JSONL in local or S3-compatible storage.
+   - Compiled pipeline execution plans preserve schema, field lineage, validation evidence, and optimistic graph-version checks.
    - `PipelineDefinition` steps support `filter`, `normalize`, `classify`, `summarize`, `derive`, `derive_geo_point`, `project`, `map_to_ontology`, and `link_objects`.
    - `PipelineRun` records capture lineage, step metrics, output datasets, and ontology hydration counts.
    - Data Health expectations validate required fields, uniqueness, allowed values, regexes, ranges, types, and row counts.
@@ -33,6 +37,8 @@ Based on modern ontology-driven principles, this backend separates the data plan
    - `AgentDefinition` scopes allowed object types, allowed actions, and optional model endpoint metadata.
    - `AgentSession` builds ontology context packs and stages allowed actions for human review.
    - `EvalSuite` and `EvalRun` provide deterministic checks for retrieval and action-proposal behavior.
+   - A provider-neutral model gateway supports the deterministic local adapter and explicitly enabled OpenAI-compatible HTTP providers without persisting secrets.
+   - `/api/v1/agents/*/tasks` exposes durable, cancellable, retryable agent execution over the shared worker control plane.
 6. **Governance, Lineage, and Observability**
    - `ApprovalRequest` enforces human-in-the-loop approval for high-risk actions.
    - `AuditLog` records ontology changes, pipeline runs, approvals, agent sessions, eval runs, and action execution.
@@ -52,6 +58,25 @@ Based on modern ontology-driven principles, this backend separates the data plan
   - `oms/test_ontology_validation.py`: Conformance scenario covering ontology validation, object-set search, aggregation, Search Around, data expectations, and intentional graph corruption detection.
 
 ## Setup & Running Locally
+
+For what this project is trying to reach and how completion is judged, see the tiered
+[Goal](docs/GOAL_2026-08-03.md), its [Tier B execution plan](docs/GOAL_TIER_B_2026-08-03.md),
+and the [Measurement Contract](docs/TIER_B_MEASUREMENT_CONTRACT.md) that fixes what the
+gates mean. The [Standing Goal](docs/GOAL_STANDING.md) is the ongoing discipline that keeps
+those claims from outliving their proof; `python oms/audit_evidence_corpus.py` reports how
+far the evidence has drifted from the current migration head.
+
+For a self-hosted team pilot with OIDC, TLS, migrations, backup, restore, and upgrade procedures, see [Production Pilot Operations](docs/PRODUCTION_PILOT.md).
+
+For the independent own-data Connect-to-Report acceptance run and tamper-evident two-team evidence gate, see [Independent Evaluator Guide](docs/EXTERNAL_EVALUATOR_GUIDE.md).
+
+For drag/drop editing, typed Pipeline transforms, ontology mappings, Workshop breakpoints, AIP traces, versioning, and recovery, see [Visual Builder Operations](docs/VISUAL_BUILDERS.md).
+
+For durable worker claims, heartbeats, retries, cancellation, timeout recovery, and queue monitoring, see [Asynchronous Execution Runtime](docs/ASYNC_EXECUTION.md).
+
+For normalized semantic definitions, temporal object events, snapshot storage, typed `/api/v1` queries, pipeline plans, and the model gateway, see [OntologyOS Runtime Core](docs/ONTOLOGYOS_RUNTIME_CORE.md). For partition watermarks, late-data quarantine, windows, backpressure, and recoverable stream workers, see [Durable Event-Time Stream Processing](docs/DURABLE_STREAM_PROCESSING.md).
+
+For signed connector, transform, widget, ontology-package, and model-provider extensions, typed SDK contracts, OCI isolation, and the real container rehearsal, see [Signed Plugin Runtime](docs/SIGNED_PLUGIN_RUNTIME.md).
 
 1. **Install Dependencies**
    ```bash

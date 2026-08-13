@@ -9,6 +9,7 @@ class ResourceBase(BaseModel):
 
 # --- OBJECT TYPES ---
 class ObjectTypeCreate(ResourceBase):
+    project_id: str = "default"
     properties: Dict[str, Any]
 
 class ObjectType(ObjectTypeCreate):
@@ -20,6 +21,7 @@ class ObjectType(ObjectTypeCreate):
 # --- OBJECT INSTANCES ---
 class ObjectInstanceCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     object_type_id: str
     properties: Dict[str, Any]
     source_asset_id: Optional[str] = None
@@ -27,6 +29,7 @@ class ObjectInstanceCreate(BaseModel):
 
 class ObjectInstance(BaseModel):
     id: str
+    project_id: str
     object_type_id: str
     properties: Dict[str, Any]
     source_asset_id: Optional[str] = None
@@ -38,6 +41,7 @@ class ObjectInstance(BaseModel):
 
 # --- LINK TYPES ---
 class LinkTypeCreate(ResourceBase):
+    project_id: str = "default"
     source_object_type_id: str
     target_object_type_id: str
     cardinality: str # ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY
@@ -45,8 +49,16 @@ class LinkTypeCreate(ResourceBase):
 class LinkType(LinkTypeCreate):
     model_config = ConfigDict(from_attributes=True)
 
+class LinkTypePatch(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    source_object_type_id: Optional[str] = None
+    target_object_type_id: Optional[str] = None
+    cardinality: Optional[str] = None
+
 class LinkInstanceCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     link_type_id: str
     source_object_id: str
     target_object_id: str
@@ -54,6 +66,7 @@ class LinkInstanceCreate(BaseModel):
 
 class LinkInstance(BaseModel):
     id: str
+    project_id: str
     link_type_id: str
     source_object_id: str
     target_object_id: str
@@ -85,6 +98,25 @@ class ObjectSetAggregateRequest(BaseModel):
     filters: Any = Field(default_factory=dict)
     group_by: Optional[str] = None
     metrics: List[Dict[str, Any]] = Field(default_factory=list)
+    # How stale a stored count may be and still be served. Omitted means any
+    # age is acceptable, which is the existing behaviour: a rollup computed once
+    # would otherwise be served forever, and a caller that cannot bound the age
+    # cannot tell a current answer from an abandoned one.
+    max_rollup_age_seconds: Optional[int] = None
+
+
+class FacetRollupRefreshRequest(BaseModel):
+    object_type_id: str
+    field: str
+
+
+class FacetRollupRefreshResponse(BaseModel):
+    object_type_id: str
+    field: str
+    project_id: str
+    computed_at: int
+    groups: List[Dict[str, Any]] = Field(default_factory=list)
+    refresh_seconds: float
 
 class ObjectSetAggregateResponse(BaseModel):
     object_type_id: str
@@ -92,6 +124,12 @@ class ObjectSetAggregateResponse(BaseModel):
     group_by: Optional[str] = None
     total: int
     groups: List[Dict[str, Any]] = Field(default_factory=list)
+    # "exact" when the aggregate was computed, "rollup" when served from stored
+    # counts. Declared here because a response model silently drops fields it
+    # does not name, and a caller cannot tell a fresh count from a stored one
+    # without being told which it got.
+    source: Optional[str] = None
+    computed_at: Optional[int] = None
 
 class ObjectSetSearchAroundRequest(BaseModel):
     object_ids: List[str]
@@ -108,6 +146,7 @@ class ObjectSetSearchAroundResponse(BaseModel):
     edges: List[Dict[str, Any]] = Field(default_factory=list)
 
 class SavedObjectSetCreate(ResourceBase):
+    project_id: str = "default"
     object_type_id: str
     filters: Any = Field(default_factory=dict)
     owner: str = "system"
@@ -208,6 +247,7 @@ class MGRSCoordinateResponse(BaseModel):
     utm: Dict[str, Any] = Field(default_factory=dict)
 
 class MapLayerDefinitionCreate(ResourceBase):
+    project_id: str = "default"
     object_type_id: str
     saved_object_set_id: Optional[str] = None
     geometry_field: str = "geometry"
@@ -227,11 +267,18 @@ class MapLayerFeatureCollectionResponse(GISFeatureCollectionResponse):
 
 # --- ACTION TYPES ---
 class ActionTypeCreate(ResourceBase):
+    project_id: str = "default"
     parameters: Dict[str, Any]
     rules: Dict[str, Any]
 
 class ActionType(ActionTypeCreate):
     model_config = ConfigDict(from_attributes=True)
+
+class ActionTypePatch(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+    rules: Optional[Dict[str, Any]] = None
 
 # --- ACTION EXECUTION ---
 class ActionExecutionRequest(BaseModel):
@@ -250,6 +297,7 @@ class ActionExecutionResponse(BaseModel):
 
 # --- DATA ASSETS AND PIPELINES ---
 class DataAssetCreate(ResourceBase):
+    project_id: str = "default"
     kind: str = "dataset"
     asset_schema: Dict[str, Any] = Field(default_factory=dict)
     records: List[Dict[str, Any]] = Field(default_factory=list)
@@ -270,6 +318,7 @@ class DataExpectationsResponse(BaseModel):
     checks: List[Dict[str, Any]] = Field(default_factory=list)
 
 class PipelineDefinitionCreate(ResourceBase):
+    project_id: str = "default"
     input_asset_id: str
     output_asset_id: Optional[str] = None
     mode: str = "batch"
@@ -284,6 +333,7 @@ class PipelineDefinition(PipelineDefinitionCreate):
 
 class PipelineRun(BaseModel):
     id: str
+    project_id: str
     pipeline_id: str
     status: str
     input_asset_id: str
@@ -300,6 +350,7 @@ class PipelineRun(BaseModel):
 
 # --- MODEL ENDPOINTS ---
 class ModelEndpointCreate(ResourceBase):
+    project_id: str = "default"
     provider: str
     model_name: str
     purpose: str = "general"
@@ -315,6 +366,7 @@ class ModelEndpoint(ModelEndpointCreate):
 # --- GOVERNANCE ---
 class ApprovalRequest(BaseModel):
     id: str
+    project_id: str
     action_type_id: str
     requester: str
     parameters: Dict[str, Any]
@@ -343,6 +395,7 @@ class AuditLog(BaseModel):
 
 # --- AGENTS AND EVALS ---
 class AgentDefinitionCreate(ResourceBase):
+    project_id: str = "default"
     system_prompt: Optional[str] = None
     allowed_object_types: List[str] = Field(default_factory=list)
     allowed_actions: List[str] = Field(default_factory=list)
@@ -543,6 +596,7 @@ class AIPThread(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class LogicFunctionCreate(ResourceBase):
+    project_id: str = "default"
     blocks: List[Dict[str, Any]] = Field(default_factory=list)
     input_schema: Dict[str, Any] = Field(default_factory=dict)
     output_schema: Dict[str, Any] = Field(default_factory=dict)
@@ -595,6 +649,7 @@ class AutomationRun(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class EvalSuiteCreate(ResourceBase):
+    project_id: str = "default"
     target_agent_id: str
     cases: List[Dict[str, Any]] = Field(default_factory=list)
     criteria: Dict[str, Any] = Field(default_factory=dict)
@@ -607,6 +662,7 @@ class EvalSuite(EvalSuiteCreate):
 
 class EvalRun(BaseModel):
     id: str
+    project_id: str
     suite_id: str
     status: str
     score: int

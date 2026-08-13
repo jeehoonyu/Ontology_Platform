@@ -22,8 +22,9 @@ read-only from app.modeling.
 """
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, tenancy
 from .modeling import ModelingObjective, ModelSubmission, ModelDeployment
+from .production_auth import Principal, require_permission
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
@@ -46,7 +47,8 @@ class MevRelease(Base):
     """A released model version pinned to an environment tag (staging / production)."""
     __tablename__ = "mev_releases"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     version: Mapped[str] = mapped_column(String)
@@ -59,7 +61,8 @@ class MevCheck(Base):
     """A manual or automatic release-gate check defined on an objective."""
     __tablename__ = "mev_checks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     name: Mapped[str] = mapped_column(String)
     check_type: Mapped[str] = mapped_column(String)  # manual | automatic
@@ -73,7 +76,8 @@ class MevCheckResult(Base):
     """The decision (pending/approved/rejected) for a check against a submission."""
     __tablename__ = "mev_check_results"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     check_id: Mapped[str] = mapped_column(String, ForeignKey("mev_checks.id"), index=True)
     status: Mapped[str] = mapped_column(String)  # pending | approved | rejected
@@ -86,7 +90,8 @@ class MevEvalDataset(Base):
     """An evaluation dataset registered for an objective."""
     __tablename__ = "mev_eval_datasets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     objective_id: Mapped[str] = mapped_column(String, ForeignKey("modeling_objectives.id"), index=True)
     asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     display_name: Mapped[str] = mapped_column(String)
@@ -97,7 +102,8 @@ class MevEvalSubset(Base):
     """A fairness/analysis slice over an evaluation dataset (filter_column in filter_values)."""
     __tablename__ = "mev_eval_subsets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     eval_dataset_id: Mapped[str] = mapped_column(String, ForeignKey("mev_eval_datasets.id"), index=True)
     name: Mapped[str] = mapped_column(String)
     filter_column: Mapped[str] = mapped_column(String)
@@ -109,7 +115,8 @@ class MevExperiment(Base):
     """A logged experiment: hyperparameters, metrics, artifacts for a submission."""
     __tablename__ = "mev_experiments"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     hyperparameters: Mapped[dict] = mapped_column(JSON, default=dict)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -121,7 +128,8 @@ class MevAdapter(Base):
     """A model adapter defining the input/output schema of a submission."""
     __tablename__ = "mev_adapters"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     submission_id: Mapped[str] = mapped_column(String, ForeignKey("model_submissions.id"), index=True)
     input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     output_schema: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -132,7 +140,8 @@ class MevDeploymentConfig(Base):
     """Deployment configuration bound to a SPECIFIC release (batch or live)."""
     __tablename__ = "mev_deployment_configs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     deployment_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     release_id: Mapped[str] = mapped_column(String, ForeignKey("mev_releases.id"), index=True)
     kind: Mapped[str] = mapped_column(String)  # batch | live
@@ -159,6 +168,7 @@ class MevCheckCreate(BaseModel):
 class MevCheckRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     objective_id: str
     name: str
     check_type: str
@@ -171,6 +181,7 @@ class MevCheckRead(BaseModel):
 class MevCheckResultRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     submission_id: str
     check_id: str
     status: str
@@ -197,6 +208,7 @@ class MevReleaseCreate(BaseModel):
 class MevReleaseRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     objective_id: str
     submission_id: str
     version: str
@@ -214,6 +226,7 @@ class MevEvalDatasetCreate(BaseModel):
 class MevEvalDatasetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     objective_id: str
     asset_id: Optional[str] = None
     display_name: str
@@ -230,6 +243,7 @@ class MevEvalSubsetCreate(BaseModel):
 class MevEvalSubsetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     eval_dataset_id: str
     name: str
     filter_column: str
@@ -256,6 +270,7 @@ class MevExperimentCreate(BaseModel):
 class MevExperimentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     submission_id: str
     hyperparameters: Dict[str, Any]
     metrics: Dict[str, Any]
@@ -272,6 +287,7 @@ class MevAdapterCreate(BaseModel):
 class MevAdapterRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     submission_id: str
     input_schema: Dict[str, Any]
     output_schema: Dict[str, Any]
@@ -296,6 +312,7 @@ class MevDeploymentConfigCreate(BaseModel):
 class MevDeploymentConfigRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str
     deployment_id: Optional[str] = None
     release_id: str
     kind: str
@@ -325,18 +342,47 @@ def _audit(db: Session, event_type: str, subject_type: str, subject_id: str,
     ))
 
 
-def _get_objective(db: Session, objective_id: str) -> ModelingObjective:
+def _get_objective(db: Session, objective_id: str, principal: Principal, permission: str = "view") -> ModelingObjective:
     obj = db.query(ModelingObjective).filter(ModelingObjective.id == objective_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail=f"ModelingObjective '{objective_id}' not found")
+    tenancy.assert_project_permission(db, principal, obj.project_id, permission)
     return obj
 
 
-def _get_submission(db: Session, submission_id: str) -> ModelSubmission:
+def _get_submission(db: Session, submission_id: str, principal: Principal, permission: str = "view") -> ModelSubmission:
     sub = db.query(ModelSubmission).filter(ModelSubmission.id == submission_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail=f"ModelSubmission '{submission_id}' not found")
+    tenancy.assert_project_permission(db, principal, sub.project_id, permission)
+    objective = db.get(ModelingObjective, sub.objective_id)
+    if not objective or objective.project_id != sub.project_id:
+        raise HTTPException(status_code=409, detail="Submission project ownership is inconsistent")
     return sub
+
+
+def _get_eval_dataset(db: Session, eval_dataset_id: str, principal: Principal, permission: str = "view") -> MevEvalDataset:
+    row = db.get(MevEvalDataset, eval_dataset_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"MevEvalDataset '{eval_dataset_id}' not found")
+    tenancy.assert_project_permission(db, principal, row.project_id, permission)
+    return row
+
+
+def _get_release(db: Session, release_id: str, principal: Principal, permission: str = "view") -> MevRelease:
+    row = db.get(MevRelease, release_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"MevRelease '{release_id}' not found")
+    tenancy.assert_project_permission(db, principal, row.project_id, permission)
+    return row
+
+
+def _assert_asset_project(db: Session, asset_id: Optional[str], project_id: str) -> None:
+    if not asset_id:
+        return
+    asset = db.get(models.DataAsset, asset_id)
+    if asset and str((asset.asset_schema or {}).get("project_id") or "default") != project_id:
+        raise HTTPException(status_code=409, detail="Dataset belongs to a different project")
 
 
 def _compare(value: float, operator: str, threshold: float) -> bool:
@@ -360,8 +406,9 @@ def _compare(value: float, operator: str, threshold: float) -> bool:
 # ---------------------------------------------------------------------------
 
 @router.post("/modeling/objectives/{objective_id}/checks", response_model=MevCheckRead)
-def create_check(objective_id: str, body: MevCheckCreate, db: Session = Depends(get_db)):
-    _get_objective(db, objective_id)
+def create_check(objective_id: str, body: MevCheckCreate,
+                 principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    objective = _get_objective(db, objective_id, principal, "edit")
     if body.check_type not in VALID_CHECK_TYPES:
         raise HTTPException(status_code=422, detail=f"check_type must be one of {sorted(VALID_CHECK_TYPES)}")
     if body.check_type == "automatic":
@@ -374,21 +421,21 @@ def create_check(objective_id: str, body: MevCheckCreate, db: Session = Depends(
     if db.query(MevCheck).filter(MevCheck.id == cid).first():
         raise HTTPException(status_code=400, detail="MevCheck already exists")
     row = MevCheck(
-        id=cid, objective_id=objective_id, name=body.name, check_type=body.check_type,
+        id=cid, project_id=objective.project_id, objective_id=objective_id, name=body.name, check_type=body.check_type,
         metric=body.metric, operator=body.operator, threshold=body.threshold, created_at=_now(),
     )
     db.add(row)
     _audit(db, "modeling.check.created", "mev_check", cid,
-           {"objective_id": objective_id, "check_type": body.check_type})
+           {"objective_id": objective_id, "check_type": body.check_type, "project_id": objective.project_id}, principal.id)
     db.commit()
     db.refresh(row)
     return row
 
 
 @router.get("/modeling/objectives/{objective_id}/checks", response_model=List[MevCheckRead])
-def list_checks(objective_id: str, db: Session = Depends(get_db)):
-    _get_objective(db, objective_id)
-    return db.query(MevCheck).filter(MevCheck.objective_id == objective_id).all()
+def list_checks(objective_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    objective = _get_objective(db, objective_id, principal)
+    return db.query(MevCheck).filter(MevCheck.objective_id == objective_id, MevCheck.project_id == objective.project_id).all()
 
 
 def _evaluate_submission_checks(db: Session, submission: ModelSubmission) -> List[MevCheckResult]:
@@ -397,7 +444,8 @@ def _evaluate_submission_checks(db: Session, submission: ModelSubmission) -> Lis
     metric vs threshold/operator -> approved/rejected automatically. Manual checks start pending.
     Idempotent per (submission, check): existing results are reused.
     """
-    checks = db.query(MevCheck).filter(MevCheck.objective_id == submission.objective_id).all()
+    checks = db.query(MevCheck).filter(MevCheck.objective_id == submission.objective_id,
+                                       MevCheck.project_id == submission.project_id).all()
     results: List[MevCheckResult] = []
     metrics = submission.metrics or {}
     for chk in checks:
@@ -415,14 +463,14 @@ def _evaluate_submission_checks(db: Session, submission: ModelSubmission) -> Lis
             else:
                 status = "approved" if _compare(float(metric_val), chk.operator, float(chk.threshold)) else "rejected"
             res = MevCheckResult(
-                id=uuid.uuid4().hex, submission_id=submission.id, check_id=chk.id,
+                id=uuid.uuid4().hex, project_id=submission.project_id, submission_id=submission.id, check_id=chk.id,
                 status=status, reviewer="system",
                 comment=f"auto: {chk.metric}={metric_val} {chk.operator} {chk.threshold}",
                 decided_at=_now(),
             )
         else:
             res = MevCheckResult(
-                id=uuid.uuid4().hex, submission_id=submission.id, check_id=chk.id,
+                id=uuid.uuid4().hex, project_id=submission.project_id, submission_id=submission.id, check_id=chk.id,
                 status="pending", reviewer=None, comment=None, decided_at=None,
             )
         db.add(res)
@@ -435,26 +483,28 @@ def _evaluate_submission_checks(db: Session, submission: ModelSubmission) -> Lis
 
 @router.post("/modeling/submissions/{submission_id}/evaluate-checks",
              response_model=List[MevCheckResultRead])
-def evaluate_checks(submission_id: str, db: Session = Depends(get_db)):
-    sub = _get_submission(db, submission_id)
+def evaluate_checks(submission_id: str, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    sub = _get_submission(db, submission_id, principal, "execute")
     return _evaluate_submission_checks(db, sub)
 
 
 @router.get("/modeling/submissions/{submission_id}/check-results",
             response_model=List[MevCheckResultRead])
-def list_check_results(submission_id: str, db: Session = Depends(get_db)):
-    _get_submission(db, submission_id)
-    return db.query(MevCheckResult).filter(MevCheckResult.submission_id == submission_id).all()
+def list_check_results(submission_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    sub = _get_submission(db, submission_id, principal)
+    return db.query(MevCheckResult).filter(MevCheckResult.submission_id == submission_id,
+                                           MevCheckResult.project_id == sub.project_id).all()
 
 
 @router.post("/modeling/submissions/{submission_id}/check-results",
              response_model=MevCheckResultRead)
-def decide_check_result(submission_id: str, body: MevCheckDecision, db: Session = Depends(get_db)):
-    _get_submission(db, submission_id)
+def decide_check_result(submission_id: str, body: MevCheckDecision,
+                        principal: Principal = Depends(require_permission("approve")), db: Session = Depends(get_db)):
+    sub = _get_submission(db, submission_id, principal, "approve")
     if body.status not in {"approved", "rejected"}:
         raise HTTPException(status_code=422, detail="status must be 'approved' or 'rejected'")
     chk = db.query(MevCheck).filter(MevCheck.id == body.check_id).first()
-    if not chk:
+    if not chk or chk.project_id != sub.project_id or chk.objective_id != sub.objective_id:
         raise HTTPException(status_code=404, detail=f"MevCheck '{body.check_id}' not found")
     res = db.query(MevCheckResult).filter(
         MevCheckResult.submission_id == submission_id,
@@ -462,7 +512,7 @@ def decide_check_result(submission_id: str, body: MevCheckDecision, db: Session 
     ).first()
     if not res:
         res = MevCheckResult(
-            id=uuid.uuid4().hex, submission_id=submission_id, check_id=body.check_id,
+            id=uuid.uuid4().hex, project_id=sub.project_id, submission_id=submission_id, check_id=body.check_id,
             status=body.status,
         )
         db.add(res)
@@ -471,7 +521,8 @@ def decide_check_result(submission_id: str, body: MevCheckDecision, db: Session 
     res.comment = body.comment
     res.decided_at = _now()
     _audit(db, "modeling.check_result.decided", "mev_check_result", res.id,
-           {"submission_id": submission_id, "check_id": body.check_id, "status": body.status})
+           {"submission_id": submission_id, "check_id": body.check_id, "status": body.status,
+            "project_id": sub.project_id}, principal.id)
     db.commit()
     db.refresh(res)
     return res
@@ -484,9 +535,11 @@ def _release_eligibility(db: Session, submission: ModelSubmission) -> Dict[str, 
     """
     _evaluate_submission_checks(db, submission)
     checks = {c.id: c for c in db.query(MevCheck).filter(
-        MevCheck.objective_id == submission.objective_id).all()}
+        MevCheck.objective_id == submission.objective_id,
+        MevCheck.project_id == submission.project_id).all()}
     results = db.query(MevCheckResult).filter(
-        MevCheckResult.submission_id == submission.id).all()
+        MevCheckResult.submission_id == submission.id,
+        MevCheckResult.project_id == submission.project_id).all()
     rejected = [r.check_id for r in results if r.status == "rejected"]
     pending_manual = [
         r.check_id for r in results
@@ -497,8 +550,9 @@ def _release_eligibility(db: Session, submission: ModelSubmission) -> Dict[str, 
 
 
 @router.get("/modeling/submissions/{submission_id}/release-eligibility")
-def get_release_eligibility(submission_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    sub = _get_submission(db, submission_id)
+def get_release_eligibility(submission_id: str, principal: Principal = Depends(require_permission("view")),
+                            db: Session = Depends(get_db)) -> Dict[str, Any]:
+    sub = _get_submission(db, submission_id, principal)
     return _release_eligibility(db, sub)
 
 
@@ -507,13 +561,15 @@ def get_release_eligibility(submission_id: str, db: Session = Depends(get_db)) -
 # ---------------------------------------------------------------------------
 
 @router.post("/modeling/objectives/{objective_id}/releases", response_model=MevReleaseRead)
-def create_release(objective_id: str, body: MevReleaseCreate, db: Session = Depends(get_db)):
-    _get_objective(db, objective_id)
+def create_release(objective_id: str, body: MevReleaseCreate,
+                   principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
+    objective = _get_objective(db, objective_id, principal, "publish")
     if body.environment not in VALID_ENVIRONMENTS:
         raise HTTPException(status_code=422, detail=f"environment must be one of {sorted(VALID_ENVIRONMENTS)}")
     sub = db.query(ModelSubmission).filter(
         ModelSubmission.id == body.submission_id,
         ModelSubmission.objective_id == objective_id,
+        ModelSubmission.project_id == objective.project_id,
     ).first()
     if not sub:
         raise HTTPException(status_code=404,
@@ -529,7 +585,7 @@ def create_release(objective_id: str, body: MevReleaseCreate, db: Session = Depe
     if db.query(MevRelease).filter(MevRelease.id == rid).first():
         raise HTTPException(status_code=400, detail="MevRelease already exists")
     row = MevRelease(
-        id=rid, objective_id=objective_id, submission_id=body.submission_id,
+        id=rid, project_id=objective.project_id, objective_id=objective_id, submission_id=body.submission_id,
         version=body.version, environment=body.environment, notes=body.notes, created_at=_now(),
     )
     db.add(row)
@@ -540,32 +596,30 @@ def create_release(objective_id: str, body: MevReleaseCreate, db: Session = Depe
         sub.released = True
     _audit(db, "modeling.release.created", "mev_release", rid,
            {"objective_id": objective_id, "submission_id": body.submission_id,
-            "environment": body.environment})
+            "environment": body.environment, "project_id": objective.project_id}, principal.id)
     db.commit()
     db.refresh(row)
     return row
 
 
 @router.get("/modeling/objectives/{objective_id}/releases", response_model=List[MevReleaseRead])
-def list_releases(objective_id: str, db: Session = Depends(get_db)):
-    _get_objective(db, objective_id)
+def list_releases(objective_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    objective = _get_objective(db, objective_id, principal)
     return db.query(MevRelease).filter(
-        MevRelease.objective_id == objective_id).order_by(MevRelease.created_at.desc()).all()
+        MevRelease.objective_id == objective_id, MevRelease.project_id == objective.project_id).order_by(MevRelease.created_at.desc()).all()
 
 
 @router.post("/modeling/releases/{release_id}/promote", response_model=MevReleaseRead)
-def promote_release(release_id: str, db: Session = Depends(get_db)):
+def promote_release(release_id: str, principal: Principal = Depends(require_permission("publish")), db: Session = Depends(get_db)):
     """
     Promote explicitly re-points a release's environment to 'production'. It does NOT silently
     rebind any deployment config; deployment configs bind to a specific release_id (re-point
     those explicitly via a new deployment config if desired).
     """
-    row = db.query(MevRelease).filter(MevRelease.id == release_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"MevRelease '{release_id}' not found")
+    row = _get_release(db, release_id, principal, "publish")
     row.environment = "production"
     _audit(db, "modeling.release.promoted", "mev_release", release_id,
-           {"environment": "production"})
+           {"environment": "production", "project_id": row.project_id}, principal.id)
     db.commit()
     db.refresh(row)
     return row
@@ -576,13 +630,15 @@ def promote_release(release_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/modeling/objectives/{objective_id}/eval-datasets", response_model=MevEvalDatasetRead)
-def create_eval_dataset(objective_id: str, body: MevEvalDatasetCreate, db: Session = Depends(get_db)):
-    _get_objective(db, objective_id)
+def create_eval_dataset(objective_id: str, body: MevEvalDatasetCreate,
+                        principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    objective = _get_objective(db, objective_id, principal, "edit")
+    _assert_asset_project(db, body.asset_id, objective.project_id)
     did = body.id or uuid.uuid4().hex
     if db.query(MevEvalDataset).filter(MevEvalDataset.id == did).first():
         raise HTTPException(status_code=400, detail="MevEvalDataset already exists")
     row = MevEvalDataset(
-        id=did, objective_id=objective_id, asset_id=body.asset_id,
+        id=did, project_id=objective.project_id, objective_id=objective_id, asset_id=body.asset_id,
         display_name=body.display_name, created_at=_now(),
     )
     db.add(row)
@@ -593,21 +649,21 @@ def create_eval_dataset(objective_id: str, body: MevEvalDatasetCreate, db: Sessi
 
 @router.get("/modeling/objectives/{objective_id}/eval-datasets",
             response_model=List[MevEvalDatasetRead])
-def list_eval_datasets(objective_id: str, db: Session = Depends(get_db)):
-    _get_objective(db, objective_id)
-    return db.query(MevEvalDataset).filter(MevEvalDataset.objective_id == objective_id).all()
+def list_eval_datasets(objective_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    objective = _get_objective(db, objective_id, principal)
+    return db.query(MevEvalDataset).filter(MevEvalDataset.objective_id == objective_id,
+                                           MevEvalDataset.project_id == objective.project_id).all()
 
 
 @router.post("/modeling/eval-datasets/{eval_dataset_id}/subsets", response_model=MevEvalSubsetRead)
-def create_eval_subset(eval_dataset_id: str, body: MevEvalSubsetCreate, db: Session = Depends(get_db)):
-    ds = db.query(MevEvalDataset).filter(MevEvalDataset.id == eval_dataset_id).first()
-    if not ds:
-        raise HTTPException(status_code=404, detail=f"MevEvalDataset '{eval_dataset_id}' not found")
+def create_eval_subset(eval_dataset_id: str, body: MevEvalSubsetCreate,
+                       principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    ds = _get_eval_dataset(db, eval_dataset_id, principal, "edit")
     sid = body.id or uuid.uuid4().hex
     if db.query(MevEvalSubset).filter(MevEvalSubset.id == sid).first():
         raise HTTPException(status_code=400, detail="MevEvalSubset already exists")
     row = MevEvalSubset(
-        id=sid, eval_dataset_id=eval_dataset_id, name=body.name,
+        id=sid, project_id=ds.project_id, eval_dataset_id=eval_dataset_id, name=body.name,
         filter_column=body.filter_column, filter_values=body.filter_values, created_at=_now(),
     )
     db.add(row)
@@ -618,11 +674,10 @@ def create_eval_subset(eval_dataset_id: str, body: MevEvalSubsetCreate, db: Sess
 
 @router.get("/modeling/eval-datasets/{eval_dataset_id}/subsets",
             response_model=List[MevEvalSubsetRead])
-def list_eval_subsets(eval_dataset_id: str, db: Session = Depends(get_db)):
-    ds = db.query(MevEvalDataset).filter(MevEvalDataset.id == eval_dataset_id).first()
-    if not ds:
-        raise HTTPException(status_code=404, detail=f"MevEvalDataset '{eval_dataset_id}' not found")
-    return db.query(MevEvalSubset).filter(MevEvalSubset.eval_dataset_id == eval_dataset_id).all()
+def list_eval_subsets(eval_dataset_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    ds = _get_eval_dataset(db, eval_dataset_id, principal)
+    return db.query(MevEvalSubset).filter(MevEvalSubset.eval_dataset_id == eval_dataset_id,
+                                          MevEvalSubset.project_id == ds.project_id).all()
 
 
 # ---------------------------------------------------------------------------
@@ -719,11 +774,13 @@ def _compute_metrics(problem_type: str, preds: List[Any], actuals: List[Any],
 
 
 @router.post("/modeling/objectives/{objective_id}/evaluate")
-def evaluate(objective_id: str, body: MevEvaluateRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    objective = _get_objective(db, objective_id)
+def evaluate(objective_id: str, body: MevEvaluateRequest,
+             principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    objective = _get_objective(db, objective_id, principal, "execute")
     sub = db.query(ModelSubmission).filter(
         ModelSubmission.id == body.submission_id,
         ModelSubmission.objective_id == objective_id,
+        ModelSubmission.project_id == objective.project_id,
     ).first()
     if not sub:
         raise HTTPException(status_code=404,
@@ -731,6 +788,7 @@ def evaluate(objective_id: str, body: MevEvaluateRequest, db: Session = Depends(
     ds = db.query(MevEvalDataset).filter(
         MevEvalDataset.id == body.eval_dataset_id,
         MevEvalDataset.objective_id == objective_id,
+        MevEvalDataset.project_id == objective.project_id,
     ).first()
     if not ds:
         raise HTTPException(status_code=404,
@@ -765,7 +823,8 @@ def evaluate(objective_id: str, body: MevEvaluateRequest, db: Session = Depends(
             objective.problem_type, s_preds, s_actuals, s_prob)
 
     _audit(db, "modeling.evaluation.run", "model_submission", body.submission_id,
-           {"objective_id": objective_id, "eval_dataset_id": body.eval_dataset_id})
+           {"objective_id": objective_id, "eval_dataset_id": body.eval_dataset_id,
+            "project_id": objective.project_id}, principal.id)
     db.commit()
     return {
         "submission_id": body.submission_id,
@@ -781,13 +840,14 @@ def evaluate(objective_id: str, body: MevEvaluateRequest, db: Session = Depends(
 # ---------------------------------------------------------------------------
 
 @router.post("/modeling/submissions/{submission_id}/experiments", response_model=MevExperimentRead)
-def create_experiment(submission_id: str, body: MevExperimentCreate, db: Session = Depends(get_db)):
-    _get_submission(db, submission_id)
+def create_experiment(submission_id: str, body: MevExperimentCreate,
+                      principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    submission = _get_submission(db, submission_id, principal, "execute")
     eid = body.id or uuid.uuid4().hex
     if db.query(MevExperiment).filter(MevExperiment.id == eid).first():
         raise HTTPException(status_code=400, detail="MevExperiment already exists")
     row = MevExperiment(
-        id=eid, submission_id=submission_id, hyperparameters=body.hyperparameters,
+        id=eid, project_id=submission.project_id, submission_id=submission_id, hyperparameters=body.hyperparameters,
         metrics=body.metrics, artifacts=body.artifacts, created_at=_now(),
     )
     db.add(row)
@@ -798,10 +858,11 @@ def create_experiment(submission_id: str, body: MevExperimentCreate, db: Session
 
 @router.get("/modeling/submissions/{submission_id}/experiments",
             response_model=List[MevExperimentRead])
-def list_experiments(submission_id: str, db: Session = Depends(get_db)):
-    _get_submission(db, submission_id)
+def list_experiments(submission_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    submission = _get_submission(db, submission_id, principal)
     return db.query(MevExperiment).filter(
-        MevExperiment.submission_id == submission_id).order_by(MevExperiment.created_at).all()
+        MevExperiment.submission_id == submission_id,
+        MevExperiment.project_id == submission.project_id).order_by(MevExperiment.created_at).all()
 
 
 # ---------------------------------------------------------------------------
@@ -809,13 +870,14 @@ def list_experiments(submission_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/modeling/submissions/{submission_id}/adapter", response_model=MevAdapterRead)
-def create_adapter(submission_id: str, body: MevAdapterCreate, db: Session = Depends(get_db)):
-    _get_submission(db, submission_id)
+def create_adapter(submission_id: str, body: MevAdapterCreate,
+                   principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    submission = _get_submission(db, submission_id, principal, "edit")
     aid = body.id or uuid.uuid4().hex
     if db.query(MevAdapter).filter(MevAdapter.id == aid).first():
         raise HTTPException(status_code=400, detail="MevAdapter already exists")
     row = MevAdapter(
-        id=aid, submission_id=submission_id, input_schema=body.input_schema,
+        id=aid, project_id=submission.project_id, submission_id=submission_id, input_schema=body.input_schema,
         output_schema=body.output_schema, created_at=_now(),
     )
     db.add(row)
@@ -825,11 +887,12 @@ def create_adapter(submission_id: str, body: MevAdapterCreate, db: Session = Dep
 
 
 @router.get("/modeling/submissions/{submission_id}/adapter", response_model=MevAdapterRead)
-def get_adapter(submission_id: str, db: Session = Depends(get_db)):
-    _get_submission(db, submission_id)
-    row = db.query(MevAdapter).filter(MevAdapter.submission_id == submission_id).order_by(
+def get_adapter(submission_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    submission = _get_submission(db, submission_id, principal)
+    row = db.query(MevAdapter).filter(MevAdapter.submission_id == submission_id,
+                                      MevAdapter.project_id == submission.project_id).order_by(
         MevAdapter.created_at.desc()).first()
-    if not row:
+    if not row or row.project_id != submission.project_id:
         raise HTTPException(status_code=404, detail="MevAdapter not found for submission")
     return row
 
@@ -849,11 +912,13 @@ def _type_ok(value: Any, type_name: str) -> bool:
 
 
 @router.post("/modeling/submissions/{submission_id}/adapter/infer")
-def adapter_infer(submission_id: str, body: MevInferRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    _get_submission(db, submission_id)
-    adapter = db.query(MevAdapter).filter(MevAdapter.submission_id == submission_id).order_by(
+def adapter_infer(submission_id: str, body: MevInferRequest,
+                  principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)) -> Dict[str, Any]:
+    submission = _get_submission(db, submission_id, principal, "execute")
+    adapter = db.query(MevAdapter).filter(MevAdapter.submission_id == submission_id,
+                                          MevAdapter.project_id == submission.project_id).order_by(
         MevAdapter.created_at.desc()).first()
-    if not adapter:
+    if not adapter or adapter.project_id != submission.project_id:
         raise HTTPException(status_code=404, detail="MevAdapter not found for submission")
     input_schema = adapter.input_schema or {}
     missing = [k for k in input_schema if k not in body.inputs]
@@ -884,37 +949,47 @@ def adapter_infer(submission_id: str, body: MevInferRequest, db: Session = Depen
 # ---------------------------------------------------------------------------
 
 @router.post("/modeling/deployment-configs", response_model=MevDeploymentConfigRead)
-def create_deployment_config(body: MevDeploymentConfigCreate, db: Session = Depends(get_db)):
+def create_deployment_config(body: MevDeploymentConfigCreate,
+                             principal: Principal = Depends(require_permission("deploy")), db: Session = Depends(get_db)):
     if body.kind not in VALID_DEPLOY_KINDS:
         raise HTTPException(status_code=422, detail=f"kind must be one of {sorted(VALID_DEPLOY_KINDS)}")
-    release = db.query(MevRelease).filter(MevRelease.id == body.release_id).first()
-    if not release:
-        raise HTTPException(status_code=404, detail=f"MevRelease '{body.release_id}' not found")
+    release = _get_release(db, body.release_id, principal, "deploy")
+    if body.deployment_id:
+        deployment = db.get(ModelDeployment, body.deployment_id)
+        # Configs may reference an external deployment identifier. If it resolves
+        # locally, enforce the governed project boundary.
+        if deployment and deployment.project_id != release.project_id:
+            raise HTTPException(status_code=409, detail="Deployment belongs to a different project")
     cid = body.id or uuid.uuid4().hex
     if db.query(MevDeploymentConfig).filter(MevDeploymentConfig.id == cid).first():
         raise HTTPException(status_code=400, detail="MevDeploymentConfig already exists")
     if body.kind == "live" and body.replicas is None:
         raise HTTPException(status_code=422, detail="live deployment config requires replicas")
     row = MevDeploymentConfig(
-        id=cid, deployment_id=body.deployment_id, release_id=body.release_id, kind=body.kind,
+        id=cid, project_id=release.project_id, deployment_id=body.deployment_id, release_id=body.release_id, kind=body.kind,
         spark_profile=body.spark_profile, replicas=body.replicas, cpu=body.cpu, gpu=body.gpu,
         created_at=_now(),
     )
     db.add(row)
     _audit(db, "modeling.deployment_config.created", "mev_deployment_config", cid,
-           {"release_id": body.release_id, "kind": body.kind})
+           {"release_id": body.release_id, "kind": body.kind, "project_id": release.project_id}, principal.id)
     db.commit()
     db.refresh(row)
     return row
 
 
 @router.get("/modeling/deployment-configs", response_model=List[MevDeploymentConfigRead])
-def list_deployment_configs(db: Session = Depends(get_db)):
-    return db.query(MevDeploymentConfig).order_by(MevDeploymentConfig.created_at.desc()).all()
+def list_deployment_configs(principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    projects = tenancy.accessible_project_ids(db, principal)
+    query = db.query(MevDeploymentConfig)
+    if projects is not None:
+        query = query.filter(MevDeploymentConfig.project_id.in_(projects))
+    return query.order_by(MevDeploymentConfig.created_at.desc()).all()
 
 
 @router.post("/modeling/deployment-configs/{config_id}/query")
 def query_deployment_config(config_id: str, body: MevInferRequest,
+                            principal: Principal = Depends(require_permission("execute")),
                             db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Validate query inputs against the adapter schema of the submission bound via the config's
@@ -923,13 +998,14 @@ def query_deployment_config(config_id: str, body: MevInferRequest,
     cfg = db.query(MevDeploymentConfig).filter(MevDeploymentConfig.id == config_id).first()
     if not cfg:
         raise HTTPException(status_code=404, detail=f"MevDeploymentConfig '{config_id}' not found")
+    tenancy.assert_project_permission(db, principal, cfg.project_id, "execute")
     release = db.query(MevRelease).filter(MevRelease.id == cfg.release_id).first()
-    if not release:
+    if not release or release.project_id != cfg.project_id:
         raise HTTPException(status_code=404, detail="Bound MevRelease not found")
     adapter = db.query(MevAdapter).filter(
         MevAdapter.submission_id == release.submission_id).order_by(
         MevAdapter.created_at.desc()).first()
-    if not adapter:
+    if not adapter or adapter.project_id != cfg.project_id:
         raise HTTPException(status_code=404, detail="MevAdapter not found for released submission")
     input_schema = adapter.input_schema or {}
     missing = [k for k in input_schema if k not in body.inputs]

@@ -23,9 +23,9 @@ Tables (all prefixed Wh / wh_ to avoid collisions on the shared Base):
 """
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
+from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey, inspect
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Any, Dict
@@ -46,7 +46,8 @@ LISTENER_AUTH_TYPES = {"hmac", "bearer", "api_key", "none"}
 class WhWebhook(Base):
     __tablename__ = "wh_webhooks"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     source_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     display_name: Mapped[str] = mapped_column(String)
     mode: Mapped[str] = mapped_column(String)  # writeback | side_effect
@@ -65,7 +66,8 @@ class WhWebhook(Base):
 class WhExecution(Base):
     __tablename__ = "wh_executions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     webhook_id: Mapped[str] = mapped_column(String, ForeignKey("wh_webhooks.id"), index=True)
     request_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     response_payload: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -80,7 +82,8 @@ class WhExecution(Base):
 class WhCredential(Base):
     __tablename__ = "wh_credentials"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     source_id: Mapped[str] = mapped_column(String, index=True)
     credential_type: Mapped[str] = mapped_column(String)  # api_key | oauth2
     token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -91,7 +94,8 @@ class WhCredential(Base):
 class WhOutboundApp(Base):
     __tablename__ = "wh_outbound_apps"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     client_id: Mapped[str] = mapped_column(String)
     client_secret: Mapped[str] = mapped_column(String)
@@ -103,7 +107,8 @@ class WhOutboundApp(Base):
 class WhListener(Base):
     __tablename__ = "wh_listeners"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     auth_type: Mapped[str] = mapped_column(String)  # hmac | bearer | api_key | none
     auth_secret: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -112,11 +117,16 @@ class WhListener(Base):
     event_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer)
 
+    @property
+    def credential_configured(self) -> bool:
+        return bool(self.auth_secret) if self.auth_type != "none" else True
+
 
 class WhListenerEvent(Base):
     __tablename__ = "wh_listener_events"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     listener_id: Mapped[str] = mapped_column(String, ForeignKey("wh_listeners.id"), index=True)
     raw_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     auth_valid: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -132,6 +142,7 @@ class WhListenerEvent(Base):
 
 class WebhookCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     source_id: Optional[str] = None
     display_name: str
     mode: str = "writeback"
@@ -145,6 +156,7 @@ class WebhookRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     source_id: Optional[str] = None
     display_name: str
     mode: str
@@ -172,6 +184,7 @@ class ExecutionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     webhook_id: str
     request_payload: Dict[str, Any]
     response_payload: Dict[str, Any]
@@ -185,6 +198,7 @@ class ExecutionRead(BaseModel):
 
 class CredentialCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     credential_type: str = "api_key"
     token: Optional[str] = None
     expires_at: Optional[int] = None
@@ -199,6 +213,7 @@ class AuthorizeRequest(BaseModel):
 
 class OutboundAppCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     client_id: str
     client_secret: str
@@ -210,9 +225,9 @@ class OutboundAppRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     client_id: str
-    client_secret: str
     token_endpoint: str
     scopes: List[str]
     created_at: int
@@ -220,6 +235,7 @@ class OutboundAppRead(BaseModel):
 
 class ListenerCreate(BaseModel):
     id: Optional[str] = None
+    project_id: str = "default"
     display_name: str
     auth_type: str = "none"
     auth_secret: Optional[str] = None
@@ -232,9 +248,10 @@ class ListenerRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     display_name: str
     auth_type: str
-    auth_secret: Optional[str] = None
+    credential_configured: bool = False
     target_asset_id: Optional[str] = None
     event_schema: Any
     created_at: int
@@ -244,6 +261,7 @@ class ListenerEventRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    project_id: str
     listener_id: str
     raw_payload: Dict[str, Any]
     auth_valid: bool
@@ -330,13 +348,13 @@ def _extract_outputs(webhook: WhWebhook, response_body: Any) -> Dict[str, Any]:
     return out
 
 
-def _credential_status_for_source(db: Session, source_id: Optional[str]) -> Dict[str, Any]:
+def _credential_status_for_source(db: Session, source_id: Optional[str], project_id: str = "default") -> Dict[str, Any]:
     """Return {needs_refresh, expired} for the latest credential of a source."""
     if not source_id:
         return {"has_credential": False, "needs_refresh": False, "expired": False}
     cred = (
         db.query(WhCredential)
-        .filter(WhCredential.source_id == source_id)
+        .filter(WhCredential.project_id == project_id, WhCredential.source_id == source_id)
         .order_by(WhCredential.created_at.desc())
         .first()
     )
@@ -356,11 +374,24 @@ def _validate_required_params(webhook: WhWebhook, parameters: Dict[str, Any]) ->
         )
 
 
-def _get_webhook(db: Session, webhook_id: str) -> WhWebhook:
-    wh = db.query(WhWebhook).filter(WhWebhook.id == webhook_id).first()
-    if not wh:
-        raise HTTPException(status_code=404, detail=f"Webhook '{webhook_id}' not found")
-    return wh
+def _get_webhook(db: Session, webhook_id: str, principal: Optional[production_auth.Principal] = None, permission: str = "view") -> WhWebhook:
+    if principal is None:
+        wh = db.query(WhWebhook).filter(WhWebhook.id == webhook_id).first()
+        if not wh:
+            raise HTTPException(status_code=404, detail=f"Webhook '{webhook_id}' not found")
+        return wh
+    return semantic_scope.owned_row(db, principal, WhWebhook, webhook_id, permission, "Webhook")
+
+
+def _validate_source_project(db: Session, source_id: Optional[str], project_id: str) -> None:
+    if not source_id:
+        return
+    from . import connectivity
+    if connectivity.ConnectionSource.__tablename__ not in inspect(db.get_bind()).get_table_names():
+        return
+    source = db.get(connectivity.ConnectionSource, source_id)
+    if source and source.project_id != project_id:
+        raise HTTPException(status_code=422, detail="Connection source must belong to the same project")
 
 
 def _required_event_keys(event_schema: Any) -> List[str]:
@@ -409,7 +440,9 @@ def _audit(db: Session, event_type: str, subject_type: str, subject_id: str, pay
 # ---------------------------------------------------------------------------
 
 @router.post("/connections/webhooks", response_model=WebhookRead)
-def create_webhook(body: WebhookCreate, db: Session = Depends(get_db)):
+def create_webhook(body: WebhookCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
+    _validate_source_project(db, body.source_id, body.project_id)
     if body.mode not in WEBHOOK_MODES:
         raise HTTPException(status_code=422, detail=f"mode must be one of {sorted(WEBHOOK_MODES)}")
     wh_id = body.id or uuid.uuid4().hex
@@ -418,6 +451,7 @@ def create_webhook(body: WebhookCreate, db: Session = Depends(get_db)):
     now = _now()
     row = WhWebhook(
         id=wh_id,
+        project_id=body.project_id,
         source_id=body.source_id,
         display_name=body.display_name,
         mode=body.mode,
@@ -437,13 +471,13 @@ def create_webhook(body: WebhookCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/connections/webhooks", response_model=List[WebhookRead])
-def list_webhooks(db: Session = Depends(get_db)):
-    return db.query(WhWebhook).order_by(WhWebhook.created_at).all()
+def list_webhooks(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.accessible_query(db, principal, WhWebhook).order_by(WhWebhook.created_at).all()
 
 
 @router.get("/connections/webhooks/{webhook_id}", response_model=WebhookRead)
-def get_webhook(webhook_id: str, db: Session = Depends(get_db)):
-    return _get_webhook(db, webhook_id)
+def get_webhook(webhook_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return _get_webhook(db, webhook_id, principal)
 
 
 # ---------------------------------------------------------------------------
@@ -451,9 +485,9 @@ def get_webhook(webhook_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/connections/webhooks/{webhook_id}/invoke")
-def invoke_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(get_db)):
+def invoke_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     """Writeback invoke: failures are BLOCKING (return 422 so the caller rolls back)."""
-    wh = _get_webhook(db, webhook_id)
+    wh = _get_webhook(db, webhook_id, principal, "execute")
     _validate_required_params(wh, body.parameters)
 
     # Idempotency: if this key already succeeded, return the cached execution.
@@ -477,7 +511,7 @@ def invoke_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(g
             }
 
     request_payload = _build_request(wh, body.parameters)
-    cred_status = _credential_status_for_source(db, wh.source_id)
+    cred_status = _credential_status_for_source(db, wh.source_id, wh.project_id)
     mock = wh.mock_response or {}
     resp_status = mock.get("status", 200)
     resp_body = mock.get("body", {})
@@ -489,6 +523,7 @@ def invoke_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(g
     if failed:
         execution = WhExecution(
             id=exec_id,
+            project_id=wh.project_id,
             webhook_id=webhook_id,
             request_payload=request_payload,
             response_payload=mock,
@@ -517,6 +552,7 @@ def invoke_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(g
     extracted = _extract_outputs(wh, resp_body)
     execution = WhExecution(
         id=exec_id,
+        project_id=wh.project_id,
         webhook_id=webhook_id,
         request_payload=request_payload,
         response_payload=mock,
@@ -546,13 +582,13 @@ def invoke_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(g
 # ---------------------------------------------------------------------------
 
 @router.post("/connections/webhooks/{webhook_id}/invoke-side-effect")
-def invoke_side_effect(webhook_id: str, body: WebhookSideEffectInvoke, db: Session = Depends(get_db)):
+def invoke_side_effect(webhook_id: str, body: WebhookSideEffectInvoke, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     """Side-effect invoke: failures are NON-BLOCKING; always return 200.
 
     Supports a batch list of parameter sets -> one WhExecution each.
     """
-    wh = _get_webhook(db, webhook_id)
-    cred_status = _credential_status_for_source(db, wh.source_id)
+    wh = _get_webhook(db, webhook_id, principal, "execute")
+    cred_status = _credential_status_for_source(db, wh.source_id, wh.project_id)
     param_sets = body.parameter_sets if body.parameter_sets else [{}]
     results: List[Dict[str, Any]] = []
     now = _now()
@@ -569,7 +605,7 @@ def invoke_side_effect(webhook_id: str, body: WebhookSideEffectInvoke, db: Sessi
 
         if missing:
             execution = WhExecution(
-                id=exec_id, webhook_id=webhook_id, request_payload=request_payload,
+                id=exec_id, project_id=wh.project_id, webhook_id=webhook_id, request_payload=request_payload,
                 response_payload={"error": f"missing required parameters: {missing}"},
                 response_status=422, status="failed", extracted_outputs={},
                 idempotency_key=None, actor=body.actor, created_at=now,
@@ -582,7 +618,7 @@ def invoke_side_effect(webhook_id: str, body: WebhookSideEffectInvoke, db: Sessi
         failed = bool(mock.get("fail"))
         if failed:
             execution = WhExecution(
-                id=exec_id, webhook_id=webhook_id, request_payload=request_payload,
+                id=exec_id, project_id=wh.project_id, webhook_id=webhook_id, request_payload=request_payload,
                 response_payload=mock,
                 response_status=resp_status if isinstance(resp_status, int) else 500,
                 status="failed", extracted_outputs={}, idempotency_key=None,
@@ -593,7 +629,7 @@ def invoke_side_effect(webhook_id: str, body: WebhookSideEffectInvoke, db: Sessi
         else:
             extracted = _extract_outputs(wh, resp_body)
             execution = WhExecution(
-                id=exec_id, webhook_id=webhook_id, request_payload=request_payload,
+                id=exec_id, project_id=wh.project_id, webhook_id=webhook_id, request_payload=request_payload,
                 response_payload=mock,
                 response_status=resp_status if isinstance(resp_status, int) else 200,
                 status="success", extracted_outputs=extracted, idempotency_key=None,
@@ -621,12 +657,12 @@ def invoke_side_effect(webhook_id: str, body: WebhookSideEffectInvoke, db: Sessi
 # ---------------------------------------------------------------------------
 
 @router.post("/connections/webhooks/{webhook_id}/test")
-def test_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(get_db)):
+def test_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     """Dry-run: build + return request preview + mock response + extracted outputs.
 
     Does NOT store a WhExecution.
     """
-    wh = _get_webhook(db, webhook_id)
+    wh = _get_webhook(db, webhook_id, principal, "execute")
     _validate_required_params(wh, body.parameters)
     request_payload = _build_request(wh, body.parameters)
     mock = wh.mock_response or {}
@@ -647,11 +683,11 @@ def test_webhook(webhook_id: str, body: WebhookInvoke, db: Session = Depends(get
 # ---------------------------------------------------------------------------
 
 @router.get("/connections/webhooks/{webhook_id}/executions", response_model=List[ExecutionRead])
-def list_executions(webhook_id: str, db: Session = Depends(get_db)):
-    _get_webhook(db, webhook_id)
+def list_executions(webhook_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    wh = _get_webhook(db, webhook_id, principal)
     return (
         db.query(WhExecution)
-        .filter(WhExecution.webhook_id == webhook_id)
+        .filter(WhExecution.project_id == wh.project_id, WhExecution.webhook_id == webhook_id)
         .order_by(WhExecution.created_at)
         .all()
     )
@@ -662,12 +698,14 @@ def list_executions(webhook_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/outbound-applications", response_model=OutboundAppRead)
-def create_outbound_app(body: OutboundAppCreate, db: Session = Depends(get_db)):
+def create_outbound_app(body: OutboundAppCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
+    semantic_scope.assert_project(db, principal, body.project_id, "administer")
     app_id = body.id or uuid.uuid4().hex
     if db.query(WhOutboundApp).filter(WhOutboundApp.id == app_id).first():
         raise HTTPException(status_code=400, detail="OutboundApp already exists")
     row = WhOutboundApp(
         id=app_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         client_id=body.client_id,
         client_secret=body.client_secret,
@@ -684,8 +722,8 @@ def create_outbound_app(body: OutboundAppCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/outbound-applications", response_model=List[OutboundAppRead])
-def list_outbound_apps(db: Session = Depends(get_db)):
-    return db.query(WhOutboundApp).order_by(WhOutboundApp.created_at).all()
+def list_outbound_apps(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
+    return semantic_scope.accessible_query(db, principal, WhOutboundApp, "administer").order_by(WhOutboundApp.created_at).all()
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +731,9 @@ def list_outbound_apps(db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/connections/sources/{source_id}/credentials")
-def create_credential(source_id: str, body: CredentialCreate, db: Session = Depends(get_db)):
+def create_credential(source_id: str, body: CredentialCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
+    semantic_scope.assert_project(db, principal, body.project_id, "administer")
+    _validate_source_project(db, source_id, body.project_id)
     if body.credential_type not in CREDENTIAL_TYPES:
         raise HTTPException(status_code=422,
                             detail=f"credential_type must be one of {sorted(CREDENTIAL_TYPES)}")
@@ -702,6 +742,7 @@ def create_credential(source_id: str, body: CredentialCreate, db: Session = Depe
         raise HTTPException(status_code=400, detail="Credential already exists")
     row = WhCredential(
         id=cred_id,
+        project_id=body.project_id,
         source_id=source_id,
         credential_type=body.credential_type,
         token=body.token,
@@ -716,6 +757,7 @@ def create_credential(source_id: str, body: CredentialCreate, db: Session = Depe
     expired = row.expires_at is not None and row.expires_at <= _now()
     return {
         "id": cred_id,
+        "project_id": row.project_id,
         "source_id": source_id,
         "credential_type": row.credential_type,
         "expires_at": row.expires_at,
@@ -725,14 +767,14 @@ def create_credential(source_id: str, body: CredentialCreate, db: Session = Depe
 
 
 @router.post("/connections/webhooks/{webhook_id}/authorize")
-def authorize_webhook(webhook_id: str, body: AuthorizeRequest, db: Session = Depends(get_db)):
+def authorize_webhook(webhook_id: str, body: AuthorizeRequest, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
     """Simulate an OAuth2 code -> token exchange against a WhOutboundApp.
 
     Deterministic: token = sha256(client_secret + code). Stores a WhCredential
     (oauth2) for the webhook's source (or the supplied source_id).
     """
-    wh = _get_webhook(db, webhook_id)
-    app = db.query(WhOutboundApp).filter(WhOutboundApp.id == body.outbound_app_id).first()
+    wh = _get_webhook(db, webhook_id, principal, "administer")
+    app = db.query(WhOutboundApp).filter(WhOutboundApp.id == body.outbound_app_id, WhOutboundApp.project_id == wh.project_id).first()
     if not app:
         raise HTTPException(status_code=404,
                             detail=f"OutboundApp '{body.outbound_app_id}' not found")
@@ -740,6 +782,7 @@ def authorize_webhook(webhook_id: str, body: AuthorizeRequest, db: Session = Dep
     if not source_id:
         raise HTTPException(status_code=422,
                             detail="No source_id available to bind the credential to")
+    _validate_source_project(db, source_id, wh.project_id)
 
     token = hashlib.sha256((app.client_secret + body.code).encode("utf-8")).hexdigest()
     now = _now()
@@ -748,6 +791,7 @@ def authorize_webhook(webhook_id: str, body: AuthorizeRequest, db: Session = Dep
     cred_id = uuid.uuid4().hex
     row = WhCredential(
         id=cred_id,
+        project_id=wh.project_id,
         source_id=source_id,
         credential_type="oauth2",
         token=token,
@@ -773,18 +817,24 @@ def authorize_webhook(webhook_id: str, body: AuthorizeRequest, db: Session = Dep
 # ---------------------------------------------------------------------------
 
 @router.post("/listeners", response_model=ListenerRead)
-def create_listener(body: ListenerCreate, db: Session = Depends(get_db)):
+def create_listener(body: ListenerCreate, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
+    semantic_scope.assert_project(db, principal, body.project_id, "edit")
     if body.auth_type not in LISTENER_AUTH_TYPES:
         raise HTTPException(status_code=422,
                             detail=f"auth_type must be one of {sorted(LISTENER_AUTH_TYPES)}")
     if body.auth_type != "none" and not body.auth_secret:
         raise HTTPException(status_code=422,
                             detail=f"auth_secret is required for auth_type '{body.auth_type}'")
+    if body.target_asset_id:
+        asset = semantic_scope.asset_for(db, principal, body.target_asset_id, "edit")
+        if asset.project_id != body.project_id:
+            raise HTTPException(status_code=422, detail="Listener target asset must belong to the same project")
     listener_id = body.id or uuid.uuid4().hex
     if db.query(WhListener).filter(WhListener.id == listener_id).first():
         raise HTTPException(status_code=400, detail="Listener already exists")
     row = WhListener(
         id=listener_id,
+        project_id=body.project_id,
         display_name=body.display_name,
         auth_type=body.auth_type,
         auth_secret=body.auth_secret,
@@ -801,16 +851,13 @@ def create_listener(body: ListenerCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/listeners", response_model=List[ListenerRead])
-def list_listeners(db: Session = Depends(get_db)):
-    return db.query(WhListener).order_by(WhListener.created_at).all()
+def list_listeners(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.accessible_query(db, principal, WhListener).order_by(WhListener.created_at).all()
 
 
 @router.get("/listeners/{listener_id}", response_model=ListenerRead)
-def get_listener(listener_id: str, db: Session = Depends(get_db)):
-    row = db.query(WhListener).filter(WhListener.id == listener_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Listener '{listener_id}' not found")
-    return row
+def get_listener(listener_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    return semantic_scope.owned_row(db, principal, WhListener, listener_id, "view", "Listener")
 
 
 def _check_listener_auth(listener: WhListener, headers: Dict[str, str], body_bytes: bytes) -> bool:
@@ -864,7 +911,7 @@ async def receive_listener_event(listener_id: str, request: Request, db: Session
     auth_valid = _check_listener_auth(listener, headers, body_bytes)
     if not auth_valid:
         event = WhListenerEvent(
-            id=event_id, listener_id=listener_id, raw_payload=payload,
+            id=event_id, project_id=listener.project_id, listener_id=listener_id, raw_payload=payload,
             auth_valid=False, processing_status="auth_error",
             error_message="authentication failed", created_at=now,
         )
@@ -880,7 +927,7 @@ async def receive_listener_event(listener_id: str, request: Request, db: Session
     missing = [k for k in required_keys if k not in payload]
     if missing:
         event = WhListenerEvent(
-            id=event_id, listener_id=listener_id, raw_payload=payload,
+            id=event_id, project_id=listener.project_id, listener_id=listener_id, raw_payload=payload,
             auth_valid=True, processing_status="validation_error",
             error_message=f"missing required keys: {missing}", created_at=now,
         )
@@ -897,7 +944,8 @@ async def receive_listener_event(listener_id: str, request: Request, db: Session
     appended = False
     if listener.target_asset_id:
         asset = db.query(models.DataAsset).filter(
-            models.DataAsset.id == listener.target_asset_id
+            models.DataAsset.id == listener.target_asset_id,
+            models.DataAsset.project_id == listener.project_id,
         ).first()
         if asset:
             records = list(asset.records or [])
@@ -907,7 +955,7 @@ async def receive_listener_event(listener_id: str, request: Request, db: Session
             appended = True
 
     event = WhListenerEvent(
-        id=event_id, listener_id=listener_id, raw_payload=payload,
+        id=event_id, project_id=listener.project_id, listener_id=listener_id, raw_payload=payload,
         auth_valid=True, processing_status="persisted",
         error_message=None, created_at=now,
     )
@@ -924,12 +972,11 @@ async def receive_listener_event(listener_id: str, request: Request, db: Session
 
 
 @router.get("/listeners/{listener_id}/events", response_model=List[ListenerEventRead])
-def list_listener_events(listener_id: str, db: Session = Depends(get_db)):
-    if not db.query(WhListener).filter(WhListener.id == listener_id).first():
-        raise HTTPException(status_code=404, detail=f"Listener '{listener_id}' not found")
+def list_listener_events(listener_id: str, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
+    listener = semantic_scope.owned_row(db, principal, WhListener, listener_id, "view", "Listener")
     return (
         db.query(WhListenerEvent)
-        .filter(WhListenerEvent.listener_id == listener_id)
+        .filter(WhListenerEvent.project_id == listener.project_id, WhListenerEvent.listener_id == listener_id)
         .order_by(WhListenerEvent.created_at)
         .all()
     )

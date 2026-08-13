@@ -1,0 +1,54 @@
+{
+  "gate_id": "ontology_scale",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "explorer_filter_p95_ms": 9.608,
+    "facet_from_rollup": 1,
+    "facet_p95_ms": 8.598,
+    "facet_refresh_seconds": 3.09,
+    "facet_source": "rollup",
+    "graph_two_hop_p95_ms": 15.709,
+    "links": 50000000,
+    "object_lookup_p95_ms": 9.8,
+    "object_range_p95_ms": 12.938,
+    "objects": 10000000
+  },
+  "notes": "Reference profile over 10000000 objects and 50000000 links, 20 samples per query shape, physical index plans verified. Covers both typed-read implementations: the v1 keyset select and the Object Explorer path. Facet served from rollup.",
+  "provenance": {
+    "captured_at": 1786406727,
+    "entry_points": [
+      "POST /api/v1/objects/query",
+      "POST /api/v1/graph/query",
+      "POST /object-explorer/query",
+      "POST /object-sets/aggregate"
+    ],
+    "git_commit": "e8c655e",
+    "harness": "oms/benchmark_ontology_scale_postgres.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
+    "request_shapes": [
+      "typed lookup, equality filter on an indexed property",
+      "typed range read, gte filter with ordering",
+      "two-hop graph traversal",
+      "Object Explorer filtered read (runtime.query_object_set)",
+      "facet aggregation grouped by a property"
+    ]
+  },
+  "status": "PASS",
+  "thresholds": {
+    "explorer_filter_p95_ms_max": 300.0,
+    "facet_from_rollup_min": 1,
+    "facet_p95_ms_max": 300.0,
+    "graph_two_hop_p95_ms_max": 2000.0,
+    "links_min": 50000000,
+    "object_lookup_p95_ms_max": 300.0,
+    "object_range_p95_ms_max": 300.0,
+    "objects_min": 10000000
+  },
+  "tier": "B"
+}

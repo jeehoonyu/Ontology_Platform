@@ -1,0 +1,268 @@
+"""Durable worker claims, progress, retries, and stale-job recovery."""
+import os
+import tempfile
+import time
+
+tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'async_jobs.db')}"
+os.environ["AUTH_MODE"] = "local"
+os.environ["APP_ENV"] = "test"
+
+from fastapi.testclient import TestClient  # noqa: E402
+from app.database import SessionLocal  # noqa: E402
+from app.main import app  # noqa: E402
+from app.platform_runtime import PlatformJob, PlatformJobIdempotencyReceipt, PlatformJobLease  # noqa: E402
+
+client = TestClient(app)
+passed = 0
+
+
+def ok(response, label, expect=200):
+    global passed
+    assert response.status_code == expect, f"{label}: {response.status_code} {response.text[:800]}"
+    passed += 1
+    return response.json() if response.content else {}
+
+
+low = ok(client.post("/jobs", json={
+    "job_type": "pipeline.preview",
+    "payload": {"graph_id": "low"},
+    "priority": 10,
+    "max_attempts": 2,
+}), "create low-priority job", 201)
+high = ok(client.post("/jobs", json={
+    "job_type": "pipeline.preview",
+    "payload": {"graph_id": "high"},
+    "priority": 90,
+    "max_attempts": 2,
+}), "create high-priority job", 201)
+
+claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "pipeline-worker-1",
+    "supported_job_types": ["pipeline.preview"],
+    "lease_seconds": 30,
+}), "claim highest-priority job")
+assert claim["job"]["id"] == high["id"] and claim["job"]["status"] == "RUNNING", claim
+token = claim["job"]["lease_token"]
+
+ok(client.post(f"/jobs/{high['id']}/heartbeat", json={
+    "lease_token": "not-the-owner",
+    "progress": 10,
+}), "reject invalid lease", 409)
+heartbeat = ok(client.post(f"/jobs/{high['id']}/heartbeat", json={
+    "lease_token": token,
+    "progress": 45,
+    "message": "Sampling transformed rows",
+    "metrics": {"rows_scanned": 240},
+}), "record worker heartbeat")
+assert heartbeat["progress"] == 45 and heartbeat["lease"]["worker_id"] == "pipeline-worker-1", heartbeat
+
+completed = ok(client.post(f"/jobs/{high['id']}/complete", json={
+    "lease_token": token,
+    "result": {"rows": 25, "schema_fields": 8},
+}), "complete claimed job")
+assert completed["status"] == "SUCCEEDED" and completed["progress"] == 100 and completed["lease"] is None, completed
+
+low_claim = ok(client.post("/jobs/claim", json={"worker_id": "pipeline-worker-2"}), "claim remaining job")["job"]
+assert low_claim["id"] == low["id"], low_claim
+retried = ok(client.post(f"/jobs/{low['id']}/fail", json={
+    "lease_token": low_claim["lease_token"],
+    "error": "Temporary connector outage",
+    "retriable": True,
+}), "schedule retry")
+assert retried["status"] == "QUEUED" and retried["attempt"] == 2, retried
+
+retry_claim = ok(client.post("/jobs/claim", json={"worker_id": "pipeline-worker-3"}), "claim retry")["job"]
+failed = ok(client.post(f"/jobs/{low['id']}/fail", json={
+    "lease_token": retry_claim["lease_token"],
+    "error": "Connector remained unavailable",
+    "retriable": True,
+}), "exhaust retry budget")
+assert failed["status"] == "FAILED" and failed["completed_at"], failed
+
+first_idempotent = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "idempotency_key": "incident-42-report-v1",
+}), "create idempotent job", 201)
+second_idempotent = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "idempotency_key": "incident-42-report-v1",
+}), "reuse idempotent job", 201)
+assert first_idempotent["id"] == second_idempotent["id"], (first_idempotent, second_idempotent)
+assert first_idempotent["idempotent_replay"] is False and second_idempotent["idempotent_replay"] is True
+assert first_idempotent["idempotency_receipt_id"] == second_idempotent["idempotency_receipt_id"]
+passed += 1
+
+ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "idempotency_key": "incident-42-report-v1",
+    "payload": {"format": "changed"},
+}), "reject changed request behind reused idempotency key", 409)
+
+scoped_idempotent = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "subject_type": "incident",
+    "subject_id": "incident-43",
+    "idempotency_key": "incident-42-report-v1",
+}), "scope an idempotency key to its subject", 201)
+assert scoped_idempotent["id"] != first_idempotent["id"], scoped_idempotent
+passed += 1
+
+with SessionLocal() as db:
+    now = int(time.time())
+    for index in range(251):
+        db.add(PlatformJob(
+            id=f"filler-job-{index}", project_id="default", job_type="report.generate",
+            status="SUCCEEDED", actor=first_idempotent["actor"], subject_type=None, subject_id=None,
+            payload={"__execution": {"idempotency_key": f"filler-{index}"}}, result={},
+            attempt=1, progress=100, created_at=now + index + 1, updated_at=now + index + 1,
+            started_at=now + index + 1, completed_at=now + index + 1,
+        ))
+    db.commit()
+
+old_replay = ok(client.post("/jobs", json={
+    "job_type": "report.generate",
+    "idempotency_key": "incident-42-report-v1",
+}), "replay receipt beyond the former 250-job scan window", 201)
+assert old_replay["id"] == first_idempotent["id"] and old_replay["idempotent_replay"] is True, old_replay
+with SessionLocal() as db:
+    assert db.query(PlatformJobIdempotencyReceipt).filter(
+        PlatformJobIdempotencyReceipt.job_id == first_idempotent["id"],
+    ).count() == 1
+passed += 2
+
+stale = ok(client.post("/jobs", json={
+    "job_type": "model.monitor",
+    "max_attempts": 3,
+}), "create stale-worker job", 201)
+stale_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "model-worker-1",
+    "supported_job_types": ["model.monitor"],
+}), "claim stale-worker job")["job"]
+with SessionLocal() as db:
+    lease = db.query(PlatformJobLease).filter(PlatformJobLease.job_id == stale["id"]).one()
+    lease.expires_at = int(time.time()) - 1
+    db.commit()
+
+summary = ok(client.get("/jobs/summary"), "reap stale worker")
+assert summary["reaped_stale_jobs"] == 1 and summary["active_leases"] == 0, summary
+recovered = ok(client.get(f"/jobs/{stale['id']}"), "inspect recovered job")
+assert recovered["status"] == "QUEUED" and recovered["attempt"] == 2, recovered
+assert any(event["event_type"] == "job.requeued" for event in recovered["events"]), recovered
+recovery_event = next(event for event in recovered["events"] if event["event_type"] == "job.requeued")
+assert recovery_event["payload"]["prior_worker_id"] == "model-worker-1"
+observation = ok(client.get(f"/runtime/observability/jobs/{stale['id']}"), "inspect recovery telemetry")
+assert observation["status"] == "QUEUED" and observation["completed_at"] is None, observation
+assert observation["spans"][-1]["name"] == "recovery" and observation["metrics"]["recovery_count"] == 1, observation
+ops_events = ok(client.get("/ops/events?source=runtime"), "inspect recovery operations event")
+assert any(event["event_type"] == "job.requeued" and event["subject_id"] == stale["id"] for event in ops_events), ops_events
+passed += 3
+
+listed = ok(client.get("/jobs?status=SUCCEEDED&job_type=pipeline.preview"), "filter job list")
+assert [row["id"] for row in listed] == [high["id"]], listed
+
+empty = ok(client.post("/jobs/claim", json={
+    "worker_id": "unsupported-worker",
+    "supported_job_types": ["unknown.type"],
+}), "return empty compatible queue")
+assert empty["job"] is None, empty
+
+dependency_one = ok(client.post("/jobs", json={
+    "job_type": "pipeline.partition",
+    "subject_type": "pipeline_partition",
+    "subject_id": "partition-1",
+}), "create first partition dependency", 201)
+dependency_two = ok(client.post("/jobs", json={
+    "job_type": "pipeline.partition",
+    "subject_type": "pipeline_partition",
+    "subject_id": "partition-2",
+}), "create second partition dependency", 201)
+coordinator = ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "subject_type": "pipeline_execution_plan",
+    "subject_id": "partitioned-plan",
+    "depends_on": [dependency_one["id"], dependency_two["id"]],
+    "idempotency_key": "partitioned-plan-finalize-v1",
+}), "create dependency-gated coordinator", 201)
+assert coordinator["status"] == "BLOCKED", coordinator
+assert {item["id"] for item in coordinator["dependencies"]} == {dependency_one["id"], dependency_two["id"]}, coordinator
+passed += 1
+blocked_observation = ok(client.get(f"/runtime/observability/jobs/{coordinator['id']}"), "inspect blocked dependency telemetry")
+assert blocked_observation["status"] == "BLOCKED", blocked_observation
+assert blocked_observation["spans"][0]["name"] == "dependency_wait", blocked_observation["spans"]
+passed += 1
+
+coordinator_replay = ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "subject_type": "pipeline_execution_plan",
+    "subject_id": "partitioned-plan",
+    "depends_on": [dependency_one["id"], dependency_two["id"]],
+    "idempotency_key": "partitioned-plan-finalize-v1",
+}), "replay dependency-gated coordinator", 201)
+assert coordinator_replay["id"] == coordinator["id"] and coordinator_replay["idempotent_replay"] is True, coordinator_replay
+passed += 1
+
+blocked_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "coordinator-worker",
+    "supported_job_types": ["pipeline.finalize"],
+}), "do not claim blocked coordinator")
+assert blocked_claim["job"] is None, blocked_claim
+
+claimed_dependency_ids = set()
+for index in range(1, 3):
+    claimed_dependency = ok(client.post("/jobs/claim", json={
+        "worker_id": f"partition-worker-{index}",
+        "supported_job_types": ["pipeline.partition"],
+    }), f"claim partition dependency {index}")["job"]
+    claimed_dependency_ids.add(claimed_dependency["id"])
+    ok(client.post(f"/jobs/{claimed_dependency['id']}/complete", json={
+        "lease_token": claimed_dependency["lease_token"],
+        "result": {"partition": index},
+    }), f"complete partition dependency {index}")
+assert claimed_dependency_ids == {dependency_one["id"], dependency_two["id"]}, claimed_dependency_ids
+passed += 1
+
+released_observation = ok(client.get(f"/runtime/observability/jobs/{coordinator['id']}"), "inspect released dependency telemetry")
+assert released_observation["status"] == "QUEUED", released_observation
+assert released_observation["spans"][-1]["message"] == "Job dependencies satisfied", released_observation["spans"]
+passed += 1
+
+coordinator_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "coordinator-worker",
+    "supported_job_types": ["pipeline.finalize"],
+}), "claim released coordinator")["job"]
+assert coordinator_claim["id"] == coordinator["id"], coordinator_claim
+coordinator_state = ok(client.get(f"/jobs/{coordinator['id']}"), "inspect dependency release evidence")
+assert any(event["event_type"] == "job.dependencies_satisfied" for event in coordinator_state["events"]), coordinator_state
+passed += 1
+
+failed_dependency = ok(client.post("/jobs", json={
+    "job_type": "pipeline.partition",
+}), "create failing partition dependency", 201)
+failed_coordinator = ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "depends_on": [failed_dependency["id"]],
+}), "create coordinator behind failing dependency", 201)
+failed_dependency_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "failed-partition-worker",
+    "supported_job_types": ["pipeline.partition"],
+}), "claim failing dependency")["job"]
+ok(client.post(f"/jobs/{failed_dependency['id']}/fail", json={
+    "lease_token": failed_dependency_claim["lease_token"],
+    "error": "Partition input was corrupt",
+    "retriable": False,
+}), "fail partition dependency")
+failed_coordinator_state = ok(client.get(f"/jobs/{failed_coordinator['id']}"), "propagate dependency failure")
+assert failed_coordinator_state["status"] == "FAILED", failed_coordinator_state
+assert any(event["event_type"] == "job.dependency_failed" for event in failed_coordinator_state["events"]), failed_coordinator_state
+passed += 1
+
+ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "depends_on": ["missing-job"],
+}), "reject missing dependency", 404)
+
+print(f"\nAsynchronous job runtime verified: {passed} assertions passed.")
+from app.database import engine as _engine  # noqa: E402
+_engine.dispose()
+tmpdir.cleanup()

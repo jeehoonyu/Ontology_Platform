@@ -21,7 +21,7 @@ NEW tables (all prefixed Iface/iface_ to avoid Base collisions):
 """
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, production_auth, tenancy
 from .ontology_interfaces import OntologyInterface, SharedPropertyType, VALID_BASE_TYPES  # noqa: F401  (read-only reuse)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
@@ -39,7 +39,7 @@ class IfaceLinkConstraint(Base):
     """A link constraint declared on an interface (an interface link type)."""
     __tablename__ = "iface_link_constraints"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     interface_id: Mapped[str] = mapped_column(String, ForeignKey("ontology_interfaces.id"), index=True)
     api_name: Mapped[str] = mapped_column(String)
     target_kind: Mapped[str] = mapped_column(String)  # "interface" | "object_type"
@@ -53,7 +53,7 @@ class IfaceImplementation(Base):
     """An explicit declaration that an object type implements an interface."""
     __tablename__ = "iface_implementations"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
     interface_id: Mapped[str] = mapped_column(String, ForeignKey("ontology_interfaces.id"), index=True)
     # {interface_prop -> object_type_prop}
@@ -67,7 +67,7 @@ class IfaceAction(Base):
     """An interface action (create/modify/delete) defined polymorphically on an interface."""
     __tablename__ = "iface_actions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     interface_id: Mapped[str] = mapped_column(String, ForeignKey("ontology_interfaces.id"), index=True)
     api_name: Mapped[str] = mapped_column(String)
     operation: Mapped[str] = mapped_column(String)  # "create" | "modify" | "delete"
@@ -132,6 +132,9 @@ class CheckObjectTypeResult(BaseModel):
 class QueryObjectsRequest(BaseModel):
     filters: Dict[str, Any] = Field(default_factory=dict)
     limit: Optional[int] = None
+    # Narrows the query to one project. Omitting it does not widen the query
+    # past what the caller may read; it means "every project I can read".
+    project_id: Optional[str] = None
 
 
 class InterfaceActionCreate(BaseModel):
@@ -214,6 +217,89 @@ def _resolve_properties(db: Session, interface_id: str) -> (Dict[str, dict], Dic
             flattened[prop_name] = dict(spec)
             inherited_from[prop_name] = iface_id
     return flattened, inherited_from
+
+
+# A declared base type satisfies an interface requirement when it is the same
+# type, or a widening that discards nothing the interface asked for. A geopoint
+# satisfies a geoshape requirement because a point is a geometry; the reverse is
+# not true, and neither direction holds for a string.
+_WIDENING: Dict[str, set] = {
+    "byte": {"short", "integer", "long", "float", "double", "decimal"},
+    "short": {"integer", "long", "float", "double", "decimal"},
+    "integer": {"long", "double", "decimal"},
+    "long": {"decimal"},
+    "float": {"double", "decimal"},
+    "double": {"decimal"},
+    "date": {"timestamp"},
+    "geopoint": {"geoshape"},
+}
+
+# Legacy ObjectType.properties uses JSON-schema style names. Map them onto the
+# ontology base-type vocabulary so an object type that predates a normalized
+# profile can still be judged rather than waved through.
+_LEGACY_TO_BASE = {
+    "string": "string", "integer": "integer", "number": "double",
+    "boolean": "boolean", "array": "array", "object": "struct",
+    "json": "struct", "geometry": "geoshape", "geojson": "geoshape",
+    "any": "", "": "",
+}
+
+
+def _declared_base_types(db: Session, object_type_id: str) -> Dict[str, str]:
+    """Property name -> declared base type, normalized profile first.
+
+    The profile is authoritative because it records real base types. The legacy
+    JSON schema on ObjectType is the fallback for types that predate a profile,
+    mapped onto the base vocabulary rather than compared as free text.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from .ontology_core import ObjectTypeProfile
+
+    # The normalized profile table is absent in partial schemas, so its presence
+    # is checked rather than assumed. Falling back to the legacy bag keeps an
+    # older deployment judging conformance instead of failing the request.
+    bind = db.get_bind()
+    profile = None
+    if bind is not None and sa_inspect(bind).has_table(ObjectTypeProfile.__tablename__):
+        profile = db.get(ObjectTypeProfile, object_type_id)
+    if profile is not None and profile.properties:
+        return {
+            name: ((spec or {}).get("base_type") or "") if isinstance(spec, dict) else ""
+            for name, spec in profile.properties.items()
+        }
+    obj = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first()
+    if obj is None:
+        return {}
+    resolved: Dict[str, str] = {}
+    for name, spec in (obj.properties or {}).items():
+        raw = (spec or {}).get("type", "") if isinstance(spec, dict) else ""
+        resolved[name] = _LEGACY_TO_BASE.get(str(raw).lower(), str(raw))
+    return resolved
+
+
+def base_type_satisfies(declared: str, required: str) -> bool:
+    """Whether a declared property type meets an interface's required type."""
+    from .ontology_interfaces import normalize_base_type
+
+    # An interface may still carry a legacy name such as "geo"; resolve both
+    # sides onto the ontology vocabulary before comparing.
+    declared = normalize_base_type(declared)
+    required = normalize_base_type(required)
+    if not required:
+        return True
+    if not declared:
+        # The object type declares no type for this property, so the requirement
+        # can be neither confirmed nor refuted. It is allowed rather than
+        # refused: legacy property bags frequently omit a type, and rejecting
+        # them would break implementations that already exist, which the goal's
+        # compatibility-preserving rule forbids. The guarantee is therefore
+        # enforced wherever a type is declared and unavailable where it is not,
+        # which is a real limit on what an interface promises over legacy data.
+        return True
+    if declared == required:
+        return True
+    return required in _WIDENING.get(declared, set())
 
 
 def _resolve_link_constraints(db: Session, interface_id: str) -> Dict[str, IfaceLinkConstraint]:
@@ -397,19 +483,33 @@ def implement_interface(
 
     flattened, _ = _resolve_properties(db, body.interface_id)
     ot_prop_names = set((ot.properties or {}).keys())
+    declared_types = _declared_base_types(db, object_type_id)
+    ot_prop_names |= set(declared_types)
 
     unmet: List[str] = []
 
     # For every REQUIRED resolved interface property there must be a mapping to an
-    # existing object-type property.
+    # existing object-type property whose declared base type satisfies the
+    # requirement. Checking only that the name exists would let a string satisfy
+    # a geopoint, which makes the interface a suggestion: every consumer of an
+    # interface-scoped query relies on the type holding for every implementer.
     for prop_name, spec in flattened.items():
         if not spec.get("required", False):
             continue
         mapped = body.property_mappings.get(prop_name)
         if mapped is None:
             unmet.append(f"property:{prop_name} (no mapping)")
-        elif mapped not in ot_prop_names:
+            continue
+        if mapped not in ot_prop_names:
             unmet.append(f"property:{prop_name} -> '{mapped}' (object-type property not found)")
+            continue
+        required_type = str(spec.get("base_type") or "")
+        declared_type = declared_types.get(mapped, "")
+        if not base_type_satisfies(declared_type, required_type):
+            unmet.append(
+                f"property:{prop_name} -> '{mapped}' "
+                f"(declared {declared_type or 'untyped'}, interface requires {required_type})"
+            )
 
     # For every REQUIRED resolved link constraint there must be a link_mapping to an
     # existing LinkType whose source == ot (and target matches when target_kind=object_type).
@@ -569,16 +669,34 @@ def query_objects(
     interface_id: str,
     body: QueryObjectsRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("view")),
 ) -> Dict[str, Any]:
     _get_interface(db, interface_id)
     flattened, _ = _resolve_properties(db, interface_id)
     iface_prop_names = set(flattened.keys())
+
+    # An interface names a capability, not a tenancy scope. Walking its
+    # implementers crosses projects by construction, so the object types are
+    # filtered to what this principal may read before any instance is touched.
+    # Without this the query returned committed instance data from every project
+    # in the deployment (GOAL2-006).
+    allowed_projects = tenancy.accessible_project_ids(db, principal, "view")
+    if body.project_id is not None:
+        tenancy.assert_project_permission(db, principal, body.project_id, "view")
+        allowed_projects = {body.project_id}
 
     impls = (
         db.query(IfaceImplementation)
         .filter(IfaceImplementation.interface_id == interface_id)
         .all()
     )
+    if allowed_projects is not None:
+        readable_type_ids = {
+            row.id for row in db.query(models.ObjectType.id, models.ObjectType.project_id)
+            .filter(models.ObjectType.project_id.in_(allowed_projects))
+            .all()
+        } if allowed_projects else set()
+        impls = [impl for impl in impls if impl.object_type_id in readable_type_ids]
 
     object_type_ids_searched: List[str] = []
     results: List[Dict[str, Any]] = []
@@ -592,11 +710,16 @@ def query_objects(
         object_type_ids_searched.append(impl.object_type_id)
         mappings = impl.property_mappings or {}
 
-        instances = (
-            db.query(models.ObjectInstance)
-            .filter(models.ObjectInstance.object_type_id == impl.object_type_id)
-            .all()
+        instance_query = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.object_type_id == impl.object_type_id
         )
+        # Instances carry their own project. An object type readable in one
+        # project must not surface rows another project wrote against it.
+        if allowed_projects is not None:
+            instance_query = instance_query.filter(
+                models.ObjectInstance.project_id.in_(allowed_projects)
+            )
+        instances = instance_query.all()
 
         for inst in instances:
             inst_props = inst.properties or {}

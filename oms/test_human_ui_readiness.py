@@ -68,7 +68,7 @@ readiness = ok(client.get("/project/readiness"), "project readiness")
 assert readiness["status"] in {"READY", "NEEDS_ATTENTION"}, readiness
 assert readiness["checks"], readiness
 
-for route in ["/workspace/command-center", "/workspace/imports", "/workspace/ontology", "/workspace/pipeline", "/workspace/graph", "/workspace/validation"]:
+for route in ["/workspace/command-center", "/workspace/imports", "/workspace/ontology", "/workspace/pipeline", "/workspace/object-explorer", "/workspace/map", "/workspace/models", "/workspace/decision", "/workspace/ops", "/workspace/graph", "/workspace/validation"]:
     html = client.get(route).text
     assert "id=\"root\"" in html or "/react/assets/" in html, html[:300]
     passed += 1

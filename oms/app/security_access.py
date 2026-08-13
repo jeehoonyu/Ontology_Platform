@@ -25,7 +25,7 @@ class Project(Base):
 
     __tablename__ = "projects"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     organization: Mapped[str] = mapped_column(String, default="default")
@@ -42,7 +42,7 @@ class Role(Base):
 
     __tablename__ = "roles"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     permissions: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -53,7 +53,7 @@ class RoleGrant(Base):
 
     __tablename__ = "role_grants"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), index=True, nullable=False)
     principal: Mapped[str] = mapped_column(String, nullable=False, index=True)
     role_id: Mapped[str] = mapped_column(String, ForeignKey("roles.id"), nullable=False, index=True)

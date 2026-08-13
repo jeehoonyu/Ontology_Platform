@@ -36,7 +36,7 @@ def _now() -> int:
 
 class DatasetTransaction(Base):
     __tablename__ = "dataset_transactions"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, index=True)
     branch: Mapped[str] = mapped_column(String, default="master", index=True)
     txn_type: Mapped[str] = mapped_column(String)            # SNAPSHOT/APPEND/UPDATE/DELETE
@@ -50,7 +50,7 @@ class DatasetTransaction(Base):
 
 class DatasetBranch(Base):
     __tablename__ = "dataset_branches"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String, index=True)
     base_branch: Mapped[str] = mapped_column(String, default="master")
@@ -65,7 +65,7 @@ class DatasetSchemaDef(Base):
     until a schema has been declared.
     """
     __tablename__ = "dataset_schema_defs"
-    dataset_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    dataset_id: Mapped[str] = mapped_column(String, primary_key=True)
     columns: Mapped[list] = mapped_column(JSON, default=list)  # [{"name": str, "type": str}]
     created_at: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[int] = mapped_column(Integer)

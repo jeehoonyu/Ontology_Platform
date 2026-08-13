@@ -1,10 +1,12 @@
 """
-Management & Enablement — authentication providers, API tokens / service accounts,
+Management & Enablement — authentication providers, hashed API tokens / service accounts,
 and third-party OAuth clients (deep-fidelity pass 12). Based on
 /docs/foundry/authentication/*: identity-provider integrations (SAML/OIDC) with
 attribute mapping, and tokens that are invalid while the owning user account is
-inactive. Additive; deterministic; local (not real cryptography/OAuth).
+inactive. API token secrets are shown once and only their SHA-256 digest is stored.
 """
+import hashlib
+import secrets
 import time
 import uuid
 from typing import Optional, List, Any, Dict
@@ -26,7 +28,7 @@ def _now() -> int:
 
 class AuthProvider(Base):
     __tablename__ = "admin_auth_providers"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String)
     protocol: Mapped[str] = mapped_column(String)              # saml | oidc
     config: Mapped[dict] = mapped_column(JSON, default=dict)   # no secrets stored in clear
@@ -37,7 +39,7 @@ class AuthProvider(Base):
 
 class ServiceAccount(Base):
     __tablename__ = "admin_service_accounts"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     organization_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer)
@@ -45,19 +47,22 @@ class ServiceAccount(Base):
 
 class ApiToken(Base):
     __tablename__ = "admin_api_tokens"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
-    token: Mapped[str] = mapped_column(String, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    token: Mapped[str] = mapped_column(String, index=True)  # legacy value or non-secret hashed:<id> marker
+    token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    token_prefix: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     principal_type: Mapped[str] = mapped_column(String, default="user")  # user | service_account
     principal_id: Mapped[str] = mapped_column(String, index=True)
     scopes: Mapped[list] = mapped_column(JSON, default=list)
     expires_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(Integer)
+    last_used_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class OAuthClient(Base):
     __tablename__ = "admin_oauth_clients"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     client_id: Mapped[str] = mapped_column(String, index=True)
     scopes: Mapped[list] = mapped_column(JSON, default=list)
@@ -164,6 +169,24 @@ def map_assertion(provider_id: str, body: MapAssertionRequest, db: Session = Dep
 # ---------------------------------------------------------------------------
 # Service accounts + tokens
 # ---------------------------------------------------------------------------
+def token_digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def find_token(db: Session, secret: str) -> Optional[ApiToken]:
+    digest = token_digest(secret)
+    token = db.query(ApiToken).filter(ApiToken.token_hash == digest).first()
+    if token:
+        return token
+    legacy = db.query(ApiToken).filter(ApiToken.token == secret).first()
+    if legacy:
+        legacy.token_hash = digest
+        legacy.token_prefix = secret[:12]
+        legacy.token = f"hashed:{legacy.id}"
+        db.flush()
+    return legacy
+
+
 @router.post("/admin/service-accounts", status_code=201)
 def create_service_account(body: ServiceAccountCreate, db: Session = Depends(get_db)):
     sid = body.id or uuid.uuid4().hex
@@ -187,10 +210,11 @@ def issue_token(body: TokenCreate, db: Session = Depends(get_db)):
     if body.principal_type == "service_account" and not db.get(ServiceAccount, body.principal_id):
         raise HTTPException(status_code=404, detail="service account not found")
     tid = uuid.uuid4().hex
-    secret = "tok_" + uuid.uuid4().hex
+    secret = "tok_" + secrets.token_urlsafe(32)
     expires = (_now() + body.ttl_seconds) if body.ttl_seconds else None
-    db.add(ApiToken(id=tid, token=secret, principal_type=body.principal_type, principal_id=body.principal_id,
-                    scopes=body.scopes, expires_at=expires, revoked=False, created_at=_now()))
+    db.add(ApiToken(id=tid, token=f"hashed:{tid}", token_hash=token_digest(secret), token_prefix=secret[:12],
+                    principal_type=body.principal_type, principal_id=body.principal_id,
+                    scopes=body.scopes, expires_at=expires, revoked=False, created_at=_now(), last_used_at=None))
     db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="admin", event_type="admin.token.issued",
                                   subject_type=body.principal_type, subject_id=body.principal_id, payload={"scopes": body.scopes}))
     db.commit()
@@ -199,7 +223,7 @@ def issue_token(body: TokenCreate, db: Session = Depends(get_db)):
 
 @router.post("/admin/tokens/validate")
 def validate_token(body: TokenValidateRequest, db: Session = Depends(get_db)):
-    tok = db.query(ApiToken).filter(ApiToken.token == body.token).first()
+    tok = find_token(db, body.token)
     if not tok:
         return {"valid": False, "reason": "unknown token"}
     if tok.revoked:
@@ -213,6 +237,8 @@ def validate_token(body: TokenValidateRequest, db: Session = Depends(get_db)):
             return {"valid": False, "reason": "principal inactive"}
     if body.required_scope and body.required_scope not in (tok.scopes or []):
         return {"valid": False, "reason": "missing scope", "required_scope": body.required_scope}
+    tok.last_used_at = _now()
+    db.commit()
     return {"valid": True, "principal_type": tok.principal_type, "principal_id": tok.principal_id, "scopes": tok.scopes}
 
 
@@ -231,8 +257,10 @@ def list_tokens(principal_id: Optional[str] = None, db: Session = Depends(get_db
     q = db.query(ApiToken)
     if principal_id:
         q = q.filter(ApiToken.principal_id == principal_id)
-    return [{"id": t.id, "principal_id": t.principal_id, "scopes": t.scopes,
-             "revoked": t.revoked, "expires_at": t.expires_at} for t in q.all()]
+    return [{"id": t.id, "principal_id": t.principal_id, "principal_type": t.principal_type,
+             "token_prefix": t.token_prefix or ((t.token or "")[:12] or None), "scopes": t.scopes,
+             "revoked": t.revoked, "expires_at": t.expires_at, "created_at": t.created_at,
+             "last_used_at": t.last_used_at} for t in q.all()]
 
 
 @router.post("/admin/oauth-clients", status_code=201)

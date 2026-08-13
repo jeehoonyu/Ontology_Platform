@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-08-09T06:09:07.387Z",
+  "profile": "production-oidc-plugin-execution",
+  "status": "PASS",
+  "plugin_version_id": "plugin_version_1e53d20e3d30482ca769",
+  "fast_execution_id": "plugin_run_e19687e9cc88463b88d4",
+  "recovery_execution_id": "plugin_run_1cdb0368717948c787bd",
+  "recovery_job_id": "job_d8c0a58f12334cc98afe",
+  "recovered_attempt": 2,
+  "recovery_reason": "lease_expired",
+  "terminal_success_events": 1,
+  "sandbox": {
+    "cpus": 1,
+    "mode": "oci",
+    "pids": 64,
+    "image": "plugin-registry:5000/ontology-plugin-sandbox@sha256:2b117e2d2e580cc88de74fadb8c6c79fbf242fc6c83e76d458c9edf3c96deb9a",
+    "runner": "/app/app/plugin_sandbox_runner.py",
+    "network": "none",
+    "non_root": true,
+    "memory_mb": 128,
+    "read_only": true,
+    "tls_trust": null,
+    "egress_proxy": false,
+    "egress_policy": null,
+    "sdk_api_version": 1,
+    "no_new_privileges": true,
+    "capabilities_dropped": true
+  },
+  "assertions": {
+    "real_oidc_administration": true,
+    "execute_only_service_token": true,
+    "signed_bundle": true,
+    "digest_pinned_oci": true,
+    "governed_egress_proxy_provisioned": true,
+    "executor_loss_recovered": true,
+    "duplicate_terminal_delivery_prevented": true,
+    "audit_evidence": true
+  }
+}

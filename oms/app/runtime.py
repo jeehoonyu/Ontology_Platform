@@ -1,6 +1,7 @@
 import base64
 import copy
 import hashlib
+import heapq
 import json
 import math
 import re
@@ -8,10 +9,13 @@ import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import (Float, and_, case, cast, func, literal, null, or_, type_coerce,
+                        not_ as sqlalchemy_not, or_ as sqlalchemy_or)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from . import models, models_action
+from .geo_bounds import bounds_of
 
 
 def now_ts() -> int:
@@ -617,6 +621,7 @@ def _compare_filter(value: Any, op: str, expected: Any) -> bool:
 def _object_to_dict(obj: models.ObjectInstance, *, include_lineage: bool = True) -> Dict[str, Any]:
     payload = {
         "id": obj.id,
+        "project_id": obj.project_id,
         "object_type_id": obj.object_type_id,
         "properties": obj.properties or {},
         "source_asset_id": obj.source_asset_id,
@@ -631,6 +636,7 @@ def _object_to_dict(obj: models.ObjectInstance, *, include_lineage: bool = True)
 def _link_to_dict(link: models.LinkInstance) -> Dict[str, Any]:
     return {
         "id": link.id,
+        "project_id": link.project_id,
         "link_type_id": link.link_type_id,
         "source_object_id": link.source_object_id,
         "target_object_id": link.target_object_id,
@@ -643,66 +649,368 @@ def _link_to_dict(link: models.LinkInstance) -> Dict[str, Any]:
 # and a conservative identifier pattern — used to decide which equality predicates
 # can be safely narrowed in SQL.
 _SAFE_FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_RESERVED_TOP = {"id", "object_type_id", "source_asset_id", "created_at", "updated_at", "lineage", "properties"}
+# `project_id` belongs here because `_record_value` resolves a bare field name
+# against the record's top level first, and the record carries it. Without it a
+# filter named `project_id` is matched against the row's own column in Python
+# while the pushdown looks for it inside `properties`, and the two disagree.
+_RESERVED_TOP = {"id", "project_id", "object_type_id", "source_asset_id",
+                 "created_at", "updated_at", "lineage", "properties"}
 
 
-def _pushdown_equalities(db: Session, normalized_filters: List[Dict[str, Any]]):
-    """SQLAlchemy conditions that narrow the candidate set for simple top-level
-    equality predicates via SQLite ``json_extract``.
+def _equality_variants(value: Any) -> List[Any]:
+    """JSON scalars that Python's ``==`` cannot tell apart from ``value``.
 
-    This is ONLY a pre-filter: the Python pass in ``_query_object_rows`` re-checks
-    every candidate with ``_compare_filter``, so the returned rows are identical to a
-    pure-Python filter no matter what the pre-filter returns. Because a row that
-    matches in Python also satisfies these equality conditions (consistent scalar
-    semantics between Python ``==`` and SQLite ``json_extract`` equality), the
-    pre-filter is always a superset of the true matches. Non-SQLite dialects skip it
-    (correct, just unoptimized) — Postgres JSONB pushdown is a later hardening step.
+    Measured against PostgreSQL 15.8 rather than assumed: ``'true'::jsonb =
+    '1'::jsonb`` is false, while Python holds ``True == 1``. Pushing a bare
+    equality down would therefore drop rows whose property is stored in the
+    other form. Matching both forms restores agreement.
+
+    SQLite needs no expansion -- ``json_extract`` yields 1 for a stored ``true``
+    and Python binds ``True`` as 1, verified across the same cases -- but
+    emitting the same condition twice there is harmless and keeps one path.
     """
+    if isinstance(value, bool):
+        return [value, int(value)]
+    if isinstance(value, int) and value in (0, 1):
+        return [value, bool(value)]
+    return [value]
+
+
+def _dialect_name(db: Session) -> Optional[str]:
     try:
-        dialect = db.get_bind().dialect.name
+        return db.get_bind().dialect.name
     except Exception:
-        dialect = None
-    if dialect != "sqlite":
-        return []
-    conds = []
+        return None
+
+
+def _pushdown_conditions(db: Session, normalized_filters: List[Dict[str, Any]]):
+    """SQL conditions for the predicates that can be evaluated in the database.
+
+    Returns ``(conditions, exact)``. ``exact`` is True only when *every*
+    predicate was translated, which is what lets the caller push ``LIMIT`` down
+    and skip the Python pass entirely. When it is False the conditions are a
+    superset pre-filter and the Python pass stays authoritative, so the rows
+    returned are identical either way.
+
+    Only ``equals`` and ``exists`` are translated, and only for scalars. The
+    ordered comparisons look translatable and are not: ``_compare_filter``
+    coerces both sides with ``float()``, so the string ``"5"`` compares greater
+    than 3 in Python while no SQL dialect agrees. Translating them would change
+    which rows come back, and a read-path change that silently alters results is
+    worse than a slow read. They stay in the Python pass, which now streams.
+
+    Both dialects are covered. Postgres was previously skipped entirely with a
+    comment calling it a later hardening step, which meant the production
+    dialect was the unoptimized one -- and the one where the object type is
+    materialized in full for any filter at all.
+    """
+    dialect = _dialect_name(db)
+    if dialect not in {"sqlite", "postgresql"}:
+        return [], False
+
+    conditions = []
+    translated = 0
+    properties = models.ObjectInstance.properties
     for item in normalized_filters:
-        if item["op"] not in {"equals", "eq", "=="}:
-            continue
         field = item["field"]
         value = item.get("value")
+        op = item["op"]
         if not isinstance(field, str) or not _SAFE_FIELD.match(field) or field in _RESERVED_TOP:
             continue
-        if not isinstance(value, (str, int, float, bool)):  # excludes None / list / dict
-            continue
-        conds.append(func.json_extract(models.ObjectInstance.properties, "$." + field) == value)
-    return conds
+        if op in {"equals", "eq", "=="}:
+            if not isinstance(value, (str, int, float, bool)):  # excludes None/list/dict
+                continue
+            variants = _equality_variants(value)
+            if dialect == "sqlite":
+                column = func.json_extract(properties, "$." + field)
+                alternatives = [column == variant for variant in variants]
+            else:
+                # Containment, not `->>`. `->>` renders the value as text, so
+                # `('{"a":1}'::jsonb->>'a') = '1'` is true where Python holds
+                # `1 != "1"` -- it would match rows Python rejects. Containment
+                # compares JSON to JSON, is exact for a scalar member (verified:
+                # `{"a":[1,2]} @> {"a":1}` is false, so it does not reach into
+                # nested arrays), and can use a GIN index.
+                #
+                # `@>` is spelled out rather than reached through `.contains()`.
+                # The column is `JSON().with_variant(JSONB(), "postgresql")`, so
+                # its Python-side comparator is JSON, which has no containment
+                # operator -- `.contains()` silently resolves to the generic
+                # string LIKE and Postgres rejects the statement. It fails loudly
+                # here, but only on Postgres, because SQLite never reaches this
+                # branch.
+                alternatives = [
+                    properties.op("@>", is_comparison=True)(
+                        type_coerce({field: variant}, JSONB))
+                    for variant in variants
+                ]
+            conditions.append(sqlalchemy_or(*alternatives) if len(alternatives) > 1
+                              else alternatives[0])
+            translated += 1
+        elif op == "exists":
+            # `_compare_filter` treats a JSON null as absent, and both of these
+            # yield SQL NULL for a JSON null, so the semantics line up.
+            if dialect == "sqlite":
+                present = func.json_extract(properties, "$." + field).isnot(None)
+            else:
+                # Same reason as `@>` above: the column's Python-side type is
+                # JSON, so `properties[field].astext` does not exist. The jsonb
+                # function is explicit and returns NULL for both a missing key
+                # and a stored JSON null, which is exactly how `_compare_filter`
+                # treats them.
+                present = func.jsonb_extract_path_text(properties, field).isnot(None)
+            conditions.append(present if bool(value) else sqlalchemy_not(present))
+            translated += 1
+
+    return conditions, bool(normalized_filters) and translated == len(normalized_filters)
 
 
-def _query_object_rows(
+# Rows are pulled in batches and rejected rows are dropped from the identity map
+# as they go, so a scan costs a batch of memory rather than an object type of it.
+_STREAM_BATCH = 1_000
+
+_METRES_PER_DEGREE_LATITUDE = 111_320.0
+
+
+def _point_coordinate_expressions(dialect: str, geometry_field: str):
+    """(longitude, latitude) as SQL floats, NULL where the row cannot be judged.
+
+    Condition B4. Only point-shaped geometry is recognised, in the two forms the
+    fixture and the product actually store: a GeoJSON Point under the configured
+    geometry field, and bare ``longitude``/``latitude`` scalars.
+
+    The type checks are not decoration. A Polygon's ``coordinates[0]`` is an
+    array, and casting that to a float aborts the whole statement in Postgres --
+    so the cast only happens where the value is known to be a number. Every
+    other shape yields NULL, and the caller turns NULL into "cannot judge here",
+    which keeps the pre-filter a superset. ``extract_geometry`` also accepts
+    ``location``, ``geojson`` and ``lon``/``lng`` aliases; those are left to the
+    Python pass rather than enumerated here, on the same principle.
+    """
+    properties = models.ObjectInstance.properties
+
+    if dialect == "sqlite":
+        def coordinate(index: int, scalar: str):
+            geo_path = f"$.{geometry_field}.coordinates[{index}]"
+            scalar_path = f"$.{scalar}"
+            return case(
+                (func.json_type(properties, geo_path).in_(("integer", "real")),
+                 func.json_extract(properties, geo_path)),
+                (func.json_type(properties, scalar_path).in_(("integer", "real")),
+                 func.json_extract(properties, scalar_path)),
+                else_=null(),
+            )
+        return coordinate(0, "longitude"), coordinate(1, "latitude")
+
+    # `jsonb_extract_path_text` rather than `.astext` on the extracted value.
+    # This column is `JSON().with_variant(JSONB())`, so nothing SQLAlchemy hands
+    # back from it carries the JSONB comparator -- not the column, not an index
+    # expression, not a function result. Three separate attempts to use that API
+    # here failed, each only on Postgres. The explicit functions always work.
+    def coordinate(index: int, scalar: str):
+        geo = func.jsonb_extract_path(properties, geometry_field, "coordinates", str(index))
+        scalar_value = func.jsonb_extract_path(properties, scalar)
+        return case(
+            (func.jsonb_typeof(geo) == "number",
+             cast(func.jsonb_extract_path_text(
+                 properties, geometry_field, "coordinates", str(index)), Float)),
+            (func.jsonb_typeof(scalar_value) == "number",
+             cast(func.jsonb_extract_path_text(properties, scalar), Float)),
+            else_=null(),
+        )
+    return coordinate(0, "longitude"), coordinate(1, "latitude")
+
+
+# `extract_geometry` consults these before falling back to longitude/latitude
+# scalars, and the materialized bounds are computed with that same default
+# precedence. A query naming some other field is asking about geometry the
+# stored bounds do not describe, so it must not use them.
+_DEFAULT_GEOMETRY_FIELDS = {"geometry", "location", "geojson"}
+
+
+def backfill_geo_bounds(db: Session, *, object_type_id: Optional[str] = None,
+                        batch: int = 1000) -> int:
+    """Compute the stored extent for rows that never got one, and return how many.
+
+    Needed after any load that bypasses the ORM -- a Core bulk insert, a COPY, a
+    restore from a dump taken before this column existed. Until it runs, those
+    rows are marked unindexed and spatial queries fall back to scanning, which
+    is slower and correct; after it, they are indexed and the query is fast and
+    correct. At no point are they invisible.
+    """
+    updated = 0
+    while True:
+        query = db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.geo_indexed.is_(False))
+        if object_type_id is not None:
+            query = query.filter(models.ObjectInstance.object_type_id == object_type_id)
+        rows = query.limit(batch).all()
+        if not rows:
+            return updated
+        for row in rows:
+            bounds = bounds_of(row.properties)
+            (row.geo_min_lon, row.geo_min_lat,
+             row.geo_max_lon, row.geo_max_lat) = bounds or (None, None, None, None)
+            row.geo_indexed = True
+            updated += 1
+        db.commit()
+
+
+def _geo_bounds_complete(db: Session, object_type_id: str) -> bool:
+    """Whether every row of this type has a computed extent.
+
+    One indexed existence check. If anything is unindexed the caller must scan,
+    because for those rows NULL bounds carry no information -- and answering
+    quickly from data that does not exist is the failure this guards against.
+    """
+    return not db.query(
+        db.query(models.ObjectInstance)
+        .filter(models.ObjectInstance.object_type_id == object_type_id,
+                models.ObjectInstance.geo_indexed.is_(False))
+        .exists()
+    ).scalar()
+
+
+def _materialized_bbox_condition(db: Session, geometry_field: str, bounds: Optional[List[float]]):
+    """Intersect the query box with the stored extent, as a plain conjunction.
+
+    This is what closes B4. The expression pre-filter below is correct but
+    carries an ``OR unjudgeable`` disjunct for geometry SQL cannot parse, and
+    that disjunct measured a sixteen-fold cost by preventing an index scan.
+    Bounds computed on write are comparable for every shape, so no disjunct is
+    needed and the planner can use `ix_object_instances_geo_bounds_gist`.
+
+    Excluding NULL bounds is not a shortcut: NULL means the row has no geometry,
+    and `spatial_query_objects` skips exactly those rows anyway.
+
+    Standard box intersection -- two boxes overlap unless one is entirely to one
+    side of the other -- so this is a superset of every predicate the Python
+    pass applies, including a radius, whose reference point lies inside the
+    object's own extent.
+    """
+    if not bounds or len(bounds) != 4:
+        return None
+    if geometry_field not in _DEFAULT_GEOMETRY_FIELDS:
+        return None
+    west, south, east, north = (float(value) for value in bounds)
+    if west > east:
+        return None  # crosses the antimeridian
+
+    min_lon = models.ObjectInstance.geo_min_lon
+    min_lat = models.ObjectInstance.geo_min_lat
+    max_lon = models.ObjectInstance.geo_max_lon
+    max_lat = models.ObjectInstance.geo_max_lat
+
+    if _dialect_name(db) == "postgresql":
+        # Spelled as a box overlap, because that is what the GiST index in
+        # `0039_object_geo_bounds` is built over. The four range comparisons
+        # below are logically identical and the planner will not match them to
+        # that index -- a btree cannot answer a two-sided interval intersection
+        # selectively, which is the whole reason the index is GiST.
+        #
+        # The IS NOT NULL is not redundant either: the index is partial on that
+        # predicate, and the planner has to be able to prove it to use it.
+        stored = func.box(func.point(min_lon, min_lat), func.point(max_lon, max_lat))
+        wanted = func.box(func.point(west, south), func.point(east, north))
+        return and_(min_lon.isnot(None),
+                    stored.op("&&", is_comparison=True)(wanted))
+
+    return and_(min_lon <= east, max_lon >= west,
+                min_lat <= north, max_lat >= south)
+
+
+def _bbox_prefilter(db: Session, geometry_field: str, bounds: Optional[List[float]]):
+    """A SQL condition selecting a superset of rows whose point lies in ``bounds``.
+
+    Returns None when no safe condition can be built, in which case the caller
+    scans as before. Refusing is always correct here; a pre-filter that is not a
+    superset silently loses rows.
+    """
+    if not bounds or len(bounds) != 4:
+        return None
+    dialect = _dialect_name(db)
+    if dialect not in {"sqlite", "postgresql"}:
+        return None
+    if not isinstance(geometry_field, str) or not _SAFE_FIELD.match(geometry_field):
+        return None
+
+    west, south, east, north = (float(value) for value in bounds)
+    if west > east:
+        return None  # crosses the antimeridian; two ranges, not one. Not worth the risk.
+
+    longitude, latitude = _point_coordinate_expressions(dialect, geometry_field)
+    inside = and_(longitude >= west, longitude <= east,
+                  latitude >= south, latitude <= north)
+    unjudgeable = or_(longitude.is_(None), latitude.is_(None))
+    return or_(inside, unjudgeable)
+
+
+def _radius_bounds(centre: Tuple[float, float], radius_meters: float) -> Optional[List[float]]:
+    """The bounding box enclosing a circle, or None where the box is unreliable.
+
+    Near the poles a metre of longitude spans an unbounded number of degrees, and
+    a box derived there can exclude points the haversine would accept. The
+    Python pass is correct without any of this, so the answer there is to
+    decline rather than approximate.
+    """
+    longitude, latitude = centre
+    if abs(latitude) > 85.0:
+        return None
+    delta_latitude = radius_meters / _METRES_PER_DEGREE_LATITUDE
+    cosine = math.cos(math.radians(latitude))
+    if cosine < 1e-6:
+        return None
+    delta_longitude = radius_meters / (_METRES_PER_DEGREE_LATITUDE * cosine)
+    west, east = longitude - delta_longitude, longitude + delta_longitude
+    if west < -180.0 or east > 180.0:
+        return None  # wraps; see the antimeridian note above
+    return [west, latitude - delta_latitude, east, latitude + delta_latitude]
+
+
+# Exactly what `_object_to_dict` reads. Selecting columns rather than entities
+# keeps a scan out of the session's identity map altogether.
+_OBJECT_COLUMNS = (
+    models.ObjectInstance.id,
+    models.ObjectInstance.project_id,
+    models.ObjectInstance.object_type_id,
+    models.ObjectInstance.properties,
+    models.ObjectInstance.source_asset_id,
+    models.ObjectInstance.created_at,
+    models.ObjectInstance.updated_at,
+    models.ObjectInstance.lineage,
+)
+
+
+def _stream_object_rows(
     db: Session,
-    *,
-    object_type_id: str,
-    filters: Optional[Any] = None,
-) -> List[models.ObjectInstance]:
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first()
-    if not object_type:
-        raise ValueError(f"ObjectType '{object_type_id}' not found")
+    query,
+    normalized_filters: List[Dict[str, Any]],
+) -> Iterable[Any]:
+    """Yield rows satisfying the residual predicates without materializing the scan.
 
-    normalized_filters = _normalize_filters(filters)
+    ``query.all()`` was what made every filtered read cost the object type: it
+    built an ORM instance for every row before anything was filtered or limited.
+    Streaming keeps the same rows in the same order and the same Python
+    semantics, but the caller decides how many to hold.
 
-    query = db.query(models.ObjectInstance).filter(
-        models.ObjectInstance.object_type_id == object_type_id
-    )
-    # Narrow candidates in SQL for simple equality predicates; Python confirms below.
-    for cond in _pushdown_equalities(db, normalized_filters):
-        query = query.filter(cond)
-    rows = query.all()
+    Columns, not entities, and deliberately so. The first version streamed
+    entities and expunged the rejects, because ``yield_per`` still registers
+    each instance in the identity map. That bounded memory and introduced a
+    worse problem: expunging detaches an instance the *caller* may be holding
+    from an earlier query, so a read could silently sever a pending write. A
+    column query never enters the identity map, so there is nothing to expunge
+    and nothing to detach.
 
+    The rows returned carry the same attribute names, which is all
+    `_object_to_dict` and every caller of this ever used.
+    """
+    source = (query.with_entities(*_OBJECT_COLUMNS)
+              .execution_options(stream_results=True)
+              .yield_per(_STREAM_BATCH))
     if not normalized_filters:
-        return rows
-
-    matched = []
-    for row in rows:
+        yield from source
+        return
+    for row in source:
         record = _object_to_dict(row, include_lineage=True)
         if all(
             _compare_filter(
@@ -712,8 +1020,64 @@ def _query_object_rows(
             )
             for item in normalized_filters
         ):
-            matched.append(row)
-    return matched
+            yield row
+
+
+def _object_base_query(db: Session, *, object_type_id: str, project_id: Optional[str] = None):
+    """The type-scoped query, after confirming the object type exists."""
+    type_query = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id)
+    if project_id is not None:
+        type_query = type_query.filter(models.ObjectType.project_id == project_id)
+    if not type_query.first():
+        raise ValueError(f"ObjectType '{object_type_id}' not found")
+    query = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.object_type_id == object_type_id
+    )
+    if project_id is not None:
+        query = query.filter(models.ObjectInstance.project_id == project_id)
+    return query
+
+
+def _prepared_object_query(
+    db: Session,
+    *,
+    object_type_id: str,
+    project_id: Optional[str] = None,
+    filters: Optional[Any] = None,
+):
+    """The type-scoped query with pushdown applied, plus the residual predicates.
+
+    Returns ``(query, residual, exact)``. When ``exact`` is True the residual is
+    empty and the query alone selects exactly the matching rows, so the caller
+    may apply ``LIMIT``/``OFFSET`` and ``count(*)`` in SQL. Otherwise the
+    residual must be applied in Python over a stream.
+    """
+    normalized = _normalize_filters(filters)
+    query = _object_base_query(db, object_type_id=object_type_id, project_id=project_id)
+    conditions, exact = _pushdown_conditions(db, normalized)
+    for condition in conditions:
+        query = query.filter(condition)
+    return query, ([] if exact else normalized), exact
+
+
+def iter_object_rows(
+    db: Session,
+    *,
+    object_type_id: str,
+    project_id: Optional[str] = None,
+    filters: Optional[Any] = None,
+) -> Iterable[models.ObjectInstance]:
+    """Stream matching object rows.
+
+    This replaces ``_query_object_rows``, which returned a list and so cost one
+    object type of memory per call however few rows the caller went on to use.
+    Every caller here consumes the stream without retaining it, which is what
+    makes a filtered read, a facet aggregation and a spatial query cost a batch
+    instead of a table.
+    """
+    query, residual, _ = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+    return _stream_object_rows(db, query, residual)
 
 
 def _encode_cursor(offset: int) -> str:
@@ -736,32 +1100,73 @@ def query_object_set(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     limit: int = 100,
     offset: int = 0,
     cursor: Optional[str] = None,
     with_total: bool = True,
+    max_total: Optional[int] = None,
     include_lineage: bool = True,
 ) -> Dict[str, Any]:
+    """Read a page of an object set.
+
+    `max_total` bounds what an exact total costs. Counting every match is the
+    single most expensive thing this function does: at ten million objects a
+    filter matching 500,000 rows costs 621.9 ms with the total and 1.8 ms
+    without it, so the count is 345 times the page it accompanies. Passing a cap
+    stops the count there and sets `total_is_capped`, which is the arrangement
+    condition B3 asks for -- a total that is either exact or honestly labelled
+    as a floor.
+
+    Left at None the behaviour is unchanged, so no existing caller silently
+    starts receiving a different number.
+    """
     start = _decode_cursor(cursor) if cursor else max(0, int(offset or 0))
     bounded_limit = max(0, min(int(limit), 10000))
-    normalized = _normalize_filters(filters)
+    query, residual, exact = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
 
-    if not normalized:
-        # No residual predicates -> paginate in SQL. Order-free offset/limit on SQLite
-        # returns rowid (insertion) order, matching the previous ``.all()[:limit]`` output
-        # for the default call, so results stay backward compatible.
-        if not db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first():
-            raise ValueError(f"ObjectType '{object_type_id}' not found")
-        base = db.query(models.ObjectInstance).filter(
-            models.ObjectInstance.object_type_id == object_type_id
-        )
-        total = base.count() if with_total else None
-        selected = base.offset(start).limit(bounded_limit).all() if bounded_limit else []
+    total_is_capped = False
+    if not residual:
+        # Every predicate reached SQL (or there were none), so the page and the
+        # total come from the database. Order-free offset/limit returns
+        # insertion order on both dialects, matching the previous output.
+        if not with_total:
+            total = None
+        elif max_total is None:
+            total = query.count()
+        else:
+            # Count a bounded window rather than the whole match set. The
+            # database stops after max_total + 1 rows, so the cost no longer
+            # follows how many objects happen to match.
+            window = query.with_entities(literal(1)).limit(max_total + 1).subquery()
+            total = db.query(func.count()).select_from(window).scalar() or 0
+            if total > max_total:
+                total, total_is_capped = max_total, True
+        selected = (query.with_entities(*_OBJECT_COLUMNS)
+                    .offset(start).limit(bounded_limit).all()) if bounded_limit else []
     else:
-        rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
-        total = len(rows) if with_total else None
-        selected = rows[start:start + bounded_limit] if bounded_limit else []
+        # A predicate SQL cannot express exactly. The Python pass stays
+        # authoritative, but it runs over a stream and holds only the page, so
+        # the cost is the scan rather than the scan plus a copy of the type.
+        selected = []
+        matched = 0
+        window_end = start + bounded_limit
+        for row in _stream_object_rows(db, query, residual):
+            if bounded_limit and start <= matched < window_end:
+                selected.append(row)
+            matched += 1
+            # The total is the only reason to keep reading past the page. Asked
+            # for none, this stops at the page; given a cap, it stops there.
+            if not with_total and matched >= window_end:
+                break
+            if with_total and max_total is not None and matched > max_total:
+                total_is_capped = True
+                break
+        total = matched if with_total else None
+        if total_is_capped:
+            total = max_total
 
     next_cursor = (
         _encode_cursor(start + len(selected))
@@ -778,65 +1183,279 @@ def query_object_set(
     }
     if with_total:
         response["total"] = total
+        # Always present alongside a total, never only when true: a field that
+        # appears only in the capped case reads as absent rather than false, and
+        # a caller cannot tell "exact" from "the server did not say".
+        response["total_is_capped"] = total_is_capped
     return response
+
+
+def _group_key_expressions(dialect: str, group_by: str):
+    """(json type, group value) for a top-level property, per dialect."""
+    properties = models.ObjectInstance.properties
+    if dialect == "sqlite":
+        path = "$." + group_by
+        return (func.json_type(properties, path), func.json_extract(properties, path))
+    return (
+        func.jsonb_typeof(func.jsonb_extract_path(properties, group_by)),
+        func.jsonb_extract_path_text(properties, group_by),
+    )
+
+
+# JSON types whose Python `str()` the database cannot reproduce. A dict grouped
+# in Python keys on its repr -- "{'a': 1}" -- and no dialect renders that, so a
+# group set containing one falls back to the streaming pass rather than
+# returning different keys.
+_UNGROUPABLE_JSON_TYPES = {"object", "array"}
+
+
+def _python_group_key(json_type: Optional[str], value: Any) -> Optional[str]:
+    """The key the Python pass would have produced, or None if it cannot be known."""
+    if json_type is None or json_type == "null":
+        return "null"
+    if json_type in _UNGROUPABLE_JSON_TYPES:
+        return None
+    if json_type in {"boolean", "true", "false"}:
+        # Python renders booleans "True"/"False"; every dialect renders them
+        # lowercase, and SQLite hands back 1/0 besides.
+        if json_type == "true":
+            return "True"
+        if json_type == "false":
+            return "False"
+        return "True" if value in (True, 1, "true") else "False"
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def _sql_group_counts(db: Session, query, group_by: Optional[str]) -> Optional[Dict[str, int]]:
+    """Group counts computed by the database, or None when it cannot be trusted to match.
+
+    This is condition B3. The Python pass below is correct and bounded, but it
+    still carries every row of the object type into Python to produce a handful
+    of numbers -- 138 seconds at ten million objects. A `GROUP BY` costs one
+    scan inside the database and returns as many rows as there are groups.
+
+    Deliberately narrow: counts only, no metrics, a single top-level property,
+    and no residual predicates. Each of those is a place where SQL and
+    `_compare_filter`/`str()` could disagree, and a faster aggregate that
+    returns different numbers is not an improvement. Anything outside the narrow
+    case returns None and the caller streams.
+    """
+    dialect = _dialect_name(db)
+    if dialect not in {"sqlite", "postgresql"}:
+        return None
+    if group_by is not None and (
+        not isinstance(group_by, str)
+        or not _SAFE_FIELD.match(group_by)
+        or group_by in _RESERVED_TOP
+    ):
+        return None
+
+    if group_by is None:
+        return {"all": query.count()}
+
+    type_expr, key_expr = _group_key_expressions(dialect, group_by)
+    rows = query.with_entities(type_expr, key_expr, func.count()).group_by(
+        type_expr, key_expr).all()
+
+    counts: Dict[str, int] = {}
+    for json_type, value, count in rows:
+        key = _python_group_key(json_type, value)
+        if key is None:
+            return None  # an object- or array-valued group; let Python decide
+        counts[key] = counts.get(key, 0) + int(count)
+    return counts
+
+
+def refresh_facet_counts(db: Session, *, object_type_id: str, field: str,
+                         project_id: Optional[str] = None) -> Dict[str, Any]:
+    """Recompute and store the facet counts for one property.
+
+    This pays the aggregate so that reads do not. On the ten-million-object
+    reference fixture, grouping `category` cost **2.724 s** through
+    `POST /object-sets/facets/refresh`, against a **9.235 ms** read from the
+    stored counts and 2,713.288 ms computing it exactly. Run it on a schedule,
+    or after a load, at whatever staleness the deployment will show.
+
+    An earlier version of this docstring cited 56,487.9 ms here. That figure
+    comes from `measure_read_path_bounds.py`, which times a different shape, and
+    it does not describe what this function costs. Left corrected rather than
+    deleted: a cost written into a docstring is what an operator sizes a refresh
+    schedule against.
+
+    Nothing called this until 2026-08-09. The table shipped at migration 0040
+    and `aggregate_object_set` read from it whenever it was populated, but no
+    route, job or load hook ever wrote to it, so every deployment computed every
+    facet exactly and the stored path was unreachable in practice.
+
+    Returns the counts it stored, so a caller can refresh and render in one go.
+    """
+    query, residual, _ = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=None)
+    if residual:  # unreachable with filters=None; guards a future caller
+        raise ValueError("facet rollups are computed over the unfiltered type")
+    counts = _sql_group_counts(db, query, field)
+    if counts is None:
+        # A group key SQL cannot render the way Python does. Falling back to the
+        # streaming pass here would store numbers the exact path disagrees with,
+        # so nothing is stored and reads keep computing exactly.
+        raise ValueError(f"'{field}' cannot be grouped in SQL for this object type")
+
+    scope = project_id or "default"
+    computed_at = int(time.time())
+    db.query(models.ObjectFacetCount).filter(
+        models.ObjectFacetCount.object_type_id == object_type_id,
+        models.ObjectFacetCount.field == field,
+        models.ObjectFacetCount.project_id == scope,
+    ).delete(synchronize_session=False)
+    for group_key, count in counts.items():
+        db.add(models.ObjectFacetCount(
+            id=f"facet_{uuid.uuid4().hex}", project_id=scope,
+            object_type_id=object_type_id, field=field,
+            group_key=group_key, count=count, computed_at=computed_at,
+        ))
+    db.commit()
+    return {
+        "object_type_id": object_type_id, "field": field,
+        "project_id": scope, "computed_at": computed_at,
+        "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+    }
+
+
+def _read_facet_rollup(db: Session, object_type_id: str, field: Optional[str],
+                       project_id: Optional[str], max_age_seconds: Optional[int]):
+    """Stored counts for this facet, or None when they cannot be used.
+
+    Returns None -- meaning "compute it exactly" -- when no rollup exists or it
+    is older than the caller will accept. A rollup is never used for a filtered
+    aggregate, because it describes the whole type.
+    """
+    if field is None:
+        return None
+    rows = db.query(models.ObjectFacetCount).filter(
+        models.ObjectFacetCount.object_type_id == object_type_id,
+        models.ObjectFacetCount.field == field,
+        models.ObjectFacetCount.project_id == (project_id or "default"),
+    ).all()
+    if not rows:
+        return None
+    computed_at = min(row.computed_at for row in rows)
+    if max_age_seconds is not None and int(time.time()) - computed_at > max_age_seconds:
+        return None
+    return computed_at, {row.group_key: row.count for row in rows}
 
 
 def aggregate_object_set(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     group_by: Optional[str] = None,
     metrics: Optional[List[Dict[str, Any]]] = None,
+    max_rollup_age_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
-    grouped: Dict[str, List[models.ObjectInstance]] = {}
+    requested_metrics = [metric for metric in (metrics or []) if isinstance(metric, dict)]
+
+    if not requested_metrics and not filters:
+        # Stored counts, when there are any and the caller accepts their age.
+        # Only for an unfiltered aggregate: a rollup describes the whole type.
+        rollup = _read_facet_rollup(
+            db, object_type_id, group_by, project_id, max_rollup_age_seconds)
+        if rollup is not None:
+            computed_at, counts = rollup
+            return {
+                "object_type_id": object_type_id,
+                "filters": {},
+                "group_by": group_by,
+                "total": sum(counts.values()),
+                "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+                # Never omitted. A caller that does not look still has it in the
+                # payload, which is the difference between stale and misleading.
+                "source": "rollup",
+                "computed_at": computed_at,
+            }
+
+    if not requested_metrics:
+        query, residual, _ = _prepared_object_query(
+            db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+        if not residual:
+            counts = _sql_group_counts(db, query, group_by)
+            if counts is not None:
+                return {
+                    "object_type_id": object_type_id,
+                    "filters": filters or {},
+                    "group_by": group_by,
+                    "total": sum(counts.values()),
+                    "groups": [{"group": key, "count": counts[key]} for key in sorted(counts)],
+                    "source": "exact",
+                }
+
+    # Accumulators per group rather than the rows themselves. The previous
+    # version kept every row of the object type in `grouped` purely to call
+    # len() on the lists and re-read a few fields, so a facet count over ten
+    # million objects held ten million ORM instances to produce twenty numbers.
+    counts: Dict[str, int] = {}
+    tallies: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    total = 0
+
+    rows = iter_object_rows(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
     for row in rows:
         record = _object_to_dict(row, include_lineage=True)
         raw_key = _record_value(record, group_by) if group_by else "all"
         key = str(raw_key if raw_key is not None else "null")
-        grouped.setdefault(key, []).append(row)
+        counts[key] = counts.get(key, 0) + 1
+        total += 1
+        if requested_metrics:
+            group_tallies = tallies.setdefault(key, {})
+            for metric in requested_metrics:
+                field = metric.get("field")
+                alias = (metric.get("alias")
+                         or f"{str(metric.get('operation', 'count')).lower()}_{field or 'rows'}")
+                tally = group_tallies.setdefault(
+                    alias, {"present": 0, "n": 0, "sum": 0.0, "min": None, "max": None})
+                if not field:
+                    continue
+                value = _record_value(record, field)
+                if value is not None:
+                    tally["present"] += 1
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    number = float(value)
+                    tally["n"] += 1
+                    tally["sum"] += number
+                    tally["min"] = number if tally["min"] is None else min(tally["min"], number)
+                    tally["max"] = number if tally["max"] is None else max(tally["max"], number)
 
-    requested_metrics = metrics or []
     groups: List[Dict[str, Any]] = []
-    for key, items in sorted(grouped.items(), key=lambda pair: pair[0]):
-        aggregate: Dict[str, Any] = {
-            "group": key,
-            "count": len(items),
-        }
+    for key in sorted(counts):
+        aggregate: Dict[str, Any] = {"group": key, "count": counts[key]}
         for metric in requested_metrics:
-            if not isinstance(metric, dict):
-                continue
             field = metric.get("field")
             operation = str(metric.get("operation", "count")).lower()
             alias = metric.get("alias") or f"{operation}_{field or 'rows'}"
-            values = [
-                _record_value(_object_to_dict(item, include_lineage=True), field)
-                for item in items
-                if field
-            ]
-            numeric_values = [
-                float(value) for value in values
-                if isinstance(value, (int, float)) and not isinstance(value, bool)
-            ]
+            tally = tallies.get(key, {}).get(
+                alias, {"present": 0, "n": 0, "sum": 0.0, "min": None, "max": None})
             if operation == "count":
-                aggregate[alias] = len([value for value in values if value is not None]) if field else len(items)
+                aggregate[alias] = tally["present"] if field else counts[key]
             elif operation == "sum":
-                aggregate[alias] = sum(numeric_values)
+                aggregate[alias] = tally["sum"]
             elif operation == "avg":
-                aggregate[alias] = sum(numeric_values) / len(numeric_values) if numeric_values else None
+                aggregate[alias] = tally["sum"] / tally["n"] if tally["n"] else None
             elif operation == "min":
-                aggregate[alias] = min(numeric_values) if numeric_values else None
+                aggregate[alias] = tally["min"]
             elif operation == "max":
-                aggregate[alias] = max(numeric_values) if numeric_values else None
+                aggregate[alias] = tally["max"]
         groups.append(aggregate)
 
     return {
         "object_type_id": object_type_id,
         "filters": filters or {},
         "group_by": group_by,
-        "total": len(rows),
+        "total": total,
         "groups": groups,
+        "source": "exact",
     }
 
 
@@ -844,6 +1463,7 @@ def search_around_objects(
     db: Session,
     *,
     object_ids: List[str],
+    project_id: Optional[str] = None,
     link_type_id: Optional[str] = None,
     direction: str = "both",
     target_object_type_id: Optional[str] = None,
@@ -852,9 +1472,15 @@ def search_around_objects(
     direction = direction.lower()
     if direction not in {"incoming", "outgoing", "both"}:
         raise ValueError("direction must be incoming, outgoing, or both")
-    if link_type_id and not db.query(models.LinkType).filter(models.LinkType.id == link_type_id).first():
+    link_type_query = db.query(models.LinkType).filter(models.LinkType.id == link_type_id) if link_type_id else None
+    if link_type_query is not None and project_id is not None:
+        link_type_query = link_type_query.filter(models.LinkType.project_id == project_id)
+    if link_type_id and not link_type_query.first():
         raise ValueError(f"LinkType '{link_type_id}' not found")
-    if target_object_type_id and not db.query(models.ObjectType).filter(models.ObjectType.id == target_object_type_id).first():
+    target_query = db.query(models.ObjectType).filter(models.ObjectType.id == target_object_type_id) if target_object_type_id else None
+    if target_query is not None and project_id is not None:
+        target_query = target_query.filter(models.ObjectType.project_id == project_id)
+    if target_object_type_id and not target_query.first():
         raise ValueError(f"ObjectType '{target_object_type_id}' not found")
 
     bounded_depth = max(1, min(int(depth), 6))
@@ -869,6 +1495,8 @@ def search_around_objects(
             break
         next_frontier: Set[str] = set()
         query = db.query(models.LinkInstance)
+        if project_id is not None:
+            query = query.filter(models.LinkInstance.project_id == project_id)
         if link_type_id:
             query = query.filter(models.LinkInstance.link_type_id == link_type_id)
         links = query.all()
@@ -879,7 +1507,10 @@ def search_around_objects(
             if direction in {"incoming", "both"} and link.target_object_id in frontier:
                 candidates.append((link.target_object_id, link.source_object_id))
             for _, neighbor_id in candidates:
-                neighbor = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == neighbor_id).first()
+                neighbor_query = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == neighbor_id)
+                if project_id is not None:
+                    neighbor_query = neighbor_query.filter(models.ObjectInstance.project_id == project_id)
+                neighbor = neighbor_query.first()
                 if not neighbor:
                     continue
                 if target_object_type_id and neighbor.object_type_id != target_object_type_id:
@@ -894,11 +1525,17 @@ def search_around_objects(
 
     nodes = [
         _object_to_dict(row, include_lineage=True)
-        for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.id.in_(node_ids)).all()
+        for row in db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.id.in_(node_ids),
+            *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+        ).all()
     ] if node_ids else []
     edges = [
         _link_to_dict(row)
-        for row in db.query(models.LinkInstance).filter(models.LinkInstance.id.in_(edge_ids)).all()
+        for row in db.query(models.LinkInstance).filter(
+            models.LinkInstance.id.in_(edge_ids),
+            *([models.LinkInstance.project_id == project_id] if project_id is not None else []),
+        ).all()
     ] if edge_ids else []
 
     return {
@@ -914,6 +1551,7 @@ def spatial_query_objects(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     geometry_field: str = "geometry",
     near: Optional[Dict[str, Any]] = None,
@@ -923,7 +1561,6 @@ def spatial_query_objects(
     limit: int = 100,
     include_lineage: bool = True,
 ) -> Dict[str, Any]:
-    rows = _query_object_rows(db, object_type_id=object_type_id, filters=filters)
     bounded_limit = max(0, min(int(limit), 10000))
     near_point = geometry_reference_point(normalize_geometry(near) or {}) if near else None
     normalized_polygon = normalize_geometry(polygon) if polygon else None
@@ -933,7 +1570,47 @@ def spatial_query_objects(
     if polygon and (not normalized_polygon or normalized_polygon.get("type") != "Polygon"):
         raise ValueError("polygon must be a GeoJSON Polygon")
 
-    matches: List[Dict[str, Any]] = []
+    # Narrow to a bounding box in SQL before any geometry reaches Python. Without
+    # this the spatial query is the one shape streaming made slower, because it
+    # cannot stop early and every row pays the cost of an ORM instance, a
+    # geometry extraction and a haversine before being rejected.
+    #
+    # The box is derived from whichever predicate was given -- an explicit bbox,
+    # a polygon's own extent, or the square enclosing a radius -- and each is a
+    # superset of the eventual answer, so the Python pass below still decides.
+    prefilter_bounds = normalized_bbox
+    if prefilter_bounds is None and normalized_polygon:
+        prefilter_bounds = geometry_bbox(normalized_polygon)
+    if prefilter_bounds is None and near_point and radius_meters is not None:
+        prefilter_bounds = _radius_bounds(near_point, float(radius_meters))
+
+    query, residual, _ = _prepared_object_query(
+        db, object_type_id=object_type_id, project_id=project_id, filters=filters)
+    # Prefer the materialized extent, which is indexable. The expression
+    # pre-filter is the fallback for a query naming a non-default geometry
+    # field, where the stored bounds describe something else.
+    spatial_condition = None
+    if prefilter_bounds and _geo_bounds_complete(db, object_type_id):
+        spatial_condition = _materialized_bbox_condition(
+            db, geometry_field, prefilter_bounds)
+    if spatial_condition is None:
+        spatial_condition = _bbox_prefilter(db, geometry_field, prefilter_bounds)
+    if spatial_condition is not None:
+        query = query.filter(spatial_condition)
+    rows = _stream_object_rows(db, query, residual)
+
+    # Only the page is retained. Previously every match became a full payload
+    # dict, the whole list was sorted, and the first `limit` were returned: a
+    # radius query returning fifty pins held every matching object first.
+    #
+    # `heapq.nlargest` semantics by hand: the heap keeps the `limit` smallest
+    # distances, so the root is the worst kept candidate and is evicted when a
+    # closer one arrives. The sequence number is part of the key so ties resolve
+    # by scan order, which is what the previous stable sort did.
+    kept: List[Tuple[float, int, Dict[str, Any]]] = []
+    total = 0
+    sequence = 0
+
     for row in rows:
         geometry = extract_geometry(row.properties or {}, geometry_field)
         if not geometry:
@@ -954,6 +1631,14 @@ def spatial_query_objects(
             if radius_meters is not None and distance > float(radius_meters):
                 continue
 
+        total += 1
+        sequence += 1
+        rank = distance if near_point else float(sequence)
+        if not bounded_limit:
+            continue
+        if len(kept) == bounded_limit and rank >= -kept[0][0]:
+            continue
+
         payload = _object_to_dict(row, include_lineage=include_lineage)
         mgrs = encode_mgrs(ref_point[1], ref_point[0])["mgrs"] if ref_point else None
         payload["geometry"] = geometry
@@ -963,10 +1648,11 @@ def spatial_query_objects(
             "distance_meters": round(distance, 3) if distance is not None else None,
             "mgrs": mgrs,
         }
-        matches.append(payload)
+        heapq.heappush(kept, (-rank, -sequence, payload))
+        if len(kept) > bounded_limit:
+            heapq.heappop(kept)
 
-    if near_point:
-        matches.sort(key=lambda item: item["spatial"]["distance_meters"] if item["spatial"]["distance_meters"] is not None else float("inf"))
+    objects = [payload for _, _, payload in sorted(kept, key=lambda item: (-item[0], -item[1]))]
 
     return {
         "object_type_id": object_type_id,
@@ -978,9 +1664,9 @@ def spatial_query_objects(
             "bbox": bbox,
             "polygon": polygon,
         },
-        "total": len(matches),
-        "count": len(matches[:bounded_limit]) if bounded_limit else 0,
-        "objects": matches[:bounded_limit] if bounded_limit else [],
+        "total": total,
+        "count": len(objects),
+        "objects": objects,
     }
 
 
@@ -1014,6 +1700,7 @@ def object_set_feature_collection(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     filters: Optional[Any] = None,
     geometry_field: str = "geometry",
     limit: int = 1000,
@@ -1022,6 +1709,7 @@ def object_set_feature_collection(
     query = spatial_query_objects(
         db,
         object_type_id=object_type_id,
+        project_id=project_id,
         filters=filters,
         geometry_field=geometry_field,
         limit=limit,
@@ -1056,6 +1744,7 @@ def evaluate_saved_object_set(
     return query_object_set(
         db,
         object_type_id=saved_object_set.object_type_id,
+        project_id=saved_object_set.project_id,
         filters=saved_object_set.filters or {},
         limit=limit,
         include_lineage=include_lineage,
@@ -1071,7 +1760,10 @@ def render_map_layer(
     filters = layer.filters or {}
     object_type_id = layer.object_type_id
     if layer.saved_object_set_id:
-        saved = db.query(models.SavedObjectSet).filter(models.SavedObjectSet.id == layer.saved_object_set_id).first()
+        saved = db.query(models.SavedObjectSet).filter(
+            models.SavedObjectSet.id == layer.saved_object_set_id,
+            models.SavedObjectSet.project_id == layer.project_id,
+        ).first()
         if not saved:
             raise ValueError(f"SavedObjectSet '{layer.saved_object_set_id}' not found")
         object_type_id = saved.object_type_id
@@ -1080,6 +1772,7 @@ def render_map_layer(
     collection = object_set_feature_collection(
         db,
         object_type_id=object_type_id,
+        project_id=layer.project_id,
         filters=filters,
         geometry_field=layer.geometry_field,
         limit=limit,
@@ -1107,24 +1800,33 @@ def build_object_profile(
     *,
     object_type_id: str,
     object_id: str,
+    project_id: Optional[str] = None,
     linked_limit: int = 50,
 ) -> Dict[str, Any]:
     obj = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.id == object_id,
         models.ObjectInstance.object_type_id == object_type_id,
+        *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
     ).first()
     if not obj:
         raise ValueError(f"ObjectInstance '{object_id}' not found")
-    object_type = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first()
+    object_type = db.query(models.ObjectType).filter(
+        models.ObjectType.id == object_type_id,
+        *([models.ObjectType.project_id == project_id] if project_id is not None else []),
+    ).first()
     if not object_type:
         raise ValueError(f"ObjectType '{object_type_id}' not found")
 
-    outbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.source_object_id == object_id).all()
-    inbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.target_object_id == object_id).all()
+    project_filters = [models.LinkInstance.project_id == project_id] if project_id is not None else []
+    outbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.source_object_id == object_id, *project_filters).all()
+    inbound_links = db.query(models.LinkInstance).filter(models.LinkInstance.target_object_id == object_id, *project_filters).all()
     neighbor_ids = [link.target_object_id for link in outbound_links] + [link.source_object_id for link in inbound_links]
     linked_objects = [
         _object_to_dict(row, include_lineage=True)
-        for row in db.query(models.ObjectInstance).filter(models.ObjectInstance.id.in_(neighbor_ids)).limit(linked_limit).all()
+        for row in db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.id.in_(neighbor_ids),
+            *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+        ).limit(linked_limit).all()
     ] if neighbor_ids else []
 
     geometry = extract_geometry(obj.properties or {})
@@ -1162,6 +1864,7 @@ def evaluate_geofence(
     db: Session,
     *,
     object_type_id: str,
+    project_id: Optional[str] = None,
     geofence: Optional[Dict[str, Any]] = None,
     bbox: Optional[List[float]] = None,
     filters: Optional[Any] = None,
@@ -1182,6 +1885,7 @@ def evaluate_geofence(
     query = spatial_query_objects(
         db,
         object_type_id=object_type_id,
+        project_id=project_id,
         filters=filters,
         geometry_field=geometry_field,
         limit=limit,
@@ -1233,7 +1937,10 @@ def validate_link_instance_candidate(
         )
 
     cardinality = (link_type.cardinality or "MANY_TO_MANY").upper()
-    query = db.query(models.LinkInstance).filter(models.LinkInstance.link_type_id == link_type.id)
+    query = db.query(models.LinkInstance).filter(
+        models.LinkInstance.link_type_id == link_type.id,
+        models.LinkInstance.project_id == link_type.project_id,
+    )
     if exclude_link_id:
         query = query.filter(models.LinkInstance.id != exclude_link_id)
     existing_links = query.all()
@@ -1410,7 +2117,7 @@ def hydrate_objects(
     hydrated_records: List[Dict[str, Any]] = []
     materialized = 0
     updated = 0
-    from . import decision_intelligence
+    from . import decision_intelligence, ontology_runtime_v1
 
     for record in records:
         if object_id_expr is not None:
@@ -1426,6 +2133,8 @@ def hydrate_objects(
             target: resolve_value(source_expr, record)
             for target, source_expr in property_map.items()
         } if property_map else dict(record)
+        if step.get("omit_nulls"):
+            properties = {key: value for key, value in properties.items() if value is not None}
 
         errors = validate_object_properties(object_type, properties)
         if errors:
@@ -1439,6 +2148,8 @@ def hydrate_objects(
             "operation": "map_to_ontology",
         }
         if existing:
+            if existing.project_id != object_type.project_id:
+                raise ValueError(f"ObjectInstance '{object_id}' belongs to another project")
             if not upsert:
                 raise ValueError(f"ObjectInstance '{object_id}' already exists")
             existing.properties = {**(existing.properties or {}), **properties}
@@ -1457,6 +2168,7 @@ def hydrate_objects(
         else:
             created = models.ObjectInstance(
                 id=str(object_id),
+                project_id=object_type.project_id,
                 object_type_id=object_type_id,
                 properties=properties,
                 source_asset_id=source_asset_id,
@@ -1509,6 +2221,8 @@ def hydrate_links(
         if not source or not target:
             skipped += 1
             continue
+        if source.project_id != link_type.project_id or target.project_id != link_type.project_id:
+            raise ValueError("Link hydration crosses a project boundary")
         link_id = str(step.get("link_id") or f"{link_type_id}:{source_id}:{target_id}")
         link_errors = validate_link_instance_candidate(
             db,
@@ -1529,6 +2243,7 @@ def hydrate_links(
         }
         db.add(models.LinkInstance(
             id=link_id,
+            project_id=link_type.project_id,
             link_type_id=link_type_id,
             source_object_id=str(source_id),
             target_object_id=str(target_id),
@@ -1667,6 +2382,22 @@ def execute_pipeline_steps(
                 {**record, target_field: resolve_value(step.get("value"), record)}
                 for record in records
             ]
+        elif operation == "namespace_id":
+            source_field = str(step.get("source_field") or "id")
+            target_field = str(step.get("target_field") or "_ontology_id")
+            prefix = str(step.get("prefix") or "")
+            separator = str(step.get("separator") or ":")
+            strict = bool(step.get("strict", True))
+            namespaced = []
+            for record in records:
+                source_value = record.get(source_field)
+                if source_value in {None, ""}:
+                    if strict:
+                        raise ValueError(f"namespace_id could not resolve field '{source_field}'")
+                    namespaced.append(dict(record))
+                    continue
+                namespaced.append({**record, target_field: f"{prefix}{separator if prefix else ''}{source_value}"})
+            records = namespaced
         elif operation == "derive_geo_point":
             records, metrics = _derive_geo_points(records, step)
         elif operation == "derive_mgrs":
@@ -1903,17 +2634,23 @@ def _validation_issue(
     })
 
 
-def validate_ontology_integrity(db: Session) -> Dict[str, Any]:
+def validate_ontology_integrity(db: Session, project_id: Optional[str] = None) -> Dict[str, Any]:
     issues: List[Dict[str, Any]] = []
-    object_types = {item.id: item for item in db.query(models.ObjectType).all()}
-    link_types = {item.id: item for item in db.query(models.LinkType).all()}
-    objects = {item.id: item for item in db.query(models.ObjectInstance).all()}
+    def project_rows(model: Any) -> List[Any]:
+        query = db.query(model)
+        if project_id is not None and hasattr(model, "project_id"):
+            query = query.filter(model.project_id == project_id)
+        return query.all()
+
+    object_types = {item.id: item for item in project_rows(models.ObjectType)}
+    link_types = {item.id: item for item in project_rows(models.LinkType)}
+    objects = {item.id: item for item in project_rows(models.ObjectInstance)}
     actions = {item.id: item for item in db.query(models.ActionType).all()}
-    data_assets = {item.id: item for item in db.query(models.DataAsset).all()}
-    pipelines = {item.id: item for item in db.query(models.PipelineDefinition).all()}
+    data_assets = {item.id: item for item in project_rows(models.DataAsset)}
+    pipelines = {item.id: item for item in project_rows(models.PipelineDefinition)}
     agents = {item.id: item for item in db.query(models.AgentDefinition).all()}
-    saved_object_sets = {item.id: item for item in db.query(models.SavedObjectSet).all()}
-    map_layers = {item.id: item for item in db.query(models.MapLayerDefinition).all()}
+    saved_object_sets = {item.id: item for item in project_rows(models.SavedObjectSet)}
+    map_layers = {item.id: item for item in project_rows(models.MapLayerDefinition)}
 
     for object_type in object_types.values():
         if not isinstance(object_type.properties, dict):
@@ -2008,7 +2745,7 @@ def validate_ontology_integrity(db: Session) -> Dict[str, Any]:
                 message=f"Source asset '{obj.source_asset_id}' does not exist.",
             )
 
-    links = db.query(models.LinkInstance).all()
+    links = project_rows(models.LinkInstance)
     source_counts: Dict[Tuple[str, str], int] = {}
     target_counts: Dict[Tuple[str, str], int] = {}
     for link in links:
@@ -2298,7 +3035,7 @@ def apply_action_mutations(
     rules = action_type.rules or {}
     mutations = rules.get("object_mutations", [])
     mutated_ids: List[str] = []
-    from . import decision_intelligence
+    from . import decision_intelligence, ontology_runtime_v1
 
     for mutation in mutations:
         object_type_id = mutation["object_type_id"]
@@ -2313,11 +3050,13 @@ def apply_action_mutations(
             raise ValueError("Action mutation could not resolve object id")
 
         existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == str(object_id)).first()
+        before_state = dict(existing.properties or {}) if existing else {}
         if not existing:
             if not mutation.get("create_if_missing"):
                 raise ValueError(f"ObjectInstance '{object_id}' not found")
             existing = models.ObjectInstance(
                 id=str(object_id),
+                project_id=object_type.project_id,
                 object_type_id=object_type_id,
                 properties={},
                 source_asset_id=None,
@@ -2326,6 +3065,8 @@ def apply_action_mutations(
                 updated_at=now_ts(),
             )
             db.add(existing)
+        elif existing.project_id != object_type.project_id:
+            raise ValueError(f"ObjectInstance '{object_id}' belongs to another project")
 
         updates = {
             field: resolve_value(expression, parameters)
@@ -2351,6 +3092,16 @@ def apply_action_mutations(
             source_type="action_type",
             source_id=action_type.id,
         )
+        ontology_runtime_v1.record_object_change(
+            db,
+            existing,
+            before_state=before_state,
+            event_type="action.object.mutated",
+            actor=actor,
+            source_type="action_type",
+            source_id=action_type.id,
+            evidence={"action_type_id": action_type.id},
+        )
         mutated_ids.append(existing.id)
 
     return mutated_ids
@@ -2362,17 +3113,22 @@ def build_context_pack(
     allowed_object_types: List[str],
     filters: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     filters = filters or {}
     object_type_ids = allowed_object_types
     if not object_type_ids:
-        object_type_ids = [row.id for row in db.query(models.ObjectType).all()]
+        type_query = db.query(models.ObjectType)
+        if project_id is not None:
+            type_query = type_query.filter(models.ObjectType.project_id == project_id)
+        object_type_ids = [row.id for row in type_query.all()]
 
     packs = []
     for object_type_id in object_type_ids:
-        objects = db.query(models.ObjectInstance).filter(
-            models.ObjectInstance.object_type_id == object_type_id
-        ).all()
+        object_query = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == object_type_id)
+        if project_id is not None:
+            object_query = object_query.filter(models.ObjectInstance.project_id == project_id)
+        objects = object_query.all()
 
         object_filters = filters.get(object_type_id, {}) if isinstance(filters.get(object_type_id), dict) else {}
         if object_filters:
@@ -2393,7 +3149,7 @@ def build_context_pack(
             ],
         })
 
-    return {"packs": packs, "filters": filters, "limit": limit}
+    return {"packs": packs, "filters": filters, "limit": limit, "project_id": project_id}
 
 
 def plan_agent_session(
@@ -2409,10 +3165,11 @@ def plan_agent_session(
         allowed_object_types=agent.allowed_object_types or [],
         filters=filters,
         limit=max_context_objects,
+        project_id=agent.project_id,
     )
     try:
         from . import decision_intelligence
-        context["decision_intelligence"] = decision_intelligence.build_decision_context(db, context)
+        context["decision_intelligence"] = decision_intelligence.build_decision_context(db, context, project_id=agent.project_id)
     except Exception as exc:
         context["decision_intelligence"] = {"error": str(exc), "object_risk": [], "duplicate_warnings": []}
     prompt = user_prompt.lower()
@@ -2952,19 +3709,63 @@ def _logic_cmp(op: str, left: Any, right: Any) -> bool:
     return False
 
 
-def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any], limit: int = 1000):
-    """Query an object set with simple equality filters (AIP Logic 'Query Objects')."""
-    instances = (
-        db.query(models.ObjectInstance)
-        .filter(models.ObjectInstance.object_type_id == object_type_id)
-        .all()
-    )
+def _logic_object_rows(db: Session, object_type_id: str, filters: Dict[str, Any], limit: int = 1000,
+                       project_id: Optional[str] = None):
+    """Query an object set with simple equality filters (AIP Logic 'Query Objects').
+
+    Returns ``(rows, total_matching)``.
+
+    The `limit` argument used to be applied to the list returned by ``.all()``,
+    so it never reached SQL and every one of this function's twenty-one call
+    sites loaded the whole object type -- including the one asking for five
+    rows. It is now a SQL ``LIMIT`` whenever the predicates can be expressed in
+    SQL, and a stream that stops early otherwise.
+
+    A caller that asks for a billion rows still gets a scan; that is the
+    caller's contract, not this function's, and condition B3 of
+    ``docs/GOAL_2026-08-06.md`` covers it. What changed is that asking for a
+    page now costs a page.
+    """
     filters = filters or {}
-    matched = [
-        i for i in instances
-        if all((i.properties or {}).get(k) == v for k, v in filters.items())
-    ]
-    return matched[: int(limit)], len(matched)
+    bounded = max(0, int(limit))
+    query = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.object_type_id == object_type_id,
+        *([models.ObjectInstance.project_id == project_id] if project_id is not None else []),
+    )
+
+    normalized = [{"field": key, "op": "equals", "value": value} for key, value in filters.items()]
+    conditions, exact = _pushdown_conditions(db, normalized)
+    for condition in conditions:
+        query = query.filter(condition)
+    if not filters:
+        exact = True
+
+    if exact:
+        # count(*) rather than len(list): the total was the reason callers asked
+        # for everything, and the database can produce it without shipping rows.
+        total = query.count()
+        rows = (query.with_entities(*_OBJECT_COLUMNS).limit(bounded).all()
+                if bounded else [])
+        return rows, total
+
+    # A predicate SQL cannot express. Stream, keep the page, count the rest.
+    # The comparison stays `properties.get(key) == value`, deliberately not
+    # `_compare_filter`: this entry point has always matched raw top-level keys,
+    # and `_record_value` would resolve a filter named `id` against the row's
+    # own id instead of its properties.
+    matched: List[Any] = []
+    total = 0
+    source = (query.with_entities(*_OBJECT_COLUMNS)
+              .execution_options(stream_results=True)
+              .yield_per(_STREAM_BATCH))
+    for row in source:
+        properties = row.properties or {}
+        if not all(properties.get(key) == value for key, value in filters.items()):
+            continue
+        total += 1
+        if len(matched) < bounded:
+            matched.append(row)
+    return matched, total
 
 
 def _eval_logic_condition(condition: Dict[str, Any], scope: Dict[str, Any], db: Session) -> bool:
@@ -3033,6 +3834,7 @@ def _exec_logic_block_list(
                 allowed_object_types=block.get("object_types", []),
                 filters=block.get("filters", {}),
                 limit=int(block.get("limit", 5)),
+                project_id=logic_function.project_id,
             )
             outputs[block.get("output", "context")] = result
         elif block_type == "assist":
@@ -3124,7 +3926,7 @@ def _exec_logic_block_list(
             object_id = resolve_value(block.get("object_id"), scope) or block.get("object_id")
             if not object_type_id or not object_id:
                 raise ValueError("explain_object requires object_type_id and object_id")
-            result = decision_intelligence.explain_object_by_id(db, str(object_type_id), str(object_id))
+            result = decision_intelligence.explain_object_by_id(db, str(object_type_id), str(object_id), project_id=logic_function.project_id)
             outputs[block.get("output", "explanation")] = result
         elif block_type == "score_risk":
             from . import decision_intelligence
@@ -3135,7 +3937,7 @@ def _exec_logic_block_list(
                 scorecard_ids = [item.strip() for item in scorecard_ids.split(",") if item.strip()]
             if not object_type_id or not object_id:
                 raise ValueError("score_risk requires object_type_id and object_id")
-            result = decision_intelligence.score_object_by_id(db, str(object_type_id), str(object_id), scorecard_ids=scorecard_ids)
+            result = decision_intelligence.score_object_by_id(db, str(object_type_id), str(object_id), scorecard_ids=scorecard_ids, project_id=logic_function.project_id)
             outputs[block.get("output", "risk")] = result
         elif block_type == "run_scenario":
             from . import decision_intelligence
@@ -3149,6 +3951,7 @@ def _exec_logic_block_list(
                 seed_object_ids=seed_object_ids,
                 overrides=overrides,
                 propagation_rules=propagation_rules,
+                project_id=logic_function.project_id,
             )
             outputs[block.get("output", "scenario")] = result
         elif block_type == "create_incident":
@@ -3166,6 +3969,7 @@ def _exec_logic_block_list(
                 alert_ids=block.get("alert_ids") or [],
                 approval_ids=block.get("approval_ids") or [],
                 actor=block.get("actor", "logic"),
+                project_id=logic_function.project_id,
             )
             result = ops_control._incident_dict(incident)
             outputs[block.get("output", "incident")] = result
@@ -3299,6 +4103,27 @@ def _compare_count(count: int, operator: str, threshold: int) -> bool:
     return False
 
 
+def _legacy_automation_project_id(db: Session, automation: models.AutomationDefinition) -> str:
+    project_ids = set()
+    condition = automation.condition or {}
+    effect = automation.effect or {}
+    references = [
+        (models.ObjectType, condition.get("object_type_id")),
+        (models.ActionType, effect.get("action_type_id")),
+        (models.PipelineDefinition, effect.get("pipeline_id")),
+        (models.LogicFunction, effect.get("logic_function_id")),
+    ]
+    for model, resource_id in references:
+        if not resource_id:
+            continue
+        resource = db.get(model, str(resource_id))
+        if resource is not None and getattr(resource, "project_id", None):
+            project_ids.add(str(resource.project_id))
+    if len(project_ids) > 1:
+        raise ValueError(f"Automation '{automation.id}' references resources from multiple projects")
+    return next(iter(project_ids), "default")
+
+
 def evaluate_automation(
     db: Session,
     *,
@@ -3307,6 +4132,7 @@ def evaluate_automation(
 ) -> Dict[str, Any]:
     condition = automation.condition or {}
     effect = automation.effect or {}
+    project_id = _legacy_automation_project_id(db, automation)
     condition_result = False
     effect_result: Dict[str, Any] = {"status": "SKIPPED"}
 
@@ -3320,6 +4146,7 @@ def evaluate_automation(
             allowed_object_types=[object_type_id],
             filters={object_type_id: condition.get("filters", {})},
             limit=100000,
+            project_id=project_id,
         )
         count = len(context["packs"][0]["objects"]) if context["packs"] else 0
         condition_result = _compare_count(count, condition.get("operator", ">"), int(condition.get("threshold", 0)))
@@ -3329,8 +4156,12 @@ def evaluate_automation(
     if condition_result:
         if effect.get("type") == "request_approval":
             approval_id = str(uuid.uuid4())
+            action = db.get(models.ActionType, effect["action_type_id"])
+            if not action:
+                raise ValueError(f"ActionType '{effect['action_type_id']}' not found")
             approval = models_action.ApprovalRequest(
                 id=approval_id,
+                project_id=action.project_id,
                 action_type_id=effect["action_type_id"],
                 requester=actor,
                 parameters=effect.get("parameters", {}),

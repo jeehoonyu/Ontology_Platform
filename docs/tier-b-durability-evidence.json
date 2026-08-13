@@ -1,0 +1,50 @@
+{
+  "gate_id": "durability",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "backup_restore_rehearsals": 1,
+    "backup_seconds": 41.467,
+    "committed_probe_lost": 0,
+    "failover_promotion_seconds": 0.705,
+    "failover_state_mismatches": 0,
+    "fresh_volume_restores": 1,
+    "promotions_out_of_recovery": 1,
+    "replica_failover_rehearsals": 1,
+    "restore_readiness_seconds": 1.25,
+    "restore_state_mismatches": 0
+  },
+  "notes": "Derived from 2 rehearsal(s) at 0042_stream_outer_joins; 2 recorded at other heads ignored.",
+  "provenance": {
+    "captured_at": 1786381163,
+    "entry_points": [
+      "aggregate of oms/rehearse_ontology_scale_backup_restore.py",
+      "aggregate of oms/rehearse_ontology_scale_replica_failover.py"
+    ],
+    "git_commit": "7b3c747",
+    "harness": "oms/durability_rehearsals.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": "0042_stream_outer_joins",
+    "request_shapes": [
+      "physical backup and restore onto a fresh volume",
+      "streaming replica promotion with a committed probe"
+    ]
+  },
+  "status": "PASS",
+  "thresholds": {
+    "backup_restore_rehearsals_min": 1,
+    "committed_probe_lost_max": 0,
+    "failover_promotion_seconds_max": 1800.0,
+    "failover_state_mismatches_max": 0,
+    "fresh_volume_restores_min": 1,
+    "promotions_out_of_recovery_min": 1,
+    "replica_failover_rehearsals_min": 1,
+    "restore_readiness_seconds_max": 1800.0,
+    "restore_state_mismatches_max": 0
+  },
+  "tier": "B"
+}

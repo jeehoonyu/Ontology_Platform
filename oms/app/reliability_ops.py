@@ -6,6 +6,7 @@ top of existing DataAsset, PipelineDefinition, PipelineRun, and lineage APIs.
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections import Counter, deque
@@ -35,7 +36,7 @@ def _new_id(prefix: str) -> str:
 class DataQualityContract(Base):
     __tablename__ = "data_quality_contracts"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     asset_id: Mapped[str] = mapped_column(String, index=True)
@@ -49,7 +50,7 @@ class DataQualityContract(Base):
 class DataQualityRun(Base):
     __tablename__ = "data_quality_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     contract_id: Mapped[str] = mapped_column(String, index=True)
     asset_id: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, default="PASS", index=True)
@@ -62,7 +63,7 @@ class DataQualityRun(Base):
 class LineageImpactRun(Base):
     __tablename__ = "lineage_impact_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     resource_kind: Mapped[str] = mapped_column(String, index=True)
     resource_id: Mapped[str] = mapped_column(String, index=True)
     direction: Mapped[str] = mapped_column(String, default="downstream")
@@ -75,7 +76,7 @@ class LineageImpactRun(Base):
 class BackfillPlan(Base):
     __tablename__ = "backfill_plans"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     pipeline_ids: Mapped[list] = mapped_column(JSON, default=list)
@@ -90,7 +91,7 @@ class BackfillPlan(Base):
 class ReliabilitySnapshot(Base):
     __tablename__ = "reliability_snapshots"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     snapshot_type: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String, default="PASS", index=True)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -132,6 +133,8 @@ class BackfillRunRequest(BaseModel):
 
 
 def _ensure_tables(db: Session) -> None:
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        return
     for table in (
         DataQualityContract.__table__,
         DataQualityRun.__table__,
@@ -425,9 +428,12 @@ def _run_pipeline_backfill(db: Session, pipeline: models.PipelineDefinition, act
     input_asset = db.get(models.DataAsset, pipeline.input_asset_id)
     if not input_asset:
         return {"pipeline_id": pipeline.id, "status": "FAILED", "error": f"Input asset '{pipeline.input_asset_id}' not found"}
+    if input_asset.project_id != pipeline.project_id:
+        return {"pipeline_id": pipeline.id, "status": "FAILED", "error": "Pipeline input belongs to another project"}
     now = _now()
     run = models.PipelineRun(
         id=str(uuid.uuid4()),
+        project_id=pipeline.project_id,
         pipeline_id=pipeline.id,
         status="RUNNING",
         input_asset_id=input_asset.id,
@@ -443,13 +449,16 @@ def _run_pipeline_backfill(db: Session, pipeline: models.PipelineDefinition, act
         output_records, lineage, metrics = execute_pipeline_steps(db, pipeline=pipeline, run_id=run.id, input_asset=input_asset)
         output_asset_id = pipeline.output_asset_id or f"{pipeline.id}_output"
         output_asset = db.get(models.DataAsset, output_asset_id)
+        if output_asset and output_asset.project_id != pipeline.project_id:
+            raise HTTPException(status_code=409, detail="Pipeline output belongs to another project")
         if not output_asset:
             output_asset = models.DataAsset(
                 id=output_asset_id,
+                project_id=pipeline.project_id,
                 display_name=f"{pipeline.display_name} Output",
                 description=f"Backfill output of pipeline {pipeline.id}",
                 kind="dataset",
-                asset_schema={},
+                asset_schema={"project_id": pipeline.project_id},
                 records=[],
                 created_at=now,
                 updated_at=now,

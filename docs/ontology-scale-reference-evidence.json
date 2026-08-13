@@ -1,0 +1,38 @@
+{
+  "explorer_filter_p95_ms": 9.608,
+  "facet_p95_ms": 8.598,
+  "facet_refresh_seconds": 3.09,
+  "facet_source": "rollup",
+  "graph_edges": 100,
+  "graph_index_names": [
+    "ix_link_instances_source_object_id",
+    "ix_link_instances_target_object_id"
+  ],
+  "graph_nodes": 77,
+  "graph_query_limit_ms": 2000.0,
+  "graph_two_hop_p50_ms": 14.402,
+  "graph_two_hop_p95_ms": 15.709,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "index_rebuild_seconds": {},
+  "link_relation_bytes": 23753711616,
+  "links": 50000000,
+  "object_index_names": [
+    "ix_oi_property_e18d75eec8db1d235039"
+  ],
+  "object_lookup_p50_ms": 8.848,
+  "object_lookup_p95_ms": 9.8,
+  "object_query_limit_ms": 300.0,
+  "object_range_p50_ms": 12.074,
+  "object_range_p95_ms": 12.938,
+  "object_relation_bytes": 10207092736,
+  "objects": 10000000,
+  "profile": "reference",
+  "reference_scale_achieved": true,
+  "reused_existing_fixture": true,
+  "samples": 20,
+  "seed_seconds": 1.734
+}

@@ -1,0 +1,380 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend, conformance, and SQLite migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: oms/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install backend dependencies
+        run: python -m pip install -r oms/requirements.txt
+      - name: Verify dependency installation
+        run: python -m pip check
+      - name: Apply SQLite migrations twice
+        env:
+          DATABASE_URL: sqlite:////tmp/ontology-ci.db
+        run: |
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini current
+      - name: Run all backend test scripts
+        run: |
+          set -o pipefail
+          count=0
+          for test_file in $(find oms -maxdepth 1 -name 'test_*.py' -print | sort); do
+            echo "::group::${test_file}"
+            python "${test_file}" 2>&1 | tee -a backend-tests.log
+            echo "::endgroup::"
+            count=$((count + 1))
+          done
+          echo "Backend scripts passed: ${count}"
+          test "${count}" -ge 150
+      - name: Validate docs conformance
+        run: python oms/validate_docs_conformance.py
+      - name: Enforce the extensibility ratchets
+        # Fails when a new object type would cost more UI work than the last:
+        # native rendering coverage falling, or concrete type coupling rising.
+        run: python oms/audit_extensibility.py
+      - name: Enforce the evidence provenance ratchet
+        # Fails the build when evidence is added without a migration head. Such
+        # a file cannot be shown to be stale, so nothing ever forces it to be
+        # re-earned; catching it here is the difference between a ratchet and
+        # an intention.
+        run: python oms/audit_evidence_corpus.py
+      - name: Enforce the schema freeze
+        # Fails the build when a migration would land during an open pilot
+        # window. pilot_window.py already refuses to pool two schemas, but it
+        # discovers the change only at collection time, by which point the seven
+        # days are spent and the migration is merged. This is the same rule
+        # applied while it is still cheap to obey.
+        run: python oms/validate_schema_freeze.py
+      - name: Report Tier B gate status
+        # Reports only. Tier B is not claimed, so gating on it would leave the
+        # build permanently red and train everyone to ignore it.
+        continue-on-error: true
+        run: python oms/validate_tier_b_evidence.py
+      - name: Benchmark snapshot-native pipeline execution
+        env:
+          PIPELINE_SCALE_PROFILE: smoke
+          PIPELINE_SCALE_SAMPLES: "3"
+        run: python oms/benchmark_pipeline_scale.py
+      - name: Benchmark latency-injected S3-compatible execution
+        env:
+          AWS_ACCESS_KEY_ID: ontology
+          AWS_SECRET_ACCESS_KEY: ontology-development-secret
+          DATA_SNAPSHOT_S3_ENDPOINT: http://127.0.0.1:19001
+          OBJECT_STORAGE_NETWORK_SCOPE: ci-toxiproxy-20ms-downstream
+          OBJECT_STORAGE_TOXIPROXY_ADMIN_URL: http://127.0.0.1:18474
+          OBJECT_STORAGE_TOXIPROXY_NAME: minio-latency
+          OBJECT_STORAGE_TOXIPROXY_ENDPOINT: http://127.0.0.1:19001
+          OBJECT_STORAGE_BENCHMARK_PROFILE: smoke
+          OBJECT_STORAGE_BENCHMARK_ROWS: "100000"
+          OBJECT_STORAGE_BENCHMARK_PARTITIONS: "8"
+          OBJECT_STORAGE_BENCHMARK_SAMPLES: "3"
+          OBJECT_STORAGE_BENCHMARK_CONCURRENT_WORKERS: "4"
+        run: |
+          set -euo pipefail
+          docker compose --profile object-storage up -d minio
+          MINIO_CONTAINER="$(docker compose ps -q minio)"
+          NETWORK="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$MINIO_CONTAINER")"
+          docker run -d --name ontologyos-ci-toxiproxy --network "$NETWORK" \
+            -p 18474:8474 -p 19001:9000 \
+            ghcr.io/shopify/toxiproxy@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+          cleanup() {
+            docker rm -f ontologyos-ci-toxiproxy >/dev/null 2>&1 || true
+            docker compose --profile object-storage stop minio >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null && break
+            test "$attempt" -lt 30
+            sleep 1
+          done
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18474/proxies \
+            -d '{"name":"minio-latency","listen":"0.0.0.0:9000","upstream":"minio:9000","enabled":true}' >/dev/null
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18474/proxies/minio-latency/toxics \
+            -d '{"name":"object-store-response-latency","type":"latency","stream":"downstream","toxicity":1.0,"attributes":{"latency":20,"jitter":2}}' >/dev/null
+          python oms/benchmark_object_storage_minio.py
+      - name: Upload backend failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-failure-evidence
+          path: backend-tests.log
+          if-no-files-found: ignore
+
+  postgres-migrations:
+    name: PostgreSQL migration chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ontology
+          POSTGRES_PASSWORD: ontology-ci
+          POSTGRES_DB: ontology
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ontology -d ontology"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg2://ontology:ontology-ci@127.0.0.1:5432/ontology
+      APP_ENV: test
+      AUTH_MODE: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: oms/requirements.txt
+      - run: python -m pip install -r oms/requirements.txt
+      - name: Apply and verify migration chain
+        run: |
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini upgrade head
+          python -m alembic -c oms/alembic.ini current
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
+              tables = inspect(connection).get_table_names()
+          assert revision == "0042_stream_outer_joins", revision
+          assert len(tables) >= 100, len(tables)
+          print(f"PostgreSQL schema ready at {revision} with {len(tables)} tables")
+          PY
+      - name: Rehearse PostgreSQL ontology query compiler
+        run: python oms/verify_ontology_query_postgres.py
+      - name: Rehearse PostgreSQL snapshot publication fencing
+        env:
+          DUCKDB_FENCING_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: python oms/test_duckdb_delivery_lease_fencing.py
+      - name: Rehearse worker-process loss with independent S3 caches
+        env:
+          AWS_ACCESS_KEY_ID: ontology
+          AWS_SECRET_ACCESS_KEY: ontology-development-secret
+          DATA_SNAPSHOT_BACKEND: s3
+          DATA_SNAPSHOT_BUCKET: ontology-recovery
+          DATA_SNAPSHOT_S3_ENDPOINT: http://127.0.0.1:19101
+          DATA_SNAPSHOT_S3_REGION: us-east-1
+          DATA_SNAPSHOT_S3_ADDRESSING_STYLE: path
+          DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: "false"
+          DATA_SNAPSHOT_MAX_FILES: "64"
+          PIPELINE_RECOVERY_S3_ADMIN_ENDPOINT: http://127.0.0.1:9000
+          PIPELINE_RECOVERY_ROWS: "20000"
+          PIPELINE_RECOVERY_PARTITIONS: "8"
+          PIPELINE_RECOVERY_LEASE_SECONDS: "10"
+          PIPELINE_RECOVERY_EVIDENCE_PATH: /tmp/pipeline-worker-recovery-evidence.json
+        run: |
+          set -euo pipefail
+          docker compose --profile object-storage up -d minio
+          MINIO_CONTAINER="$(docker compose ps -q minio)"
+          NETWORK="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$MINIO_CONTAINER")"
+          docker run -d --name ontologyos-ci-worker-recovery-proxy --network "$NETWORK" \
+            -p 18574:8474 -p 19101:9000 \
+            ghcr.io/shopify/toxiproxy@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+          cleanup() {
+            docker rm -f ontologyos-ci-worker-recovery-proxy >/dev/null 2>&1 || true
+            docker compose --profile object-storage stop minio >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null && break
+            test "$attempt" -lt 30
+            sleep 1
+          done
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18574/proxies \
+            -d '{"name":"minio-recovery-latency","listen":"0.0.0.0:9000","upstream":"minio:9000","enabled":true}' >/dev/null
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18574/proxies/minio-recovery-latency/toxics \
+            -d '{"name":"worker-recovery-response-latency","type":"latency","stream":"downstream","toxicity":1.0,"attributes":{"latency":100,"jitter":0}}' >/dev/null
+          python oms/rehearse_pipeline_worker_recovery.py
+          python - <<'PY'
+          import json
+          evidence = json.load(open('/tmp/pipeline-worker-recovery-evidence.json', encoding='utf-8'))
+          assert evidence['status'] == 'PASS'
+          assert evidence['recovery']['attempt'] == 2
+          assert evidence['recovery']['output_snapshot_count'] == 1
+          assert evidence['recovery']['execution_fenced'] is True
+          PY
+      - name: Benchmark PostgreSQL ontology query plans
+        env:
+          ONTOLOGY_SCALE_PROFILE: smoke
+          ONTOLOGY_SCALE_SAMPLES: "10"
+        run: python oms/benchmark_ontology_scale_postgres.py
+      - name: Benchmark PostgreSQL ontology mixed workload
+        env:
+          ONTOLOGY_MIXED_PROFILE: smoke
+          ONTOLOGY_MIXED_WRITES: "2000"
+          ONTOLOGY_MIXED_READERS: "4"
+        run: python oms/benchmark_ontology_mixed_workload_postgres.py
+      - name: Rehearse PostgreSQL stream ordering and processor fencing
+        run: python oms/verify_stream_processing_postgres.py
+      - name: Rehearse PostgreSQL durable event-to-stream routing
+        run: python oms/verify_event_stream_routing_postgres.py
+      - name: Rehearse PostgreSQL cross-stream interval joins
+        run: python oms/verify_cross_stream_join_postgres.py
+      - name: Rehearse PostgreSQL cross-stream outer joins
+        run: python oms/verify_cross_stream_outer_postgres.py
+      - name: Rehearse PostgreSQL artifact review serialization
+        run: python oms/verify_artifact_review_postgres.py
+      - name: Rehearse PostgreSQL collaboration scale
+        run: python oms/verify_collaboration_scale_postgres.py
+      - name: Rehearse collaboration WebSocket replica loss and cursor recovery
+        run: python oms/verify_collaboration_websocket_chaos_postgres.py
+      - name: Rehearse cross-stream network-partition recovery
+        run: python oms/verify_cross_stream_partition_postgres.py
+      - name: Rehearse cross-stream outer-finalization partition recovery
+        run: python oms/verify_cross_stream_outer_partition_postgres.py
+      - name: Aggregate the chaos gate across both of its subjects
+        run: python oms/chaos_rehearsals.py aggregate
+
+  frontend:
+    name: Frontend type, build, and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit production dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Typecheck and build
+        working-directory: frontend
+        run: npm run build
+
+  browser:
+    name: Browser, responsive, and accessibility acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: oms/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r oms/requirements.txt
+      - name: Install frontend and Chrome
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chrome
+      - name: Run browser acceptance
+        working-directory: frontend
+        env:
+          CI: "true"
+          PYTHON_BIN: python
+        run: npm run test:e2e
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-acceptance-evidence
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  container:
+    name: Production container and Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      POSTGRES_USER: ontology
+      POSTGRES_PASSWORD: ontology-ci
+      POSTGRES_DB: ontology
+      OIDC_ISSUER: https://identity.example.test/realms/ontology
+      OIDC_CLIENT_ID: ontology-platform
+      PUBLIC_BASE_URL: https://ontology.example.test
+      PUBLIC_HOST: ontology.example.test
+      CONNECTOR_SECRET_KEY: ci-connector-secret-with-at-least-32-characters
+      KEYCLOAK_ADMIN_PASSWORD: ontology-ci-admin
+      PLUGIN_EXECUTOR_TOKEN: ci-plugin-executor-token
+      REHEARSAL_POSTGRES_PASSWORD: ontology-ci
+      REHEARSAL_KEYCLOAK_ADMIN_PASSWORD: ontology-ci-admin
+      REHEARSAL_CONNECTOR_SECRET_KEY: ci-rehearsal-connector-secret-with-at-least-32-characters
+      REHEARSAL_PLUGIN_EXECUTOR_TOKEN: ci-plugin-executor-token
+      REHEARSAL_PLUGIN_SANDBOX_IMAGE: registry.example.test/ontology-plugin-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production Compose model
+        run: docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+      - name: Validate OIDC plugin recovery rehearsal model
+        run: docker compose -f docker-compose.rehearsal.yml --profile plugin-execution config --quiet
+      - name: Build production application image
+        run: docker build --file oms/Dockerfile --tag ontology-platform:${{ github.sha }} .
+      - name: Verify packaged API v1 compatibility inventory
+        run: |
+          docker run --rm --entrypoint python \
+            -e APP_ENV=test -e AUTH_MODE=local -e SKIP_CREATE_ALL=1 \
+            ontology-platform:${{ github.sha }} -c '
+          from app.main import app
+          manifest = app.state.api_v1_compatibility_summary
+          schema = app.openapi()
+          assert manifest["aliases"] >= 850, manifest
+          assert "/api/v1/imports/templates" in schema["paths"]
+          assert schema["paths"]["/api/v1/imports/templates"]["get"]["x-ontologyos-compatibility-source"] == "/imports/templates"
+          print(manifest)
+          '
+      - name: Build isolated plugin executor image
+        run: docker build --file oms/plugin-executor.Dockerfile --tag ontology-plugin-executor:${{ github.sha }} .
+      - name: Build governed plugin egress proxy image
+        run: docker build --file oms/plugin-egress-proxy.Dockerfile --tag ontology-plugin-egress-proxy:${{ github.sha }} .
+      - name: Rehearse digest-pinned plugin sandbox
+        run: |
+          docker build --file oms/plugin-sandbox.Dockerfile --tag ontologyos-plugin-sandbox:${{ github.sha }} .
+          SANDBOX_IMAGE="$(docker image inspect --format '{{.Id}}' ontologyos-plugin-sandbox:${{ github.sha }})"
+          python oms/rehearse_plugin_oci.py --image "$SANDBOX_IMAGE"
+      - name: Rehearse governed plugin egress
+        run: |
+          SANDBOX_IMAGE="$(docker image inspect --format '{{.Id}}' ontologyos-plugin-sandbox:${{ github.sha }})"
+          PROXY_IMAGE="$(docker image inspect --format '{{.Id}}' ontology-plugin-egress-proxy:${{ github.sha }})"
+          python oms/rehearse_plugin_egress.py --sandbox-image "$SANDBOX_IMAGE" --proxy-image "$PROXY_IMAGE"

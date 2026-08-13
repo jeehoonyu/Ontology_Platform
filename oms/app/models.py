@@ -1,7 +1,10 @@
 from typing import Optional
-from sqlalchemy import String, Integer, JSON, ForeignKey, Boolean, Index
+from sqlalchemy import (String, Integer, Float, JSON, ForeignKey, Boolean, Index,
+                        event, text)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
+from .geo_bounds import bounds_of
 
 class ObjectType(Base):
     """
@@ -9,7 +12,8 @@ class ObjectType(Base):
     """
     __tablename__ = "object_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     properties: Mapped[dict] = mapped_column(JSON) # Schema of properties
@@ -25,7 +29,8 @@ class LinkType(Base):
     """
     __tablename__ = "link_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"))
@@ -42,11 +47,15 @@ class ActionType(Base):
     """
     __tablename__ = "action_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     parameters: Mapped[dict] = mapped_column(JSON) # Expected input schema
     rules: Mapped[dict] = mapped_column(JSON) # Validation and execution logic / side-effects
+
+
+OBJECT_STATE_JSON = JSON().with_variant(JSONB(), "postgresql")
 
 
 class ObjectInstance(Base):
@@ -56,17 +65,95 @@ class ObjectInstance(Base):
     """
     __tablename__ = "object_instances"
     # Composite index for the common type-scoped + ordered/paginated scan.
-    __table_args__ = (Index("ix_object_instances_type_created", "object_type_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_object_instances_type_created", "object_type_id", "created_at"),
+        Index(
+            "ix_object_instances_materialized_active",
+            "project_id", "object_type_id", "source_asset_id", "is_active", "id",
+        ),
+    )
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
-    properties: Mapped[dict] = mapped_column(JSON)
+    properties: Mapped[dict] = mapped_column(OBJECT_STATE_JSON)
+
+    # The object's geographic extent, derived from `properties` on every write by
+    # the listener below. It exists so a spatial query can be answered by an
+    # index instead of by carrying every row into Python to have its geometry
+    # parsed -- which cost 21.9 GB and 171 s at ten million objects.
+    #
+    # NULL means the object has no geometry, which is exactly the set a spatial
+    # query should exclude, so the filter can be a plain conjunction rather than
+    # the disjunction that previously defeated the planner. That equivalence is
+    # only true while these stay in step with `properties`; see the listener.
+    geo_min_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geo_min_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geo_max_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    geo_max_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Distinguishes "no geometry" from "never computed", which NULL bounds alone
+    # cannot. Without it a row inserted through SQLAlchemy Core -- which bypasses
+    # the mapper, and so the listener -- is indistinguishable from a row with
+    # nothing to place, and a spatial query drops it silently. With it, such rows
+    # are visible, countable, and force the correct-but-slower scan instead of a
+    # wrong answer. Set by the listener on every ORM write.
+    geo_indexed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False,
+    )
     source_asset_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    lineage: Mapped[dict] = mapped_column(JSON, default=dict)
+    materialization_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False,
+    )
+    retired_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    lineage: Mapped[dict] = mapped_column(OBJECT_STATE_JSON, default=dict)
     created_at: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[int] = mapped_column(Integer)
 
     object_type = relationship("ObjectType")
+
+
+@event.listens_for(ObjectInstance, "before_insert")
+@event.listens_for(ObjectInstance, "before_update")
+def _synchronize_geo_bounds(_mapper, _connection, target: "ObjectInstance") -> None:
+    """Recompute the geographic extent whenever an object is written.
+
+    Registered on the mapper rather than called from each writer, because there
+    are twenty-eight assignments to `properties` across the application and a
+    spatial query reads these columns as authoritative: a site that forgot to
+    update them would not fail, it would quietly remove objects from the map.
+
+    This covers every ORM write, which today is every write the application
+    makes. It does **not** cover a Core bulk insert, which bypasses the mapper
+    entirely -- benchmark fixtures do that, and `oms/audit_query_bounds.py`
+    fails the build if application code starts to.
+    """
+    bounds = bounds_of(target.properties)
+    (target.geo_min_lon, target.geo_min_lat,
+     target.geo_max_lon, target.geo_max_lat) = bounds or (None, None, None, None)
+    target.geo_indexed = True
+
+
+class ObjectFacetCount(Base):
+    """A precomputed facet bucket, with the time it was computed.
+
+    A facet over ten million objects is a full aggregate however it is written,
+    so the read is served from here and the aggregate is paid out of band. The
+    age is stored beside the number rather than inferred, because a count that
+    does not say how old it is cannot be distinguished from a wrong one.
+    """
+    __tablename__ = "object_facet_counts"
+    __table_args__ = (
+        Index("ix_object_facet_counts_lookup", "object_type_id", "field", "project_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default")
+    object_type_id: Mapped[str] = mapped_column(String)
+    field: Mapped[str] = mapped_column(String)
+    group_key: Mapped[str] = mapped_column(String)
+    count: Mapped[int] = mapped_column(Integer)
+    computed_at: Mapped[int] = mapped_column(Integer)
 
 
 class LinkInstance(Base):
@@ -75,7 +162,8 @@ class LinkInstance(Base):
     """
     __tablename__ = "link_instances"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     link_type_id: Mapped[str] = mapped_column(String, ForeignKey("link_types.id"), index=True)
     source_object_id: Mapped[str] = mapped_column(String, ForeignKey("object_instances.id"), index=True)
     target_object_id: Mapped[str] = mapped_column(String, ForeignKey("object_instances.id"), index=True)
@@ -95,7 +183,8 @@ class DataAsset(Base):
     """
     __tablename__ = "data_assets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     kind: Mapped[str] = mapped_column(String, default="dataset")
@@ -116,7 +205,8 @@ class PipelineDefinition(Base):
     """
     __tablename__ = "pipeline_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     input_asset_id: Mapped[str] = mapped_column(String, ForeignKey("data_assets.id"), index=True)
@@ -137,7 +227,8 @@ class PipelineRun(Base):
     """
     __tablename__ = "pipeline_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     pipeline_id: Mapped[str] = mapped_column(String, ForeignKey("pipeline_definitions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     input_asset_id: Mapped[str] = mapped_column(String, index=True)
@@ -160,7 +251,8 @@ class ModelEndpoint(Base):
     """
     __tablename__ = "model_endpoints"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     provider: Mapped[str] = mapped_column(String)
@@ -179,7 +271,8 @@ class AgentDefinition(Base):
     """
     __tablename__ = "agent_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     system_prompt: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -199,7 +292,7 @@ class AgentSession(Base):
     """
     __tablename__ = "agent_sessions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     agent_id: Mapped[str] = mapped_column(String, ForeignKey("agent_definitions.id"), index=True)
     user_prompt: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="CREATED")
@@ -219,7 +312,7 @@ class AIPThread(Base):
     """
     __tablename__ = "aip_threads"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String)
     owner: Mapped[str] = mapped_column(String, default="system")
     resources: Mapped[list] = mapped_column(JSON, default=list)
@@ -235,7 +328,8 @@ class SavedObjectSet(Base):
     """
     __tablename__ = "saved_object_sets"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
@@ -254,7 +348,8 @@ class MapLayerDefinition(Base):
     """
     __tablename__ = "map_layer_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", server_default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     object_type_id: Mapped[str] = mapped_column(String, ForeignKey("object_types.id"), index=True)
@@ -279,7 +374,8 @@ class LogicFunction(Base):
     """
     __tablename__ = "logic_functions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     blocks: Mapped[list] = mapped_column(JSON, default=list)
@@ -296,7 +392,7 @@ class LogicRun(Base):
     """
     __tablename__ = "logic_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     logic_function_id: Mapped[str] = mapped_column(String, ForeignKey("logic_functions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     inputs: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -316,7 +412,7 @@ class AutomationDefinition(Base):
     """
     __tablename__ = "automation_definitions"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     trigger: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -333,7 +429,7 @@ class AutomationRun(Base):
     """
     __tablename__ = "automation_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(String, ForeignKey("automation_definitions.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     condition_result: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -350,7 +446,8 @@ class EvalSuite(Base):
     """
     __tablename__ = "eval_suites"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     display_name: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
     target_agent_id: Mapped[str] = mapped_column(String, ForeignKey("agent_definitions.id"), index=True)
@@ -368,7 +465,8 @@ class EvalRun(Base):
     """
     __tablename__ = "eval_runs"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     suite_id: Mapped[str] = mapped_column(String, ForeignKey("eval_suites.id"), index=True)
     status: Mapped[str] = mapped_column(String, default="PENDING")
     score: Mapped[int] = mapped_column(Integer, default=0)

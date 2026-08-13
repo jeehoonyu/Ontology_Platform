@@ -1,9 +1,16 @@
 fastapi>=0.110.0
 uvicorn>=0.27.1
+websockets>=12,<16       # production WebSocket collaboration transport
 sqlalchemy>=2.0.29
 pydantic>=2.7.0
 pydantic-settings>=2.2.1
 alembic>=1.13.1
 psycopg2-binary>=2.9.9
 python-multipart>=0.0.9   # required by FastAPI for multipart file uploads
-# pyarrow>=15.0.0         # optional — enables Parquet dataset uploads (guarded import)
+authlib>=1.3.2            # OIDC ID-token validation and JOSE support
+cryptography>=42.0.0      # encrypted connector credentials and OIDC crypto primitives
+paramiko>=3.4,<4          # pinned-host SFTP connector transport
+kafka-python>=2.0.2,<3    # Kafka partition-offset ingestion
+duckdb>=1.1,<2            # deterministic Arrow/Parquet preview execution
+pyarrow>=17,<22           # columnar dataset snapshots and Parquet interchange
+boto3>=1.35,<2            # optional S3-compatible snapshot storage adapter

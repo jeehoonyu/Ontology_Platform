@@ -33,7 +33,8 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action, runtime
+from . import models, models_action, runtime, tenancy
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["aip_evals"])
 
@@ -44,7 +45,8 @@ def _now() -> int:
 
 class AipEvalRun(Base):
     __tablename__ = "aip_eval_runs"
-    id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, default="default", index=True)
     target: Mapped[str] = mapped_column(String)          # "actual" | logic function id
     total: Mapped[int] = mapped_column(Integer, default=0)
     passed: Mapped[int] = mapped_column(Integer, default=0)
@@ -281,6 +283,7 @@ def _grade_all(graders: List[Dict[str, Any]], actual: Any) -> Dict[str, Any]:
 # Schemas
 # ---------------------------------------------------------------------------
 class GradeRequest(BaseModel):
+    project_id: str = "default"
     actual: Any
     graders: List[Dict[str, Any]]
 
@@ -299,6 +302,7 @@ class GradeLogicRequest(BaseModel):
 class GradeOneRequest(BaseModel):
     """Single-grader convenience shape: {grader, expected, actual}."""
     grader: str
+    project_id: str = "default"
     actual: Any = None
     expected: Any = None
     # optional knobs forwarded to the grader (threshold, metric, min_score, path, pattern, op, value...)
@@ -319,6 +323,7 @@ class ExperimentsRequest(BaseModel):
     formatted with the configuration's params ({model}, {prompt}, ...) before grading,
     letting different parameter values yield different outputs/scores.
     """
+    project_id: str = "default"
     param_grid: Dict[str, List[Any]]
     cases: List[ExperimentCase] = Field(default_factory=list)
     metric: str = "score"  # which aggregate drives ranking: "score" | "pass_rate"
@@ -343,9 +348,10 @@ def grader_types():
 
 
 @router.post("/aip/evals/grade")
-def grade(body: GradeRequest, db: Session = Depends(get_db)):
+def grade(body: GradeRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    tenancy.assert_project_permission(db, principal, body.project_id, "execute")
     graded = _grade_all(body.graders, body.actual)
-    run = AipEvalRun(id=uuid.uuid4().hex, target="actual", total=graded["metrics"]["total"],
+    run = AipEvalRun(id=uuid.uuid4().hex, project_id=body.project_id, target="actual", total=graded["metrics"]["total"],
                      passed=graded["metrics"]["passed"], pass_rate=graded["metrics"]["pass_rate"],
                      results=graded["results"], created_at=_now())
     db.add(run); db.commit()
@@ -353,26 +359,27 @@ def grade(body: GradeRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/aip/evals/grade-one")
-def grade_one(body: GradeOneRequest, db: Session = Depends(get_db)):
+def grade_one(body: GradeOneRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     """Single-grader convenience endpoint matching the {grader, expected, actual} shape.
 
     Folds `expected`/`options` into a grader dict and runs it through the same engine
     used by /aip/evals/grade, so e.g. levenshtein/set_match/llm_judge are all reachable.
     """
+    tenancy.assert_project_permission(db, principal, body.project_id, "execute")
     grader: Dict[str, Any] = {"type": body.grader}
     grader.update(body.options or {})
     if body.expected is not None and "expected" not in grader:
         grader["expected"] = body.expected
     result = _grade_one(grader, body.actual)
-    run = AipEvalRun(id=uuid.uuid4().hex, target="actual", total=1,
+    run = AipEvalRun(id=uuid.uuid4().hex, project_id=body.project_id, target="actual", total=1,
                      passed=1 if result["passed"] else 0,
                      pass_rate=1.0 if result["passed"] else 0.0,
                      results=[result], created_at=_now())
     db.add(run)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id,
                                   event_type="aip.evals.graded_one",
                                   subject_type="aip_eval", subject_id=run.id,
-                                  payload={"grader": body.grader, "passed": result["passed"]}))
+                                  payload={"project_id": body.project_id, "grader": body.grader, "passed": result["passed"]}))
     db.commit()
     return {"run_id": run.id, "result": result}
 
@@ -400,12 +407,13 @@ def _expand_grid(param_grid: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
 
 
 @router.post("/aip/evals/experiments")
-def experiments(body: ExperimentsRequest, db: Session = Depends(get_db)):
+def experiments(body: ExperimentsRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     """Grid-search experiment: Cartesian product of param_grid -> per-config aggregate score.
 
     Mirrors Foundry AIP Evals experiments: each parameter combination is a separate
     evaluation run; results are aggregated per configuration and the best is reported.
     """
+    tenancy.assert_project_permission(db, principal, body.project_id, "execute")
     configs = _expand_grid(body.param_grid)
     metric_key = body.metric if body.metric in ("score", "pass_rate") else "score"
 
@@ -434,17 +442,17 @@ def experiments(body: ExperimentsRequest, db: Session = Depends(get_db)):
     ranked = sorted(config_results, key=lambda c: c["metrics"]["aggregate_score"], reverse=True)
     best = ranked[0] if ranked else None
 
-    run = AipEvalRun(id=uuid.uuid4().hex, target="experiment",
+    run = AipEvalRun(id=uuid.uuid4().hex, project_id=body.project_id, target="experiment",
                      total=sum(c["metrics"]["total"] for c in config_results),
                      passed=sum(c["metrics"]["passed"] for c in config_results),
                      pass_rate=round(best["metrics"]["pass_rate"], 4) if best else 0.0,
                      results=[{"config": c["config"], "metrics": c["metrics"]} for c in config_results],
                      created_at=_now())
     db.add(run)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id,
                                   event_type="aip.evals.experiment",
                                   subject_type="aip_experiment", subject_id=run.id,
-                                  payload={"num_configs": len(configs), "metric": metric_key,
+                                  payload={"project_id": body.project_id, "num_configs": len(configs), "metric": metric_key,
                                            "best_config": best["config"] if best else None}))
     db.commit()
     return {
@@ -458,10 +466,11 @@ def experiments(body: ExperimentsRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/aip/evals/grade-logic")
-def grade_logic(body: GradeLogicRequest, db: Session = Depends(get_db)):
+def grade_logic(body: GradeLogicRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     fn = db.get(models.LogicFunction, body.logic_function_id)
     if not fn:
         raise HTTPException(status_code=404, detail=f"LogicFunction '{body.logic_function_id}' not found")
+    tenancy.assert_project_permission(db, principal, fn.project_id, "execute")
     case_results = []
     total = 0
     passed = 0
@@ -474,17 +483,26 @@ def grade_logic(body: GradeLogicRequest, db: Session = Depends(get_db)):
         case_results.append({"case_id": case.id, "inputs": case.inputs, **graded})
     metrics = {"cases": len(body.cases), "total": total, "passed": passed,
                "pass_rate": round(passed / total, 4) if total else 0.0}
-    run = AipEvalRun(id=uuid.uuid4().hex, target=body.logic_function_id, total=total, passed=passed,
+    run = AipEvalRun(id=uuid.uuid4().hex, project_id=fn.project_id, target=body.logic_function_id, total=total, passed=passed,
                      pass_rate=metrics["pass_rate"], results=case_results, created_at=_now())
     db.add(run)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="aip.evals.graded_logic",
-                                  subject_type="logic_function", subject_id=body.logic_function_id, payload=metrics))
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="aip.evals.graded_logic",
+                                  subject_type="logic_function", subject_id=body.logic_function_id,
+                                  payload={"project_id": fn.project_id, **metrics}))
     db.commit()
     return {"run_id": run.id, "logic_function_id": body.logic_function_id, "metrics": metrics, "cases": case_results}
 
 
 @router.get("/aip/evals/runs")
-def list_eval_runs(db: Session = Depends(get_db)):
-    rows = db.query(AipEvalRun).order_by(AipEvalRun.created_at.desc()).limit(100).all()
-    return [{"id": r.id, "target": r.target, "total": r.total, "passed": r.passed,
+def list_eval_runs(project_id: Optional[str] = None, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    query = db.query(AipEvalRun)
+    if project_id:
+        tenancy.assert_project_permission(db, principal, project_id, "view")
+        query = query.filter(AipEvalRun.project_id == project_id)
+    else:
+        accessible = tenancy.accessible_project_ids(db, principal, "view")
+        if accessible is not None:
+            query = query.filter(AipEvalRun.project_id.in_(accessible)) if accessible else query.filter(AipEvalRun.id == "__none__")
+    rows = query.order_by(AipEvalRun.created_at.desc()).limit(100).all()
+    return [{"id": r.id, "project_id": r.project_id, "target": r.target, "total": r.total, "passed": r.passed,
              "pass_rate": r.pass_rate, "created_at": r.created_at} for r in rows]

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .database import Base, get_db
 from . import models, models_action, connectivity as _conn
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["connectivity_ops"])
 
@@ -25,7 +26,7 @@ def _now() -> int:
 
 class SyncCursorState(Base):
     __tablename__ = "sync_cursor_state"
-    sync_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    sync_id: Mapped[str] = mapped_column(String, primary_key=True)
     cursor_field: Mapped[str] = mapped_column(String)
     last_value: Mapped[dict] = mapped_column(JSON, default=dict)  # {"value": ...}
     runs: Mapped[int] = mapped_column(Integer, default=0)
@@ -38,10 +39,8 @@ class IncrementalRunRequest(BaseModel):
 
 
 @router.post("/connections/syncs/{sync_id}/run-incremental")
-def run_incremental(sync_id: str, body: IncrementalRunRequest, db: Session = Depends(get_db)):
-    sync = db.get(_conn.ConnectionSync, sync_id)
-    if not sync:
-        raise HTTPException(status_code=404, detail=f"Sync '{sync_id}' not found")
+def run_incremental(sync_id: str, body: IncrementalRunRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
+    sync = _conn._sync_or_404(db, sync_id, principal, "execute")
     cursor_field = body.cursor_field or sync.cursor_field
     if not cursor_field:
         raise HTTPException(status_code=422, detail="incremental sync requires a cursor_field")
@@ -91,7 +90,8 @@ def run_incremental(sync_id: str, body: IncrementalRunRequest, db: Session = Dep
 
 
 @router.get("/connections/syncs/{sync_id}/cursor")
-def get_cursor(sync_id: str, db: Session = Depends(get_db)):
+def get_cursor(sync_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    _conn._sync_or_404(db, sync_id, principal, "view")
     state = db.get(SyncCursorState, sync_id)
     if not state:
         return {"sync_id": sync_id, "cursor_field": None, "last_value": None, "runs": 0}

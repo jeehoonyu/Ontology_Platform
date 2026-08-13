@@ -1,0 +1,33 @@
+{
+  "backup_method": "pg_basebackup_physical_stream",
+  "backup_seconds": 41.467,
+  "fresh_volume": true,
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "python": "3.12.10"
+  },
+  "postgres_image": "sha256:3f4a5d48e0be9580ed70ed618cd039ce57bbb2dd113053d3836e28513f1f87cd",
+  "restore_readiness_seconds": 1.25,
+  "rpo_semantics": "consistent physical snapshot at pg_basebackup completion",
+  "rto_limit_seconds": 1800.0,
+  "source_container": "ontology_postgres",
+  "source_state": {
+    "indexed_plan": true,
+    "links": 50000000,
+    "migration": "0042_stream_outer_joins",
+    "mixed_events": 200000,
+    "objects": 10000000
+  },
+  "status": "PASS",
+  "target_container": "ontology_scale_restore_reference",
+  "target_state": {
+    "indexed_plan": true,
+    "links": 50000000,
+    "migration": "0042_stream_outer_joins",
+    "mixed_events": 200000,
+    "objects": 10000000
+  },
+  "target_volume": "ontology_scale_restore_pgdata",
+  "target_volume_bytes": 34249316693
+}

@@ -1,0 +1,45 @@
+{
+  "gate_id": "identity",
+  "goal": "GOAL_2026-08-03",
+  "measurements": {
+    "authorization_flow": "authorization_code_pkce",
+    "concurrency": 10,
+    "elapsed_seconds": 28.93,
+    "identities": 200,
+    "login_p50_ms": 1326.319,
+    "login_p95_ms": 1716.151,
+    "mutation_denials": 200,
+    "replicas_verified": 2,
+    "run_migration_head": "0042_stream_outer_joins",
+    "unique_principals": 200
+  },
+  "notes": "Derived from the oidc-scale run at oidc-identity-scale-evidence.json, measured at 0042_stream_outer_joins. The run's own 'status' field is ignored; the verdict comes from the thresholds.",
+  "provenance": {
+    "captured_at": 1786255819,
+    "entry_points": [
+      "authorization_code_pkce against Keycloak, via frontend/tests/production/oidc-scale.spec.ts",
+      "two independently addressed API replicas"
+    ],
+    "git_commit": "82848db",
+    "harness": "oms/identity_scale_evidence.py",
+    "host": {
+      "cpu_count": 20,
+      "platform": "windows",
+      "release": "11"
+    },
+    "migration_head": "0042_stream_outer_joins",
+    "request_shapes": [
+      "200 distinct PKCE logins",
+      "server-side mutation denial per authenticated viewer"
+    ]
+  },
+  "status": "PASS",
+  "thresholds": {
+    "identities_min": 200,
+    "login_p95_ms_max": 15000.0,
+    "mutation_denials_min": 200,
+    "replicas_verified_min": 2,
+    "unique_principals_min": 200
+  },
+  "tier": "B"
+}

@@ -6,6 +6,16 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "dist",
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "canvas-vendor": ["@xyflow/react"],
+          "dragdrop-vendor": ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"],
+          "query-vendor": ["@tanstack/react-query"],
+          "icons-vendor": ["lucide-react"]
+        }
+      }
+    }
   }
 });
