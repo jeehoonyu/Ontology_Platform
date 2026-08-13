@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import stat
 import subprocess
 import sys
 import time
@@ -50,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EVIDENCE_ROOT = Path(os.getenv("PILOT_EVIDENCE_ROOT", str(REPO_ROOT / "docs")))
 MANIFEST = EVIDENCE_ROOT / "pilot-window.json"
+ENVIRONMENT_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 WINDOW_DAYS = 7
 WINDOW_SECONDS = WINDOW_DAYS * 24 * 60 * 60
@@ -78,6 +81,75 @@ class WindowVoided(RuntimeError):
     Distinct from an ordinary tick failure so the supervisor cannot mistake a
     transient error for a schema change and quietly stop collecting.
     """
+
+
+def configure_runtime(
+    *,
+    evidence_root: Optional[str] = None,
+    environment_file: Optional[str] = None,
+    token_file: Optional[str] = None,
+    token_env: Optional[str] = None,
+) -> None:
+    """Bind the supervisor to durable paths before reading its manifest.
+
+    Startup managers do not inherit the shell that opened a seven-day window.
+    The evidence path is safe to pass as an argument; the recovery credential is
+    read from a protected file so it never appears in a process command line or
+    scheduled-task definition.
+    """
+    global EVIDENCE_ROOT, MANIFEST
+
+    if environment_file:
+        runtime_path = Path(environment_file).expanduser().resolve()
+        if not runtime_path.is_file():
+            raise ValueError(f"Pilot runtime environment file does not exist: {runtime_path}")
+        metadata = runtime_path.stat()
+        if os.name != "nt" and stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise ValueError(
+                f"Pilot runtime environment file must not be accessible by group or others: {runtime_path}"
+            )
+        if metadata.st_size > 65536:
+            raise ValueError("Pilot runtime environment file is unexpectedly large")
+        for line_number, raw_line in enumerate(runtime_path.read_text(encoding="utf-8").splitlines(), 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                raise ValueError(f"Invalid pilot runtime environment entry on line {line_number}")
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not ENVIRONMENT_KEY.match(key):
+                raise ValueError(f"Invalid pilot runtime environment key on line {line_number}")
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            os.environ[key] = value
+
+    if evidence_root:
+        EVIDENCE_ROOT = Path(evidence_root).expanduser().resolve()
+        MANIFEST = EVIDENCE_ROOT / "pilot-window.json"
+    if not token_file:
+        return
+
+    secret_path = Path(token_file).expanduser().resolve()
+    if not secret_path.is_file():
+        raise ValueError(f"Pilot recovery token file does not exist: {secret_path}")
+    metadata = secret_path.stat()
+    if os.name != "nt" and stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise ValueError(
+            f"Pilot recovery token file must not be accessible by group or others: {secret_path}"
+        )
+    if metadata.st_size > 4096:
+        raise ValueError("Pilot recovery token file is unexpectedly large")
+    token = secret_path.read_text(encoding="utf-8").strip()
+    if len(token) < 32 or len(token.splitlines()) != 1:
+        raise ValueError("Pilot recovery token file must contain one secret of at least 32 characters")
+
+    environment_name = token_env
+    if not environment_name:
+        manifest = load_manifest()
+        environment_name = str((manifest or {}).get("token_env") or "PILOT_RECOVERY_TOKEN")
+    os.environ[environment_name] = token
 
 
 def _path(name: str) -> Path:
@@ -493,6 +565,72 @@ def status(args: argparse.Namespace) -> int:
     return 0 if not owed else 1
 
 
+def verify_runtime(args: argparse.Namespace) -> int:
+    """Verify persisted startup inputs against the already-open window."""
+    del args
+    manifest = load_manifest()
+    if manifest is None:
+        print("No window is open. Run preflight and start before installing a supervisor.")
+        return 1
+    checks: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str) -> None:
+        checks.append((name, ok, detail))
+
+    from recovery_probe_client import canonical_target, json_request
+    from tier_b_evidence import current_head
+
+    head = current_head()
+    check("migration-head", head == manifest.get("migration_head_at_start"),
+          f"runtime {head}, window {manifest.get('migration_head_at_start')}")
+    token_env = str(manifest.get("token_env") or "PILOT_RECOVERY_TOKEN")
+    token = os.getenv(token_env, "").strip()
+    check("recovery-token", len(token) >= 32,
+          f"{token_env} holds {len(token)} characters; production requires 32")
+    if token:
+        code, _ = json_request(
+            str(manifest["target"]),
+            "/health/pilot-recovery/marks/_preflight/highest",
+            token=token,
+            timeout=10.0,
+        )
+        check("recovery-token-accepted", code == 422,
+              f"source recovery protocol returned {code}; expected authenticated validation 422")
+
+    if manifest.get("recovery_driver") == "postgres-compose":
+        try:
+            from pilot_postgres_recovery import Config
+
+            config = Config.from_env()
+            source_matches = canonical_target(config.source_url) == canonical_target(str(manifest["target"]))
+            recovery_matches = canonical_target(config.recovery_url) == canonical_target(
+                str(manifest["recovery_target"])
+            )
+            check("source-target", source_matches,
+                  f"runtime {config.source_url}, window {manifest['target']}")
+            check("recovery-target", recovery_matches,
+                  f"runtime {config.recovery_url}, window {manifest['recovery_target']}")
+            check("recovery-projects", config.source_project != config.recovery_project,
+                  f"{config.source_project} -> {config.recovery_project}")
+        except Exception as error:
+            check("recovery-driver", False, f"{type(error).__name__}: {error}")
+
+    lag = observer_lag(int(time.time())) if manifest.get("availability_writer") == "observer" else 0
+    check("availability-observer", lag is not None and lag <= OBSERVER_MAX_LAG_SECONDS,
+          "no observer state" if lag is None else f"last wrote {lag}s ago")
+
+    width = max(len(name) for name, _, _ in checks)
+    print("Pilot persisted-runtime verification\n")
+    for name, ok, detail in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {name.ljust(width)}  {detail}")
+    failed = [name for name, ok, _ in checks if not ok]
+    if failed:
+        print(f"\n{len(failed)} runtime check(s) failed: {', '.join(failed)}.")
+        return 1
+    print(f"\nAll {len(checks)} persisted runtime checks passed.")
+    return 0
+
+
 def preflight(args: argparse.Namespace) -> int:
     """Check everything checkable before committing seven days to it.
 
@@ -636,6 +774,21 @@ def aggregate(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--evidence-root",
+        default=None,
+        help="Durable pilot evidence directory. Pass before the subcommand.",
+    )
+    parser.add_argument(
+        "--token-file",
+        default=None,
+        help="Protected file containing PILOT_RECOVERY_TOKEN. Pass before the subcommand.",
+    )
+    parser.add_argument(
+        "--environment-file",
+        default=None,
+        help="Protected KEY=VALUE runtime configuration. Pass before the subcommand.",
+    )
     sub = parser.add_subparsers(dest="mode", required=True)
     started = sub.add_parser("start")
     started.add_argument("--target", required=True, help="Live source API")
@@ -674,8 +827,20 @@ def main() -> int:
 
     sub.add_parser("tick").set_defaults(func=tick)
     sub.add_parser("status").set_defaults(func=status)
+    sub.add_parser("verify-runtime", help="Validate persisted startup inputs for an open window").set_defaults(
+        func=verify_runtime
+    )
     sub.add_parser("aggregate").set_defaults(func=aggregate)
     args = parser.parse_args()
+    try:
+        configure_runtime(
+            evidence_root=args.evidence_root,
+            environment_file=args.environment_file,
+            token_file=args.token_file,
+            token_env=getattr(args, "token_env", None),
+        )
+    except (OSError, UnicodeError, ValueError) as error:
+        parser.error(str(error))
     return args.func(args)
 
 
