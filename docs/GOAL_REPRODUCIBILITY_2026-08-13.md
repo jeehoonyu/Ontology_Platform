@@ -204,6 +204,51 @@ careless reader hopes to see. The check that catches it is not "do the numbers m
 comparison. That is now how D4 is verified, and it is the shape of check any future
 reproduction condition needs.
 
+## D3 and D5 closed 2026-08-13 — all five conditions met
+
+**D3.** `oms/audit_dependency_provenance.py` reports every evidence file as **CURRENT**
+(the recorded closure digest matches what is installed), **DRIFTED** (it ran against a
+different set, and the packages that moved are named), **UNRECORDED** (produced before D2),
+or **UNREADABLE**. All four verified against synthetic evidence.
+
+The live corpus reads **24 files, all UNRECORDED** — every one predates D2. That is the
+ceiling, confirmed to fail the build when lowered by one.
+
+**The ratchet is on UNRECORDED, never on DRIFTED**, which is the correction `GOAL_2026-08-13`
+already paid for. Upgrading a dependency is ordinary work. Drift is not a defect: it is the
+answer to a question this repository previously could not ask — *did the library change, or
+did we?*
+
+**D5.** `scripts/reproduce-measurement.sh` and
+[`REPRODUCING_A_MEASUREMENT.md`](REPRODUCING_A_MEASUREMENT.md). Executed end to end rather
+than described: clone, virtualenv, install from the lock, digest matched
+`a727fd9a41cfa7b6`, gate ran, **evidence file confirmed rewritten**, compared. Twelve
+measurements exact, four drifted, verdicts agreed.
+
+That is a second independent timing sample, and it corroborates D4:
+
+| | run A | run B |
+| --- | ---: | ---: |
+| `deliver_ms` | +33.0% | +31.8% |
+| `preview_p95_ms` | +17.7% | +24.5% |
+
+Two runs, one machine, a byte-identical closure. Roughly a fifth to a third of timing
+variance is a stable property here rather than a one-off, and structure was exact both
+times. The script encodes the consequence: **a differing latency is not a finding, a
+differing verdict is**, and only the second exits non-zero.
+
+Step 6 of that script — confirming the evidence file actually changed — exists because the
+mistake was made and reported before it was caught.
+`oms/test_reproducibility_conditions.py` (23 assertions) asserts the guard is still there,
+so it cannot be quietly removed.
+
+### The limit of what was achieved
+
+D2 is forward-only. The 24 existing evidence files stay UNRECORDED until their gates are
+next re-run, because backfilling a dependency block into a measurement taken before it was
+recorded would be inventing provenance rather than capturing it. The corpus therefore
+carries an honest debt with a ceiling on it, not a clean sheet.
+
 ## Explicit non-goals
 
 **Not** reproducible builds in the Nix or Bazel sense. The aim is that a measurement names

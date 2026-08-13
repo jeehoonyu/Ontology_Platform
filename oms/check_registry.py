@@ -49,6 +49,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "validate_tier_b_evidence": {"gates": "Tier B gates are current and threshold-checked", "cadence": "every push"},
     "validate_external_evaluations": {"gates": "external evaluations carry provenance", "cadence": "every push"},
     "audit_check_coverage": {"gates": "every check is declared and homed", "cadence": "every push"},
+    "audit_dependency_provenance": {"gates": "evidence names the third-party code that produced it", "cadence": "every push"},
 
     # --- need a database ------------------------------------------------------
     "benchmark_ontology_scale_postgres": {"gates": "Tier B ontology scale", "cadence": "per release candidate"},

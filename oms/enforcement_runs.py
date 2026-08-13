@@ -66,6 +66,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "every check-shaped script is declared and has a home",
         "runs_in": "suite",
     },
+    "audit_dependency_provenance": {
+        "purpose": "evidence names the dependency set that produced it",
+        "runs_in": "suite",
+    },
     "validate_external_evaluations": {
         "purpose": "external evaluator submissions carry their own provenance",
         "runs_in": "suite",
