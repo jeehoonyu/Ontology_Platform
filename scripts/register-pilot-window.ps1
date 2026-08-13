@@ -8,7 +8,9 @@
 # deployment then measures about 50% available. Measured: 57.1%.
 param(
     [string]$TaskName = "OntologyPilotWindow",
-    [Parameter(Mandatory = $true)][string]$EvidenceRoot,
+    [string]$EvidenceRoot = "",
+    [string]$TokenFile = "",
+    [string]$EnvironmentFile = "",
     [string]$PythonPath = "",
     [int]$RestartIntervalMinutes = 5,
     [switch]$Unregister
@@ -23,22 +25,74 @@ if ($Unregister) {
     exit 0
 }
 
+if (-not $EvidenceRoot) { throw "EvidenceRoot is required." }
+if (-not $TokenFile) { throw "TokenFile is required; do not put the recovery token in task arguments." }
+if (-not $EnvironmentFile) { throw "EnvironmentFile is required so recovery configuration survives restart." }
 if (-not $PythonPath) { $PythonPath = (Get-Command python).Source }
 if (-not (Test-Path -LiteralPath $EvidenceRoot)) {
     throw "EvidenceRoot $EvidenceRoot does not exist. Create it and restrict its ACL first."
 }
-if (-not $env:PILOT_RECOVERY_TOKEN -or $env:PILOT_RECOVERY_TOKEN.Length -lt 32) {
-    throw "Set PILOT_RECOVERY_TOKEN (at least 32 characters) for the account that will run the task."
+if (-not (Test-Path -LiteralPath $TokenFile -PathType Leaf)) {
+    throw "TokenFile $TokenFile does not exist."
+}
+if (-not (Test-Path -LiteralPath $EnvironmentFile -PathType Leaf)) {
+    throw "EnvironmentFile $EnvironmentFile does not exist."
+}
+$resolvedEvidenceRoot = (Resolve-Path -LiteralPath $EvidenceRoot).Path
+$resolvedTokenFile = (Resolve-Path -LiteralPath $TokenFile).Path
+$resolvedEnvironmentFile = (Resolve-Path -LiteralPath $EnvironmentFile).Path
+$token = (Get-Content -LiteralPath $resolvedTokenFile -Raw).Trim()
+if ($token.Length -lt 32 -or $token.Contains("`n") -or $token.Contains("`r")) {
+    throw "TokenFile must contain one secret of at least 32 characters."
 }
 
-$manifest = Join-Path $EvidenceRoot "pilot-window.json"
+# The secret is never embedded in the task action. Refuse the common broad ACLs
+# before handing its path to a startup task.
+$broadSids = @("S-1-1-0", "S-1-5-11", "S-1-5-32-545")
+foreach ($protectedFile in @($resolvedTokenFile, $resolvedEnvironmentFile)) {
+    foreach ($entry in (Get-Acl -LiteralPath $protectedFile).Access) {
+        if ($entry.AccessControlType -ne "Allow") { continue }
+        try { $sid = $entry.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }
+        catch { continue }
+        if ($sid -in $broadSids) {
+            throw "$protectedFile grants access to a broad principal ($($entry.IdentityReference)); restrict its ACL first."
+        }
+    }
+}
+$token = $null
+
+$manifest = Join-Path $resolvedEvidenceRoot "pilot-window.json"
 if (-not (Test-Path -LiteralPath $manifest)) {
     throw "No open window at $manifest. Run `pilot_window.py preflight` and then `start` first."
 }
+$observerState = Join-Path $resolvedEvidenceRoot "availability-probe-state.json"
+if (-not (Test-Path -LiteralPath $observerState -PathType Leaf)) {
+    throw "The availability observer has not written $observerState. Start it before registering the supervisor."
+}
+$observerAge = ((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $observerState).LastWriteTimeUtc).TotalSeconds
+if ($observerAge -gt 90) {
+    throw "The availability observer state is stale ($([int]$observerAge)s old). Repair the observer before registration."
+}
 
+$pilotScript = Join-Path $root "oms/pilot_window.py"
+& $PythonPath $pilotScript `
+    --evidence-root $resolvedEvidenceRoot `
+    --environment-file $resolvedEnvironmentFile `
+    --token-file $resolvedTokenFile `
+    verify-runtime
+if ($LASTEXITCODE -ne 0) {
+    throw "Persisted pilot runtime verification failed; the task was not registered."
+}
+$arguments = @(
+    ('"{0}"' -f $pilotScript),
+    "--evidence-root", ('"{0}"' -f $resolvedEvidenceRoot),
+    "--environment-file", ('"{0}"' -f $resolvedEnvironmentFile),
+    "--token-file", ('"{0}"' -f $resolvedTokenFile),
+    "run"
+) -join " "
 $action = New-ScheduledTaskAction `
     -Execute $PythonPath `
-    -Argument "oms/pilot_window.py run" `
+    -Argument $arguments `
     -WorkingDirectory $root
 
 # At startup, not on a repetition: the supervisor paces its own 30-second ticks.
@@ -67,6 +121,5 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 Write-Host "Registered $TaskName to run `pilot_window.py run` at startup."
-Write-Host "PILOT_EVIDENCE_ROOT must be set to $EvidenceRoot for that account."
 Write-Host "Start it now with: Start-ScheduledTask -TaskName $TaskName"
-Write-Host "Watch it with:     python oms/pilot_window.py status"
+Write-Host "Watch it with:     python oms/pilot_window.py --evidence-root `"$resolvedEvidenceRoot`" status"
