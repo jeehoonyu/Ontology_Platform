@@ -129,6 +129,25 @@ properties_section = ok(client.get("/ui-state/ontology/object-types/correlated_i
 assert properties_section["section_id"] == "properties", properties_section
 assert len(properties_section["rows"]) >= 4, properties_section["rows"]
 
+interface_property = properties_section["rows"][0]
+ok(client.post("/interfaces", json={
+    "id": "ui_identifiable",
+    "display_name": "UI Identifiable",
+    "description": "Reusable identity capability exposed by Ontology Manager.",
+    "properties": {
+        "identity": {"base_type": interface_property["base_type"], "required": True},
+    },
+}), "create ontology interface")
+ok(client.post("/object-types/correlated_intelligence/implement-interface", json={
+    "interface_id": "ui_identifiable",
+    "property_mappings": {"identity": interface_property["name"]},
+}), "implement ontology interface")
+interfaces_section = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/sections/interfaces"), "ontology interfaces section")
+assert interfaces_section["summary"]["configured"] is True, interfaces_section
+assert interfaces_section["summary"]["implementation_count"] == 1, interfaces_section
+assert interfaces_section["rows"][0]["interface_id"] == "ui_identifiable", interfaces_section["rows"]
+assert interfaces_section["rows"][0]["property_mappings"]["identity"] == interface_property["name"], interfaces_section["rows"][0]
+
 security_section = ok(client.get("/ui-state/ontology/object-types/correlated_intelligence/sections/security"), "ontology security section")
 assert security_section["summary"]["visibility"], security_section
 

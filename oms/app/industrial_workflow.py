@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import time
 import uuid
@@ -17,6 +18,7 @@ from . import (
     decision_intelligence,
     data_plane,
     investigations,
+    imports_ops,
     models,
     models_action,
     ontology_registry,
@@ -28,6 +30,8 @@ from . import (
     production_auth,
     tenancy,
 )
+import evaluator_evidence
+from .pilot_evidence import current_migration_head
 from .database import get_db
 from .runtime import create_audit_log
 
@@ -64,6 +68,16 @@ class IndustrialTriageRequest(BaseModel):
     project_id: str
     object_id: Optional[str] = None
     reason: Optional[str] = None
+
+
+class ExternalEvaluatorEvidenceRequest(BaseModel):
+    project_id: str = Field(min_length=1, max_length=200)
+    team_id: str = Field(min_length=2, max_length=120, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]+$")
+    organization_id: str = Field(min_length=2, max_length=120, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]+$")
+    deployment_id: str = Field(min_length=4, max_length=160, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]+$")
+    evaluator_alias: str = Field(min_length=3, max_length=200)
+    external_team_confirmation: bool
+    own_data_confirmation: bool
 
 
 def _now() -> int:
@@ -909,6 +923,8 @@ def _run_snapshot_pipeline(
     delivered = data_plane.execute_duckdb_snapshot_plan(
         db, plan.id, mode="deliver", limit=100, output_asset_id=str(pipeline.output_asset_id),
         parameters={}, actor=actor, execution_job_id=f"industrial_{hashlib.sha256(execution_key.encode('utf-8')).hexdigest()[:32]}",
+        execution_fence_job_id=execution_job_id,
+        execution_lease_token=execution_lease_token,
     )
     output_snapshot_payload = delivered.get("output_snapshot") or {}
     output_snapshot = db.get(data_plane.DataAssetSnapshot, output_snapshot_payload.get("id"))
@@ -1595,3 +1611,139 @@ def industrial_asset_reliability_report(
     if format == "markdown":
         return PlainTextResponse(_report_markdown(payload), media_type="text/markdown")
     return payload
+
+
+@router.post("/api/v1/industrial/workflows/asset-reliability/evaluator-evidence")
+def industrial_asset_reliability_evaluator_evidence(
+    body: ExternalEvaluatorEvidenceRequest,
+    principal: production_auth.Principal = Depends(production_auth.require_permission("export")),
+    db: Session = Depends(get_db),
+):
+    """Export a tamper-evident, privacy-preserving external evaluation bundle."""
+    tenancy.assert_project_permission(db, principal, body.project_id, "export")
+    ids = _ids(body.project_id)
+    pipeline_run = db.query(models.PipelineRun).filter(
+        models.PipelineRun.project_id == body.project_id,
+        models.PipelineRun.pipeline_id == ids["pipeline"],
+    ).order_by(models.PipelineRun.created_at.desc()).first()
+    rows = _latest_workflow_rows(db, body.project_id)
+    approval = rows["approval"]
+    action_event = rows["action_event"]
+    report = rows["report"]
+    environment = db.query(ontology_versioning.OntologyEnvironment).filter(
+        ontology_versioning.OntologyEnvironment.project_id == body.project_id,
+        ontology_versioning.OntologyEnvironment.name == "production",
+    ).first()
+    decision_run = _latest_decision_run(db, body.project_id, _latest_execution_job(db, body.project_id))
+    object_count = db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.project_id == body.project_id,
+        models.ObjectInstance.object_type_id == ids["object_type"],
+        models.ObjectInstance.is_active.is_(True),
+    ).count()
+    lineage = dict(pipeline_run.lineage or {}) if pipeline_run else {}
+    source_snapshot_id = str(lineage.get("source_snapshot_id") or "")
+    source_snapshot = db.get(data_plane.DataAssetSnapshot, source_snapshot_id) if source_snapshot_id else None
+    source_asset_id = pipeline_run.input_asset_id if pipeline_run else None
+    source_asset = db.get(models.DataAsset, source_asset_id) if source_asset_id else None
+    import_job = db.query(imports_ops.ImportJob).filter(
+        imports_ops.ImportJob.project_id == body.project_id,
+        imports_ops.ImportJob.target_dataset_id == source_asset_id,
+        imports_ops.ImportJob.status == "PROMOTED",
+    ).order_by(imports_ops.ImportJob.promoted_at.desc()).first() if source_asset_id else None
+    sample_source_ids = {"maintenance_raw_assets", "maintenance_raw_work_orders", "asset_reliability_raw"}
+    provenance_verified = bool(
+        source_asset
+        and source_asset.id not in sample_source_ids
+        and (import_job or source_asset.file_ref)
+    )
+
+    step_facts = [
+        ("connect", source_snapshot_id),
+        ("transform", pipeline_run.id if pipeline_run and pipeline_run.status == "SUCCESS" else None),
+        ("model", environment.current_revision_id if environment and object_count else None),
+        ("analyze", decision_run.id if decision_run else None),
+        ("approve", approval.id if approval and approval.status == "APPROVED" else None),
+        ("act", action_event.id if action_event and action_event.status in {"PENDING", "PUBLISHED", "DELIVERED"} else None),
+        ("report", report.id if report else None),
+    ]
+    steps = [
+        {"id": step_id, "status": "complete" if evidence_id else "incomplete", "evidence_id": evidence_id}
+        for step_id, evidence_id in step_facts
+    ]
+    report_payload = _report_payload(db, body.project_id) if report else {}
+    release_commit = os.getenv("ONTOLOGYOS_RELEASE_COMMIT", "development").strip().lower()
+    auth_mode = os.getenv("AUTH_MODE", "local").strip().lower()
+    reasons = []
+    if not body.external_team_confirmation:
+        reasons.append("external_team_confirmation_required")
+    if not body.own_data_confirmation:
+        reasons.append("own_data_confirmation_required")
+    if not provenance_verified:
+        reasons.append("own_data_provenance_required")
+    if auth_mode != "oidc":
+        reasons.append("oidc_authentication_required")
+    if not (7 <= len(release_commit) <= 64 and all(character in "0123456789abcdef" for character in release_commit)):
+        reasons.append("pinned_release_commit_required")
+    reasons.extend(f"workflow_step_incomplete:{item['id']}" for item in steps if item["status"] != "complete")
+
+    evaluator_identity_hash = hashlib.sha256(
+        f"{body.team_id}:{body.organization_id}:{body.evaluator_alias.strip().lower()}".encode("utf-8")
+    ).hexdigest()
+    principal_hash = hashlib.sha256(f"{body.organization_id}:{principal.id}".encode("utf-8")).hexdigest()
+    payload = {
+        "schema_version": evaluator_evidence.SCHEMA_VERSION,
+        "kind": evaluator_evidence.KIND,
+        "generated_at": _now(),
+        "migration_head": current_migration_head(),
+        "release_commit": release_commit,
+        "authentication_mode": auth_mode,
+        "project": {"id": body.project_id, "object_count": object_count},
+        "evaluator": {
+            "team_id": body.team_id,
+            "organization_id": body.organization_id,
+            "deployment_id": body.deployment_id,
+            "identity_hash": evaluator_identity_hash,
+            "principal_hash": principal_hash,
+            "external_team_confirmation": body.external_team_confirmation,
+        },
+        "dataset": {
+            "asset_id": source_asset_id,
+            "snapshot_id": source_snapshot_id or None,
+            "content_hash": source_snapshot.content_hash if source_snapshot else None,
+            "row_count": source_snapshot.row_count if source_snapshot else 0,
+            "storage_format": source_snapshot.storage_format if source_snapshot else None,
+            "import_job_id": import_job.id if import_job else None,
+            "source_type": import_job.source_type if import_job else (source_asset.source_format if source_asset else None),
+            "provenance_verified": provenance_verified,
+            "own_data_confirmation": body.own_data_confirmation,
+        },
+        "workflow": {
+            "name": "asset_reliability_connect_to_report",
+            "steps": steps,
+            "evidence_ids": sorted({str(evidence_id) for _, evidence_id in step_facts if evidence_id}),
+        },
+        "report": {
+            "id": report.id if report else None,
+            "content_hash": evaluator_evidence.sha256_json(report_payload),
+            "payload": report_payload,
+        },
+        "qualification": {"qualifies": not reasons, "reasons": sorted(set(reasons))},
+    }
+    bundle = evaluator_evidence.seal_bundle(payload)
+    create_audit_log(
+        db, actor=principal.id, event_type="industrial.workflow.evaluator_evidence.exported",
+        subject_type="project", subject_id=body.project_id,
+        payload={
+            "project_id": body.project_id, "team_id": body.team_id,
+            "deployment_id": body.deployment_id, "bundle_hash": bundle["bundle_hash"],
+            "qualifies": bundle["qualification"]["qualifies"],
+        },
+    )
+    ops_control.record_ops_event(
+        db, project_id=body.project_id, source="industrial_workflow",
+        event_type="industrial.workflow.evaluator_evidence.exported", severity="info",
+        title="External evaluator evidence exported", subject_type="project", subject_id=body.project_id,
+        payload={"team_id": body.team_id, "bundle_hash": bundle["bundle_hash"], "qualifies": bundle["qualification"]["qualifies"]},
+    )
+    db.commit()
+    return bundle

@@ -2,21 +2,32 @@
   "gate_id": "pipeline_scale",
   "goal": "GOAL_2026-08-03",
   "measurements": {
-    "deliver_ms": 3828.364,
+    "complex_deliver_ms": 1803.904,
+    "complex_idempotent_replay": true,
+    "complex_join_left_rows": 10000000,
+    "complex_join_right_rows": 10000000,
+    "complex_materialized_python_rows": 2,
+    "complex_pivot_cardinality": 512,
+    "complex_preview_ms": 1241.171,
+    "complex_union_rows": 20000000,
+    "deliver_ms": 1515.835,
+    "geofence_outer_vertices": 8192,
+    "geofence_parameterized_edges": true,
+    "geofence_total_positions": 9218,
     "input_rows": 10000000,
     "materialized_python_rows": 20,
     "output_partitions": 20,
-    "preview_p95_ms": 3743.131
+    "preview_p95_ms": 1459.595
   },
-  "notes": "Reference profile over 10000000 rows in 8 immutable partitions, delivered to 20 output partitions.",
+  "notes": "Reference profile over 10000000 rows in 8 immutable partitions, delivered to 20 output partitions; the complex path joins two 10000000-row snapshots, unions 20000000 rows, and pivots 512 metric columns without bulk Python materialization. The geofence evaluates 9218 positions through bound edge tables over distinct telemetry coordinates rather than parser-sized generated SQL.",
   "provenance": {
-    "captured_at": 1786387156,
+    "captured_at": 1786486672,
     "entry_points": [
       "POST /data-assets",
       "POST /pipeline-builder/graphs",
       "POST /pipeline-builder/workers/run-next"
     ],
-    "git_commit": "f554924",
+    "git_commit": "cf5b192",
     "harness": "oms/benchmark_pipeline_scale.py",
     "host": {
       "cpu_count": 20,
@@ -28,12 +39,26 @@
     "request_shapes": [
       "partitioned dataset registration",
       "compiled pipeline graph preview",
-      "worker-driven partitioned delivery"
+      "worker-driven partitioned delivery",
+      "large-to-large join, schema-aligned union, and high-cardinality pivot",
+      "parameterized high-vertex polygon with a hole",
+      "idempotent complex-plan delivery replay"
     ]
   },
   "status": "PASS",
   "thresholds": {
+    "complex_deliver_ms_max": 90000.0,
+    "complex_idempotent_replay_min": true,
+    "complex_join_left_rows_min": 10000000,
+    "complex_join_right_rows_min": 10000000,
+    "complex_materialized_python_rows_max": 2,
+    "complex_pivot_cardinality_min": 512,
+    "complex_preview_ms_max": 60000.0,
+    "complex_union_rows_min": 20000000,
     "deliver_ms_max": 60000.0,
+    "geofence_outer_vertices_min": 8192,
+    "geofence_parameterized_edges_min": true,
+    "geofence_total_positions_min": 9000,
     "input_rows_min": 10000000,
     "materialized_python_rows_max": 20,
     "output_partitions_min": 1,

@@ -1,5 +1,12 @@
 import { api, postJson } from "../api";
-import type { JobSummary, JsonObject, PlatformJob } from "../types";
+import type {
+  JobSummary,
+  JsonObject,
+  PipelineExecutionPlan,
+  PipelineExecutionStrategy,
+  PipelinePlanExecutionResponse,
+  PlatformJob
+} from "../types";
 
 export function getJobSummary(): Promise<JobSummary> {
   return api<JobSummary>("/jobs/summary");
@@ -29,4 +36,25 @@ export function runPipelineJob(jobId: string): Promise<{ job: PlatformJob | null
     job_id: jobId,
     lease_seconds: 120
   });
+}
+
+export function compilePipelinePlan(graphId: string): Promise<PipelineExecutionPlan> {
+  return postJson<PipelineExecutionPlan>(`/api/v1/pipelines/${encodeURIComponent(graphId)}/plans`, {
+    executor: "duckdb"
+  });
+}
+
+export function executePipelinePlan(
+  planId: string,
+  body: {
+    mode: "preview" | "deliver";
+    execution_strategy: PipelineExecutionStrategy;
+    max_partitions: number;
+    idempotency_key: string;
+  }
+): Promise<PipelinePlanExecutionResponse> {
+  return postJson<PipelinePlanExecutionResponse>(
+    `/api/v1/pipeline-plans/${encodeURIComponent(planId)}/execute`,
+    body
+  );
 }

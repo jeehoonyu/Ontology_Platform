@@ -324,6 +324,7 @@ class JobCreate(BaseModel):
     estimated_cost_usd: float = Field(default=0.0, ge=0)
     estimated_tokens: float = Field(default=0.0, ge=0)
     estimated_records: float = Field(default=0.0, ge=0)
+    depends_on: List[str] = Field(default_factory=list, max_length=100)
 
 
 class JobClaimRequest(BaseModel):
@@ -2714,6 +2715,76 @@ def _reap_stale_jobs(db: Session) -> int:
     return reaped
 
 
+_SUCCESSFUL_JOB_STATUSES = {"SUCCEEDED", "PUBLISHED", "DELIVERED"}
+_FAILED_JOB_STATUSES = {"FAILED", "CANCELLED", "DEAD_LETTER"}
+
+
+def _dependency_rows(db: Session, row: PlatformJob) -> List[PlatformJob]:
+    dependency_ids = [str(item) for item in (_execution(row).get("depends_on") or []) if str(item)]
+    if not dependency_ids:
+        return []
+    by_id = {
+        dependency.id: dependency
+        for dependency in db.query(PlatformJob).filter(PlatformJob.id.in_(dependency_ids)).all()
+    }
+    return [by_id[item] for item in dependency_ids if item in by_id]
+
+
+def _release_blocked_jobs(db: Session) -> Dict[str, int]:
+    """Advance dependency-gated jobs without making workers poll them early."""
+    now = _now()
+    released = 0
+    failed = 0
+    blocked = db.query(PlatformJob).filter(PlatformJob.status == "BLOCKED").with_for_update(skip_locked=True).all()
+    for row in blocked:
+        dependency_ids = [str(item) for item in (_execution(row).get("depends_on") or []) if str(item)]
+        dependencies = _dependency_rows(db, row)
+        if len(dependencies) != len(dependency_ids):
+            row.status = "FAILED"
+            row.error = "One or more job dependencies no longer exist"
+        else:
+            terminal_failure = next((item for item in dependencies if item.status in _FAILED_JOB_STATUSES), None)
+            if terminal_failure:
+                row.status = "FAILED"
+                row.error = f"Dependency {terminal_failure.id} ended with status {terminal_failure.status}"
+            elif dependencies and all(item.status in _SUCCESSFUL_JOB_STATUSES for item in dependencies):
+                row.status = "QUEUED"
+                row.error = None
+                row.updated_at = now
+                _set_execution(row, available_at=now)
+                _job_event(db, row, "job.dependencies_satisfied", {
+                    "depends_on": dependency_ids,
+                    "dependency_count": len(dependency_ids),
+                })
+                _audit(db, "system", "job.dependencies_satisfied", "platform_job", row.id, {
+                    "job_type": row.job_type, "depends_on": dependency_ids,
+                })
+                from . import runtime_observability
+                runtime_observability.record_job_progress(
+                    db, row, "Job dependencies satisfied", {"depends_on": dependency_ids},
+                )
+                released += 1
+                continue
+            else:
+                continue
+        row.progress = 0
+        row.updated_at = row.completed_at = now
+        _job_event(db, row, "job.dependency_failed", {
+            "depends_on": dependency_ids,
+            "dependency_statuses": {item.id: item.status for item in dependencies},
+            "error": row.error,
+        })
+        from . import runtime_observability
+        runtime_observability.record_job_terminal(
+            db, row, "FAILED", {"depends_on": dependency_ids}, row.error,
+        )
+        _audit(db, "system", "job.dependency_failed", "platform_job", row.id, {
+            "job_type": row.job_type, "depends_on": dependency_ids, "error": row.error,
+        })
+        failed += 1
+    return {"released": released, "failed": failed}
+
+
 @router.post("/jobs", status_code=201)
 def create_job(body: JobCreate, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     tenancy.assert_project_permission(db, principal, body.project_id, "execute")
@@ -2724,6 +2795,22 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
         replay = _job_replay(db, scope_hash, request_hash)
         if replay:
             return replay
+    dependency_ids = list(dict.fromkeys(str(item).strip() for item in body.depends_on if str(item).strip()))
+    if len(dependency_ids) != len(body.depends_on):
+        raise HTTPException(status_code=422, detail="Job dependencies must be non-empty and unique")
+    dependencies = []
+    if dependency_ids:
+        dependencies = db.query(PlatformJob).filter(PlatformJob.id.in_(dependency_ids)).all()
+        if len(dependencies) != len(dependency_ids):
+            found = {row.id for row in dependencies}
+            missing = [item for item in dependency_ids if item not in found]
+            raise HTTPException(status_code=404, detail={"message": "Job dependency not found", "dependency_ids": missing})
+        foreign = [row.id for row in dependencies if row.project_id != body.project_id]
+        if foreign:
+            raise HTTPException(status_code=404, detail={"message": "Job dependency not found", "dependency_ids": foreign})
+        failed_dependencies = [row.id for row in dependencies if row.status in _FAILED_JOB_STATUSES]
+        if failed_dependencies:
+            raise HTTPException(status_code=409, detail={"message": "Cannot depend on a terminally failed job", "dependency_ids": failed_dependencies})
     estimates = {
         "compute_seconds": body.estimated_compute_seconds,
         "estimated_cost_usd": body.estimated_cost_usd,
@@ -2739,8 +2826,11 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
         "timeout_seconds": body.timeout_seconds,
         "available_at": body.available_at or now,
         "idempotency_key": body.idempotency_key,
+        "depends_on": dependency_ids,
     }
-    row = PlatformJob(id=_id("job"), project_id=body.project_id, job_type=body.job_type, status="QUEUED", actor=principal.id, subject_type=body.subject_type, subject_id=body.subject_id, payload=payload, result={}, attempt=1, progress=0, created_at=now, updated_at=now)
+    dependencies_satisfied = all(row.status in _SUCCESSFUL_JOB_STATUSES for row in dependencies)
+    initial_status = "QUEUED" if dependencies_satisfied else "BLOCKED"
+    row = PlatformJob(id=_id("job"), project_id=body.project_id, job_type=body.job_type, status=initial_status, actor=principal.id, subject_type=body.subject_type, subject_id=body.subject_id, payload=payload, result={}, attempt=1, progress=0, created_at=now, updated_at=now)
     db.add(row)
     db.flush()
     receipt = None
@@ -2754,8 +2844,10 @@ def create_job(body: JobCreate, principal: Principal = Depends(require_permissio
         )
         db.add(receipt)
     runtime_observability.record_job_queued(db, row, estimates, admission)
-    _job_event(db, row, "job.queued", {"priority": body.priority, "available_at": body.available_at or now})
-    _audit(db, principal.id, "job.queued", "platform_job", row.id, {"job_type": row.job_type, "priority": body.priority})
+    event_type = "job.queued" if initial_status == "QUEUED" else "job.blocked"
+    event_payload = {"priority": body.priority, "available_at": body.available_at or now, "depends_on": dependency_ids}
+    _job_event(db, row, event_type, event_payload)
+    _audit(db, principal.id, event_type, "platform_job", row.id, {"job_type": row.job_type, **event_payload})
     try:
         db.commit()
     except IntegrityError:
@@ -2776,9 +2868,16 @@ def _job_dict(row: PlatformJob, db: Optional[Session] = None) -> Dict[str, Any]:
     result = {column: getattr(row, column) for column in ("id", "project_id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at")}
     result["payload"] = {key: value for key, value in (row.payload or {}).items() if key != "__execution"}
     result["execution"] = _execution(row)
+    for key in ("execution_strategy", "partition_execution", "strategy_fallback", "agent_task_graph"):
+        if key in result["payload"]:
+            result[key] = result["payload"][key]
     if db:
         lease = _lease_for_job(db, row.id)
         result["lease"] = None if not lease else {"worker_id": lease.worker_id, "claimed_at": lease.claimed_at, "heartbeat_at": lease.heartbeat_at, "expires_at": lease.expires_at}
+        result["dependencies"] = [
+            {"id": dependency.id, "job_type": dependency.job_type, "status": dependency.status}
+            for dependency in _dependency_rows(db, row)
+        ]
     return result
 
 
@@ -2793,6 +2892,7 @@ def _authorized_job(db: Session, principal: Principal, job_id: str, permission: 
 @router.get("/jobs")
 def list_jobs(status: Optional[str] = None, job_type: Optional[str] = None, project_id: Optional[str] = None, limit: int = Query(100, ge=1, le=500), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     _reap_stale_jobs(db)
+    _release_blocked_jobs(db)
     db.commit()
     query = db.query(PlatformJob)
     if project_id:
@@ -2811,8 +2911,15 @@ def list_jobs(status: Optional[str] = None, job_type: Optional[str] = None, proj
 
 @router.post("/jobs/claim")
 def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
-    now = _now()
     _reap_stale_jobs(db)
+    _release_blocked_jobs(db)
+    # Candidate selection and capacity checks must observe lease deletions and
+    # QUEUED transitions from the reaper in this same claim transaction.
+    db.flush()
+    # Reaping assigns recovered jobs an availability timestamp. Capture the
+    # dispatch clock afterwards so a second boundary during recovery cannot
+    # make the newly queued job invisible until the next worker poll.
+    now = _now()
     from . import worker_control
     constraints = worker_control.worker_claim_constraints(
         db, principal, body.worker_id, body.supported_job_types, body.project_id,
@@ -2867,6 +2974,7 @@ def claim_job(body: JobClaimRequest, principal: Principal = Depends(require_perm
 @router.get("/jobs/summary")
 def job_summary(principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     reaped = _reap_stale_jobs(db)
+    dependency_changes = _release_blocked_jobs(db)
     db.commit()
     query = db.query(PlatformJob)
     accessible = tenancy.accessible_project_ids(db, principal)
@@ -2888,6 +2996,8 @@ def job_summary(principal: Principal = Depends(require_permission("view")), db: 
         "active_leases": db.query(PlatformJobLease).join(PlatformJob, PlatformJob.id == PlatformJobLease.job_id).filter(PlatformJob.id.in_([row.id for row in rows])).count() if rows else 0,
         "oldest_queued_seconds": max([now - row.created_at for row in queued], default=0),
         "reaped_stale_jobs": reaped,
+        "dependency_jobs_released": dependency_changes["released"],
+        "dependency_jobs_failed": dependency_changes["failed"],
         "last_updated": now,
     }
 
@@ -2929,6 +3039,7 @@ def complete_job(job_id: str, body: JobCompleteRequest, principal: Principal = D
     runtime_observability.record_job_terminal(db, row, "SUCCEEDED", body.result)
     _release_job_lease(db, row.id)
     _audit(db, principal.id, "job.succeeded", "platform_job", row.id, {"job_type": row.job_type, "attempt": row.attempt})
+    _release_blocked_jobs(db)
     db.commit()
     return _job_dict(row, db)
 
@@ -2960,6 +3071,8 @@ def fail_job(job_id: str, body: JobFailRequest, principal: Principal = Depends(r
     from . import runtime_observability
     runtime_observability.record_job_terminal(db, row, row.status, body.details, body.error)
     _audit(db, principal.id, "job.failed" if row.status == "FAILED" else "job.retry_scheduled", "platform_job", row.id, {"job_type": row.job_type, "attempt": row.attempt})
+    if row.status == "FAILED":
+        _release_blocked_jobs(db)
     db.commit()
     return _job_dict(row, db)
 
@@ -2968,6 +3081,7 @@ def fail_job(job_id: str, body: JobFailRequest, principal: Principal = Depends(r
 def get_job(job_id: str, principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     row = _authorized_job(db, principal, job_id, "view")
     _reap_stale_jobs(db)
+    _release_blocked_jobs(db)
     db.commit()
     db.refresh(row)
     result = _job_dict(row, db)
@@ -2991,6 +3105,7 @@ def cancel_job(job_id: str, principal: Principal = Depends(require_permission("e
     if row.job_type == "plugin.execute":
         from . import plugin_runtime
         plugin_runtime.sync_execution_from_job(db, row)
+    _release_blocked_jobs(db)
     db.commit()
     return _job_dict(row, db)
 
@@ -3000,7 +3115,8 @@ def retry_job(job_id: str, principal: Principal = Depends(require_permission("ex
     row = _authorized_job(db, principal, job_id, "execute")
     if row.status not in {"FAILED", "CANCELLED"}:
         raise HTTPException(status_code=409, detail="Only failed or cancelled jobs can be retried")
-    row.status = "QUEUED"
+    dependencies = _dependency_rows(db, row)
+    row.status = "QUEUED" if all(item.status in _SUCCESSFUL_JOB_STATUSES for item in dependencies) else "BLOCKED"
     row.attempt += 1
     row.progress = 0
     row.error = None

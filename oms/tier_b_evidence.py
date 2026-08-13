@@ -113,6 +113,35 @@ def _git_commit() -> str:
         return "unknown"
 
 
+def build_evidence_provenance(
+    harness: str,
+    *,
+    observed_head: str | None = None,
+    entry_points: List[str] | None = None,
+    request_shapes: List[str] | None = None,
+) -> Dict[str, Any]:
+    """Build the canonical provenance envelope for raw and gate evidence.
+
+    ``observed_head=None`` is intentional for a harness that measures no
+    migrated database. It must never be replaced with the repository head by
+    implication.
+    """
+    return {
+        "migration_head": current_head(),
+        "observed_migration_head": observed_head,
+        "git_commit": _git_commit(),
+        "captured_at": int(time.time()),
+        "harness": harness,
+        "entry_points": list(entry_points or []),
+        "request_shapes": list(request_shapes or []),
+        "host": {
+            "platform": platform.system().lower(),
+            "release": platform.release(),
+            "cpu_count": os.cpu_count(),
+        },
+    }
+
+
 def write_evidence(
     gate_id: str,
     *,
@@ -164,27 +193,12 @@ def write_evidence(
         "status": status,
         "thresholds": thresholds,
         "measurements": measurements,
-        "provenance": {
-            "migration_head": head,
-            # The head read from the database this run measured, when it measured
-            # one. Absent means the harness did not touch a database, or did not
-            # say -- which the auditor reports rather than assumes.
-            "observed_migration_head": observed_head,
-            "git_commit": _git_commit(),
-            "captured_at": int(time.time()),
-            "harness": harness,
-            # The routes this run actually called, and the request shapes it
-            # issued. Empty means the harness declined to say, which the auditor
-            # reports rather than assumes: a gate that does not name its entry
-            # point is not evidence for any particular one.
-            "entry_points": list(entry_points or []),
-            "request_shapes": list(request_shapes or []),
-            "host": {
-                "platform": platform.system().lower(),
-                "release": platform.release(),
-                "cpu_count": os.cpu_count(),
-            },
-        },
+        "provenance": build_evidence_provenance(
+            harness,
+            observed_head=observed_head,
+            entry_points=entry_points,
+            request_shapes=request_shapes,
+        ),
     }
     if breaches:
         payload["breaches"] = breaches

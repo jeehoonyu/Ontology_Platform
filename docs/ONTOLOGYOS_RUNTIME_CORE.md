@@ -2,6 +2,19 @@
 
 This runtime increment makes ontology semantics, object history, bulk data, pipeline plans, and model calls explicit production contracts. Existing endpoints remain available; `/api/v1` is additive and compatibility-first.
 
+The compatibility contract now covers the assembled product API rather than a
+small manually duplicated subset. After every router is mounted,
+`api_v1_compat.install_api_v1_compatibility()` adds typed `/api/v1` aliases for
+eligible legacy handlers. Each alias calls the exact same endpoint and retains
+its request validation, response model, dependencies, status code, streaming
+class, and OpenAPI contract. Explicit v1 route-shape collisions always win;
+browser pages, OIDC callbacks, health/metrics, and framework documentation stay
+unversioned. `GET /api/v1/compatibility/manifest` exposes the runtime inventory,
+while `oms/test_api_v1_compatibility.py` verifies state parity, tenant
+authorization, permission inference, OpenAPI metadata, collision handling, and
+idempotent installation. `oms/test_api_v1_route_coverage.py` caps deliberately
+unversioned handlers so a new product endpoint cannot silently avoid v1.
+
 ## Semantic And Temporal Ontology
 
 `POST /api/v1/ontology/compile` materializes normalized property and resource definitions from existing object types, profiles, links, and actions. Property definitions include constraints, display metadata, sensitivity, indexing intent, and stable order. Resource definitions preserve links, actions, interfaces, policies, datasources, and dependencies without forcing object values into an EAV model.
@@ -65,6 +78,18 @@ Requests enforce model allowlists and input limits, record policy and usage evid
 External provider URLs reject embedded credentials, enforce `MODEL_GATEWAY_ALLOWED_HOSTS`, resolve and reject private/local/reserved addresses unless `MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS=true`, and revalidate redirects. Keep private networking disabled unless model workers run in a controlled subnet.
 
 Durable agent work is submitted through `POST /api/v1/agents/{agent_id}/tasks`, inspected through `GET /api/v1/agents/tasks/{task_id}`, and cancelled or retried through task subresources. Progress is available from `/api/v1/events/stream?job_id={task_id}`.
+
+For independently recoverable execution, `POST /api/v1/agents/{agent_id}/task-graphs`
+creates a deterministic context -> parallel tools -> synthesis DAG. The context
+stage records the ontology/document retrieval pack. Each selected tool runs under
+its own lease and immutable configuration snapshot, so one failed tool can be
+retried without repeating successful tools. The synthesis job remains `BLOCKED`
+until every stage succeeds, validates the task/config identities, and alone commits
+the final `AgentToolRun`, approval requests, audit records, and Ops evidence.
+Action tools only produce proposals: tool workers never mutate ontology objects,
+and high-risk actions receive deterministic pending approval IDs during synthesis.
+Graph cancellation cascades in dependency-safe order; graph retry resumes failed or
+cancelled stages. The original `/tasks` single-job contract remains compatible.
 
 ## Current Scale Boundary
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from tier_b_evidence import compare  # noqa: E402
+from tier_b_evidence import build_evidence_provenance, compare, current_head  # noqa: E402
 
 passed = 0
 
@@ -80,5 +80,19 @@ check(compare(gate, {"facet_p95_ms": 2713.288, "facet_from_rollup": 0}) != [],
       "and the exact fallback breaches on both counts")
 
 check(compare({}, {"anything": 1}) == [], "no thresholds is no breaches")
+
+provenance = build_evidence_provenance(
+    "oms/test_threshold_comparison.py",
+    entry_points=["POST /api/v1/example"],
+    request_shapes=["bounded diagnostic request"],
+)
+check(provenance["migration_head"] == current_head(), "raw evidence records repository migration head")
+check(provenance["observed_migration_head"] is None,
+      "raw evidence does not invent a measured database head")
+check(provenance["harness"] == "oms/test_threshold_comparison.py", "raw evidence records harness")
+check(provenance["entry_points"] == ["POST /api/v1/example"], "raw evidence records entry points")
+check(provenance["request_shapes"] == ["bounded diagnostic request"], "raw evidence records request shapes")
+check(isinstance(provenance["captured_at"], int) and provenance["captured_at"] > 0,
+      "raw evidence records capture time")
 
 print(f"Threshold comparison verified: {passed} assertions passed.")

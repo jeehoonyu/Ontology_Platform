@@ -1881,6 +1881,7 @@ def validate_project(db: Session = Depends(get_db)):
         "/connections/sources",
         "/streams",
         "/api/v1/streams/processing/summary",
+        "/api/v1/compatibility/manifest",
         "/project/export",
         "/project/validate",
         "/project/readiness",
