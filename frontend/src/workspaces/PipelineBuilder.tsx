@@ -1,6 +1,14 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { postJson } from "../api";
-import { cancelJob, enqueuePipelineJob, getJob, retryJob, runPipelineJob } from "../api/jobApi";
+import {
+  cancelJob,
+  compilePipelinePlan,
+  enqueuePipelineJob,
+  executePipelinePlan,
+  getJob,
+  retryJob,
+  runPipelineJob
+} from "../api/jobApi";
 import { getPipelineOntologyContracts } from "../api/pipelineOntologyApi";
 import {
   createPipelineNode,
@@ -29,6 +37,8 @@ import type {
   PipelineOntologyContract,
   PipelineOntologyContractState,
   PipelineOutputsState,
+  PipelineExecutionPlan,
+  PipelineExecutionStrategy,
   PipelineUiState,
   PlatformJob
 } from "../types";
@@ -46,12 +56,16 @@ export function PipelineBuilder() {
   const [zoom, setZoom] = useState(0.86);
   const [quickAddType, setQuickAddType] = useState("filter");
   const [executionJob, setExecutionJob] = useState<PlatformJob | null>(null);
+  const [executionPlan, setExecutionPlan] = useState<PipelineExecutionPlan | null>(null);
+  const [executionEngine, setExecutionEngine] = useState<"builder" | "duckdb">("builder");
+  const [executionStrategy, setExecutionStrategy] = useState<PipelineExecutionStrategy>("auto");
+  const [maxPartitions, setMaxPartitions] = useState(8);
   const [busyAction, setBusyAction] = useState("");
   const [actionStatus, setActionStatus] = useState("Select a node, insert transforms from edges or the node menu, then preview or deploy.");
   const state = useAsyncState<PipelineUiState>(getPipelineState, [refreshKey]);
 
   useEffect(() => {
-    if (!executionJob || !["QUEUED", "RUNNING"].includes(executionJob.status)) return;
+    if (!executionJob || !["BLOCKED", "QUEUED", "RUNNING"].includes(executionJob.status)) return;
     const timer = window.setInterval(() => {
       void getJob(executionJob.id).then(setExecutionJob).catch(() => undefined);
     }, 1_500);
@@ -131,9 +145,46 @@ export function PipelineBuilder() {
         setActionStatus(`Validation completed: ${formatValue((result as { status?: unknown }).status || "ok")}`);
       } else {
         setActionStatus(`Queueing Pipeline ${action}...`);
-        const queued = await enqueuePipelineJob(selectedGraphId, action, `${action}-${selectedGraphId}-${Date.now()}`);
+        const idempotencyKey = `${action}-${selectedGraphId}-${Date.now()}`;
+        let queued: PlatformJob;
+        if (executionEngine === "duckdb") {
+          setActionStatus("Compiling the graph into a typed DuckDB execution plan...");
+          const plan = await compilePipelinePlan(selectedGraphId);
+          setExecutionPlan(plan);
+          const response = await executePipelinePlan(plan.id, {
+            mode: action,
+            execution_strategy: action === "preview" ? "single" : executionStrategy,
+            max_partitions: maxPartitions,
+            idempotency_key: idempotencyKey
+          });
+          queued = response.execution;
+        } else {
+          queued = await enqueuePipelineJob(selectedGraphId, action, idempotencyKey);
+          setExecutionPlan(null);
+        }
         setExecutionJob(queued);
         setActionStatus(`${action} queued as ${queued.id}. Waiting for worker claim...`);
+        if (queued.partition_execution && queued.dependencies?.length) {
+          let shardFailed = false;
+          for (let index = 0; index < queued.dependencies.length; index += 1) {
+            const dependency = queued.dependencies[index];
+            setActionStatus(`Executing snapshot shard ${index + 1} of ${queued.dependencies.length}...`);
+            const shard = await runPipelineJob(dependency.id);
+            if (!shard.job || shard.job.status !== "SUCCEEDED") {
+              shardFailed = true;
+              break;
+            }
+            setExecutionJob(await getJob(queued.id));
+          }
+          if (shardFailed) {
+            const failed = await getJob(queued.id);
+            setExecutionJob(failed);
+            setActionStatus(`Distributed delivery stopped: ${failed.error || "a snapshot shard failed"}`);
+            return;
+          }
+        }
+        const ready = await getJob(queued.id);
+        setExecutionJob(ready);
         const executed = await runPipelineJob(queued.id);
         if (executed.job) {
           const detail = await getJob(executed.job.id);
@@ -329,6 +380,44 @@ export function PipelineBuilder() {
           />
         </section>
         <aside className="output-rail">
+          <Panel title="Execution Policy">
+            <div className="pipeline-execution-policy">
+              <label>
+                <span>Engine</span>
+                <select value={executionEngine} onChange={(event) => setExecutionEngine(event.target.value as "builder" | "duckdb")}>
+                  <option value="builder">Builder runtime</option>
+                  <option value="duckdb">Snapshot runtime (DuckDB)</option>
+                </select>
+              </label>
+              <label>
+                <span>Delivery strategy</span>
+                <select
+                  value={executionStrategy}
+                  disabled={executionEngine !== "duckdb"}
+                  onChange={(event) => setExecutionStrategy(event.target.value as PipelineExecutionStrategy)}
+                >
+                  <option value="auto">Auto</option>
+                  <option value="single">Single worker</option>
+                  <option value="partitioned">Partition workers</option>
+                </select>
+              </label>
+              <label>
+                <span>Maximum partitions</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={100}
+                  value={maxPartitions}
+                  disabled={executionEngine !== "duckdb" || executionStrategy === "single"}
+                  onChange={(event) => setMaxPartitions(Math.max(2, Math.min(100, Number(event.target.value) || 2)))}
+                />
+              </label>
+              <p>
+                Auto distributes row-local plans over immutable files and falls back safely when a transform needs global state.
+                Preview always uses one worker.
+              </p>
+            </div>
+          </Panel>
           <Panel title="Execution">
             {executionJob ? <div className="pipeline-execution-state" aria-live="polite">
               <div className="pipeline-execution-heading"><StatusBadge value={executionJob.status} /><strong>{executionJob.job_type}</strong></div>
@@ -337,10 +426,28 @@ export function PipelineBuilder() {
                 job_id: executionJob.id,
                 progress: `${executionJob.progress}%`,
                 attempt: executionJob.attempt,
+                strategy: executionJob.execution_strategy || (executionPlan ? "single" : "builder"),
+                plan: executionPlan?.id || "Builder graph",
                 error: executionJob.error || "None"
               }} />
+              {executionJob.strategy_fallback?.reasons?.length ? (
+                <div className="inline-warning" role="status">
+                  Auto selected one worker: {executionJob.strategy_fallback.reasons.join(" ")}
+                </div>
+              ) : null}
+              {executionJob.dependencies?.length ? (
+                <details open>
+                  <summary>Partition jobs ({executionJob.dependencies.length})</summary>
+                  <DataTable rows={executionJob.dependencies.map((dependency, index) => ({
+                    partition: index + 1,
+                    job: dependency.id,
+                    type: dependency.job_type,
+                    status: dependency.status
+                  }))} />
+                </details>
+              ) : null}
               <div className="action-row">
-                <button onClick={cancelExecution} disabled={!["QUEUED", "RUNNING"].includes(executionJob.status)}>Cancel</button>
+                <button onClick={cancelExecution} disabled={!["BLOCKED", "QUEUED", "RUNNING"].includes(executionJob.status)}>Cancel</button>
                 <button onClick={retryExecution} disabled={!["FAILED", "CANCELLED"].includes(executionJob.status)}>Retry</button>
               </div>
               {executionJob.events?.length ? <details><summary>Execution events</summary><DataTable rows={executionJob.events.map((event) => ({ event: event.event_type, status: event.status, created_at: event.created_at }))} /></details> : null}

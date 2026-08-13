@@ -167,6 +167,101 @@ empty = ok(client.post("/jobs/claim", json={
 }), "return empty compatible queue")
 assert empty["job"] is None, empty
 
+dependency_one = ok(client.post("/jobs", json={
+    "job_type": "pipeline.partition",
+    "subject_type": "pipeline_partition",
+    "subject_id": "partition-1",
+}), "create first partition dependency", 201)
+dependency_two = ok(client.post("/jobs", json={
+    "job_type": "pipeline.partition",
+    "subject_type": "pipeline_partition",
+    "subject_id": "partition-2",
+}), "create second partition dependency", 201)
+coordinator = ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "subject_type": "pipeline_execution_plan",
+    "subject_id": "partitioned-plan",
+    "depends_on": [dependency_one["id"], dependency_two["id"]],
+    "idempotency_key": "partitioned-plan-finalize-v1",
+}), "create dependency-gated coordinator", 201)
+assert coordinator["status"] == "BLOCKED", coordinator
+assert {item["id"] for item in coordinator["dependencies"]} == {dependency_one["id"], dependency_two["id"]}, coordinator
+passed += 1
+blocked_observation = ok(client.get(f"/runtime/observability/jobs/{coordinator['id']}"), "inspect blocked dependency telemetry")
+assert blocked_observation["status"] == "BLOCKED", blocked_observation
+assert blocked_observation["spans"][0]["name"] == "dependency_wait", blocked_observation["spans"]
+passed += 1
+
+coordinator_replay = ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "subject_type": "pipeline_execution_plan",
+    "subject_id": "partitioned-plan",
+    "depends_on": [dependency_one["id"], dependency_two["id"]],
+    "idempotency_key": "partitioned-plan-finalize-v1",
+}), "replay dependency-gated coordinator", 201)
+assert coordinator_replay["id"] == coordinator["id"] and coordinator_replay["idempotent_replay"] is True, coordinator_replay
+passed += 1
+
+blocked_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "coordinator-worker",
+    "supported_job_types": ["pipeline.finalize"],
+}), "do not claim blocked coordinator")
+assert blocked_claim["job"] is None, blocked_claim
+
+claimed_dependency_ids = set()
+for index in range(1, 3):
+    claimed_dependency = ok(client.post("/jobs/claim", json={
+        "worker_id": f"partition-worker-{index}",
+        "supported_job_types": ["pipeline.partition"],
+    }), f"claim partition dependency {index}")["job"]
+    claimed_dependency_ids.add(claimed_dependency["id"])
+    ok(client.post(f"/jobs/{claimed_dependency['id']}/complete", json={
+        "lease_token": claimed_dependency["lease_token"],
+        "result": {"partition": index},
+    }), f"complete partition dependency {index}")
+assert claimed_dependency_ids == {dependency_one["id"], dependency_two["id"]}, claimed_dependency_ids
+passed += 1
+
+released_observation = ok(client.get(f"/runtime/observability/jobs/{coordinator['id']}"), "inspect released dependency telemetry")
+assert released_observation["status"] == "QUEUED", released_observation
+assert released_observation["spans"][-1]["message"] == "Job dependencies satisfied", released_observation["spans"]
+passed += 1
+
+coordinator_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "coordinator-worker",
+    "supported_job_types": ["pipeline.finalize"],
+}), "claim released coordinator")["job"]
+assert coordinator_claim["id"] == coordinator["id"], coordinator_claim
+coordinator_state = ok(client.get(f"/jobs/{coordinator['id']}"), "inspect dependency release evidence")
+assert any(event["event_type"] == "job.dependencies_satisfied" for event in coordinator_state["events"]), coordinator_state
+passed += 1
+
+failed_dependency = ok(client.post("/jobs", json={
+    "job_type": "pipeline.partition",
+}), "create failing partition dependency", 201)
+failed_coordinator = ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "depends_on": [failed_dependency["id"]],
+}), "create coordinator behind failing dependency", 201)
+failed_dependency_claim = ok(client.post("/jobs/claim", json={
+    "worker_id": "failed-partition-worker",
+    "supported_job_types": ["pipeline.partition"],
+}), "claim failing dependency")["job"]
+ok(client.post(f"/jobs/{failed_dependency['id']}/fail", json={
+    "lease_token": failed_dependency_claim["lease_token"],
+    "error": "Partition input was corrupt",
+    "retriable": False,
+}), "fail partition dependency")
+failed_coordinator_state = ok(client.get(f"/jobs/{failed_coordinator['id']}"), "propagate dependency failure")
+assert failed_coordinator_state["status"] == "FAILED", failed_coordinator_state
+assert any(event["event_type"] == "job.dependency_failed" for event in failed_coordinator_state["events"]), failed_coordinator_state
+passed += 1
+
+ok(client.post("/jobs", json={
+    "job_type": "pipeline.finalize",
+    "depends_on": ["missing-job"],
+}), "reject missing dependency", 404)
+
 print(f"\nAsynchronous job runtime verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

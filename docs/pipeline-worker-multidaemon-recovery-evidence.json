@@ -1,0 +1,42 @@
+{
+    "status":  "PASS",
+    "provenance":  {
+                       "migration_head":  "0042_stream_outer_joins",
+                       "observed_migration_head":  "0042_stream_outer_joins",
+                       "harness":  "scripts/rehearse-production-acceptance.ps1"
+                   },
+    "profile":  "production-oidc-independent-docker-daemon-worker-recovery",
+    "generated_at":  "2026-08-12T00:09:21.8314984Z",
+    "topology":  {
+                     "independent_docker_daemons":  2,
+                     "shared_worker_filesystem":  false,
+                     "shared_image_store":  false,
+                     "shared_cache":  false,
+                     "physical_hosts":  1
+                 },
+    "job_id":  "job_54743fe5ecda42ea",
+    "input_snapshot_id":  "dataset_snapshot_537ecf30dfcc4cdd84799dabdea3eaad",
+    "input_rows":  100000,
+    "input_partitions":  32,
+    "first_worker":  {
+                         "daemon":  "tcp://127.0.0.1:12375",
+                         "container":  "82c0eed6c8bfeda515af7370fd199489b346a7ae10c4c17989dc44724eda5c1a",
+                         "exit_code":  137,
+                         "private_cache_files_before_kill":  3
+                     },
+    "replacement_worker":  {
+                               "daemon":  "tcp://127.0.0.1:22375",
+                               "container":  "ffdd87c79a04b929de9fef49d869b0861adc031286ca12d884dba4f333239b2a",
+                               "private_cache_files":  32,
+                               "attempt":  2
+                           },
+    "publication":  {
+                        "claim_count":  2,
+                        "requeue_count":  1,
+                        "success_count":  1,
+                        "output_snapshot_id":  "dataset_snapshot_4c8de29dffd7ef18258b2bcf6ef32f8c",
+                        "output_rows":  10000,
+                        "output_snapshot_count":  1,
+                        "execution_fenced":  true
+                    }
+}

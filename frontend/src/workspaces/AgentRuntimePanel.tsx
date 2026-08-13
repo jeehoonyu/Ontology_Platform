@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, Bot, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { enqueueAgentInvocation, listAgents, runAgentJob } from "../api/agentApi";
-import { cancelJob, getJob, retryJob } from "../api/jobApi";
-import { ErrorBanner, StatusBadge } from "../components/data/DataDisplay";
+import {
+  cancelAgentTask,
+  enqueueAgentInvocation,
+  enqueueAgentTaskGraph,
+  listAgents,
+  retryAgentTask,
+  runAgentJob
+} from "../api/agentApi";
+import { getJob } from "../api/jobApi";
+import { DataTable, ErrorBanner, StatusBadge } from "../components/data/DataDisplay";
 import type { AgentRunResult, PlatformJob } from "../types";
 
 interface ParameterRow {
@@ -23,17 +30,23 @@ export function AgentRuntimePanel() {
   const [prompt, setPrompt] = useState("Inspect current operational risk and propose the safest next action.");
   const [parameters, setParameters] = useState<ParameterRow[]>([]);
   const [job, setJob] = useState<PlatformJob | null>(null);
+  const [executionMode, setExecutionMode] = useState<"graph" | "single">("graph");
+  const [graphStages, setGraphStages] = useState<PlatformJob[]>([]);
   const [result, setResult] = useState<AgentRunResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const selectedAgentId = agentId || agents.data?.[0]?.id || "";
 
   useEffect(() => {
-    if (!job || !["QUEUED", "RUNNING"].includes(job.status)) return;
+    if (!job || !["BLOCKED", "QUEUED", "RUNNING"].includes(job.status)) return;
     const timer = window.setInterval(async () => {
       try {
         const current = await getJob(job.id);
         setJob(current);
+        if (current.agent_task_graph) {
+          const ids = [current.agent_task_graph.context_job_id, ...current.agent_task_graph.tool_job_ids];
+          setGraphStages(await Promise.all(ids.map(getJob)));
+        }
         const completed = resultFromJob(current);
         if (completed) setResult(completed);
       } catch (reason) {
@@ -46,6 +59,30 @@ export function AgentRuntimePanel() {
   const policy = result?.policy_summary?.decision || (job?.status === "FAILED" ? "FAILED" : "NOT_RUN");
   const events = useMemo(() => job?.events || [], [job?.events]);
 
+  async function executeGraph(coordinator: PlatformJob) {
+    const graph = coordinator.agent_task_graph;
+    if (!graph) {
+      const execution = await runAgentJob(coordinator.id);
+      return execution;
+    }
+    const stageIds = [graph.context_job_id, ...graph.tool_job_ids];
+    for (const stageId of stageIds) {
+      const stage = await getJob(stageId);
+      if (["QUEUED", "BLOCKED"].includes(stage.status)) {
+        if (stage.status === "BLOCKED") continue;
+        const executed = await runAgentJob(stageId);
+        if (!executed.job || executed.job.status !== "SUCCEEDED") {
+          setGraphStages(await Promise.all(stageIds.map(getJob)));
+          return { job: await getJob(coordinator.id), result: null };
+        }
+      }
+      setGraphStages(await Promise.all(stageIds.map(getJob)));
+    }
+    const ready = await getJob(coordinator.id);
+    setJob(ready);
+    return runAgentJob(coordinator.id);
+  }
+
   async function invoke() {
     if (!selectedAgentId || !prompt.trim()) return;
     setBusy(true);
@@ -53,9 +90,12 @@ export function AgentRuntimePanel() {
     setResult(null);
     try {
       const parameterValues = Object.fromEntries(parameters.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value]));
-      const queued = await enqueueAgentInvocation(selectedAgentId, prompt.trim(), parameterValues, crypto.randomUUID());
+      const queued = executionMode === "graph"
+        ? await enqueueAgentTaskGraph(selectedAgentId, prompt.trim(), parameterValues, crypto.randomUUID())
+        : await enqueueAgentInvocation(selectedAgentId, prompt.trim(), parameterValues, crypto.randomUUID());
       setJob(queued);
-      const execution = await runAgentJob(queued.id);
+      setGraphStages([]);
+      const execution = await executeGraph(queued);
       if (execution.job) {
         const detailed = await getJob(execution.job.id);
         setJob(detailed);
@@ -71,7 +111,11 @@ export function AgentRuntimePanel() {
   async function cancel() {
     if (!job) return;
     try {
-      setJob(await cancelJob(job.id));
+      setJob(await cancelAgentTask(job.id));
+      if (job.agent_task_graph) {
+        const ids = [job.agent_task_graph.context_job_id, ...job.agent_task_graph.tool_job_ids];
+        setGraphStages(await Promise.all(ids.map(getJob)));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
@@ -81,9 +125,9 @@ export function AgentRuntimePanel() {
     if (!job) return;
     setBusy(true);
     try {
-      const queued = await retryJob(job.id);
+      const queued = await retryAgentTask(job.id);
       setJob(queued);
-      const execution = await runAgentJob(queued.id);
+      const execution = await executeGraph(queued);
       if (execution.job) {
         const detailed = await getJob(execution.job.id);
         setJob(detailed);
@@ -103,6 +147,10 @@ export function AgentRuntimePanel() {
         <div className="agent-runtime-controls">
           <select aria-label="Agent" value={selectedAgentId} onChange={(event) => setAgentId(event.target.value)} disabled={!agents.data?.length}>
             {(agents.data || []).map((agent) => <option value={agent.id} key={agent.id}>{agent.display_name}</option>)}
+          </select>
+          <select aria-label="Execution mode" value={executionMode} onChange={(event) => setExecutionMode(event.target.value as "graph" | "single")}>
+            <option value="graph">Durable task graph</option>
+            <option value="single">Single compatibility job</option>
           </select>
           <button className="primary-action" onClick={invoke} disabled={busy || !selectedAgentId || !prompt.trim()}><Play size={14} /> {busy ? "Running" : "Run agent"}</button>
         </div>
@@ -127,8 +175,25 @@ export function AgentRuntimePanel() {
               <span><StatusBadge value={job.status} /><small>{job.job_type} · attempt {job.attempt}</small></span>
               <div className="agent-progress"><i style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} /></div>
               <strong>{job.progress}%</strong>
-              {["QUEUED", "RUNNING"].includes(job.status) ? <button onClick={cancel}><Ban size={14} /> Cancel</button> : null}
+              {["BLOCKED", "QUEUED", "RUNNING"].includes(job.status) ? <button onClick={cancel}><Ban size={14} /> Cancel</button> : null}
               {["FAILED", "CANCELLED"].includes(job.status) ? <button onClick={retry} disabled={busy}><RotateCcw size={14} /> Retry</button> : null}
+            </div>
+          ) : null}
+          {job?.agent_task_graph ? (
+            <div className="agent-task-graph" aria-label="Agent task graph">
+              <div>
+                <strong>Task graph</strong>
+                <small>{job.agent_task_graph.tool_count} independently retryable tool stage{job.agent_task_graph.tool_count === 1 ? "" : "s"}</small>
+              </div>
+              <DataTable rows={[
+                ...graphStages.map((stage, index) => ({
+                  stage: stage.job_type === "aip.agent.context" ? "Context" : `Tool ${index}`,
+                  job: stage.id,
+                  status: stage.status,
+                  attempt: stage.attempt
+                })),
+                { stage: "Synthesis", job: job.id, status: job.status, attempt: job.attempt }
+              ]} empty="Task stages are loading." />
             </div>
           ) : null}
           {result ? (

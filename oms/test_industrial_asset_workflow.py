@@ -1,6 +1,7 @@
 """A promoted project dataset becomes an isolated ontology, pipeline, and risk workflow."""
 import os
 import tempfile
+import time
 
 
 temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -9,6 +10,7 @@ os.environ["AUTH_MODE"] = "local"
 os.environ["APP_ENV"] = "test"
 
 from fastapi.testclient import TestClient  # noqa: E402
+from evaluator_evidence import validate_bundle  # noqa: E402
 from app import (  # noqa: E402
     decision_intelligence,
     investigations,
@@ -22,6 +24,7 @@ from app import (  # noqa: E402
 )
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.production_auth import AuthSession, SESSION_COOKIE  # noqa: E402
 
 
 client = TestClient(app)
@@ -50,18 +53,27 @@ def use(principal):
 
 
 use(alpha)
+asset_records = [
+    {"asset_key": "pump-4", "asset_name": "Line 4 Pump", "condition": "DEGRADED", "priority": "high", "failure_probability": 0.91, "lat": 37.7924, "lon": -122.4012, "serial": "P-004"},
+    {"asset_key": "chiller-2", "asset_name": "Chiller 2", "condition": "RUNNING", "priority": "medium", "failure_probability": 0.22, "lat": 37.7893, "lon": -122.4072, "serial": "C-002"},
+    {"asset_key": "facility-1", "asset_name": "Plant Facility", "priority": "high", "lat": 37.7900, "lon": -122.4050, "serial": "F-001"},
+]
 check(client.post("/data-assets", json={
     "id": "alpha-promoted-assets", "project_id": "plant-alpha", "display_name": "Alpha promoted assets",
     "kind": "dataset", "asset_schema": {
         "asset_key": "string", "asset_name": "string", "condition": "string", "priority": "string",
         "failure_probability": "number", "lat": "number", "lon": "number", "serial": "string",
     },
-    "records": [
-        {"asset_key": "pump-4", "asset_name": "Line 4 Pump", "condition": "DEGRADED", "priority": "high", "failure_probability": 0.91, "lat": 37.7924, "lon": -122.4012, "serial": "P-004"},
-        {"asset_key": "chiller-2", "asset_name": "Chiller 2", "condition": "RUNNING", "priority": "medium", "failure_probability": 0.22, "lat": 37.7893, "lon": -122.4072, "serial": "C-002"},
-        {"asset_key": "facility-1", "asset_name": "Plant Facility", "priority": "high", "lat": 37.7900, "lon": -122.4050, "serial": "F-001"},
-    ],
+    "records": asset_records,
 }), "alpha dataset")
+import_job = check(client.post("/imports/json", json={
+    "id": "alpha-own-data-import", "project_id": "plant-alpha", "filename": "plant-alpha-assets.json",
+    "display_name": "Plant Alpha operational assets", "target_dataset_id": "alpha-promoted-assets",
+    "records": asset_records,
+}), "create own-data import", 201)
+check(client.post(f"/imports/jobs/{import_job['id']}/promote-to-dataset", json={
+    "dataset_id": "alpha-promoted-assets", "display_name": "Alpha promoted assets", "replace": True,
+}), "promote own-data import")
 
 request = {
     "project_id": "plant-alpha", "source_asset_id": "alpha-promoted-assets", "display_name": "Plant Asset",
@@ -126,6 +138,48 @@ passed += 1
 report_markdown = client.get("/api/v1/industrial/workflows/asset-reliability/report?project_id=plant-alpha&format=markdown")
 assert report_markdown.status_code == 200 and "Industrial Asset Reliability Report" in report_markdown.text and "plant_alpha:pump-4" in report_markdown.text, report_markdown.text
 passed += 1
+evaluator_bundle = check(client.post("/api/v1/industrial/workflows/asset-reliability/evaluator-evidence", json={
+    "project_id": "plant-alpha", "team_id": "external-team-alpha",
+    "organization_id": "external-org-alpha", "deployment_id": "deployment-alpha-001",
+    "evaluator_alias": "operator-one", "external_team_confirmation": True,
+    "own_data_confirmation": True,
+}), "export evaluator evidence")
+assert evaluator_bundle["qualification"]["qualifies"] is False
+assert set(evaluator_bundle["qualification"]["reasons"]) >= {
+    "oidc_authentication_required", "pinned_release_commit_required",
+}
+assert evaluator_bundle["dataset"]["provenance_verified"] is True
+validation_errors = validate_bundle(evaluator_bundle)
+assert "bundle_hash_mismatch" not in validation_errors and "report_hash_mismatch" not in validation_errors
+assert "bundle_not_qualifying" in validation_errors
+passed += 5
+with SessionLocal() as db:
+    now = int(time.time())
+    db.add(AuthSession(
+        id="external-evaluator-session", principal_id="external-evaluator-alpha",
+        email=None, display_name="External evaluator", roles=["administrator"],
+        claims={"organization_id": "industrial-org", "project_ids": ["plant-alpha"]},
+        created_at=now, expires_at=now + 300, last_seen_at=now,
+    ))
+    db.commit()
+os.environ["AUTH_MODE"] = "oidc"
+os.environ["OIDC_ISSUER"] = "https://identity.example.test/realms/ontology"
+os.environ["OIDC_CLIENT_ID"] = "ontology-platform"
+os.environ["ONTOLOGYOS_RELEASE_COMMIT"] = "a" * 40
+client.cookies.set(SESSION_COOKIE, "external-evaluator-session")
+qualifying_bundle = check(client.post("/api/v1/industrial/workflows/asset-reliability/evaluator-evidence", json={
+    "project_id": "plant-alpha", "team_id": "external-team-alpha",
+    "organization_id": "external-org-alpha", "deployment_id": "deployment-alpha-qualifying",
+    "evaluator_alias": "operator-one", "external_team_confirmation": True,
+    "own_data_confirmation": True,
+}), "export qualifying evaluator evidence")
+assert qualifying_bundle["qualification"] == {"qualifies": True, "reasons": []}
+assert validate_bundle(qualifying_bundle) == []
+assert qualifying_bundle["dataset"]["import_job_id"] == import_job["id"]
+passed += 3
+os.environ["AUTH_MODE"] = "local"
+os.environ.pop("ONTOLOGYOS_RELEASE_COMMIT", None)
+client.cookies.clear()
 
 rerun = check(client.post("/api/v1/industrial/workflows/asset-reliability/onboard", json=request), "idempotent rerun")
 assert rerun["summary"]["objects_hydrated"] == 3 and rerun["resources"]["pipeline_run"] != onboarded["resources"]["pipeline_run"], rerun
@@ -186,12 +240,24 @@ use(beta)
 check(client.get("/api/v1/industrial/workflows/asset-reliability/state?project_id=plant-alpha"), "beta cannot view alpha", 403)
 check(client.get("/api/v1/industrial/workflows/asset-reliability/workflow-state?project_id=plant-alpha"), "beta cannot view alpha workflow", 403)
 check(client.get("/api/v1/industrial/workflows/asset-reliability/report?project_id=plant-alpha"), "beta cannot export alpha report", 403)
+check(client.post("/api/v1/industrial/workflows/asset-reliability/evaluator-evidence", json={
+    "project_id": "plant-alpha", "team_id": "external-team-beta",
+    "organization_id": "external-org-beta", "deployment_id": "deployment-beta-001",
+    "evaluator_alias": "operator-two", "external_team_confirmation": True,
+    "own_data_confirmation": True,
+}), "beta cannot export alpha evaluator evidence", 403)
 check(client.post("/api/v1/industrial/workflows/asset-reliability/onboard", json={**request, "project_id": "plant-beta"}), "beta cannot use alpha dataset", 404)
 check(client.post("/api/v1/industrial/workflows/asset-reliability/triage", json={"project_id": "plant-alpha"}), "beta cannot triage alpha", 403)
 
 use(viewer)
 check(client.get("/api/v1/industrial/workflows/asset-reliability/state?project_id=plant-alpha"), "viewer reads state")
 check(client.post("/api/v1/industrial/workflows/asset-reliability/onboard", json=request), "viewer cannot onboard", 403)
+check(client.post("/api/v1/industrial/workflows/asset-reliability/evaluator-evidence", json={
+    "project_id": "plant-alpha", "team_id": "external-viewer",
+    "organization_id": "external-org-viewer", "deployment_id": "deployment-viewer-001",
+    "evaluator_alias": "viewer-one", "external_team_confirmation": True,
+    "own_data_confirmation": True,
+}), "viewer cannot export evaluator evidence", 403)
 
 use(editor)
 check(client.post("/api/v1/industrial/workflows/asset-reliability/onboard", json=request), "editor cannot publish ontology", 403)

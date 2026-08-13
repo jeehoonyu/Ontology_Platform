@@ -80,6 +80,45 @@ jobs:
           PIPELINE_SCALE_PROFILE: smoke
           PIPELINE_SCALE_SAMPLES: "3"
         run: python oms/benchmark_pipeline_scale.py
+      - name: Benchmark latency-injected S3-compatible execution
+        env:
+          AWS_ACCESS_KEY_ID: ontology
+          AWS_SECRET_ACCESS_KEY: ontology-development-secret
+          DATA_SNAPSHOT_S3_ENDPOINT: http://127.0.0.1:19001
+          OBJECT_STORAGE_NETWORK_SCOPE: ci-toxiproxy-20ms-downstream
+          OBJECT_STORAGE_TOXIPROXY_ADMIN_URL: http://127.0.0.1:18474
+          OBJECT_STORAGE_TOXIPROXY_NAME: minio-latency
+          OBJECT_STORAGE_TOXIPROXY_ENDPOINT: http://127.0.0.1:19001
+          OBJECT_STORAGE_BENCHMARK_PROFILE: smoke
+          OBJECT_STORAGE_BENCHMARK_ROWS: "100000"
+          OBJECT_STORAGE_BENCHMARK_PARTITIONS: "8"
+          OBJECT_STORAGE_BENCHMARK_SAMPLES: "3"
+          OBJECT_STORAGE_BENCHMARK_CONCURRENT_WORKERS: "4"
+        run: |
+          set -euo pipefail
+          docker compose --profile object-storage up -d minio
+          MINIO_CONTAINER="$(docker compose ps -q minio)"
+          NETWORK="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$MINIO_CONTAINER")"
+          docker run -d --name ontologyos-ci-toxiproxy --network "$NETWORK" \
+            -p 18474:8474 -p 19001:9000 \
+            ghcr.io/shopify/toxiproxy@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+          cleanup() {
+            docker rm -f ontologyos-ci-toxiproxy >/dev/null 2>&1 || true
+            docker compose --profile object-storage stop minio >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null && break
+            test "$attempt" -lt 30
+            sleep 1
+          done
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18474/proxies \
+            -d '{"name":"minio-latency","listen":"0.0.0.0:9000","upstream":"minio:9000","enabled":true}' >/dev/null
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18474/proxies/minio-latency/toxics \
+            -d '{"name":"object-store-response-latency","type":"latency","stream":"downstream","toxicity":1.0,"attributes":{"latency":20,"jitter":2}}' >/dev/null
+          python oms/benchmark_object_storage_minio.py
       - name: Upload backend failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -137,6 +176,59 @@ jobs:
           PY
       - name: Rehearse PostgreSQL ontology query compiler
         run: python oms/verify_ontology_query_postgres.py
+      - name: Rehearse PostgreSQL snapshot publication fencing
+        env:
+          DUCKDB_FENCING_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: python oms/test_duckdb_delivery_lease_fencing.py
+      - name: Rehearse worker-process loss with independent S3 caches
+        env:
+          AWS_ACCESS_KEY_ID: ontology
+          AWS_SECRET_ACCESS_KEY: ontology-development-secret
+          DATA_SNAPSHOT_BACKEND: s3
+          DATA_SNAPSHOT_BUCKET: ontology-recovery
+          DATA_SNAPSHOT_S3_ENDPOINT: http://127.0.0.1:19101
+          DATA_SNAPSHOT_S3_REGION: us-east-1
+          DATA_SNAPSHOT_S3_ADDRESSING_STYLE: path
+          DATA_SNAPSHOT_S3_AUTO_CREATE_BUCKET: "false"
+          DATA_SNAPSHOT_MAX_FILES: "64"
+          PIPELINE_RECOVERY_S3_ADMIN_ENDPOINT: http://127.0.0.1:9000
+          PIPELINE_RECOVERY_ROWS: "20000"
+          PIPELINE_RECOVERY_PARTITIONS: "8"
+          PIPELINE_RECOVERY_LEASE_SECONDS: "10"
+          PIPELINE_RECOVERY_EVIDENCE_PATH: /tmp/pipeline-worker-recovery-evidence.json
+        run: |
+          set -euo pipefail
+          docker compose --profile object-storage up -d minio
+          MINIO_CONTAINER="$(docker compose ps -q minio)"
+          NETWORK="$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$MINIO_CONTAINER")"
+          docker run -d --name ontologyos-ci-worker-recovery-proxy --network "$NETWORK" \
+            -p 18574:8474 -p 19101:9000 \
+            ghcr.io/shopify/toxiproxy@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+          cleanup() {
+            docker rm -f ontologyos-ci-worker-recovery-proxy >/dev/null 2>&1 || true
+            docker compose --profile object-storage stop minio >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null && break
+            test "$attempt" -lt 30
+            sleep 1
+          done
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18574/proxies \
+            -d '{"name":"minio-recovery-latency","listen":"0.0.0.0:9000","upstream":"minio:9000","enabled":true}' >/dev/null
+          curl --fail --silent --show-error -H 'User-Agent: toxiproxy-cli' \
+            -H 'Content-Type: application/json' -X POST http://127.0.0.1:18574/proxies/minio-recovery-latency/toxics \
+            -d '{"name":"worker-recovery-response-latency","type":"latency","stream":"downstream","toxicity":1.0,"attributes":{"latency":100,"jitter":0}}' >/dev/null
+          python oms/rehearse_pipeline_worker_recovery.py
+          python - <<'PY'
+          import json
+          evidence = json.load(open('/tmp/pipeline-worker-recovery-evidence.json', encoding='utf-8'))
+          assert evidence['status'] == 'PASS'
+          assert evidence['recovery']['attempt'] == 2
+          assert evidence['recovery']['output_snapshot_count'] == 1
+          assert evidence['recovery']['execution_fenced'] is True
+          PY
       - name: Benchmark PostgreSQL ontology query plans
         env:
           ONTOLOGY_SCALE_PROFILE: smoke
@@ -259,6 +351,19 @@ jobs:
         run: docker compose -f docker-compose.rehearsal.yml --profile plugin-execution config --quiet
       - name: Build production application image
         run: docker build --file oms/Dockerfile --tag ontology-platform:${{ github.sha }} .
+      - name: Verify packaged API v1 compatibility inventory
+        run: |
+          docker run --rm --entrypoint python \
+            -e APP_ENV=test -e AUTH_MODE=local -e SKIP_CREATE_ALL=1 \
+            ontology-platform:${{ github.sha }} -c '
+          from app.main import app
+          manifest = app.state.api_v1_compatibility_summary
+          schema = app.openapi()
+          assert manifest["aliases"] >= 850, manifest
+          assert "/api/v1/imports/templates" in schema["paths"]
+          assert schema["paths"]["/api/v1/imports/templates"]["get"]["x-ontologyos-compatibility-source"] == "/imports/templates"
+          print(manifest)
+          '
       - name: Build isolated plugin executor image
         run: docker build --file oms/plugin-executor.Dockerfile --tag ontology-plugin-executor:${{ github.sha }} .
       - name: Build governed plugin egress proxy image

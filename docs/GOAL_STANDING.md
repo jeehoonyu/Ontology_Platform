@@ -71,6 +71,12 @@ wrong conclusion and did in fact produce one — an earlier revision of
 [`ONTOLOGY_MODEL_DECISION.md`](ONTOLOGY_MODEL_DECISION.md) declared interfaces a stub on
 the strength of that string alone.
 
+The placeholder was removed on 2026-08-11. The Ontology Manager interface section now
+derives explicit implementations, resolved and inherited properties, link constraints,
+interface actions, and field mappings from the governed interface tables. The audit now
+reports `interfaces configured True`, and the UI-state integration test creates and
+attaches an interface before asserting the manager-visible contract.
+
 That mistake is the argument for this invariant rather than against it. A reading that
 looks like a capability gap and is actually a consumption gap sends work to the wrong
 place, and only opening the implementation settles which one it is.
@@ -158,6 +164,7 @@ never regress. A regression is a build failure, not a discussion.
 | Tier B gates with current provenanced evidence | `oms/validate_tier_b_evidence.py` | 5 of 10 at head 0041 — 5 PASS, 2 STALE, 3 MISSING |
 | Indexes duplicating a primary key | `pg_index` against `pg_constraint` | 0, ceiling 0 (was 244, 283 MB) |
 | Semantic base types the UI renders natively | `oms/audit_extensibility.py` | 13 of 13, floor 13 |
+| Ontology interface capability reaches manager UI state | `oms/audit_extensibility.py` | `True` (was hardcoded `False`) |
 | Concrete object-type couplings in UI source | `oms/audit_extensibility.py` | 1, ceiling 1 |
 
 Read the coupling number with care. It is near zero not because the UI is admirably
@@ -281,3 +288,4 @@ findings are triaged by the severity gate like anything else.
 | 2026-08-07 | Does removing 244 duplicate primary-key indexes speed the load? | Barely. 718 s to 674 s across three million rows, one run per arm, and the decay curve is unchanged -- it was a constant tax, not the cause. 283 MB reclaimed and one fewer index per write is the real return | 244 -> 0 |
 | 2026-08-07 | Is the profile's `indexed` flag read by anything? | Yes. `_plan_index_definition` creates a btree expression index per indexed property; two occupy 1,010 MB on the benchmark corpus. GOAL_2026-08-06.md had claimed it was read by nothing and proposed building what already exists | Correction published |
 | 2026-08-07 | Why is the facet slow -- jsonb, statistics, or the plan? | None of them. An expression index was declined by the planner and slower when forced; ANALYZE made it marginally worse; the jsonb share read 92% hot and 62% cold. A full aggregate over ten million rows is O(n) whatever the split | Facet read 51,521.8 ms -> 1.4 ms via a rollup |
+| 2026-08-11 | Does the Ontology Manager expose the interface capability the backend already enforces? | No. The section was a hardcoded empty placeholder, so inheritance, mappings, actions, and link constraints disappeared at the product boundary. It now derives object-specific interface state from the governed tables and is covered by the UI-state workflow test | Interfaces configured `False` -> `True`; UI-state test 33 assertions |

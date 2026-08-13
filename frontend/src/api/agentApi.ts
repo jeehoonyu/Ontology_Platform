@@ -19,6 +19,28 @@ export function enqueueAgentInvocation(
   });
 }
 
+export function enqueueAgentTaskGraph(
+  agentId: string,
+  prompt: string,
+  parameters: JsonObject,
+  idempotencyKey: string
+): Promise<PlatformJob> {
+  return postJson<PlatformJob>(`/api/v1/agents/${encodeURIComponent(agentId)}/task-graphs`, {
+    prompt,
+    parameters,
+    idempotency_key: idempotencyKey,
+    max_parallel_tools: 20
+  });
+}
+
+export function cancelAgentTask(taskId: string): Promise<PlatformJob> {
+  return postJson<PlatformJob>(`/api/v1/agents/tasks/${encodeURIComponent(taskId)}/cancel`, {});
+}
+
+export function retryAgentTask(taskId: string): Promise<PlatformJob> {
+  return postJson<PlatformJob>(`/api/v1/agents/tasks/${encodeURIComponent(taskId)}/retry`, {});
+}
+
 export function runAgentJob(jobId: string): Promise<{ job: PlatformJob | null; result: AgentRunResult | null }> {
   return postJson("/aip/agents/workers/run-next", {
     worker_id: "react-aip-agent-worker",

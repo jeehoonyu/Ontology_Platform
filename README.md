@@ -68,6 +68,8 @@ far the evidence has drifted from the current migration head.
 
 For a self-hosted team pilot with OIDC, TLS, migrations, backup, restore, and upgrade procedures, see [Production Pilot Operations](docs/PRODUCTION_PILOT.md).
 
+For the independent own-data Connect-to-Report acceptance run and tamper-evident two-team evidence gate, see [Independent Evaluator Guide](docs/EXTERNAL_EVALUATOR_GUIDE.md).
+
 For drag/drop editing, typed Pipeline transforms, ontology mappings, Workshop breakpoints, AIP traces, versioning, and recovery, see [Visual Builder Operations](docs/VISUAL_BUILDERS.md).
 
 For durable worker claims, heartbeats, retries, cancellation, timeout recovery, and queue monitoring, see [Asynchronous Execution Runtime](docs/ASYNC_EXECUTION.md).

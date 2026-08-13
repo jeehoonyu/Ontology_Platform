@@ -900,6 +900,60 @@ def _object_type_walkthrough(db: Session, object_type_id: str) -> Dict[str, Any]
     }
 
 
+def _object_type_interface_state(db: Session, object_type_id: str) -> Dict[str, Any]:
+    """Build the manager-facing view of explicitly implemented interfaces."""
+    from . import ontology_interfaces, ontology_interfaces_ops
+
+    implementations = (
+        db.query(ontology_interfaces_ops.IfaceImplementation)
+        .filter(ontology_interfaces_ops.IfaceImplementation.object_type_id == object_type_id)
+        .order_by(ontology_interfaces_ops.IfaceImplementation.created_at, ontology_interfaces_ops.IfaceImplementation.id)
+        .all()
+    )
+    rows: List[Dict[str, Any]] = []
+    property_count = 0
+    link_constraint_count = 0
+    action_count = 0
+    for implementation in implementations:
+        interface = db.get(ontology_interfaces.OntologyInterface, implementation.interface_id)
+        if interface is None:
+            continue
+        resolved_properties, inherited_from = ontology_interfaces_ops._resolve_properties(db, interface.id)
+        resolved_links = ontology_interfaces_ops._resolve_link_constraints(db, interface.id)
+        interface_actions = (
+            db.query(ontology_interfaces_ops.IfaceAction)
+            .filter(ontology_interfaces_ops.IfaceAction.interface_id == interface.id)
+            .count()
+        )
+        property_count += len(resolved_properties)
+        link_constraint_count += len(resolved_links)
+        action_count += interface_actions
+        rows.append({
+            "id": implementation.id,
+            "interface_id": interface.id,
+            "display_name": interface.display_name,
+            "description": interface.description,
+            "extends": list(interface.extends or []),
+            "property_count": len(resolved_properties),
+            "inherited_property_count": sum(1 for owner in inherited_from.values() if owner != interface.id),
+            "link_constraint_count": len(resolved_links),
+            "action_count": interface_actions,
+            "property_mappings": dict(implementation.property_mappings or {}),
+            "link_mappings": dict(implementation.link_mappings or {}),
+            "created_at": implementation.created_at,
+        })
+    return {
+        "summary": {
+            "configured": bool(rows),
+            "implementation_count": len(rows),
+            "resolved_property_count": property_count,
+            "link_constraint_count": link_constraint_count,
+            "action_count": action_count,
+        },
+        "rows": rows,
+    }
+
+
 def _object_type_section_state(db: Session, object_type_id: str, section_id: str) -> Dict[str, Any]:
     state = _object_type_manager_state(db, object_type_id)
     section = section_id.strip().lower().replace("-", "_")
@@ -961,7 +1015,7 @@ def _object_type_section_state(db: Session, object_type_id: str, section_id: str
         "security": {"summary": {"visibility": object_type["visibility"], "groups": object_type.get("groups", [])}, "rows": []},
         "capabilities": {"summary": {"action_types": cards["action_types"]["count"], "link_types": cards["link_types"]["count"]}, "rows": []},
         "object_views": {"summary": {"configured": False}, "rows": []},
-        "interfaces": {"summary": {"configured": False}, "rows": []},
+        "interfaces": _object_type_interface_state(db, object_type_id),
         "materializations": {"summary": {"datasource_count": cards["datasources"]["count"]}, "rows": cards["datasources"].get("rows", [])},
         "automations": {"summary": {"configured": False}, "rows": []},
         "usage": {"summary": {"object_count": cards["observability"].get("object_count", 0)}, "rows": cards["dependents"].get("rows", [])},
