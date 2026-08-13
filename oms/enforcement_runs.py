@@ -62,6 +62,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "every Tier B gate is current, provenanced and threshold-checked",
         "runs_in": "suite",
     },
+    "audit_check_coverage": {
+        "purpose": "every check-shaped script is declared and has a home",
+        "runs_in": "suite",
+    },
     "validate_external_evaluations": {
         "purpose": "external evaluator submissions carry their own provenance",
         "runs_in": "suite",

@@ -1,4 +1,10 @@
 {
+  "audit_check_coverage": {
+    "at": 1786590183,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
   "audit_evidence_corpus": {
     "at": 1786587592,
     "environment": "local",
@@ -12,7 +18,7 @@
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1786587595,
+    "at": 1786590183,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
@@ -23,14 +29,20 @@
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
+  "check_coverage": {
+    "at": 1786589915,
+    "environment": "local",
+    "migration_head": "0042_stream_outer_joins",
+    "verdict": "PASS"
+  },
   "validate_docs_conformance": {
-    "at": 1786587599,
+    "at": 1786590183,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1786588081,
+    "at": 1786590405,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
@@ -42,7 +54,7 @@
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1786587599,
+    "at": 1786590183,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "FAIL"
