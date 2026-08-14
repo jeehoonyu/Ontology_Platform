@@ -1,0 +1,18 @@
+# Line endings are not cosmetic for files a Linux shell executes.
+#
+# With `core.autocrlf=true` -- the Git for Windows default -- a Windows
+# checkout rewrote `oms/entrypoint.sh` with CRLF. The image still built; the
+# container then died immediately with
+#
+#     exec /app/entrypoint.sh: no such file or directory
+#
+# because the kernel reads the shebang literally and looks for an interpreter
+# named "/bin/sh\r". The error names the script, not the line ending, which is
+# why this is worth pinning rather than remembering. Anyone cloning on Windows
+# hits it, and until this file existed the answer was that the container simply
+# could not be built here.
+*.sh text eol=lf
+scripts/hooks/* text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+entrypoint.sh text eol=lf

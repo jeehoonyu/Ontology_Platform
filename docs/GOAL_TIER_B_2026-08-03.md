@@ -387,6 +387,56 @@ a 10-minute budget, not a rule forbidding it.
 [`STARTING_THE_PILOT_WINDOW.md`](STARTING_THE_PILOT_WINDOW.md) records what the
 verification established, so starting later is a command rather than a rediscovery.
 
+### 2026-08-14: the window is open
+
+Started `2026-08-14T00:34Z` at `0042_stream_outer_joins`, closing `2026-08-21T00:34Z`, with
+the schema freeze open for eight days. The decision above was reversed on instruction; the
+risk it described is unchanged and is now simply being carried.
+
+Preflight passing had said the configuration was sound. It had not said the window could
+run, and three things had to be established before the clock was worth starting — each by
+running it, not by reading it.
+
+**The database.** The development database is 32 GB, and RPO is the age of the recovery
+point at the moment of failure: a five-minute objective requires a recovery point at least
+that often, and a logical dump of 32 GB does not finish in five minutes. The 2026-08-09
+note above flagged this and was right. The window therefore measures a **dedicated pilot
+project** with its own volume, seeded to 254 MB — which is what the reference driver scopes
+itself to in its own docstring, not a concession. Measured on that stack: backup 4.5s,
+restore 32s, a complete rehearsal 33.2s against an 1800s limit.
+
+**The recovery path.** Preflight validates that the recovery driver's configuration parses.
+It does not restore anything. A full rehearsal was run before starting — marks, backup,
+isolated restore, authenticated write at the restored head, RPO observation, cleanup —
+because the first real one fires ten hours in, and a driver that cannot restore would have
+been discovered on day one of seven. It restored, and reported `rpo_seconds: 0`.
+
+A first attempt reported `total_loss: true`. That was the trial's own error — the marks were
+written under the default project id and read back under `operations` — and not a defect:
+`tick_once` passes one project id to both. Worth recording because a total-loss reading is
+what a genuinely broken recovery point also looks like, and the difference is two arguments.
+
+**The image.** It could not be built on this checkout at all. `core.autocrlf=true` rewrote
+`oms/entrypoint.sh` with CRLF, the image built cleanly, and the container died with
+
+```
+exec /app/entrypoint.sh: no such file or directory
+```
+
+because the kernel reads the shebang literally and looks for `/bin/sh\r`. The error names
+the script, so nothing points at the line ending. `.gitattributes` now pins `*.sh` to LF.
+This is the reproducibility goal's own claim failing in a new place: the repository was
+importable by a stranger and still not buildable by one on Windows.
+
+Two operational limits are recorded rather than solved. Registering a scheduled task is
+denied to this account — `Register-ScheduledTask` and `schtasks /Create` both answer
+"Access is denied", elevated or not — so the supervisor is a host process that survives
+this terminal but not a reboot; the command to bring it back is in
+[`STARTING_THE_PILOT_WINDOW.md`](STARTING_THE_PILOT_WINDOW.md). And
+`register-pilot-window.ps1` registered only a boot trigger, which never fires for a task
+owned by an interactive account; it now registers a logon trigger too, which on a
+workstation is the one that does the work.
+
 ### What was verified locally on 2026-08-09, and what was not
 
 Against a real API on the development stack, with `PILOT_EVIDENCE_ROOT` pointed at a
@@ -472,6 +522,7 @@ it. The three that do not each have a reason in the file rather than a silence:
 `pipeline_scale` measures a scratch SQLite database with no `alembic_version`, and `chaos`
 and `identity` aggregate rehearsals and a browser run rather than one measured database.
 
-Only `availability`, `rpo`, and `rto` remain MISSING, and they are waiting on a pilot host
-and seven frozen days rather than on anything in this repository.
+Only `availability`, `rpo`, and `rto` remain MISSING. As of `2026-08-14T00:34Z` they are
+collecting: a window is open on this host until `2026-08-21T00:34Z` at `0042`, and what
+they wait on now is seven frozen days rather than anything in this repository.
 

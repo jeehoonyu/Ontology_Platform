@@ -1,0 +1,103 @@
+# Isolated restore target for a pilot window run on a workstation.
+#
+# A faithful fork of `docker-compose.pilot-recovery.yml`. Everything the RTO
+# and RPO contract actually constrains is unchanged: a separate Compose
+# project, fresh volumes on every restore, a distinct URL, checksummed
+# artifacts mounted read-only, and an API that must answer an authenticated
+# write at the restored migration head before the clock stops. The source
+# project is never stopped or mutated.
+#
+# Two things differ, and only these two:
+#
+#   * `AUTH_MODE` is `local` rather than `oidc`, because this host runs no
+#     identity provider. The recovery protocol that carries every RPO mark and
+#     the RTO write is bearer-token authenticated and does not traverse the
+#     OIDC path, so the measurement is unaffected. Identity has its own gate.
+#   * `ONTOLOGY_IMAGE` is a locally built image pinned by digest rather than a
+#     registry release digest, because the source stack under measurement is
+#     also built locally. Both sides name the same immutable image.
+services:
+  postgres:
+    image: postgis/postgis@sha256:3f4a5d48e0be9580ed70ed618cd039ce57bbb2dd113053d3836e28513f1f87cd
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - recovery_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  oms-api:
+    image: ${ONTOLOGY_IMAGE:?set ONTOLOGY_IMAGE to the image under measurement}
+    restart: "no"
+    environment:
+      APP_ENV: development
+      AUTH_MODE: local
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PUBLIC_BASE_URL: ${PILOT_RECOVERY_URL:?set PILOT_RECOVERY_URL}
+      WEBSOCKET_ALLOWED_ORIGINS: ${PILOT_RECOVERY_URL}
+      FORWARDED_ALLOW_IPS: 127.0.0.1
+      DATA_SNAPSHOT_BACKEND: local
+      DATA_SNAPSHOT_ROOT: /var/lib/ontology/snapshots
+      DATA_SNAPSHOT_CACHE_ROOT: /var/cache/ontology/snapshots
+      PLUGIN_BUNDLE_ROOT: /var/lib/ontology/plugins
+      PLUGIN_EXECUTION_MODE: worker
+      MODEL_GATEWAY_ALLOWED_HOSTS: ""
+      MODEL_GATEWAY_ALLOW_PRIVATE_NETWORKS: "false"
+      PILOT_RECOVERY_TOKEN: ${PILOT_RECOVERY_TOKEN:?set PILOT_RECOVERY_TOKEN}
+    ports:
+      - "127.0.0.1:${PILOT_RECOVERY_PORT:-18002}:8000"
+    volumes:
+      - recovery_snapshots:/var/lib/ontology/snapshots
+      - recovery_snapshot_cache:/var/cache/ontology/snapshots
+      - recovery_plugins:/var/lib/ontology/plugins
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+
+  recovery-loader:
+    image: ${ONTOLOGY_IMAGE:?set ONTOLOGY_IMAGE to the image under measurement}
+    profiles: ["restore-files"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        find /var/lib/ontology/snapshots -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        find /var/lib/ontology/plugins -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        if [ -n "$${PILOT_SNAPSHOT_ARCHIVE:-}" ]; then
+          tar -xzf "/backup/$${PILOT_SNAPSHOT_ARCHIVE}" -C /var/lib/ontology/snapshots
+        fi
+        if [ -n "$${PILOT_PLUGIN_ARCHIVE:-}" ]; then
+          tar -xzf "/backup/$${PILOT_PLUGIN_ARCHIVE}" -C /var/lib/ontology/plugins
+        fi
+    environment:
+      PILOT_SNAPSHOT_ARCHIVE: ${PILOT_SNAPSHOT_ARCHIVE:-}
+      PILOT_PLUGIN_ARCHIVE: ${PILOT_PLUGIN_ARCHIVE:-}
+    volumes:
+      - ${PILOT_BACKUP_ROOT:?set PILOT_BACKUP_ROOT}:/backup:ro
+      - recovery_snapshots:/var/lib/ontology/snapshots
+      - recovery_plugins:/var/lib/ontology/plugins
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  recovery_pgdata:
+  recovery_snapshots:
+  recovery_snapshot_cache:
+  recovery_plugins:

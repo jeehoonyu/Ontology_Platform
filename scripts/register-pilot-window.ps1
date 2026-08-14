@@ -96,7 +96,37 @@ $action = New-ScheduledTaskAction `
     -WorkingDirectory $root
 
 # At startup, not on a repetition: the supervisor paces its own 30-second ticks.
-$trigger = New-ScheduledTaskTrigger -AtStartup
+#
+# Two triggers, because one of them does not fire on a workstation. A task
+# registered under an interactive account runs only while that account is
+# logged on, so the boot trigger passes unfired on a machine sitting at the
+# lock screen -- and the window would then lose every slot between the reboot
+# and the next login. The logon trigger is the one that actually restarts the
+# supervisor here; on a server with a service account the boot trigger is. The
+# supervisor refuses to start twice against one evidence root, so registering
+# both is safe rather than merely convenient.
+#
+# Docker must be up before the first tick can reach the source. Docker Desktop
+# also starts at logon, so the first few ticks after a reboot may fail while it
+# comes up; `run` records those and continues rather than ending the window.
+#
+# A boot trigger needs administrator rights to register at all -- unelevated,
+# Register-ScheduledTask answers "Access is denied" and nothing is installed.
+# So the choice is made explicitly and reported, rather than the caller
+# discovering after a reboot that no supervisor came back.
+$elevated = (New-Object System.Security.Principal.WindowsPrincipal(
+    [System.Security.Principal.WindowsIdentity]::GetCurrent()
+)).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($elevated) {
+    $trigger = @(
+        (New-ScheduledTaskTrigger -AtStartup),
+        (New-ScheduledTaskTrigger -AtLogOn)
+    )
+    $triggerDescription = "at startup and at logon"
+} else {
+    $trigger = @((New-ScheduledTaskTrigger -AtLogOn))
+    $triggerDescription = "at logon (unelevated; a boot trigger needs administrator rights)"
+}
 
 # The supervisor holds a single-writer lock whose heartbeat goes stale after 150
 # seconds. Restarting sooner than that makes the replacement refuse the lock, so
@@ -108,6 +138,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -DontStopOnIdleEnd `
+    -StartWhenAvailable `
     -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes $RestartIntervalMinutes) `
     -ExecutionTimeLimit (New-TimeSpan -Days 8)
@@ -120,6 +151,6 @@ Register-ScheduledTask `
     -Description "OntologyOS seven-day availability/RPO/RTO pilot supervisor" `
     -Force | Out-Null
 
-Write-Host "Registered $TaskName to run `pilot_window.py run` at startup."
+Write-Host "Registered $TaskName to run `pilot_window.py run` $triggerDescription."
 Write-Host "Start it now with: Start-ScheduledTask -TaskName $TaskName"
 Write-Host "Watch it with:     python oms/pilot_window.py --evidence-root `"$resolvedEvidenceRoot`" status"

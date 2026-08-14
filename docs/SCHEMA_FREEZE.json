@@ -1,10 +1,8 @@
 {
-  "closed_at": 1786340146,
-  "closing_note": "Closed without collecting. The freeze was opened to protect a seven-day window that was never started: no pilot host was available, and a window measures the host it runs on. Reopen it at the then-current head when a host exists -- an open freeze protecting nothing trains everyone to ignore a red build.",
-  "expires_at": 1787006579,
+  "expires_at": 1787358845,
   "head": "0042_stream_outer_joins",
-  "opened_at": 1786315379,
+  "opened_at": 1786667645,
   "owner": "operations",
-  "reason": "Seven-day availability, RPO, and RTO collection. A migration during this window voids it and costs another seven days.",
-  "state": "closed"
+  "reason": "Seven-day availability, RPO, and RTO collection is running on this host. A migration during the window changes the head, voids every sample already taken, and costs another seven days. Expiry is one day past the window so the freeze outlives the collection it protects.",
+  "state": "open"
 }

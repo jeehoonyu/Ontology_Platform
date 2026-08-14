@@ -1,0 +1,81 @@
+# Source stack for a pilot window run on a workstation rather than a fleet.
+#
+# Overlays `docker-compose.yml` into its own Compose project so the seven-day
+# window never shares a database, a volume, or a port with the development
+# stack. The reference dataset in the development project is 32 GB; a logical
+# `pg_dump` of it cannot complete inside the recovery-point interval an RPO of
+# five minutes requires, and the reference driver says so itself -- logical
+# dumps suit a small pilot. This project therefore starts from an empty volume
+# and is seeded to a size the recovery cycle can actually carry.
+#
+# What differs from `docker-compose.production.yml`, and why it is honest to
+# run anyway: authentication is `local`, because the recovery protocol used by
+# every RPO mark and RTO write is bearer-token authenticated and does not
+# traverse the OIDC path. The pilot measures availability, recovery point, and
+# recovery time. It does not measure identity, which has its own gate.
+services:
+  oms-api:
+    container_name: ontology_pilot_source_api
+    environment:
+      # Without this in the *container* environment the recovery protocol is
+      # disabled and every RPO mark fails 404 for seven days. Preflight
+      # distinguishes that case from a wrong token on purpose.
+      PILOT_RECOVERY_TOKEN: ${PILOT_RECOVERY_TOKEN:?set PILOT_RECOVERY_TOKEN}
+    ports: !override
+      - "127.0.0.1:${PILOT_SOURCE_PORT:-18001}:8000"
+    volumes: !override
+      - pilot_snapshots:/var/lib/ontology/snapshots
+      - pilot_snapshot_cache:/var/cache/ontology/snapshots
+      - pilot_plugins:/var/lib/ontology/plugins
+
+  postgres:
+    container_name: ontology_pilot_source_postgres
+    # Loopback only, and not 5432: the development stack already owns that, and
+    # the two databases must never be reachable at the same address by accident.
+    ports: !override
+      - "127.0.0.1:15432:5432"
+    volumes: !override
+      - pilot_pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+
+  # The availability journal has exactly one writer and this is it. The
+  # supervisor deliberately writes no sample of its own: a recovery rehearsal
+  # blocks the supervisor for minutes, and every 30-second slot it misses is
+  # scored as downtime against a 604.8-second budget for the whole window.
+  pilot-observer:
+    build:
+      context: .
+      dockerfile: oms/Dockerfile
+    container_name: ontology_pilot_observer
+    command:
+      - python
+      - /app/availability_probe.py
+      - probe
+      - --target
+      - http://oms-api:8000
+      - --samples-file
+      - /var/lib/ontology/pilot-evidence/availability-samples.jsonl
+      - --state-file
+      - /var/lib/ontology/pilot-evidence/availability-probe-state.json
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      # A host bind mount, not a named volume: the supervisor runs on the host
+      # and has to read the same journal the observer writes.
+      - ${PILOT_EVIDENCE_PATH:?set PILOT_EVIDENCE_PATH}:/var/lib/ontology/pilot-evidence
+    depends_on:
+      - oms-api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; p='/var/lib/ontology/pilot-evidence/availability-probe-state.json'; assert os.path.exists(p) and time.time()-os.path.getmtime(p)<90"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+volumes:
+  pilot_pgdata:
+  pilot_snapshots:
+  pilot_snapshot_cache:
+  pilot_plugins:
