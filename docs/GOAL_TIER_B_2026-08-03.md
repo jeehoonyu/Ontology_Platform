@@ -498,6 +498,58 @@ That case is now a test rather than an argument: `summarize(samples("ud" * 8))` 
 Nothing about the running window changed. The behaviour was already the strict one; what
 changed is that the contract now says so, and says why.
 
+### 2026-08-14: the same defect, looked for in the other nine gates
+
+The availability contradiction was one instance of a class — a rule stated in the contract
+that the gated quantity does not implement — so every gate was checked the same way: the
+contract clause, against the `thresholds={...}` dict, against what `summarize()` actually
+computes. The enforcement mechanism itself is sound; `compare()` treats a threshold with no
+matching measurement as a breach ("not measured"), so a bar cannot be declared and silently
+skipped. The gaps are all bars that were never declared.
+
+**RPO and RTO did not enforce their own window, and now do.** The contract says "at least
+10 independent samples **across the 7-day window**" and "at least 4 rehearsals **across the
+window**". Both harnesses counted; neither measured span. Ten samples taken inside ninety
+seconds satisfied every RPO threshold, and four back-to-back restores satisfied every RTO
+one — the gates whose entire subject is recovery over a week could be earned in an
+afternoon. This was not hypothetical: the repository's own tests built exactly those
+fixtures and called them a complete plan, spanning 91 and 999 seconds respectively.
+
+`sampling_span_seconds` and `rehearsal_span_seconds` are now measured and gated at 5 days.
+Not 7 — the first sample cannot be taken at t=0, because a recovery point has to exist
+before there is anything to recover to, and the last cannot land on the closing second. The
+old fixtures are kept as negative cases, so the state the gate used to accept now fails it
+by name. The running window projects a 6.26-day span: 30 hours of margin, enough to lose
+its first three rehearsals and still qualify.
+
+Note this tightens rather than loosens, which is why it was safe to do with a window
+running. The opposite change would not have been.
+
+**Open, and not fixed here: no latency gate takes the worst of six observations.** The
+contract says *"Latency gates are measured on an otherwise idle host, and the reading is
+the worst of at least six observations"* — a rule added after a collaboration breach turned
+out to be a busy machine rather than a slow system. Nothing implements it. Every latency
+harness records one run's p95, and the evidence envelope has no field for how many
+observations produced the number, so an auditor cannot distinguish a worst-of-six from a
+single lucky run. The "worst of six" in the rows above was done by hand.
+
+It is left open deliberately rather than half-closed. Recording `observations: 1` and
+gating at 1 would launder the rule instead of enforcing it, and honouring it properly means
+each latency harness repeating its measurement six times — hours, at reference scale. That
+is a scheduling decision, and it wants a quiet host, which this one will not be for a week.
+
+**Also open: "at varied points in the backup cycle."** `phases_covered` is recorded and
+nothing requires more than one phase. Unlike the span, "varied" has no number behind it,
+and inventing one mid-window — on an unverified assumption about the running schedule's own
+phase distribution — would risk failing a run that satisfies every stated requirement. The
+contract now says the clause is unenforced instead of implying otherwise.
+
+**One correction to an earlier statement here.** RTO's `failed_recoveries_max` is 0: a
+single failed rehearsal anywhere in the seven days fails the gate outright, and every
+attempt is journalled including the failures. Earlier notes about "tolerating" a few failed
+rehearsals apply to RPO, which needs 10 successful samples out of however many are
+attempted, and not to RTO, which tolerates none.
+
 ### What was verified locally on 2026-08-09, and what was not
 
 Against a real API on the development stack, with `PILOT_EVIDENCE_ROOT` pointed at a

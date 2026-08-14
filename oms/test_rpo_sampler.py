@@ -89,20 +89,48 @@ check(
     "the breach names the missing pre-backup samples", payload["breaches"],
 )
 
-complete = [sample(60, at=i) for i in range(REQUIRED_SAMPLES - REQUIRED_PRE_BACKUP_SAMPLES)]
-complete += [sample(120, phase="pre_backup", at=90 + i) for i in range(REQUIRED_PRE_BACKUP_SAMPLES)]
+# The contract asks for samples "across the 7-day window", so a complete plan
+# has to be spread as well as counted. Fifteen hours apart puts ten of them 135
+# hours end to end, clearing the five-day floor.
+SPACING_SECONDS = 15 * 60 * 60
+
+# The defect the floor closes, kept as a case rather than a memory: ten samples,
+# two of them pre-backup, every other threshold satisfied -- and all of it inside
+# ninety seconds. This is what the gate used to accept as a week of recovery.
+clustered = [sample(60, at=i) for i in range(REQUIRED_SAMPLES - REQUIRED_PRE_BACKUP_SAMPLES)]
+clustered += [sample(60, phase="pre_backup", at=90 + i) for i in range(REQUIRED_PRE_BACKUP_SAMPLES)]
+code, payload = evidence_for(clustered)
+check(code == 1, "ten samples inside ninety seconds do not span the window", code)
+check(
+    any("sampling_span_seconds" in breach for breach in payload["breaches"]),
+    "the breach names the span, not something else", payload["breaches"],
+)
+
+complete = [sample(60, at=i * SPACING_SECONDS)
+            for i in range(REQUIRED_SAMPLES - REQUIRED_PRE_BACKUP_SAMPLES)]
+complete += [sample(120, phase="pre_backup",
+                    at=(REQUIRED_SAMPLES - REQUIRED_PRE_BACKUP_SAMPLES + i) * SPACING_SECONDS)
+             for i in range(REQUIRED_PRE_BACKUP_SAMPLES)]
 code, payload = evidence_for(complete)
 check(code == 0, "a complete sampling plan satisfies the gate", payload.get("breaches"))
 check(payload["status"] == "PASS", "a complete plan is recorded PASS", payload["status"])
 check(payload["measurements"]["max_rpo_seconds"] == 120, "evidence carries the maximum", payload["measurements"])
 check("pre_backup" in payload["measurements"]["phases_covered"], "phases are recorded", payload["measurements"])
 
-breaching = complete[:-1] + [sample(RPO_LIMIT_SECONDS + 1, phase="pre_backup", at=99)]
+# These two replace the last sample, so they keep its position in the window --
+# otherwise the span collapses and the case would pass for the wrong reason.
+LAST_AT = (REQUIRED_SAMPLES - 1) * SPACING_SECONDS
+
+breaching = complete[:-1] + [sample(RPO_LIMIT_SECONDS + 1, phase="pre_backup", at=LAST_AT)]
 code, payload = evidence_for(breaching)
 check(code == 1, "a sample over five minutes fails the gate", code)
+check(
+    any("max_rpo_seconds" in breach for breach in payload["breaches"]),
+    "the breach names the maximum, not the span", payload["breaches"],
+)
 
 # A total loss must fail even when the computed interval looks small.
-with_loss = complete[:-1] + [sample(1, phase="pre_backup", total_loss=True, at=99)]
+with_loss = complete[:-1] + [sample(1, phase="pre_backup", total_loss=True, at=LAST_AT)]
 code, payload = evidence_for(with_loss)
 check(code == 1, "a total loss fails the gate regardless of the interval", code)
 check(

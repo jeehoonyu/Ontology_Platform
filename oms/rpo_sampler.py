@@ -42,6 +42,18 @@ REQUIRED_SAMPLES = 10
 REQUIRED_PRE_BACKUP_SAMPLES = 2
 PHASES = ("pre_backup", "mid_cycle", "post_backup")
 
+# The contract asks for samples "across the 7-day window". Counting them does not
+# check that: ten samples taken in one afternoon satisfied a gate whose entire
+# subject is recovery over a week. A span floor is what makes the phrase
+# enforceable rather than aspirational.
+#
+# Not the full 604,800 seconds, which no correct run reaches. The first sample
+# cannot land at t=0 -- a recovery point has to exist before there is anything to
+# recover to, so the first rehearsal is hours in -- and the last cannot land on
+# the closing second. Five of seven days separates "across the window" from "in
+# one sitting" without failing a schedule for its own cadence.
+REQUIRED_SPAN_SECONDS = 5 * 24 * 60 * 60
+
 
 def _scheduled_at(records: List[Dict[str, Any]], now: int) -> int:
     return max(int(now), int(records[-1]["scheduled_at"]) + 1 if records else int(now))
@@ -232,8 +244,11 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
 
 def summarize(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
     values = [sample["rpo_seconds"] for sample in samples]
+    taken_at = [int(sample["at"]) for sample in samples
+                if isinstance(sample.get("at"), (int, float))]
     return {
         "samples": len(samples),
+        "sampling_span_seconds": (max(taken_at) - min(taken_at)) if len(taken_at) > 1 else 0,
         "pre_backup_samples": sum(1 for sample in samples if sample.get("phase") == "pre_backup"),
         "total_loss_samples": sum(1 for sample in samples if sample.get("total_loss")),
         "integrity_failures": 0,
@@ -259,6 +274,7 @@ def aggregate(samples_file: Path, output_dir: Optional[Path] = None) -> int:
         "rpo",
         thresholds={
             "samples_min": REQUIRED_SAMPLES,
+            "sampling_span_seconds_min": REQUIRED_SPAN_SECONDS,
             "pre_backup_samples_min": REQUIRED_PRE_BACKUP_SAMPLES,
             "total_loss_samples_max": 0,
             "integrity_failures_max": 0,

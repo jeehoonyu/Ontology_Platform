@@ -37,6 +37,11 @@ DEFAULT_REHEARSALS = REPO_ROOT / "docs" / "rto-rehearsals.jsonl"
 RTO_LIMIT_SECONDS = 30 * 60
 REQUIRED_REHEARSALS = 4
 REQUIRED_UNATTENDED = 1
+# "At least 4 rehearsals across the window" -- counting them does not check the
+# second half of that sentence, and four back-to-back restores in one afternoon
+# satisfied it. See the same constant in `rpo_sampler.py` for why the floor is
+# five of seven days rather than the whole window.
+REQUIRED_SPAN_SECONDS = 5 * 24 * 60 * 60
 READINESS_POLL_SECONDS = 2.0
 READINESS_TIMEOUT_SECONDS = RTO_LIMIT_SECONDS
 
@@ -198,8 +203,11 @@ def load_rehearsals(rehearsals_file: Path) -> List[Dict[str, Any]]:
 
 def summarize(rehearsals: List[Dict[str, Any]]) -> Dict[str, Any]:
     elapsed = [item["elapsed_seconds"] for item in rehearsals]
+    held_at = [int(item["at"]) for item in rehearsals
+               if isinstance(item.get("at"), (int, float))]
     return {
         "rehearsals": len(rehearsals),
+        "rehearsal_span_seconds": (max(held_at) - min(held_at)) if len(held_at) > 1 else 0,
         "unattended_rehearsals": sum(1 for item in rehearsals if item.get("trigger") == "unattended"),
         "failed_recoveries": sum(1 for item in rehearsals if not item.get("recovered")),
         "integrity_failures": 0,
@@ -224,6 +232,7 @@ def aggregate(rehearsals_file: Path, output_dir: Optional[Path] = None) -> int:
         "rto",
         thresholds={
             "rehearsals_min": REQUIRED_REHEARSALS,
+            "rehearsal_span_seconds_min": REQUIRED_SPAN_SECONDS,
             "unattended_rehearsals_min": REQUIRED_UNATTENDED,
             "failed_recoveries_max": 0,
             "integrity_failures_max": 0,

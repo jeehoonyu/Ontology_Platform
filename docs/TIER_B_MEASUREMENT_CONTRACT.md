@@ -110,6 +110,15 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
 - **Sampling**: at least 10 independent samples across the 7-day window, at varied points
   in the backup cycle, including at least 2 taken immediately before a scheduled backup —
   the worst case, which a mid-cycle sample would hide.
+- **Span**: the first and last samples must be at least **5 days** apart. "Across the
+  window" was previously stated and unenforced, and ten samples taken inside ninety seconds
+  satisfied every other threshold. Not the full 7 days: the first sample cannot be taken at
+  t=0, because a recovery point has to exist before there is anything to recover to, and
+  the last cannot land on the closing second. Five of seven separates a week from a sitting
+  without failing a schedule for its own cadence.
+  *"At varied points in the backup cycle" remains unenforced — `phases_covered` is recorded
+  but nothing requires more than one phase, and turning "varied" into a number is a
+  decision this contract has not made.*
 - **Threshold**: every sample <= 5 minutes. The maximum is reported, not the mean.
 
 ### RTO
@@ -129,7 +138,9 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
 - **Integrity**: every attempted rehearsal, including command failure and timeout, is
   appended to a hash-chained journal and remains part of the maximum/failure count.
 - **Schedule**: at least 4 rehearsals across the window, at least one unattended and
-  triggered by a timer rather than a person.
+  triggered by a timer rather than a person. The first and last rehearsal must be at least
+  **5 days** apart, for the reason given under RPO — four back-to-back restores in one
+  afternoon satisfied the count, and counting was all this clause ever checked.
 - **Threshold**: every rehearsal <= 30 minutes. The maximum is reported, and the
   distribution is retained.
 

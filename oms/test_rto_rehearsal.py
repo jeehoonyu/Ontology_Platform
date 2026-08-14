@@ -90,23 +90,44 @@ check(
     payload["breaches"],
 )
 
-code, payload = evidence_for([rehearsal(600, at=i * 100) for i in range(REQUIRED_REHEARSALS)])
+# "At least 4 rehearsals across the window" is two requirements, and only the
+# first was ever checked. Forty-five hours apart puts four of them 135 hours end
+# to end, which clears the five-day floor.
+SPACING_SECONDS = 45 * 60 * 60
+
+# The defect the floor closes, kept as a case rather than a memory: four
+# rehearsals, one of them unattended, every other threshold satisfied -- and all
+# four restores inside five minutes. That is not a week of recovery.
+clustered = [rehearsal(600, at=i * 100) for i in range(REQUIRED_REHEARSALS - 1)]
+clustered.append(rehearsal(900, trigger="unattended", at=300))
+code, payload = evidence_for(clustered)
+check(code == 1, "four rehearsals inside five minutes do not span the window", code)
+check(
+    any("rehearsal_span_seconds" in breach for breach in payload["breaches"]),
+    "the breach names the span, not something else", payload["breaches"],
+)
+
+code, payload = evidence_for(
+    [rehearsal(600, at=i * SPACING_SECONDS) for i in range(REQUIRED_REHEARSALS)])
 check(code == 1, "four attended rehearsals still miss the unattended requirement", code)
 check(
     any("unattended" in breach for breach in payload["breaches"]),
     "the breach names the missing unattended rehearsal", payload["breaches"],
 )
 
-complete = [rehearsal(600, at=i * 100) for i in range(REQUIRED_REHEARSALS - 1)]
-complete.append(rehearsal(900, trigger="unattended", at=999))
+complete = [rehearsal(600, at=i * SPACING_SECONDS) for i in range(REQUIRED_REHEARSALS - 1)]
+complete.append(rehearsal(900, trigger="unattended", at=(REQUIRED_REHEARSALS - 1) * SPACING_SECONDS))
 code, payload = evidence_for(complete)
 check(code == 0, "four rehearsals including one unattended satisfy the gate", payload.get("breaches"))
 check(payload["status"] == "PASS", "a complete schedule is recorded PASS", payload["status"])
 check(payload["measurements"]["max_elapsed_seconds"] == 900, "evidence carries the maximum", payload["measurements"])
 check(payload["provenance"]["migration_head"], "evidence carries provenance", payload["provenance"])
 
-breaching = [rehearsal(600, at=0), rehearsal(600, at=100), rehearsal(600, at=200),
-             rehearsal(RTO_LIMIT_SECONDS + 1, trigger="unattended", at=300)]
+# Spread like `complete`, so the case isolates the elapsed breach instead of
+# also tripping the span floor.
+breaching = [rehearsal(600, at=i * SPACING_SECONDS) for i in range(REQUIRED_REHEARSALS - 1)]
+breaching.append(rehearsal(RTO_LIMIT_SECONDS + 1, trigger="unattended",
+                           at=(REQUIRED_REHEARSALS - 1) * SPACING_SECONDS))
 code, payload = evidence_for(breaching)
 check(code == 1, "a rehearsal over the limit fails the gate", code)
 check(
