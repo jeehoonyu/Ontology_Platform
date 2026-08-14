@@ -364,6 +364,29 @@ reason nobody remembers is how a ratchet becomes something people route around. 
 retains why it was opened and why it closed. Reopen it at the then-current head when a
 host exists; the mechanism is in place and tested, and opening it again is one commit.
 
+### 2026-08-13: preflight reads 10 of 10, and the clock was deliberately not started
+
+The full pilot configuration was exercised on the development host and
+`pilot_window.py preflight` passed every check — including the two that had been failing:
+the recovery driver's Compose topology and integrity key, and a live availability observer.
+The gap is no longer configuration. It is seven consecutive days of a machine that stays
+up.
+
+The window was not opened, and that was a judgement rather than a limitation. 99.9% over
+seven days is a **10 minute 5 second** total budget, observer loss counts against it, and
+this host had been up 3.9 hours — it takes update restarts. One reboot plus a Docker start
+is 2–5 minutes, so the budget survives roughly one and not two. A lost run does not merely
+fail to produce a gate: a recorded FAIL at the current head is sticky until deliberately
+superseded, which is a worse state than MISSING.
+
+An earlier note here said a window could not run on this machine because "a window measures
+the host it runs on". That was stricter than the contract, which constrains what is
+measured and not the host class, and the correction matters: this is a risk judgement about
+a 10-minute budget, not a rule forbidding it.
+
+[`STARTING_THE_PILOT_WINDOW.md`](STARTING_THE_PILOT_WINDOW.md) records what the
+verification established, so starting later is a command rather than a rediscovery.
+
 ### What was verified locally on 2026-08-09, and what was not
 
 Against a real API on the development stack, with `PILOT_EVIDENCE_ROOT` pointed at a
