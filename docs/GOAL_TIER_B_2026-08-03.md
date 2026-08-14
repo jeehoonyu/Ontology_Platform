@@ -476,20 +476,27 @@ discarded instead and the observer started last, against an API already answerin
 live window opened `2026-08-14T02:53Z`, closing `2026-08-21T02:53Z`, on a journal whose
 first slots are clean.
 
-**A contradiction in the contract, recorded rather than resolved.** The availability
-section says both that "a failed probe marks its whole 30-second interval unavailable" and
-that "two consecutive failures are required to open an outage, so a single dropped probe
-does not fabricate downtime". Those cannot both hold: under the first, an isolated dropped
-probe costs 30 seconds of budget, which is precisely fabricated downtime. `summarize()`
-implements the first for `unavailable_seconds` — the quantity the threshold is enforced on
-— and the second for `outages`, a reported statistic. So the lenient clause is stated and
-unenforced, which is the failure mode this tier exists to catch, in the tier's own
-contract.
+**A contradiction in the contract, since resolved.** The availability section said both
+that "a failed probe marks its whole 30-second interval unavailable" and that "two
+consecutive failures are required to open an outage, so a single dropped probe does not
+fabricate downtime". Those cannot both hold: under the first, an isolated dropped probe
+costs 30 seconds of budget, which is precisely fabricated downtime.
 
-It is left as it stands, deliberately. The strict reading is the one currently enforced,
-and loosening the accounting **while a window is running** would be choosing the reading
-that helps the run in progress. Which clause governs should be decided at a moment when
-the answer costs nothing.
+The code was never ambiguous, and neither was its test. `summarize()` charges every failed
+interval to `unavailable_seconds` and opens an outage only on two in a row, and
+`test_availability_probe.py` already asserted exactly that — *"one failure still costs its
+interval"*. The defect was in the prose, which drew a false inference from a correct rule:
+the two-consecutive threshold governs `outages` and `longest_outage_seconds`, which
+describe the **shape** of failures. It never governed their cost.
+
+The decisive argument against the lenient reading is a system that answers every second
+probe. It is half available, and no two of its failures are ever adjacent — so if the
+outage rule also governed the budget it would record no downtime at all and score 100%.
+That case is now a test rather than an argument: `summarize(samples("ud" * 8))` must report
+50.0%, and the assertion fails loudly if anyone tries to discount isolated failures again.
+
+Nothing about the running window changed. The behaviour was already the strict one; what
+changed is that the contract now says so, and says why.
 
 ### What was verified locally on 2026-08-09, and what was not
 

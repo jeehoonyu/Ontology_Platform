@@ -52,8 +52,13 @@ WINDOW_DAYS = 7
 WINDOW_SECONDS = WINDOW_DAYS * 24 * 60 * 60
 WINDOW_SLOTS = WINDOW_SECONDS // PROBE_INTERVAL_SECONDS
 AVAILABILITY_TARGET_PCT = 99.9
-# Two consecutive failures are required before an outage opens, so one dropped
-# probe does not fabricate downtime.
+# Two consecutive failures are required before an *outage* opens, and this
+# governs only `outages` and `longest_outage_seconds` -- the shape of the
+# failures. Every failed interval is charged to `unavailable_seconds`, which is
+# the quantity the gate is enforced on, regardless of what precedes or follows
+# it. Discounting isolated failures from the budget would score a system that
+# answers every second probe -- half available, no two failures ever adjacent --
+# as fully available.
 CONSECUTIVE_FAILURES_TO_OPEN = 2
 
 

@@ -63,6 +63,20 @@ check(blip["unavailable_seconds"] == PROBE_INTERVAL_SECONDS, "one failure still 
 check(blip["availability_pct"] == 90.0, "one of ten intervals down is 90%", blip)
 check(blip["longest_outage_seconds"] == 0, "no outage means no outage length", blip)
 
+# The decisive case for charging every failed interval rather than only runs of
+# two. A system answering every second probe is half available, and no two of
+# its failures are ever adjacent -- so if the outage rule also governed the
+# budget, this would score as fully available. The contract says the rule
+# describes the shape of failures and not their cost; this is what that means.
+alternating = summarize(samples("ud" * 8))
+check(alternating["outages"] == 0, "alternating failures never open an outage", alternating)
+check(alternating["availability_pct"] == 50.0,
+      "half the intervals down is 50%, not 100%", alternating)
+check(alternating["unavailable_seconds"] == 8 * PROBE_INTERVAL_SECONDS,
+      "every failed interval is charged, adjacent or not", alternating)
+check(alternating["longest_outage_seconds"] == 0,
+      "no run reaches the outage threshold", alternating)
+
 opened = summarize(samples("uuuudduuuu"))
 check(opened["outages"] == 1, "two consecutive failures open one outage", opened)
 check(opened["longest_outage_seconds"] == 2 * PROBE_INTERVAL_SECONDS, "outage spans both intervals", opened)

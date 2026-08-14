@@ -76,9 +76,14 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
   within 2,000 ms.
 - **Probe cadence**: every 30 seconds from outside the application container.
 - **Window**: 7 consecutive days. At 99.9% that is an error budget of 10 minutes 5 seconds.
-- **Counting**: a failed probe marks its whole 30-second interval unavailable. Two
-  consecutive failures are required to open an outage, so a single dropped probe does not
-  fabricate downtime; the outage is then backdated to the first failure.
+- **Counting**: a failed probe marks its whole 30-second interval unavailable, and that
+  interval is charged to the error budget whether or not another failure follows it. Two
+  consecutive failures are required to open an **outage**, and an outage is backdated to
+  its first failure — but that rule governs the outage count and the longest-outage
+  duration, which describe the *shape* of the failures. It does not discount their cost.
+  Nothing here distinguishes a dropped probe from a request a user would also have lost,
+  and discounting isolated failures would score a system that fails every second probe —
+  half available, no two failures ever adjacent — as fully available.
 - **Planned restarts count against the budget.** A pilot that is only available when
   nobody deploys is not available.
 - **Observer loss counts against the budget.** The production observer persists its next
