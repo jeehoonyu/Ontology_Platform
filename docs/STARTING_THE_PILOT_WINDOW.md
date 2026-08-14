@@ -3,10 +3,20 @@
 The last three Tier B gates — availability, RPO and RTO — need one thing this repository
 cannot supply: **seven consecutive days of a machine that stays up**.
 
-**A window is open.** It started `2026-08-14T00:34Z` and closes `2026-08-21T00:34Z`, at
+**A window is open.** It started `2026-08-14T02:46Z` and closes `2026-08-21T02:46Z`, at
 head `0042_stream_outer_joins`, on the development workstation. `docs/SCHEMA_FREEZE.json`
 is open for the duration; a migration merged before it closes fails the build rather than
 silently voiding seven days of collection.
+
+An earlier window started `2026-08-14T00:34Z` and was **abandoned after two hours**, before
+it had written any evidence. It was measuring a build whose `/health/ready` reflected the
+entire schema on every call — 275 catalog round-trips, 220 ms at rest — and the availability
+gate is *defined* on that endpoint answering within 2,000 ms. It had already crossed the
+limit twice, spending 60 seconds of a 604.8-second weekly budget in the first two hours,
+which is a rate no seven-day run survives. The endpoint now answers in 6 ms. Its journals
+are kept beside the live ones as `evidence-abandoned-20260813` — an abandoned run is not a
+failed gate, because nothing was aggregated and no evidence file was written, but deleting
+it would hide that a window was started twice.
 
 The rest of this file is what that window is made of, so that watching it, finishing it,
 or starting another one is a procedure rather than a rediscovery.
@@ -74,6 +84,20 @@ C:\Users\jeehoon\ontology-pilot\
   query-bounds gates. A logical `pg_dump` of it cannot finish inside a two-minute recovery
   point, and the reference driver says so about itself: logical dumps suit a small pilot.
   Measured here: backup 4.5s, restore 32s, full rehearsal 33.2s against an 1800s limit.
+
+### Watch what the gate is defined on, not only what it measures
+
+Availability is defined as `/health/live` and `/health/ready` both answering 200 within
+2,000 ms. That makes the *cost of answering* part of the measurement. The first window
+found this the expensive way: `/health/ready` called `schema_health`, which reflected every
+mapped table through `information_schema` on every request, and a probe that has to do 275
+catalog queries fails the gate by being slow while the product behind it is perfectly
+healthy. `oms/test_readiness_cost.py` now counts the statements, because a comment saying
+the reflection is cached is an intention and a count is a ratchet.
+
+Before starting a window, probe the endpoint a few times and look at the number, not just
+the status code. Anything above a few tens of milliseconds at rest is a warning: the budget
+is 2,000 ms, but the margin has to absorb a `pg_restore` running beside it.
 
 ### Deviations from the production reference, stated plainly
 

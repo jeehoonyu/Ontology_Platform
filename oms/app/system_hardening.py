@@ -70,6 +70,40 @@ router = APIRouter(tags=["system_hardening"])
 _RUNTIME_SCHEMA_LOCK = threading.Lock()
 _RUNTIME_SCHEMA_READY_ENGINES: weakref.WeakSet[Any] = weakref.WeakSet()
 
+# `/health/ready` is the endpoint the availability gate is *defined* on: the
+# contract calls the system available when it answers 200 within 2,000 ms, and
+# it is asked every 30 seconds for seven days.
+#
+# It reflected the entire schema on every call -- one `information_schema`
+# round-trip per mapped table, 279 of them against this database -- which cost
+# 220 ms at rest and crossed 2,000 ms twice in the first two hours of a pilot
+# window, whenever the disk was busy with something else. Each crossing charges
+# 30 seconds against a 604.8-second budget for the whole week, so the readiness
+# probe was on course to fail the gate it defines by being slow to answer.
+#
+# The reflection is cached against the database's own migration head, which is
+# the only thing that legitimately changes the answer. A head change during a
+# window ends that window regardless, so nothing is being hidden by holding the
+# result between migrations.
+_SCHEMA_REFLECTION_LOCK = threading.Lock()
+_SCHEMA_REFLECTION_CACHE: "weakref.WeakKeyDictionary[Any, tuple[Optional[str], Dict[str, Any]]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _database_migration_head(db: Session) -> Optional[str]:
+    """The head the database reports, or None when it cannot answer.
+
+    One query. Distinct from `current_migration_head()`, which reads the
+    repository's migration files and therefore describes the code rather than
+    the database in front of it.
+    """
+    try:
+        return db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+    except Exception:
+        db.rollback()
+        return None
+
 
 @router.get("/health/live", include_in_schema=False)
 def health_live():
@@ -80,11 +114,7 @@ def _migration_identity(db: Session) -> Dict[str, Any]:
     from .pilot_evidence import current_migration_head
 
     runtime_head = current_migration_head()
-    try:
-        database_head = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
-    except Exception:
-        database_head = None
-        db.rollback()
+    database_head = _database_migration_head(db)
     return {
         "status": "PASS" if database_head == runtime_head else "WARN",
         "database_head": database_head,
@@ -1587,8 +1617,25 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/system/schema-health")
 def schema_health(db: Session = Depends(get_db)):
+    """Reflect the schema, or reuse the reflection taken at this same head.
+
+    Callers mutate what they are given, so each one gets its own copy.
+    """
     _ensure_runtime_tables(db)
-    inspector = inspect(db.get_bind())
+    bind = db.get_bind()
+    head = _database_migration_head(db)
+    cached = _SCHEMA_REFLECTION_CACHE.get(bind)
+    if cached is not None and cached[0] == head:
+        return copy.deepcopy(cached[1])
+    reflected = _reflect_schema(bind)
+    with _SCHEMA_REFLECTION_LOCK:
+        _SCHEMA_REFLECTION_CACHE[bind] = (head, reflected)
+    return copy.deepcopy(reflected)
+
+
+def _reflect_schema(bind: Any) -> Dict[str, Any]:
+    """One `information_schema` round-trip per mapped table. The expensive part."""
+    inspector = inspect(bind)
     existing = set(inspector.get_table_names())
     missing = [table for table in CORE_TABLES if table not in existing]
     missing_columns = {}

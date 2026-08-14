@@ -389,9 +389,10 @@ verification established, so starting later is a command rather than a rediscove
 
 ### 2026-08-14: the window is open
 
-Started `2026-08-14T00:34Z` at `0042_stream_outer_joins`, closing `2026-08-21T00:34Z`, with
-the schema freeze open for eight days. The decision above was reversed on instruction; the
-risk it described is unchanged and is now simply being carried.
+Started `2026-08-14T00:34Z` at `0042_stream_outer_joins`, with the schema freeze open for
+eight days. The decision above was reversed on instruction; the risk it described is
+unchanged and is now simply being carried. **This window was abandoned two hours in and
+restarted at `2026-08-14T02:46Z`; see the entry below.**
 
 Preflight passing had said the configuration was sound. It had not said the window could
 run, and three things had to be established before the clock was worth starting — each by
@@ -436,6 +437,49 @@ this terminal but not a reboot; the command to bring it back is in
 `register-pilot-window.ps1` registered only a boot trigger, which never fires for a task
 owned by an interactive account; it now registers a logon trigger too, which on a
 workstation is the one that does the work.
+
+### 2026-08-14: the readiness probe was failing the gate it defines
+
+Two hours into the window, the availability journal already held two unavailable slots.
+Both were `/health/ready` returning nothing after exactly 2003.4 ms — the probe's own
+2,000 ms timeout — while `/health/live` answered in 3.5 ms and 6.2 ms beside them.
+
+The cause is not the database and not the host. `/health/ready` calls `schema_health`,
+which reflects the schema on **every** call: `inspector.get_columns(...)` once per mapped
+table, 275 `information_schema` round-trips against this database, 220 ms at rest. The
+availability gate is *defined* as that endpoint answering 200 within 2,000 ms, so the
+readiness probe was on course to fail the gate by being slow to answer, with the product
+behind it entirely healthy. Anything else touching the disk — and a `pg_dump` runs every
+two minutes, a `pg_restore` every ten hours — pushed it over.
+
+The rate matters more than the two samples. Two failures in 250 slots is 99.2% against a
+99.9% target; at that rate the window ends in a recorded FAIL. Reflection is now cached
+against the database's own migration head, which is the only thing that can legitimately
+change the answer, and a head change ends a window regardless. **Measured: 220 ms to 6 ms,
+275 statements to 1.** `oms/test_readiness_cost.py` counts the statements rather than
+trusting the comment.
+
+The window was **abandoned and restarted** on the rebuilt image at `2026-08-14T02:46Z`,
+closing `2026-08-21T02:46Z`. That cost two hours and nothing else: `aggregate` had never
+run, so no evidence file existed and there was no FAIL to supersede. The alternative —
+rebuilding the API inside a live window — would have changed the subject of the
+measurement halfway through, which is worse than restarting it. The abandoned journals are
+kept as `evidence-abandoned-20260813` rather than deleted.
+
+**A contradiction in the contract, recorded rather than resolved.** The availability
+section says both that "a failed probe marks its whole 30-second interval unavailable" and
+that "two consecutive failures are required to open an outage, so a single dropped probe
+does not fabricate downtime". Those cannot both hold: under the first, an isolated dropped
+probe costs 30 seconds of budget, which is precisely fabricated downtime. `summarize()`
+implements the first for `unavailable_seconds` — the quantity the threshold is enforced on
+— and the second for `outages`, a reported statistic. So the lenient clause is stated and
+unenforced, which is the failure mode this tier exists to catch, in the tier's own
+contract.
+
+It is left as it stands, deliberately. The strict reading is the one currently enforced,
+and loosening the accounting **while a window is running** would be choosing the reading
+that helps the run in progress. Which clause governs should be decided at a moment when
+the answer costs nothing.
 
 ### What was verified locally on 2026-08-09, and what was not
 
@@ -522,7 +566,7 @@ it. The three that do not each have a reason in the file rather than a silence:
 `pipeline_scale` measures a scratch SQLite database with no `alembic_version`, and `chaos`
 and `identity` aggregate rehearsals and a browser run rather than one measured database.
 
-Only `availability`, `rpo`, and `rto` remain MISSING. As of `2026-08-14T00:34Z` they are
-collecting: a window is open on this host until `2026-08-21T00:34Z` at `0042`, and what
+Only `availability`, `rpo`, and `rto` remain MISSING. As of `2026-08-14T02:46Z` they are
+collecting: a window is open on this host until `2026-08-21T02:46Z` at `0042`, and what
 they wait on now is seven frozen days rather than anything in this repository.
 
