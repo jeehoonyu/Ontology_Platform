@@ -392,7 +392,7 @@ verification established, so starting later is a command rather than a rediscove
 Started `2026-08-14T00:34Z` at `0042_stream_outer_joins`, with the schema freeze open for
 eight days. The decision above was reversed on instruction; the risk it described is
 unchanged and is now simply being carried. **This window was abandoned two hours in and
-restarted at `2026-08-14T02:46Z`; see the entry below.**
+restarted; the live window opened `2026-08-14T02:53Z`. See the entry below.**
 
 Preflight passing had said the configuration was sound. It had not said the window could
 run, and three things had to be established before the clock was worth starting — each by
@@ -459,12 +459,22 @@ change the answer, and a head change ends a window regardless. **Measured: 220 m
 275 statements to 1.** `oms/test_readiness_cost.py` counts the statements rather than
 trusting the comment.
 
-The window was **abandoned and restarted** on the rebuilt image at `2026-08-14T02:46Z`,
-closing `2026-08-21T02:46Z`. That cost two hours and nothing else: `aggregate` had never
-run, so no evidence file existed and there was no FAIL to supersede. The alternative —
-rebuilding the API inside a live window — would have changed the subject of the
-measurement halfway through, which is worse than restarting it. The abandoned journals are
-kept as `evidence-abandoned-20260813` rather than deleted.
+The window was **abandoned and restarted** on the rebuilt image. That cost two hours and
+nothing else: `aggregate` had never run, so no evidence file existed and there was no FAIL
+to supersede. The alternative — rebuilding the API inside a live window — would have
+changed the subject of the measurement halfway through, which is worse than restarting it.
+The abandoned journals are kept as `evidence-abandoned-20260813` rather than deleted.
+
+**The restart was then discarded too, over a single slot.** Bringing the observer up
+alongside the API recorded one refused connection while the API was still running
+`alembic upgrade`, a minute before `start`. That matters more than one bad probe looks:
+`summarize()` counts from the journal's first sample rather than from the window manifest,
+so the availability journal — not `started_at` — is the window's clock, and a pre-window
+startup gap is charged to the window as 30 seconds, 5% of the whole budget. The journal is
+hash-chained, so the recorded sample cannot be edited out and should not be; the run was
+discarded instead and the observer started last, against an API already answering 200. The
+live window opened `2026-08-14T02:53Z`, closing `2026-08-21T02:53Z`, on a journal whose
+first slots are clean.
 
 **A contradiction in the contract, recorded rather than resolved.** The availability
 section says both that "a failed probe marks its whole 30-second interval unavailable" and
@@ -566,7 +576,7 @@ it. The three that do not each have a reason in the file rather than a silence:
 `pipeline_scale` measures a scratch SQLite database with no `alembic_version`, and `chaos`
 and `identity` aggregate rehearsals and a browser run rather than one measured database.
 
-Only `availability`, `rpo`, and `rto` remain MISSING. As of `2026-08-14T02:46Z` they are
-collecting: a window is open on this host until `2026-08-21T02:46Z` at `0042`, and what
+Only `availability`, `rpo`, and `rto` remain MISSING. As of `2026-08-14T02:53Z` they are
+collecting: a window is open on this host until `2026-08-21T02:53Z` at `0042`, and what
 they wait on now is seven frozen days rather than anything in this repository.
 

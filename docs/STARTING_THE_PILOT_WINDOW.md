@@ -3,20 +3,29 @@
 The last three Tier B gates — availability, RPO and RTO — need one thing this repository
 cannot supply: **seven consecutive days of a machine that stays up**.
 
-**A window is open.** It started `2026-08-14T02:46Z` and closes `2026-08-21T02:46Z`, at
+**A window is open.** It started `2026-08-14T02:53Z` and closes `2026-08-21T02:53Z`, at
 head `0042_stream_outer_joins`, on the development workstation. `docs/SCHEMA_FREEZE.json`
 is open for the duration; a migration merged before it closes fails the build rather than
 silently voiding seven days of collection.
 
-An earlier window started `2026-08-14T00:34Z` and was **abandoned after two hours**, before
-it had written any evidence. It was measuring a build whose `/health/ready` reflected the
-entire schema on every call — 275 catalog round-trips, 220 ms at rest — and the availability
-gate is *defined* on that endpoint answering within 2,000 ms. It had already crossed the
-limit twice, spending 60 seconds of a 604.8-second weekly budget in the first two hours,
-which is a rate no seven-day run survives. The endpoint now answers in 6 ms. Its journals
-are kept beside the live ones as `evidence-abandoned-20260813` — an abandoned run is not a
-failed gate, because nothing was aggregated and no evidence file was written, but deleting
-it would hide that a window was started twice.
+Two earlier attempts the same night were abandoned before writing any evidence, and both
+reasons are worth knowing.
+
+The first, at `2026-08-14T00:34Z`, was measuring a build whose `/health/ready` reflected
+the entire schema on every call — 275 catalog round-trips, 220 ms at rest — and the
+availability gate is *defined* on that endpoint answering within 2,000 ms. It had already
+crossed the limit twice, spending 60 seconds of a 604.8-second weekly budget in two hours,
+a rate no seven-day run survives. The endpoint now answers in 4–5 ms. Its journals are kept
+as `evidence-abandoned-20260813`; an abandoned run is not a failed gate, because nothing was
+aggregated and no evidence file was written, but deleting it would hide that the window was
+started three times.
+
+The second was discarded over one slot. **The availability journal is the window's clock,
+not the manifest.** `summarize()` counts from the journal's first sample, so bringing the
+observer up alongside the API charges the API's own startup — one refused connection — to
+the window as 30 seconds of downtime, 5% of the budget, for something that happened a
+minute before `start` ran. Bring the observer up *last*, against an API already answering
+200, and confirm the first slots are clean before opening the window.
 
 The rest of this file is what that window is made of, so that watching it, finishing it,
 or starting another one is a procedure rather than a rediscovery.
