@@ -136,9 +136,33 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   `count(object_instances.id)`, so it scored the fix as issuing no counts at all. A fix
   marked correct for having stopped doing the thing being measured.
 
-  Still open: `/project/export` at 139 queries. `/project/readiness` remains the worst route
-  in the product at 169, and 226 of its statements are distinct shapes — so what is left
-  there is breadth, not a loop, and it wants a different kind of look.
+  **`/project/export` was examined and is not a defect.** 139 queries, and 138 of them are
+  distinct shapes: it assembles a portable project snapshot from **133 list-valued
+  collections**, one `SELECT` per collection. One query per exported table is not something
+  to improve — a union would be worse, and reading everything is what export means.
+
+  Measured rather than assumed, at four points:
+
+  | Object types | Queries | Payload |
+  | --- | --- | --- |
+  | 0 | 139 | 7.1 KB |
+  | 8 | 139 | 31.2 KB |
+  | 16 | 139 | 55.3 KB |
+  | 32 | 139 | 99.7 KB |
+
+  `shape()` returns **flat**. The query count does not follow the data; the payload does,
+  which is the definition of the endpoint working.
+
+  What *is* worth recording is a different axis: all 133 reads are `.all()` with no limit,
+  so a large project's export materialises the entire project in Python with no streaming or
+  pagination. That is the bound `audit_query_bounds.py` measures, and it does not cover these
+  sites — it tracks object-set primitives, not the snapshot builder. Bounded queries,
+  unbounded memory. Named here rather than fixed, because for an export endpoint it may well
+  be the correct trade, and deciding that is not the same as noticing it.
+
+  Still open: `/project/readiness` remains the worst route in the product at 169, and 226 of
+  its statements are distinct shapes — so what is left there is breadth, not a loop, and it
+  wants the same kind of look `/project/export` just got.
 - **E5 — A ratchet.** An audit that fails when a route's cost regresses past its recorded
   ceiling, and *reports* drift rather than failing on it — the rule this project learned
   twice, that a gate on something ordinary work breaks is a gate people route around.
