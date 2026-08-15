@@ -241,7 +241,28 @@ with ExitStack() as stack:
             raise RuntimeError(f"Replicas disagree about the database schema: {sorted(heads)}")
         return heads.pop()
 
+    from latency_observations import REQUIRED_OBSERVATIONS, observed_worst, shortfall
     from tier_b_evidence import write_evidence
+
+    # The schema this run actually measured, not the one the repo declares.
+    observed = served_migration_head(replicas)
+
+    # This run contributes one observation; the gate is judged on the worst of
+    # the set. Below the required count nothing is emitted at all -- see
+    # `shortfall` for why a short gate must not be written rather than written
+    # failing.
+    latency, observations = observed_worst(
+        "collaboration",
+        {
+            "ack_p95_ms": evidence["acknowledgement_p95_ms"],
+            "reader_batch_seconds": evidence["reader_batch_seconds"],
+        },
+        harness="oms/verify_collaboration_scale_postgres.py",
+        observed_head=observed,
+    )
+    if observations < REQUIRED_OBSERVATIONS:
+        print(f"Collaboration rehearsal recorded. {shortfall(observations)}")
+        raise SystemExit(1)
 
     path, status, breaches = write_evidence(
         "collaboration",
@@ -252,18 +273,17 @@ with ExitStack() as stack:
             "lost_updates_max": 0,
             "reader_batch_seconds_max": READ_BATCH_LIMIT_SECONDS,
             "unique_revisions_min": EDITOR_COUNT,
+            "observations_min": REQUIRED_OBSERVATIONS,
         },
         measurements={
-            "ack_p95_ms": evidence["acknowledgement_p95_ms"],
+            **latency,
             "editors": evidence["editors"],
             "replicas": evidence["replicas"],
             "lost_updates": evidence["lost_updates"],
-            "reader_batch_seconds": evidence["reader_batch_seconds"],
             "unique_revisions": len({event["lock_version"] for event in command_events}),
         },
         harness="oms/verify_collaboration_scale_postgres.py",
-        # The schema this run actually measured, not the one the repo declares.
-        observed_head=served_migration_head(replicas),
+        observed_head=observed,
         entry_points=[
             "POST /artifacts (two independently started API replicas)",
             "GET /health/live",

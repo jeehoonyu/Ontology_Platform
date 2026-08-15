@@ -574,11 +574,30 @@ print(serialized)
 # of the rows; letting it emit would overwrite a real reference PASS with a FAIL
 # on every CI run.
 if PROFILE == "reference":
+    from latency_observations import REQUIRED_OBSERVATIONS, observed_worst, shortfall
     from tier_b_evidence import write_evidence
+
+    # Four timings, each judged on the worst of at least six reference runs.
+    # No observed_head, for the reason given at the bottom of this call: this
+    # gate does not measure a migrated database, so it has none to report.
+    _latency, _observations = observed_worst(
+        "pipeline_scale",
+        {
+            "preview_p95_ms": evidence["preview_p95_ms"],
+            "deliver_ms": evidence["deliver_ms"],
+            "complex_preview_ms": evidence["complex_preview_ms"],
+            "complex_deliver_ms": evidence["complex_deliver_ms"],
+        },
+        harness="oms/benchmark_pipeline_scale.py",
+    )
+    if _observations < REQUIRED_OBSERVATIONS:
+        print(f"Reference run recorded. {shortfall(_observations)}")
+        raise SystemExit(1)
 
     gate_path, gate_status, gate_breaches = write_evidence(
         "pipeline_scale",
         thresholds={
+            "observations_min": REQUIRED_OBSERVATIONS,
             "input_rows_min": REFERENCE_ROWS,
             "output_partitions_min": 1,
             "preview_p95_ms_max": PREVIEW_P95_LIMIT_MS,
@@ -610,17 +629,14 @@ if PROFILE == "reference":
             "materialized_python_rows_max": evidence["output_rows"],
         },
         measurements={
+            **_latency,
             "input_rows": ROW_COUNT,
             "output_partitions": evidence["output_partitions"],
-            "preview_p95_ms": evidence["preview_p95_ms"],
-            "deliver_ms": evidence["deliver_ms"],
             "materialized_python_rows": evidence["materialized_python_rows"],
             "complex_join_left_rows": evidence["complex_join_left_rows"],
             "complex_join_right_rows": evidence["complex_join_right_rows"],
             "complex_union_rows": evidence["complex_union_rows"],
             "complex_pivot_cardinality": evidence["complex_pivot_cardinality"],
-            "complex_preview_ms": evidence["complex_preview_ms"],
-            "complex_deliver_ms": evidence["complex_deliver_ms"],
             "complex_materialized_python_rows": evidence["complex_materialized_python_rows"],
             "complex_idempotent_replay": evidence["complex_idempotent_replay"],
             "geofence_outer_vertices": evidence["geofence_outer_vertices"],

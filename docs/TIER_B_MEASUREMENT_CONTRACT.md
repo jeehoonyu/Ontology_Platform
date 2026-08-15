@@ -162,6 +162,30 @@ construction gates need definitions that do not yet exist anywhere, and are fixe
   images and running suites concurrently. A latency threshold with no stated quiescence
   condition measures the machine's mood as much as the system.
 
+  **The five latency gates are `collaboration`, `identity`, `mixed_workload`,
+  `ontology_scale` and `pipeline_scale`** — named rather than inferred, because RPO, RTO,
+  durability and chaos also carry a `_seconds_max` bound and already take the worst across
+  a stated minimum number of rehearsals spread over a window, which is this rule by another
+  route. Each of the five appends its readings to `docs/latency-observations.jsonl` through
+  `oms/latency_observations.py`, and the gate is emitted from the **worst** of the set at
+  the current head, carrying `observations_min: 6` beside the reading it qualifies. Below
+  six the gate is **not emitted at all** — a short gate would fail its own threshold, a
+  recorded FAIL at the same head is sticky, and the sixth run could then not promote it.
+
+  The two halves are not equally enforceable, and the difference is stated rather than
+  blurred. *The worst of at least six* is a threshold. *On an otherwise idle host* is
+  **reported, not gated**: nothing portable tells a process whether the machine beside it
+  is busy, and gating on spread would fail a system that is legitimately variable. Instead
+  every observation is kept and `observation_spread` is published beside the reading, so
+  the signature of the original misdiagnosis — a wide spread across runs — is visible in
+  the file rather than discoverable by re-running.
+
+  `oms/audit_latency_observations.py` fails the build if any of the five stops recording
+  observations or stops gating on them, and if a sixth latency gate is added without
+  either. Evidence written before the rule was implemented carries no count; that is
+  reported, never gated, because the ratchet is that the next run carries it, not that old
+  files are deleted.
+
 - **A recorded failure is not overwritten by a later pass at the same head.** The rule
   above was stated and unenforced: every harness rewrote its evidence file on every run,
   so re-running after a failure silently replaced it. `write_evidence` now preserves the

@@ -525,18 +525,44 @@ its first three rehearsals and still qualify.
 Note this tightens rather than loosens, which is why it was safe to do with a window
 running. The opposite change would not have been.
 
-**Open, and not fixed here: no latency gate takes the worst of six observations.** The
-contract says *"Latency gates are measured on an otherwise idle host, and the reading is
-the worst of at least six observations"* — a rule added after a collaboration breach turned
-out to be a busy machine rather than a slow system. Nothing implements it. Every latency
-harness records one run's p95, and the evidence envelope has no field for how many
-observations produced the number, so an auditor cannot distinguish a worst-of-six from a
-single lucky run. The "worst of six" in the rows above was done by hand.
+**No latency gate took the worst of six observations. Five now do.** The contract says
+*"Latency gates are measured on an otherwise idle host, and the reading is the worst of at
+least six observations"* — a rule added after a collaboration breach turned out to be a busy
+machine rather than a slow system. Nothing implemented it. Every latency harness recorded
+one run's p95, and the evidence envelope had no field for how many observations produced
+the number, so an auditor could not distinguish a worst-of-six from a single lucky run. The
+"worst of six" in the rows above was a person running a script six times.
 
-It is left open deliberately rather than half-closed. Recording `observations: 1` and
-gating at 1 would launder the rule instead of enforcing it, and honouring it properly means
-each latency harness repeating its measurement six times — hours, at reference scale. That
-is a scheduling decision, and it wants a quiet host, which this one will not be for a week.
+`oms/latency_observations.py` is the same arrangement `durability_rehearsals.py` and
+`chaos_rehearsals.py` already use, reused rather than reinvented: every run appends one
+observation, the gate is derived from the worst of the union at the current head, and no
+single run decides the verdict. `collaboration`, `identity`, `mixed_workload`,
+`ontology_scale` and `pipeline_scale` each record their readings and carry
+`observations_min: 6` — fourteen latency thresholds across the five.
+
+**Below six the gate is not emitted at all**, and that is the load-bearing detail rather
+than a nicety. A gate emitted short fails its own threshold; a recorded FAIL at the same
+head is sticky by design; the sixth run could then not promote it without an explicit
+supersede. Five honest runs would have locked the gate they were accumulating toward.
+
+The quiescence half is **reported, not gated**, and the contract now says so instead of
+implying otherwise. Nothing portable tells a Python process whether the machine beside it
+is busy, and gating on spread would fail a system that is legitimately variable. So every
+observation is kept and `observation_spread` is published beside the reading — a wide
+spread is the signature of exactly the misdiagnosis this rule was written for, and it is
+now in the file rather than in someone's memory of the run.
+
+`oms/audit_latency_observations.py` is the ratchet, and it is static: it reads the harness
+sources rather than running them, because the reference profiles take hours and a check
+nobody can afford to run is not a check. It fails if any of the five stops recording or
+stops gating, and if a sixth latency gate is added wired to neither. Its own negative cases
+are tested against a fixture tree — an audit only ever run against a passing tree is an
+assertion about that tree.
+
+What is **not** claimed: none of the five has six observations yet. All five evidence files
+predate the rule and carry no count, which the audit reports and does not fail on. Earning
+them back means six reference runs each on a quiet host, and this host is not quiet for a
+week. The gates are wired; the observations are owed.
 
 **Also open: "at varied points in the backup cycle."** `phases_covered` is recorded and
 nothing requires more than one phase. Unlike the span, "varied" has no number behind it,

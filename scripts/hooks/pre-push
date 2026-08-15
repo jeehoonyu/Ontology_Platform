@@ -27,7 +27,7 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 python=${PYTHON:-python}
-checks="audit_enforcement audit_check_coverage audit_evidence_corpus audit_query_bounds audit_extensibility audit_route_coverage validate_schema_freeze"
+checks="audit_enforcement audit_check_coverage audit_evidence_corpus audit_query_bounds audit_extensibility audit_latency_observations audit_route_coverage validate_schema_freeze"
 
 echo "pre-push: running enforcement checks"
 failed=""

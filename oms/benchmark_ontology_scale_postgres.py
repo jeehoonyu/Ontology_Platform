@@ -480,11 +480,32 @@ print(serialized)
 # attempt at the gate; letting it emit would overwrite a genuine reference PASS
 # with a FAIL every CI run and destroy the evidence it took hours to produce.
 if PROFILE == "reference":
+    from latency_observations import REQUIRED_OBSERVATIONS, observed_worst, shortfall
     from tier_b_evidence import database_head, write_evidence
+
+    # Five read latencies, each judged on the worst of at least six reference
+    # runs rather than on whichever one happened to be last. At this scale the
+    # runs are hours apart, which is precisely why a single one must not decide.
+    _latency, _observations = observed_worst(
+        "ontology_scale",
+        {
+            "object_lookup_p95_ms": evidence["object_lookup_p95_ms"],
+            "object_range_p95_ms": evidence["object_range_p95_ms"],
+            "graph_two_hop_p95_ms": evidence["graph_two_hop_p95_ms"],
+            "explorer_filter_p95_ms": evidence["explorer_filter_p95_ms"],
+            "facet_p95_ms": evidence["facet_p95_ms"],
+        },
+        harness="oms/benchmark_ontology_scale_postgres.py",
+        observed_head=database_head(engine),
+    )
+    if _observations < REQUIRED_OBSERVATIONS:
+        print(f"Reference run recorded. {shortfall(_observations)}")
+        raise SystemExit(1)
 
     gate_path, gate_status, gate_breaches = write_evidence(
         "ontology_scale",
         thresholds={
+            "observations_min": REQUIRED_OBSERVATIONS,
             "objects_min": REFERENCE_OBJECTS,
             "links_min": REFERENCE_LINKS,
             "object_lookup_p95_ms_max": OBJECT_P95_LIMIT_MS,
@@ -506,13 +527,9 @@ if PROFILE == "reference":
             "facet_from_rollup_min": 1,
         },
         measurements={
+            **_latency,
             "objects": OBJECT_COUNT,
             "links": LINK_COUNT,
-            "object_lookup_p95_ms": evidence["object_lookup_p95_ms"],
-            "object_range_p95_ms": evidence["object_range_p95_ms"],
-            "graph_two_hop_p95_ms": evidence["graph_two_hop_p95_ms"],
-            "explorer_filter_p95_ms": evidence["explorer_filter_p95_ms"],
-            "facet_p95_ms": evidence["facet_p95_ms"],
             "facet_source": evidence["facet_source"],
             "facet_refresh_seconds": evidence["facet_refresh_seconds"],
             "facet_from_rollup": 1 if evidence["facet_source"] == "rollup" else 0,

@@ -400,11 +400,30 @@ print(serialized)
 # ontology_scale and pipeline_scale this gate is satisfiable below reference
 # size and evidence is emitted for either profile. The scale is recorded in the
 # measurements so a reader can judge rather than infer.
+from latency_observations import (  # noqa: E402
+    REQUIRED_OBSERVATIONS, observed_worst, shortfall,
+)
 from tier_b_evidence import database_head, write_evidence  # noqa: E402
+
+# Both p95 readings are judged on the worst of at least six runs. Throughput is
+# not a latency reading and keeps this run's own number.
+_latency, _observations = observed_worst(
+    "mixed_workload",
+    {
+        "concurrent_read_p95_ms": evidence["concurrent_read_p95_ms"],
+        "write_batch_p95_ms": evidence["write_batch_p95_ms"],
+    },
+    harness="oms/benchmark_ontology_mixed_workload_postgres.py",
+    observed_head=database_head(engine),
+)
+if _observations < REQUIRED_OBSERVATIONS:
+    print(f"Mixed-workload run recorded. {shortfall(_observations)}")
+    raise SystemExit(1)
 
 _gate_path, _gate_status, _gate_breaches = write_evidence(
     "mixed_workload",
     thresholds={
+        "observations_min": REQUIRED_OBSERVATIONS,
         "concurrent_read_p95_ms_max": READ_P95_LIMIT_MS,
         "write_batch_p95_ms_max": WRITE_P95_LIMIT_MS,
         "writes_per_second_min": MIN_WRITE_THROUGHPUT,
@@ -415,8 +434,7 @@ _gate_path, _gate_status, _gate_breaches = write_evidence(
         "performance_gate_failures_max": 0,
     },
     measurements={
-        "concurrent_read_p95_ms": evidence["concurrent_read_p95_ms"],
-        "write_batch_p95_ms": evidence["write_batch_p95_ms"],
+        **_latency,
         "writes_per_second": evidence["writes_per_second"],
         "invalid_transitions": evidence["invalid_transitions"],
         "rollback_probes_passed": 1 if evidence["rollback_probe"] == "PASS" else 0,

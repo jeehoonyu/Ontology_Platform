@@ -117,6 +117,7 @@ def main() -> int:
         raise SystemExit(f"No OIDC scale run at {path}. Run the oidc-scale profile first.")
 
     run = json.loads(path.read_text(encoding="utf-8"))
+    from latency_observations import REQUIRED_OBSERVATIONS, observed_worst, shortfall
     from tier_b_evidence import current_head, write_evidence
 
     head = current_head()
@@ -125,9 +126,23 @@ def main() -> int:
     measurements["run_migration_head"] = str(run["migration_head"])
     print(json.dumps(measurements, indent=2, sort_keys=True))
 
+    # Login p95 is a latency reading, so one browser run does not set it. Each
+    # run contributes an observation and the gate takes the worst of the set.
+    latency, observations = observed_worst(
+        "identity",
+        {"login_p95_ms": measurements["login_p95_ms"]},
+        harness="oms/identity_scale_evidence.py",
+        observed_head=str(run["migration_head"]),
+    )
+    if observations < REQUIRED_OBSERVATIONS:
+        print(f"Identity run recorded. {shortfall(observations)}")
+        return 1
+    measurements.update(latency)
+
     gate_path, status, breaches = write_evidence(
         "identity",
         thresholds={
+            "observations_min": REQUIRED_OBSERVATIONS,
             "identities_min": REQUIRED_IDENTITIES,
             "unique_principals_min": REQUIRED_IDENTITIES,
             "mutation_denials_min": REQUIRED_IDENTITIES,

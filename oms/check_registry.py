@@ -42,6 +42,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_enforcement": {"gates": "every declared check still runs", "cadence": "every push"},
     "audit_evidence_corpus": {"gates": "evidence carries a migration head", "cadence": "every push"},
     "audit_extensibility": {"gates": "the next object type costs no more than the last", "cadence": "every push"},
+    "audit_latency_observations": {"gates": "a latency gate is the worst of at least six runs", "cadence": "every push"},
     "audit_query_bounds": {"gates": "no read materializes an object type before filtering", "cadence": "every push"},
     "audit_route_coverage": {"gates": "compatibility routes have typed equivalents before retirement", "cadence": "every push"},
     "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every push"},

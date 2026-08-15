@@ -42,6 +42,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "the next object type must not cost more than the last",
         "runs_in": "suite",
     },
+    "audit_latency_observations": {
+        "purpose": "a latency gate is the worst of at least six runs, not one",
+        "runs_in": "suite",
+    },
     "audit_query_bounds": {
         "purpose": "no read materializes an object type before filtering it",
         "runs_in": "suite",
