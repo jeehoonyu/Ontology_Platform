@@ -3,13 +3,38 @@
 The last three Tier B gates — availability, RPO and RTO — need one thing this repository
 cannot supply: **seven consecutive days of a machine that stays up**.
 
-**A window is open.** It started `2026-08-14T02:53Z` and closes `2026-08-21T02:53Z`, at
-head `0042_stream_outer_joins`, on the development workstation. `docs/SCHEMA_FREEZE.json`
-is open for the duration; a migration merged before it closes fails the build rather than
-silently voiding seven days of collection.
+**No window is open.** The one that started `2026-08-14T02:53Z` was **lost after 3.6 hours**
+and is not recoverable. Nothing was aggregated, so there is no failed gate — but there is
+also nothing to show for a day. `docs/SCHEMA_FREEZE.json` is still open and should be
+closed, or left open deliberately if another window follows soon.
 
-Two earlier attempts the same night were abandoned before writing any evidence, and both
-reasons are worth knowing.
+What happened, in the order it happened:
+
+1. **23:29 on 08-13** — the supervisor stopped, 3h 36m and 109 backups in. It was a host
+   process started from a terminal; nothing outlived that terminal.
+2. **05:54 on 08-14** — the first RTO rehearsal came due. Nothing ran it. `recovery_attempts`
+   is 0, and `rto-rehearsals.jsonl` and `rpo-samples.jsonl` were never created.
+3. **12:26** — the machine rebooted. Docker restarted and the observer came back, because it
+   had `restart: unless-stopped`. The API and database did not, because they did not.
+4. **13:31** — powered off, unplanned, for nearly six hours. **19:12** — booted again.
+5. The observer, doing exactly what the contract requires, backfilled every 30-second slot
+   it had missed as unavailable: **2,541 of 2,981 slots**, 76,170 seconds against a 604.8
+   second budget. Availability computes to **14.8%**.
+
+Three lessons, none of them about the window that failed:
+
+- **A restart policy on the observer and not on its subject measures the restart.** The
+  overlay now gives the API and the database `restart: unless-stopped` too. That was a
+  defect in this repository, and the reboot only revealed it.
+- **A supervisor that dies with a terminal is not a supervisor.** This is the limitation
+  recorded below under "What would end it early", and it ended this one within four hours.
+  It must be solved before a window is worth opening again — see that section.
+- **The observer surviving better than the product is worse than both of them dying.** A
+  dead observer would have shown a gap. A live one recorded eight hours of downtime that
+  the product, had anyone been running it, might not have had.
+
+Two earlier attempts on the first night were abandoned before writing any evidence, and
+both reasons are still worth knowing.
 
 The first, at `2026-08-14T00:34Z`, was measuring a build whose `/health/ready` reflected
 the entire schema on every call — 275 catalog round-trips, 220 ms at rest — and the

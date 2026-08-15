@@ -661,7 +661,10 @@ it. The three that do not each have a reason in the file rather than a silence:
 `pipeline_scale` measures a scratch SQLite database with no `alembic_version`, and `chaos`
 and `identity` aggregate rehearsals and a browser run rather than one measured database.
 
-Only `availability`, `rpo`, and `rto` remain MISSING. As of `2026-08-14T02:53Z` they are
-collecting: a window is open on this host until `2026-08-21T02:53Z` at `0042`, and what
-they wait on now is seven frozen days rather than anything in this repository.
+Only `availability`, `rpo`, and `rto` remain MISSING. A window opened `2026-08-14T02:53Z`
+and was **lost after 3.6 hours** -- the supervisor died with the terminal that started it,
+the machine then rebooted twice and spent six hours powered off, and the observer correctly
+backfilled 76,170 seconds of a 604.8-second budget. Nothing was aggregated, so there is no
+failed gate; there is also nothing to show. What they wait on is a supervisor that survives
+a reboot on this host, which is an operating-system permission rather than a commit.
 

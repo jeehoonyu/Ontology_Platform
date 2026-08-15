@@ -16,6 +16,12 @@
 services:
   oms-api:
     container_name: ontology_pilot_source_api
+    # The window's first run was lost partly here. The observer had a restart
+    # policy and the thing it observes did not, so after a reboot the probe came
+    # back, found nothing serving, and correctly recorded every 30-second slot
+    # as unavailable. A measurement that survives a restart better than its
+    # subject does only measures the restart.
+    restart: unless-stopped
     environment:
       # Without this in the *container* environment the recovery protocol is
       # disabled and every RPO mark fails 404 for seven days. Preflight
@@ -30,6 +36,7 @@ services:
 
   postgres:
     container_name: ontology_pilot_source_postgres
+    restart: unless-stopped
     # Loopback only, and not 5432: the development stack already owns that, and
     # the two databases must never be reachable at the same address by accident.
     ports: !override
