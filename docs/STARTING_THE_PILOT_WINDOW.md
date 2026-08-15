@@ -14,7 +14,18 @@ recovery path is proven end to end, and reopening a window is the ordered comman
 below rather than a rediscovery.
 
 The last window started `2026-08-15T03:48Z` and was closed after two hours, having been
-spent as the subject of a restart drill. Its journals are kept as `evidence-drill-20260814`.
+spent as the subject of a restart drill.
+
+**Nothing from any of it is left on the host.** The pilot containers, volumes and images
+are removed, the Startup entry is gone, and the working directory that held the secrets,
+journals and backups is deleted. Every host path named below is therefore the *shape to
+recreate*, not somewhere to look. The measurements those runs produced are in this file
+and in `GOAL_TIER_B_2026-08-03.md`, which is where they belong; the journals behind them
+were never gate evidence, because `aggregate` never ran.
+
+Everything in the repository stays: the two Compose overlays, the launcher, the
+registration script, and the harnesses. Reopening is the procedure below with fresh
+secrets, not a rebuild.
 
 **The supervisor now survives a reboot.** `scripts/start-pilot-supervisor.ps1` runs from a
 Startup-folder entry, `ontology-pilot-supervisor.cmd`, because `Register-ScheduledTask` and
