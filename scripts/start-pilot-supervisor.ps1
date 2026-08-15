@@ -75,19 +75,6 @@ if ($epoch -ge ($window.started_at + $window.window_seconds)) {
     exit 0
 }
 
-# The supervisor holds a lock whose heartbeat goes stale after 150 seconds. A
-# second one refuses rather than corrupting the manifest, but starting a process
-# that will immediately refuse is noise, so check first.
-$lock = Join-Path $EvidenceRoot "pilot-window-supervisor.lock"
-if (Test-Path -LiteralPath $lock) {
-    $age = ((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $lock).LastWriteTimeUtc).TotalSeconds
-    if ($age -le 150) {
-        Note "A supervisor is already ticking (lock $([int]$age)s old)."
-        exit 0
-    }
-    Note "Reclaiming a stale lock ($([int]$age)s old)."
-}
-
 # Docker Desktop starts at logon too, and loses the race about as often as it
 # wins it. Every 30-second slot spent waiting here is one the observer will
 # score as unavailable, so this waits rather than failing fast -- the budget is
@@ -130,6 +117,41 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 5
 }
 if (-not $ready) { Note "$target did not serve within $ReadyTimeoutSeconds s; starting anyway so ticks resume." }
+
+# The lock is checked last, and by asking whether its holder still exists rather
+# than how recently it was touched.
+#
+# A drill found this: killing the supervisor and running the launcher five
+# seconds later produced "a supervisor is already ticking", because the lock's
+# heartbeat was 25 seconds old and the rule was 150. The launcher then exited 0
+# having done nothing, which is the exact shape of a morning with no ticks and
+# no explanation. The file already carries the holder's pid; asking the
+# operating system whether that process is alive is both cheaper and true.
+#
+# Checked last so that the container recovery above always runs. A supervisor
+# can be ticking happily against a stack that is not there -- it records the
+# failures and carries on -- so "someone is supervising" is not a reason to skip
+# bringing the project back.
+$lock = Join-Path $EvidenceRoot "pilot-window-supervisor.lock"
+if (Test-Path -LiteralPath $lock) {
+    $age = ((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $lock).LastWriteTimeUtc).TotalSeconds
+    $holder = $null
+    try {
+        $recorded = [int]((Get-Content -LiteralPath $lock -TotalCount 1).Trim())
+        $candidate = Get-Process -Id $recorded -ErrorAction SilentlyContinue
+        # The name guard matters after a reboot, where the pid may have been
+        # handed to something else entirely.
+        if ($candidate -and $candidate.ProcessName -like "python*") { $holder = $candidate }
+    } catch { }
+    if ($holder -and $age -le 150) {
+        Note "A supervisor is already ticking (pid $($holder.Id), lock $([int]$age)s old)."
+        exit 0
+    }
+    $why = if ($holder) { "its holder pid $($holder.Id) is alive but the lock is $([int]$age)s stale" }
+           else { "no live python holds it" }
+    Note "Reclaiming the lock: $why."
+    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+}
 
 $arguments = @(
     ('"{0}"' -f (Join-Path $root "oms\pilot_window.py")),
