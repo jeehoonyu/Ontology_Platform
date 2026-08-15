@@ -97,13 +97,47 @@ def measure(client: Any, method: str, path: str, bind: Any, **kwargs: Any) -> Di
     return summary
 
 
-def growth(before: Dict[str, Any], after: Dict[str, Any], rows_added: int) -> float:
-    """Queries added per row added -- the number that says whether cost follows data.
+def shape(points: List[tuple]) -> Dict[str, Any]:
+    """Does a route's cost follow the data? Needs at least three points.
 
-    Zero is the only good answer. Anything else is a route that costs more as
-    the product is used more, which no absolute threshold catches early: it
-    passes on an empty test database and fails in front of a customer.
+    Two points cannot answer this, and believing otherwise produced a false
+    finding the first time this was used. `/ui-state/ontology` measured 1 query
+    on an empty database and 9 with eight object types, which reads as exactly
+    one query per row. It is not: at sixteen and thirty-two object types it is
+    still 9. The route has a branch that only runs when a row exists, and a
+    branch is a step, not a slope.
+
+    The difference is the whole point of the measurement. A step is a fixed cost
+    that shows up once; a slope is a route that gets more expensive every time
+    someone uses the product. Comparing empty against non-empty conflates them,
+    and empty-against-non-empty is the comparison a test fixture makes by
+    default.
+
+    `points` is [(rows, queries), ...] in increasing row order. The slope is
+    taken across the *non-empty* points, so the one-off cost of having any data
+    at all is excluded from it.
     """
-    if rows_added <= 0:
-        return 0.0
-    return round((after["queries"] - before["queries"]) / rows_added, 3)
+    ordered = sorted(points)
+    if len(ordered) < 3:
+        return {"verdict": "unknown", "slope": None,
+                "why": "at least three points are needed to tell a step from a slope"}
+    populated = [point for point in ordered if point[0] > 0]
+    if len(populated) < 2:
+        return {"verdict": "unknown", "slope": None,
+                "why": "at least two non-empty points are needed"}
+    first_rows, first_queries = populated[0]
+    last_rows, last_queries = populated[-1]
+    span = last_rows - first_rows
+    slope = 0.0 if span <= 0 else round((last_queries - first_queries) / span, 4)
+    stepped = ordered[0][0] == 0 and ordered[0][1] != populated[0][1]
+    if slope > 0:
+        verdict = "linear"
+        why = f"{slope} queries per row across {first_rows}..{last_rows}"
+    elif stepped:
+        verdict = "step"
+        why = (f"{populated[0][1] - ordered[0][1]} queries appear once data exists, "
+               f"then flat to {last_rows} rows")
+    else:
+        verdict = "flat"
+        why = f"unchanged from {first_rows} to {last_rows} rows"
+    return {"verdict": verdict, "slope": slope, "why": why}

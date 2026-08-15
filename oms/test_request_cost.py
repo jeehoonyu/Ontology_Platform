@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sqlalchemy import text  # noqa: E402
 
 from app.database import SessionLocal, engine  # noqa: E402
-from request_cost import counting, growth, normalize, summarize  # noqa: E402
+from request_cost import counting, normalize, shape, summarize  # noqa: E402
 
 passed = 0
 
@@ -114,13 +114,35 @@ with counting(engine) as after_error:
         db.execute(text("SELECT 7"))
 check(len(after_error) == 1, "a raising block still detaches its listener", after_error)
 
-# --- growth -----------------------------------------------------------------
+# --- shape: a step is not a slope -------------------------------------------
+#
+# These are the real numbers from /ui-state/ontology, which a two-point
+# comparison called a one-query-per-row N+1 and which is nothing of the kind.
 
-flat = growth({"queries": 4}, {"queries": 4}, 8)
-check(flat == 0.0, "a route whose cost does not follow the data reports zero", flat)
+measured = shape([(0, 1), (8, 9), (16, 9), (32, 9)])
+check(measured["verdict"] == "step", "a branch that runs once data exists is a step", measured)
+check(measured["slope"] == 0.0, "a step has no slope", measured)
 
-per_row = growth({"queries": 4}, {"queries": 12}, 8)
-check(per_row == 1.0, "one extra query per row reports 1.0", per_row)
-check(growth({"queries": 4}, {"queries": 8}, 0) == 0.0, "no rows added is not a division", None)
+real = shape([(0, 1), (8, 9), (16, 17), (32, 33)])
+check(real["verdict"] == "linear", "one query per row is linear", real)
+check(real["slope"] == 1.0, "the slope excludes the empty-database point", real)
+
+flat = shape([(0, 4), (8, 4), (16, 4)])
+check(flat["verdict"] == "flat", "unchanged cost is flat", flat)
+
+# Two points is the mistake this function exists to prevent, so it refuses.
+check(shape([(0, 1), (8, 9)])["verdict"] == "unknown",
+      "two points cannot tell a step from a slope, and must not guess",
+      shape([(0, 1), (8, 9)]))
+check(shape([(0, 1), (8, 9)])["slope"] is None, "an unknown verdict reports no slope", None)
+check("three points" in shape([(0, 1), (8, 9)])["why"], "and says why", shape([(0, 1), (8, 9)]))
+
+# All-empty points cannot answer it either.
+check(shape([(0, 1), (0, 1), (0, 1)])["verdict"] == "unknown",
+      "points with no data are not a measurement of growth", None)
+
+# Unordered input must not change the verdict.
+check(shape([(32, 9), (0, 1), (8, 9), (16, 9)])["verdict"] == "step",
+      "points are sorted before they are read", None)
 
 print(f"Request cost instrument verified: {passed} assertions passed.")

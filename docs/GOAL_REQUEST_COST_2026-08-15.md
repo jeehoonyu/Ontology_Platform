@@ -43,17 +43,53 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
 ## Conditions
 
 - **E1 — An instrument.** `oms/request_cost.py`: count the statements one request executes,
-  normalise them so a shape run many times reads as *one shape, N times*, and report the
-  growth per row between two measurements. **Done**, with `oms/test_request_cost.py` pinning
-  the two properties that carry the weight — a shape with varying literals must collapse,
-  and the listener must not outlive its block or every measurement after the first is wrong.
+  normalise them so a shape run many times reads as *one shape, N times*, and decide from a
+  series of measurements whether cost follows the data. **Done**, with
+  `oms/test_request_cost.py` pinning the properties that carry the weight — a shape with
+  varying literals must collapse, the listener must not outlive its block or every
+  measurement after the first is wrong, and a verdict must be refused on fewer than three
+  points rather than guessed.
 - **E2 — A census.** Walk the reachable route surface and record what each request costs.
-  **In progress.** The first attempt had to be narrowed: routes that reach outside the
-  process block on their own timeouts and say nothing about database cost.
+  **Done for the 151 collection routes**, the shape where a per-row query hides. Two
+  exclusions were needed and both are honest: routes that reach outside the process block on
+  their own timeouts, and streaming routes, which never return a body — `/events/stream`
+  stalled the first run at route 52 of 154.
+
+  112 of 151 issue one query or fewer. Twenty issue more than ten. The worst:
+
+  | Route | Queries, empty database | Worst repeated shape |
+  | --- | --- | --- |
+  | `/project/readiness` | **297** | ×32 |
+  | `/project/validate` | 200 | ×32 |
+  | `/ui-state/validation` | 200 | ×32 |
+  | `/project/export` | 139 | ×2 |
+  | `/ui-state/command-center` | 80 | ×13 |
+  | `/system/migrations` | 35 | ×32 |
+
+  The ×32 in four of those is one shape: a `SELECT` on `system_migration_records`, from
+  `_ensure_migration_records`, which calls `db.get(MigrationRecord, version)` **once per
+  migration** in a Python loop. There are 32 records and the number only goes up. That is a
+  real per-item loop, and `/project/readiness` is now a worse offender than `/health/ready`
+  was at 275.
 - **E3 — Growth, not size.** The absolute count is the weak signal; the strong one is
-  whether the count moves when rows are added. A route whose cost follows the data passes on
-  an empty test database and fails in front of a customer. **Owed**, and it is what the
-  census exists to produce.
+  whether the count moves when rows are added.
+
+  **No route's cost grew with object-type count.** The single candidate did not survive
+  checking: `/ui-state/ontology` measured 1 query empty and 9 with eight object types, which
+  reads as exactly one query per row. At sixteen and thirty-two it is still 9. It has a
+  branch that runs only when a row exists — a step, not a slope.
+
+  That was a defect in the instrument, not the product, and the more useful of the two
+  findings. `growth()` compared two points and could not tell a fixed cost that appears once
+  from a cost that accrues forever; empty-against-non-empty is exactly the comparison a test
+  fixture makes by default. It is replaced by `shape()`, which **refuses to answer** on
+  fewer than three points and takes its slope across the non-empty ones.
+
+  The growth column is therefore reported as unmeasured for the other 150 routes rather than
+  as zero. Seeding eight object types exercises growth only for routes that read object
+  types, and the first run of the census seeded **nothing at all** — the payload was wrong
+  and every creation returned 422 — so its "0 routes grew" was a null result wearing a
+  pass. The census now aborts if it seeds nothing.
 - **E4 — Fix what the census finds.** One fix landed ahead of it, above.
 - **E5 — A ratchet.** An audit that fails when a route's cost regresses past its recorded
   ceiling, and *reports* drift rather than failing on it — the rule this project learned
