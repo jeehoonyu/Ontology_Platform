@@ -112,10 +112,33 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   And `webhooks_ops._validate_source_project` asked `get_table_names()` — every table in the
   schema — to learn whether one table exists, on a write path.
 
-  Still open from the census, unfixed: `/ui-state/command-center` runs one `count(*)` shape
-  **13 times**, and `/project/export` issues 139 queries. `/project/readiness` remains the
-  worst route in the product at 169, and 226 of its statements are distinct shapes — so what
-  is left there is breadth, not a loop, and it wants a different kind of look.
+  `/ui-state/command-center` ran 13 `count(*)` statements, and attributing them by caller
+  showed two separate defects on the same two lines:
+
+  - `maintenance_summary` counted six object types with **six** `SELECT count(*)`, one per
+    entry of a list literal. One `GROUP BY` answers all six. The dict is rebuilt from the
+    declared list rather than from the rows, because `GROUP BY` returns nothing for a type
+    with no instances and a missing key would read as an absent object type rather than an
+    empty one.
+  - `_summarize` called `maintenance_summary(db)` **twice in the same dict literal**, so the
+    route paid for the whole thing twice. The `asset_count` KPI beside it was a third query
+    for a number the summary had already computed.
+
+  | | Before | After |
+  | --- | --- | --- |
+  | `/ui-state/command-center` queries | 80 | **67** |
+  | of which aggregate statements | 13 | **1** |
+
+  `oms/test_maintenance_summary_cost.py` pins the shape, not the total: one grouped count,
+  computed once per request, agreeing with per-type counting on real rows, and zero rather
+  than missing for a type with no instances. Writing that test surfaced a trap worth naming
+  — the first version matched `count(*)` literally, and the fixed code spells it
+  `count(object_instances.id)`, so it scored the fix as issuing no counts at all. A fix
+  marked correct for having stopped doing the thing being measured.
+
+  Still open: `/project/export` at 139 queries. `/project/readiness` remains the worst route
+  in the product at 169, and 226 of its statements are distinct shapes — so what is left
+  there is breadth, not a loop, and it wants a different kind of look.
 - **E5 — A ratchet.** An audit that fails when a route's cost regresses past its recorded
   ceiling, and *reports* drift rather than failing on it — the rule this project learned
   twice, that a gate on something ordinary work breaks is a gate people route around.

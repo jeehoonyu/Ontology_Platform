@@ -873,13 +873,18 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
         limit=25,
     )
     graph = platform_core._graph_overview(db, 80)
+    # Called once and read twice. The two calls that used to be here were the
+    # same summary computed twice in one dict literal, which cost this route six
+    # duplicate queries -- the sort of thing that is invisible in the source and
+    # obvious the moment anyone counts statements.
+    maintenance = maintenance_summary(db)
     return {
         "scenario_id": SCENARIO_ID,
         "asset_id": asset_id,
-        "maintenance": maintenance_summary(db),
+        "maintenance": maintenance,
         "kpis": {
-            "asset_count": db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == "asset").count(),
-            "open_work_orders": len(maintenance_summary(db).get("open_work_orders", [])),
+            "asset_count": maintenance["object_counts"]["asset"],
+            "open_work_orders": len(maintenance.get("open_work_orders", [])),
             "high_risk_assets": len(high_risk_assets),
             "open_alerts": len(alerts),
             "open_approvals": len(approvals),

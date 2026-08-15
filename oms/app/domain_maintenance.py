@@ -1,6 +1,7 @@
 import uuid
 from typing import Any, Dict, List
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models
@@ -719,12 +720,23 @@ def bootstrap_maintenance_copilot(db: Session, *, actor: str = "system") -> Dict
 
 def maintenance_summary(db: Session) -> Dict[str, Any]:
     object_types = ["facility", "asset", "technician", "part", "work_order", "purchase_request"]
-    counts = {
-        object_type_id: db.query(models.ObjectInstance).filter(
-            models.ObjectInstance.object_type_id == object_type_id
-        ).count()
-        for object_type_id in object_types
-    }
+
+    # One grouped count, not one count per object type. The comprehension that
+    # used to be here issued six `SELECT count(*)` statements, and
+    # `/ui-state/command-center` called this function twice, so twelve of that
+    # route's eighty queries were this list being counted one entry at a time.
+    #
+    # The dict is rebuilt from `object_types` rather than from the rows, because
+    # GROUP BY returns nothing for a type with no instances and the caller reads
+    # every key. A missing key here would read as an absent object type rather
+    # than an empty one.
+    tallied = dict(
+        db.query(models.ObjectInstance.object_type_id, func.count(models.ObjectInstance.id))
+        .filter(models.ObjectInstance.object_type_id.in_(object_types))
+        .group_by(models.ObjectInstance.object_type_id)
+        .all()
+    )
+    counts = {object_type_id: int(tallied.get(object_type_id, 0)) for object_type_id in object_types}
 
     open_work_orders = [
         {
