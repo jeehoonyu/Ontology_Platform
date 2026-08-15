@@ -3,10 +3,12 @@
 The last three Tier B gates — availability, RPO and RTO — need one thing this repository
 cannot supply: **seven consecutive days of a machine that stays up**.
 
-**A window is open.** It started `2026-08-15T03:48Z` and closes `2026-08-22T03:48Z`, at
-head `0042_stream_outer_joins`. `docs/SCHEMA_FREEZE.json` is open until one day past that
-— a freeze that lapses before the collection it protects protects nothing, and the previous
-one would have, by three hours.
+**No window is open.** The one started `2026-08-15T03:48Z` was closed after two hours,
+deliberately: it was spent as the subject of a restart drill, and reopening on a clean
+budget costs less than carrying a spent one for a week. Its journals are kept as
+`evidence-drill-20260814`. `docs/SCHEMA_FREEZE.json` is left open at `0042` because the
+next window follows shortly; if it does not, close it, because an open freeze protecting
+nothing teaches everyone to ignore a red build.
 
 **The supervisor now survives a reboot.** `scripts/start-pilot-supervisor.ps1` runs from a
 Startup-folder entry, `ontology-pilot-supervisor.cmd`, because `Register-ScheduledTask` and
