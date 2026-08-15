@@ -1,8 +1,8 @@
 {
-  "expires_at": 1787358845,
+  "expires_at": 1787456911,
   "head": "0042_stream_outer_joins",
   "opened_at": 1786667645,
   "owner": "operations",
-  "reason": "Seven-day availability, RPO, and RTO collection is running on this host. A migration during the window changes the head, voids every sample already taken, and costs another seven days. Expiry is one day past the window so the freeze outlives the collection it protects.",
+  "reason": "Seven-day availability, RPO, and RTO collection is running on this host until 2026-08-22T03:48Z. A migration during the window changes the head, voids every sample already taken, and costs another seven days. Expiry is one day past the window close, because a freeze that lapses before the collection it protects protects nothing.",
   "state": "open"
 }

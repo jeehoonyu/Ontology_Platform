@@ -3,10 +3,21 @@
 The last three Tier B gates — availability, RPO and RTO — need one thing this repository
 cannot supply: **seven consecutive days of a machine that stays up**.
 
-**No window is open.** The one that started `2026-08-14T02:53Z` was **lost after 3.6 hours**
-and is not recoverable. Nothing was aggregated, so there is no failed gate — but there is
-also nothing to show for a day. `docs/SCHEMA_FREEZE.json` is still open and should be
-closed, or left open deliberately if another window follows soon.
+**A window is open.** It started `2026-08-15T03:48Z` and closes `2026-08-22T03:48Z`, at
+head `0042_stream_outer_joins`. `docs/SCHEMA_FREEZE.json` is open until one day past that
+— a freeze that lapses before the collection it protects protects nothing, and the previous
+one would have, by three hours.
+
+**The supervisor now survives a reboot.** `scripts/start-pilot-supervisor.ps1` runs from a
+Startup-folder entry, `ontology-pilot-supervisor.cmd`, because `Register-ScheduledTask` and
+`schtasks /Create` are both denied to this account. It waits for Docker, brings the project
+up if it is missing, waits for the API to serve, and starts the supervisor — or declines,
+noting why, if a window is not open, has already closed, or is already being supervised.
+Every attempt appends to `supervisor-launcher.log`, so a morning that finds no ticks can be
+told from a morning that finds no launcher.
+
+The previous window started `2026-08-14T02:53Z` and was **lost after 3.6 hours**. Nothing
+was aggregated, so there was no failed gate — and nothing to show for a day.
 
 What happened, in the order it happened:
 
@@ -166,24 +177,32 @@ per tick.
 ### What would end it early
 
 - **A migration.** The supervisor stops on a head change rather than pool two schemas.
-- **Losing the supervisor.** It is a host process. It survives this terminal closing; it
-  does **not** survive a logoff or reboot on this machine, because registering a scheduled
-  task is denied to this account — `Register-ScheduledTask` and `schtasks /Create` both
-  answer "Access is denied", elevated or not. After any restart, bring it back with:
+- **Losing the supervisor.** It is a host process, and it dies with the terminal that
+  started it. That killed the first window inside four hours. It now comes back at logon
+  from a Startup-folder entry, which needs no privilege — the durable options do not exist
+  here, because `Register-ScheduledTask` and `schtasks /Create` both answer "Access is
+  denied", elevated or not.
 
   ```powershell
-  Start-Process python -WindowStyle Hidden -WorkingDirectory C:\Users\jeehoon\.vscode\Ontology_Platform -RedirectStandardOutput C:\Users\jeehoon\ontology-pilot\supervisor.log -ArgumentList 'oms\pilot_window.py','--evidence-root','C:\Users\jeehoon\ontology-pilot\evidence','--environment-file','C:\Users\jeehoon\ontology-pilot\secrets\pilot-runtime.env','--token-file','C:\Users\jeehoon\ontology-pilot\secrets\pilot-recovery-token','run'
+  # Run it by hand any time; it is idempotent and says what it decided.
+  & "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\ontology-pilot-supervisor.cmd"
+  Get-Content C:\Users\jeehoon\ontology-pilot\supervisor-launcher.log -Tail 5
   ```
 
-  On a host where task registration is permitted, `scripts/register-pilot-window.ps1` does
-  this durably; it now registers a **logon** trigger as well as a boot trigger, because a
-  task owned by an interactive account never fires at boot and the boot trigger alone would
-  have quietly left no supervisor running.
-- **Docker not coming back.** The observer restarts with Docker Desktop, which is set to
-  start at logon here. If it does not, every 30-second slot it misses is scored as
-  unavailable.
+  The launcher waits for Docker, brings the Compose project up if it is missing, waits for
+  the API to serve, and starts one supervisor — declining if a window is not open, has
+  already closed, or is already being supervised. Deleting the `.cmd` stops it coming back.
+  On a host where task registration *is* permitted, `scripts/register-pilot-window.ps1`
+  does the same thing through Task Scheduler; it registers a **logon** trigger as well as a
+  boot trigger, because a task owned by an interactive account never fires at boot.
+- **Docker not coming back.** All three containers carry `restart: unless-stopped` and
+  Docker Desktop starts at logon here. The first window found out why the API needs that as
+  much as the observer does: only the observer had it, so after a reboot the probe returned
+  to a stack that was not serving and correctly recorded eight hours as downtime. A
+  measurement that survives a restart better than its subject does is measuring the restart.
 
-Losing minutes is survivable; losing the observer for a quarter of an hour is not.
+Losing minutes is survivable; losing the observer for a quarter of an hour is not. Losing
+the *product* while the observer watches is worse than losing both.
 
 ## Finishing
 
