@@ -85,6 +85,7 @@ _RUNTIME_SCHEMA_READY_ENGINES: weakref.WeakSet[Any] = weakref.WeakSet()
 # the only thing that legitimately changes the answer. A head change during a
 # window ends that window regardless, so nothing is being hidden by holding the
 # result between migrations.
+_MIGRATION_TABLE_READY_ENGINES: weakref.WeakSet[Any] = weakref.WeakSet()
 _SCHEMA_REFLECTION_LOCK = threading.Lock()
 _SCHEMA_REFLECTION_CACHE: "weakref.WeakKeyDictionary[Any, tuple[Optional[str], Dict[str, Any]]]" = (
     weakref.WeakKeyDictionary()
@@ -611,15 +612,61 @@ def _ensure_column(db: Session, table_name: str, column_name: str, column_ddl: s
 
 
 def _ensure_migration_records(db: Session) -> None:
-    MigrationRecord.__table__.create(bind=db.get_bind(), checkfirst=True)
+    """Reconcile the recorded migration list in one read, not one read each.
+
+    This called `db.get(MigrationRecord, version)` inside a loop over
+    `MIGRATIONS`: 32 round-trips per call, on four routes. `/project/readiness`
+    issued 297 queries against an empty database and 32 of them were this shape.
+    The count is the length of the migration list, which only ever grows, so the
+    cost of asking whether the product is ready rises with every migration
+    anyone lands.
+
+    One `SELECT` answers all 32 questions. The rows land in the session identity
+    map, so the updates below still work on tracked objects rather than detached
+    copies.
+
+    `checkfirst=True` was a further round-trip per call, asking whether a table
+    exists that cannot stop existing once it does. Asked once per engine now, as
+    `_ensure_runtime_tables` already does for the rest of the runtime schema.
+    """
+    bind = db.get_bind()
+    if bind not in _MIGRATION_TABLE_READY_ENGINES:
+        MigrationRecord.__table__.create(bind=bind, checkfirst=True)
+        _MIGRATION_TABLE_READY_ENGINES.add(bind)
     now = _now()
+    recorded = {record.version: record for record in db.query(MigrationRecord).all()}
+    missing = []
     for migration in MIGRATIONS:
-        version = migration["version"]
-        existing = db.get(MigrationRecord, version)
-        if existing:
+        existing = recorded.get(migration["version"])
+        if existing is not None:
             existing.name = migration["name"]
             existing.status = migration["status"]
-            continue
+        else:
+            missing.append(migration)
+    if not missing:
+        return
+
+    # Only the first call against a database inserts anything. Doing it in one
+    # savepoint costs one statement instead of a SAVEPOINT/INSERT/RELEASE per
+    # migration -- 97 statements for 32 rows, which is what the first request to
+    # /project/readiness used to pay on a fresh database.
+    try:
+        with db.begin_nested():
+            db.add_all([
+                MigrationRecord(version=migration["version"], name=migration["name"],
+                                status=migration["status"], applied_at=now)
+                for migration in missing
+            ])
+            db.flush()
+        return
+    except IntegrityError:
+        # Another request inserted some of these between the read above and this
+        # write, and the whole savepoint rolled back with them. Fall back to one
+        # at a time so the ones that are genuinely absent still land.
+        pass
+
+    for migration in missing:
+        version = migration["version"]
         try:
             with db.begin_nested():
                 db.add(MigrationRecord(
@@ -630,7 +677,6 @@ def _ensure_migration_records(db: Session) -> None:
                 ))
                 db.flush()
         except IntegrityError:
-            # Another readiness request recorded the same migration concurrently.
             existing = db.get(MigrationRecord, version)
             if existing:
                 existing.name = migration["name"]

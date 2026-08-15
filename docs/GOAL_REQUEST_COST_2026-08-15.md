@@ -90,7 +90,32 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   types, and the first run of the census seeded **nothing at all** — the payload was wrong
   and every creation returned 422 — so its "0 routes grew" was a null result wearing a
   pass. The census now aborts if it seeds nothing.
-- **E4 — Fix what the census finds.** One fix landed ahead of it, above.
+- **E4 — Fix what the census finds.** Two landed.
+
+  `_ensure_migration_records` asked `db.get(MigrationRecord, version)` once per migration
+  inside a loop, on four routes. One `SELECT` answers all 32 questions, and the first run
+  against a fresh database inserts in one savepoint instead of a SAVEPOINT/INSERT/RELEASE
+  per row. `checkfirst=True` on the table create — a further round-trip per call, asking
+  whether a table exists that cannot stop existing — is asked once per engine now.
+
+  | Route | Before | After | |
+  | --- | --- | --- | --- |
+  | `/system/migrations` | 35 | **3** | −91% |
+  | `/project/readiness` | 297 | **169** | −43% |
+  | `/project/validate` | 200 | **168** | −32 |
+  | `/ui-state/validation` | 200 | **168** | −32 |
+
+  `oms/test_migration_record_cost.py` pins the property rather than the number: doubling
+  `MIGRATIONS` must not change the statement count. A constant would be bumped by whoever
+  next added a migration; a comparison cannot be.
+
+  And `webhooks_ops._validate_source_project` asked `get_table_names()` — every table in the
+  schema — to learn whether one table exists, on a write path.
+
+  Still open from the census, unfixed: `/ui-state/command-center` runs one `count(*)` shape
+  **13 times**, and `/project/export` issues 139 queries. `/project/readiness` remains the
+  worst route in the product at 169, and 226 of its statements are distinct shapes — so what
+  is left there is breadth, not a loop, and it wants a different kind of look.
 - **E5 — A ratchet.** An audit that fails when a route's cost regresses past its recorded
   ceiling, and *reports* drift rather than failing on it — the rule this project learned
   twice, that a gate on something ordinary work breaks is a gate people route around.
