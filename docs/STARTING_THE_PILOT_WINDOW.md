@@ -3,12 +3,18 @@
 The last three Tier B gates — availability, RPO and RTO — need one thing this repository
 cannot supply: **seven consecutive days of a machine that stays up**.
 
-**No window is open.** The one started `2026-08-15T03:48Z` was closed after two hours,
-deliberately: it was spent as the subject of a restart drill, and reopening on a clean
-budget costs less than carrying a spent one for a week. Its journals are kept as
-`evidence-drill-20260814`. `docs/SCHEMA_FREEZE.json` is left open at `0042` because the
-next window follows shortly; if it does not, close it, because an open freeze protecting
-nothing teaches everyone to ignore a red build.
+**No window is open, and none is planned.** The multi-day run was stopped by decision on
+2026-08-14. `docs/SCHEMA_FREEZE.json` is closed to match: an open freeze protecting nothing
+teaches everyone that a red build is normal.
+
+`availability`, `rpo` and `rto` therefore stay **MISSING** — not failed. Nothing was ever
+aggregated, so no gate file exists to supersede, and Tier B stands at 7 of 10 exactly as it
+did before any of this. What was built is not wasted: preflight reads 10 of 10, the
+recovery path is proven end to end, and reopening a window is the ordered command list
+below rather than a rediscovery.
+
+The last window started `2026-08-15T03:48Z` and was closed after two hours, having been
+spent as the subject of a restart drill. Its journals are kept as `evidence-drill-20260814`.
 
 **The supervisor now survives a reboot.** `scripts/start-pilot-supervisor.ps1` runs from a
 Startup-folder entry, `ontology-pilot-supervisor.cmd`, because `Register-ScheduledTask` and

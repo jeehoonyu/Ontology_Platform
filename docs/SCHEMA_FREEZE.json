@@ -1,8 +1,10 @@
 {
+  "closed_at": 1786774363,
+  "closing_note": "Closed without collecting. The freeze protected a seven-day window that was stopped by decision on 2026-08-14: the multi-day run is not being pursued for now. An open freeze protecting nothing is worse than no freeze, because it teaches everyone that a red build is normal. Reopen it at the then-current head if the window is restarted.",
   "expires_at": 1787456911,
   "head": "0042_stream_outer_joins",
   "opened_at": 1786667645,
   "owner": "operations",
   "reason": "Seven-day availability, RPO, and RTO collection is running on this host until 2026-08-22T03:48Z. A migration during the window changes the head, voids every sample already taken, and costs another seven days. Expiry is one day past the window close, because a freeze that lapses before the collection it protects protects nothing.",
-  "state": "open"
+  "state": "closed"
 }
