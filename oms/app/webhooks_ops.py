@@ -387,7 +387,11 @@ def _validate_source_project(db: Session, source_id: Optional[str], project_id: 
     if not source_id:
         return
     from . import connectivity
-    if connectivity.ConnectionSource.__tablename__ not in inspect(db.get_bind()).get_table_names():
+    # `has_table` asks about one table; `get_table_names` lists every table in
+    # the schema to answer the same question. There are 279 of them in a
+    # populated deployment, and this runs on a write path. It is the same defect
+    # `/health/ready` had, one table instead of all of them.
+    if not inspect(db.get_bind()).has_table(connectivity.ConnectionSource.__tablename__):
         return
     source = db.get(connectivity.ConnectionSource, source_id)
     if source and source.project_id != project_id:
