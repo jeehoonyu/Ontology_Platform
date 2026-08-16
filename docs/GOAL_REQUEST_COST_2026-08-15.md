@@ -197,12 +197,43 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   another. It counts `_finalize_snapshot` calls per route — zero for validate and readiness,
   exactly one for export.
 
-  **Not fixed, and it is the larger half.** The remaining 19.3 ms is 133 `.all()` reads
-  materialising every row of every table so that 110 of them can be counted. Fixing it means
-  a count-only variant of a 586-line dict literal with 133 inline comprehensions — a real
-  refactor with real risk, and the same `.all()` question `/project/export` raises. The
-  difference is that export needs the rows and this does not. Recorded rather than attempted
-  at the end of a long session.
+  **The count-only refactor was attempted and is wrong.** Replacing each `.all()` with a
+  `.count()` does not produce the same numbers, because `_snapshot` does not return what the
+  tables contain — it returns a **single-project dependency closure**, computed in Python
+  from the rows after they are loaded.
+
+  Measured, with seven object types belonging to a second project:
+
+  | | |
+  | --- | --- |
+  | `SELECT count(*) FROM object_types` | **13** |
+  | `coverage["counts"]["object_types"]` | **6** |
+
+  `_scope_snapshot` filters every collection by `row.get("project_id")`, then applies rules
+  that need the payloads: plugin trust keys are selected by the `signer_key_id` values
+  referenced from *this project's* plugin versions, and legacy data assets are recognised by
+  reading `row["asset_schema"]["project_id"]`. It also **adds** rows — `organizations` and
+  `projects` come out of scoping with one entry each having loaded none. A `count(*)` cannot
+  reproduce any of that. The refactor as stated is not risky; it is incorrect.
+
+  **What the rows are actually being spent on is worth more than the count question.**
+  Scoping discards most of what the builder loads:
+
+  | | |
+  | --- | --- |
+  | rows loaded by the builder | 322 |
+  | rows surviving the scope | 124 |
+  | **discarded** | **198 (61%)** |
+
+  `object_types` alone loaded 206 rows to keep 6, and that ratio grows with every project
+  the deployment gains — the builder reads *all* projects to serve one.
+
+  So the tractable change is **scope pushdown**, not count-only: filter `project_id` in SQL
+  for the collections whose scope rule is exactly that, and keep the payload-dependent
+  closure rules in Python for the handful that need them. That is a different and larger
+  piece of work than this goal set out to do, and it is worth its own measurement first —
+  which collections carry a `project_id` column, and which of the closure rules survive
+  being asked in SQL.
 - **E5 — A ratchet.** `oms/audit_request_cost.py`, with the surface recorded in
   `docs/request-cost-baseline.json`. **Done.**
 
