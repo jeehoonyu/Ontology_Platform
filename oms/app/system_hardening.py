@@ -897,7 +897,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "data_assets": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.DataAsset), models.DataAsset.project_id, project_id).all()
+            for row in db.query(models.DataAsset).all()
         ],
         "pipeline_definitions": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"])
@@ -1289,7 +1289,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "project_memberships": [
             _row_dict(row, ["id", "project_id", "principal_id", "role", "permissions", "created_at", "updated_at"])
-            for row in _for_project(db.query(tenancy.ProjectMembership), tenancy.ProjectMembership.project_id, project_id).all()
+            for row in db.query(tenancy.ProjectMembership).all()
         ],
         "ontology_packages": [
             _row_dict(row, ["id", "organization_id", "owning_project_id", "display_name", "description", "status", "current_version", "created_by", "created_at", "updated_at"])

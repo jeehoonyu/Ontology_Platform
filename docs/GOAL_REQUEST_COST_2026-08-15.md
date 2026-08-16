@@ -384,6 +384,44 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   is kept though its own column says otherwise, and a child claiming my project is dropped
   because its parent is not mine.
 
+- **E8 — The full suite, which found what the harnesses did not.** 224 test scripts,
+  **223 passed and one failed**: `test_durable_ingestion_runtime.py`, on a restore.
+
+  ```
+  Snapshot validation failed
+  Resource 'connection_syncs:maintenance_sync' references
+  missing scoped data_assets 'ingestion_target'
+  ```
+
+  The same defect as the child collections, in a collection that is not a child.
+  `_scope_snapshot` recognises a **legacy data asset** by reading
+  `row["asset_schema"]["project_id"]` out of the *unscoped* snapshot and adding it back.
+  Phase one had narrowed `data_assets` by its own `project_id` column, so those rows were
+  gone before the rule could see them — the export came out short and the restore refused
+  it. `project_memberships` was narrowed the same way.
+
+  Both are reverted, and the rule behind them is now stated once and checked:
+
+  > **A collection `_scope_snapshot` reads out of the unscoped snapshot must not be narrowed
+  > in the builder.**
+
+  That is nine collections — `data_assets`, `project_memberships`, `plugin_trust_keys`,
+  `projects`, `organizations`, and the ontology packages — and `audit_snapshot_scope.py`
+  now **fails** when any of them is narrowed, because this is data loss rather than drift.
+  It is the invariant that covers both regressions: the child ones and this one.
+
+  **The check did not work the first time, and that was the most useful part.** The matcher
+  reached from a collection's key to the `_for_project(` call with `[^\]]*?`, which cannot
+  cross the `]` closing `_row_dict`'s own field list — so it matched **nothing at all** and
+  reported a clean tree. A check that passes by measuring nothing is the exact failure this
+  repository keeps finding, and it was only caught by running the audit against a tree that
+  *contains* the state it refuses. That tree is now a test case, along with the bracket that
+  broke the matcher.
+
+  Three defects, three harnesses, and the order they were caught in is the lesson: the
+  equivalence fixture missed both because it contained no crossed row; the audit missed the
+  second because it silently matched nothing; the suite caught it because a restore is a
+  real use of the data. **A fixture proves what it contains. A suite proves what it does.**
 ## What this is not
 
 Not a performance goal. Nothing here promises a route gets faster, and no threshold in it is

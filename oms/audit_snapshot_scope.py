@@ -75,6 +75,42 @@ def collections(source: str) -> Dict[str, Dict[str, object]]:
     return found
 
 
+def closure_reads(source: str) -> Set[str]:
+    """Collections whose scoped result is computed from the UNSCOPED snapshot.
+
+    `_scope_snapshot` reads some collections back out of `snapshot` rather than
+    out of `scoped`, because their rule depends on the rows the generic
+    project filter would already have thrown away: a legacy `data_asset` is
+    recognised by `row["asset_schema"]["project_id"]`, and every child is
+    matched against its parent's id.
+
+    Narrowing those in the builder deletes the rows before the rule can see
+    them. That is not a slower snapshot, it is a smaller one -- and both times it
+    happened the export simply lacked data, which is the failure this file exists
+    to refuse. The full suite caught the second instance:
+
+        Resource 'connection_syncs:maintenance_sync' references
+        missing scoped data_assets 'ingestion_target'
+    """
+    return set(re.findall(r'snapshot\.get\("(\w+)"\)', scope_body(source)))
+
+
+def narrowed_in_builder(source: str) -> Set[str]:
+    r"""Collections the builder filters by project before scoping sees them.
+
+    Matched by walking whole entries rather than by a pattern that has to reach
+    across one. The first version used `[^\]]*?` between the key and the call,
+    which cannot cross the `]` that closes `_row_dict`'s own field list -- so it
+    matched nothing at all and the check passed by measuring nothing. Verified
+    against a tree containing the state it is meant to refuse.
+    """
+    narrowed = set()
+    for match in re.finditer(r'"(\w+)":\s*\[(.*?)\],\n', snapshot_body(source), re.S):
+        if "_for_project(" in match.group(2):
+            narrowed.add(match.group(1))
+    return narrowed
+
+
 def explicit_scope_keys(source: str) -> Set[str]:
     """Collections `_scope_snapshot` assigns by name, whatever the rule is."""
     return set(re.findall(r'scoped\["(\w+)"\]\s*=', scope_body(source)))
@@ -109,7 +145,11 @@ def survey(source: str, child_relations: Set[str]) -> Tuple[Dict[str, Dict[str, 
     entries = collections(source)
     resolve_custom(entries)
     explicit = explicit_scope_keys(source)
-    unsafe = []
+    unsafe = [
+        f"{key}: narrowed by project in the builder, but _scope_snapshot reads it from the "
+        "unscoped snapshot -- the rows its rule needs are deleted before it runs"
+        for key in sorted(closure_reads(source) & narrowed_in_builder(source))
+    ]
     for key, entry in sorted(entries.items()):
         entry["child"] = key in child_relations
         entry["explicit"] = key in explicit
