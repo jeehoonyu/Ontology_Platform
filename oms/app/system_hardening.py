@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, String, inspect, text
+from sqlalchemy import Integer, String, inspect, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -711,6 +711,67 @@ def _plugin_version_snapshot(row: plugin_runtime.PluginVersion) -> Dict[str, Any
     }
 
 
+def _for_parent(query, child_key: str, project_id):
+    """Fetch a child collection by its parents rather than in full.
+
+    A child has no project of its own that the snapshot trusts. `_scope_snapshot`
+    keeps the rows whose foreign key points at a parent already in scope, and
+    reads them from the *unscoped* list to do it -- so selecting a child by its
+    own `project_id` is not the same question and does not give the same answer.
+    A row whose parent is in the project but whose own `project_id` says
+    otherwise belongs in the snapshot, and filtering it out earlier loses it.
+
+    That is not hypothetical: the first pass of this work filtered fifteen child
+    collections by their own `project_id`, and a log row whose parent was in the
+    project disappeared from the export. The predicate here is the closure's
+    predicate, expressed as a subquery so the rows are never loaded.
+
+    Without a project there is nothing to narrow, and an unscoped snapshot must
+    still read everything.
+    """
+    if not project_id:
+        return query
+    relation = _SNAPSHOT_CHILD_QUERIES.get(child_key)
+    if relation is None:
+        return query
+    foreign_key, parent_model, _parent_id = relation
+    if not _narrowable(child_key, parent_model):
+        # The parent's own scope is not a column predicate -- `ontology_packages`
+        # is selected by an explicit rule in `_scope_snapshot` that reads
+        # installations. There is no subquery for that, so this child stays
+        # loaded in full and the closure filters it as it always did. Slower
+        # than the rest, and correct, which is the right way round.
+        return query
+    return query.filter(foreign_key.in_(_parent_id_select(child_key, project_id)))
+
+
+def _narrowable(child_key: str, parent_model) -> bool:
+    """Can this child's parents be selected with a predicate?"""
+    parent_key = _SNAPSHOT_CHILD_RELATIONS[child_key][0]
+    if parent_key in _SNAPSHOT_CHILD_QUERIES:
+        grandparent = _SNAPSHOT_CHILD_QUERIES[parent_key][1]
+        return _narrowable(parent_key, grandparent)
+    return hasattr(parent_model, "project_id")
+
+
+def _parent_id_select(child_key: str, project_id):
+    """The ids of this child's in-scope parents, as a subquery.
+
+    A subquery rather than a list of ids: the list would be bounded by the
+    database's parameter limit, and a project with more parents than that cap
+    would fail rather than merely slow down. It also recurses, because one
+    relation is two deep -- `event_stream_receipts` hangs off
+    `event_stream_bindings`, which hangs off `streams`.
+    """
+    _foreign_key, parent_model, parent_id = _SNAPSHOT_CHILD_QUERIES[child_key]
+    statement = select(parent_id)
+    parent_key = _SNAPSHOT_CHILD_RELATIONS[child_key][0]
+    if parent_key in _SNAPSHOT_CHILD_QUERIES:
+        grandparent_fk = _SNAPSHOT_CHILD_QUERIES[parent_key][0]
+        return statement.where(grandparent_fk.in_(_parent_id_select(parent_key, project_id)))
+    return statement.where(parent_model.project_id == project_id)
+
+
 def _for_project(query, column, project_id):
     """Ask the database for one project's rows instead of filtering afterwards.
 
@@ -776,7 +837,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "agent_sessions": [
             _row_dict(row, ["id", "agent_id", "user_prompt", "status", "context", "plan", "proposed_actions", "created_at", "completed_at"])
-            for row in db.query(models.AgentSession).all()
+            for row in _for_parent(db.query(models.AgentSession), "agent_sessions", project_id).all()
         ],
         "logic_functions": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "blocks", "input_schema", "output_schema", "approval_required", "created_at", "updated_at"])
@@ -784,7 +845,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "logic_runs": [
             _row_dict(row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"])
-            for row in db.query(models.LogicRun).all()
+            for row in _for_parent(db.query(models.LogicRun), "logic_runs", project_id).all()
         ],
         "eval_suites": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "target_agent_id", "cases", "criteria", "created_at", "updated_at"])
@@ -820,7 +881,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "entity_candidates": [
             _row_dict(row, ["id", "project_id", "job_id", "object_type_id", "object_ids", "score", "reasons", "status", "merged_object_id", "created_at", "decided_at"])
-            for row in _for_project(db.query(decision_intelligence.EntityCandidate), decision_intelligence.EntityCandidate.project_id, project_id).all()
+            for row in _for_parent(db.query(decision_intelligence.EntityCandidate), "entity_candidates", project_id).all()
         ],
         "decision_scenarios": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "seed_object_ids", "overrides", "propagation_rules", "baseline", "scenario_output", "impact", "created_at", "updated_at"])
@@ -860,7 +921,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "pipeline_builder_builds": [
             _row_dict(row, ["id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at"])
-            for row in db.query(pipeline_builder_ops.PipelineBuilderBuild).all()
+            for row in _for_parent(db.query(pipeline_builder_ops.PipelineBuilderBuild), "pipeline_builder_builds", project_id).all()
         ],
         "pipeline_ontology_contract_runs": [
             _row_dict(row, ["id", "project_id", "graph_id", "build_id", "node_id", "object_type_id", "status", "input_rows", "accepted_rows", "rejected_rows", "created_objects", "updated_objects", "unchanged_objects", "quarantine_asset_id", "field_lineage", "violations", "created_at"])
@@ -939,7 +1000,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "workshop_module_versions": [
             _row_dict(row, ["id", "module_id", "version_number", "snapshot", "note", "actor", "created_at"])
-            for row in db.query(apps.WorkshopModuleVersion).all()
+            for row in _for_parent(db.query(apps.WorkshopModuleVersion), "workshop_module_versions", project_id).all()
         ],
         "object_explorer_explorations": [
             _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"])
@@ -987,7 +1048,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "connection_sync_runs": [
             _row_dict(row, ["id", "sync_id", "status", "records_in", "records_out", "created_at", "completed_at"])
-            for row in db.query(connectivity.SyncRun).all()
+            for row in _for_parent(db.query(connectivity.SyncRun), "connection_sync_runs", project_id).all()
         ],
         "connection_exports": [
             _row_dict(row, ["id", "project_id", "source_asset_id", "destination", "format", "created_at"])
@@ -995,11 +1056,11 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "connection_export_checkpoints": [
             _row_dict(row, ["export_id", "last_exported_count", "runs", "updated_at"])
-            for row in db.query(connectivity.ConnectionExportCheckpoint).all()
+            for row in _for_parent(db.query(connectivity.ConnectionExportCheckpoint), "connection_export_checkpoints", project_id).all()
         ],
         "connection_sync_cursors": [
             _row_dict(row, ["sync_id", "cursor_field", "last_value", "runs", "updated_at"])
-            for row in db.query(connectivity_ops.SyncCursorState).all()
+            for row in _for_parent(db.query(connectivity_ops.SyncCursorState), "connection_sync_cursors", project_id).all()
         ],
         "streams": [
             _row_dict(row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "next_sequence", "created_at"])
@@ -1007,7 +1068,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "stream_records": [
             _row_dict(row, ["id", "stream_id", "sequence", "payload", "ts", "archived", "archived_at", "created_at"])
-            for row in db.query(streaming.StreamRecord).all()
+            for row in _for_parent(db.query(streaming.StreamRecord), "stream_records", project_id).all()
         ],
         "stream_processors": [
             _row_dict(row, [
@@ -1023,52 +1084,52 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             _row_dict(row, [
                 "id", "processor_id", "project_id", "partition_key", "max_event_time",
                 "watermark", "processed_count", "late_count", "quarantined_count", "updated_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamPartitionState), stream_processing.StreamPartitionState.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamPartitionState), "stream_partition_states", project_id).all()
         ],
         "stream_window_states": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "partition_key", "window_start", "window_end",
                 "count", "numeric_count", "value_sum", "value_min", "value_max", "status",
                 "emitted_at", "updated_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamWindowState), stream_processing.StreamWindowState.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamWindowState), "stream_window_states", project_id).all()
         ],
         "stream_processing_receipts": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
                 "status", "reason", "run_id", "created_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamProcessingReceipt), stream_processing.StreamProcessingReceipt.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamProcessingReceipt), "stream_processing_receipts", project_id).all()
         ],
         "stream_join_inputs": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "record_id", "stream_id", "side",
                 "join_key", "event_time", "created_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamJoinInput), stream_processing.StreamJoinInput.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamJoinInput), "stream_join_inputs", project_id).all()
         ],
         "stream_join_receipts": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "left_record_id", "right_record_id",
                 "output_record_id", "join_key", "left_event_time", "right_event_time",
                 "run_id", "created_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamJoinReceipt), stream_processing.StreamJoinReceipt.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamJoinReceipt), "stream_join_receipts", project_id).all()
         ],
         "stream_join_outer_receipts": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "record_id", "side", "output_record_id",
                 "join_key", "event_time", "opposite_watermark", "run_id", "created_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamJoinOuterReceipt), stream_processing.StreamJoinOuterReceipt.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamJoinOuterReceipt), "stream_join_outer_receipts", project_id).all()
         ],
         "stream_quarantine_records": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
                 "watermark", "reason", "payload", "status", "created_at", "resolved_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamQuarantineRecord), stream_processing.StreamQuarantineRecord.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamQuarantineRecord), "stream_quarantine_records", project_id).all()
         ],
         "stream_processing_runs": [
             _row_dict(row, [
                 "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
                 "backlog_after", "records_processed", "records_late", "records_quarantined",
                 "windows_emitted", "joins_emitted", "outer_joins_emitted", "metrics", "error", "created_at", "completed_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamProcessingRun), stream_processing.StreamProcessingRun.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(stream_processing.StreamProcessingRun), "stream_processing_runs", project_id).all()
         ],
         "schedules": [
             _row_dict(row, ["id", "project_id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
@@ -1118,7 +1179,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
                 "aggregate_type", "aggregate_id", "actor", "payload", "headers", "occurred_at",
                 "published_at",
             ])
-            for row in _for_project(db.query(event_outbox.PlatformEventLog), event_outbox.PlatformEventLog.project_id, project_id).all()
+            for row in _for_parent(db.query(event_outbox.PlatformEventLog), "platform_event_log", project_id).all()
         ],
         "event_transport_receipts": [
             _row_dict(row, [
@@ -1127,20 +1188,20 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
                 "lease_expires_at", "broker_metadata", "last_error", "created_at", "updated_at",
                 "delivered_at",
             ])
-            for row in _for_project(db.query(event_outbox.EventTransportReceipt), event_outbox.EventTransportReceipt.project_id, project_id).all()
+            for row in _for_parent(db.query(event_outbox.EventTransportReceipt), "event_transport_receipts", project_id).all()
         ],
         "event_stream_bindings": [
             _row_dict(row, [
                 "id", "project_id", "display_name", "target_stream_id", "topics",
                 "event_types", "aggregate_types", "object_type_ids", "active",
                 "cursor_sequence", "created_by", "created_at", "updated_at",
-            ]) for row in _for_project(db.query(event_outbox.EventStreamBinding), event_outbox.EventStreamBinding.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(event_outbox.EventStreamBinding), "event_stream_bindings", project_id).all()
         ],
         "event_stream_receipts": [
             _row_dict(row, [
                 "id", "project_id", "binding_id", "event_id", "event_sequence",
                 "stream_record_id", "created_at",
-            ]) for row in _for_project(db.query(event_outbox.EventStreamReceipt), event_outbox.EventStreamReceipt.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(event_outbox.EventStreamReceipt), "event_stream_receipts", project_id).all()
         ],
         "ops_alert_rules": [ops_control._rule_dict(row) for row in _for_project(db.query(ops_control.AlertRule), ops_control.AlertRule.project_id, project_id).all()],
         "ops_alerts": [ops_control._alert_dict(row) for row in _for_project(db.query(ops_control.AlertEvent), ops_control.AlertEvent.project_id, project_id).all()],
@@ -1181,7 +1242,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "platform_artifact_revisions": [
             _row_dict(row, ["id", "artifact_id", "revision", "state", "layout", "validation", "author", "message", "published", "restored_from_revision", "created_at"])
-            for row in db.query(platform_runtime.ArtifactRevision).all()
+            for row in _for_parent(db.query(platform_runtime.ArtifactRevision), "platform_artifact_revisions", project_id).all()
         ],
         "platform_jobs": [
             _row_dict(row, ["id", "project_id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"])
@@ -1189,7 +1250,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "platform_job_events": [
             _row_dict(row, ["id", "job_id", "event_type", "status", "payload", "created_at"])
-            for row in db.query(platform_runtime.PlatformJobEvent).all()
+            for row in _for_parent(db.query(platform_runtime.PlatformJobEvent), "platform_job_events", project_id).all()
         ],
         "platform_job_idempotency_receipts": [
             _row_dict(row, ["id", "scope_hash", "job_id", "project_id", "actor", "job_type", "subject_type", "subject_id", "idempotency_key", "request_hash", "created_at"])
@@ -1197,7 +1258,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "platform_artifact_collaboration_events": [
             _row_dict(row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"])
-            for row in db.query(platform_runtime.ArtifactCollaborationEvent).all()
+            for row in _for_parent(db.query(platform_runtime.ArtifactCollaborationEvent), "platform_artifact_collaboration_events", project_id).all()
         ],
         "platform_artifact_command_receipts": [
             _row_dict(row, ["id", "artifact_id", "project_id", "command_scope", "idempotency_key", "request_hash", "revision", "lock_version", "participant_id", "command_ids", "rebased_from_lock_version", "created_at"])
@@ -1208,7 +1269,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
                 "id", "artifact_id", "project_id", "revision", "target", "thread_id",
                 "parent_id", "body", "status", "author", "resolved_by", "resolved_at",
                 "created_at", "updated_at",
-            ]) for row in _for_project(db.query(platform_runtime.ArtifactReviewComment), platform_runtime.ArtifactReviewComment.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(platform_runtime.ArtifactReviewComment), "platform_artifact_review_comments", project_id).all()
         ],
         "platform_artifact_change_proposals": [
             _row_dict(row, [
@@ -1216,7 +1277,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
                 "version", "title", "description", "commands", "targets", "validation",
                 "status", "author", "reviewer", "review_note", "applied_revision",
                 "created_at", "updated_at", "reviewed_at", "applied_at",
-            ]) for row in _for_project(db.query(platform_runtime.ArtifactChangeProposal), platform_runtime.ArtifactChangeProposal.project_id, project_id).all()
+            ]) for row in _for_parent(db.query(platform_runtime.ArtifactChangeProposal), "platform_artifact_change_proposals", project_id).all()
         ],
         "organizations": [
             _row_dict(row, ["id", "display_name", "status", "created_at", "updated_at"])
@@ -1236,7 +1297,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
         ],
         "ontology_package_versions": [
             _row_dict(row, ["id", "package_id", "version", "status", "manifest", "checksum", "validation", "author", "created_at", "published_at"])
-            for row in db.query(ontology_packages.OntologyPackageVersion).all()
+            for row in _for_parent(db.query(ontology_packages.OntologyPackageVersion), "ontology_package_versions", project_id).all()
         ],
         "ontology_package_installations": [
             _row_dict(row, ["id", "package_id", "package_version_id", "version", "target_project_id", "namespace", "status", "installed_resources", "prior_state", "previous_installation_id", "installed_by", "installed_at", "rolled_back_at"])
@@ -1320,6 +1381,40 @@ _SNAPSHOT_CHILD_RELATIONS = {
     "event_stream_bindings": ("streams", "target_stream_id", "id"),
     "event_stream_receipts": ("event_stream_bindings", "binding_id", "id"),
     "entity_candidates": ("entity_resolution_jobs", "job_id", "id"),
+}
+
+
+_SNAPSHOT_CHILD_QUERIES = {
+    # child -> (its foreign key, the parent model, the parent id column).
+    # Derived from _SNAPSHOT_CHILD_RELATIONS above; a test asserts the two
+    # maps describe exactly the same set, so neither can drift alone.
+    "agent_sessions": (models.AgentSession.agent_id, models.AgentDefinition, models.AgentDefinition.id),
+    "connection_export_checkpoints": (connectivity.ConnectionExportCheckpoint.export_id, connectivity.ConnectionExport, connectivity.ConnectionExport.id),
+    "connection_sync_cursors": (connectivity_ops.SyncCursorState.sync_id, connectivity.ConnectionSync, connectivity.ConnectionSync.id),
+    "connection_sync_runs": (connectivity.SyncRun.sync_id, connectivity.ConnectionSync, connectivity.ConnectionSync.id),
+    "entity_candidates": (decision_intelligence.EntityCandidate.job_id, decision_intelligence.EntityResolutionJob, decision_intelligence.EntityResolutionJob.id),
+    "event_stream_bindings": (event_outbox.EventStreamBinding.target_stream_id, streaming.Stream, streaming.Stream.id),
+    "event_stream_receipts": (event_outbox.EventStreamReceipt.binding_id, event_outbox.EventStreamBinding, event_outbox.EventStreamBinding.id),
+    "event_transport_receipts": (event_outbox.EventTransportReceipt.outbox_event_id, event_outbox.EventOutbox, event_outbox.EventOutbox.id),
+    "logic_runs": (models.LogicRun.logic_function_id, models.LogicFunction, models.LogicFunction.id),
+    "ontology_package_versions": (ontology_packages.OntologyPackageVersion.package_id, ontology_packages.OntologyPackage, ontology_packages.OntologyPackage.id),
+    "pipeline_builder_builds": (pipeline_builder_ops.PipelineBuilderBuild.graph_id, pipeline_builder_ops.PipelineBuilderGraph, pipeline_builder_ops.PipelineBuilderGraph.id),
+    "platform_artifact_change_proposals": (platform_runtime.ArtifactChangeProposal.artifact_id, platform_runtime.PlatformArtifact, platform_runtime.PlatformArtifact.id),
+    "platform_artifact_collaboration_events": (platform_runtime.ArtifactCollaborationEvent.artifact_id, platform_runtime.PlatformArtifact, platform_runtime.PlatformArtifact.id),
+    "platform_artifact_review_comments": (platform_runtime.ArtifactReviewComment.artifact_id, platform_runtime.PlatformArtifact, platform_runtime.PlatformArtifact.id),
+    "platform_artifact_revisions": (platform_runtime.ArtifactRevision.artifact_id, platform_runtime.PlatformArtifact, platform_runtime.PlatformArtifact.id),
+    "platform_event_log": (event_outbox.PlatformEventLog.outbox_event_id, event_outbox.EventOutbox, event_outbox.EventOutbox.id),
+    "platform_job_events": (platform_runtime.PlatformJobEvent.job_id, platform_runtime.PlatformJob, platform_runtime.PlatformJob.id),
+    "stream_join_inputs": (stream_processing.StreamJoinInput.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_join_outer_receipts": (stream_processing.StreamJoinOuterReceipt.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_join_receipts": (stream_processing.StreamJoinReceipt.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_partition_states": (stream_processing.StreamPartitionState.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_processing_receipts": (stream_processing.StreamProcessingReceipt.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_processing_runs": (stream_processing.StreamProcessingRun.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_quarantine_records": (stream_processing.StreamQuarantineRecord.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "stream_records": (streaming.StreamRecord.stream_id, streaming.Stream, streaming.Stream.id),
+    "stream_window_states": (stream_processing.StreamWindowState.processor_id, stream_processing.StreamProcessor, stream_processing.StreamProcessor.id),
+    "workshop_module_versions": (apps.WorkshopModuleVersion.module_id, apps.WorkshopModule, apps.WorkshopModule.id),
 }
 
 

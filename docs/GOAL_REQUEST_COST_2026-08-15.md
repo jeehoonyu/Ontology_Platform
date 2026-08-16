@@ -344,9 +344,45 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   reads everything — because a filter on a missing project would quietly export nothing,
   which is the failure this change could most easily have introduced.
 
-  **Phase two is not done**: the 12 child collections are still loaded in full and filtered
-  by parent id in Python. That needs a two-pass builder — scope the parents, then fetch
-  children by `parent_id IN (...)` — which is a design change rather than a per-line edit.
+  **Phase two, which turned out to be a correctness fix.** Measuring first: with 500 child
+  rows belonging to another project, the builder loaded 622 rows and **80% of them were
+  children** — the collections phase one could not touch, because they have no project of
+  their own.
+
+  Then a worse finding. Fifteen of the 27 child collections *do* carry a `project_id`
+  column, and phase one had filtered them by it. That is not the same predicate.
+  `_scope_snapshot` reads children from the **unscoped** list and keeps the ones whose
+  foreign key points at a parent in scope — so a row whose parent is in the project belongs
+  in the snapshot whatever its own column says. Narrowing by the column deleted it before
+  the closure could see it. Demonstrated: a `platform_event_log` row whose parent was in the
+  project, and which the pre-phase-one code kept, **disappeared from the export**.
+
+  The equivalence harness missed it because no fixture row had a child disagreeing with its
+  parent. A byte-identical diff is only as strong as the states the fixture contains.
+
+  So children are now selected by their parents, as a subquery — the closure's own
+  predicate, asked where the rows are:
+
+  | With 500 foreign child rows | Before | After |
+  | --- | --- | --- |
+  | rows the builder loads | 622 | **122** |
+  | of which child rows | 500 | **0** |
+
+  A subquery rather than a list of parent ids, deliberately: a list is bounded by the
+  database's parameter cap, so a project with more parents than the cap would fail rather
+  than merely slow down. It recurses for the one two-deep relation
+  (`event_stream_receipts` → `event_stream_bindings` → `streams`).
+
+  **26 of 27 are narrowed. One is not**: `ontology_package_versions`, whose parent
+  `ontology_packages` is scoped by an explicit rule that reads installations rather than by
+  a column. There is no subquery for that, so it stays loaded in full and the closure filters
+  it as before — slower than the rest and correct, which is the right way round.
+
+  `_SNAPSHOT_CHILD_QUERIES` was **derived** from the existing relation map and the builder's
+  own queries rather than hand-written, and a test asserts the two maps describe the same
+  set so neither can drift alone. The crossed-parent case is now a test: a child of my parent
+  is kept though its own column says otherwise, and a child claiming my project is dropped
+  because its parent is not mine.
 
 ## What this is not
 
