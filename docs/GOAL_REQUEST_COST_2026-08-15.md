@@ -260,6 +260,46 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   command-center ×13 are both replayed as fixtures, so the audit is tested against the
   defects it was built for rather than only against a tree that already passes.
 
+- **E6 — The column census, before any pushdown.** The scope-pushdown idea needs to know,
+  per collection, whether `project_id` can be asked in SQL. `_scope_snapshot` filters on
+  `row.get("project_id")` — the *serialised* key, not the column — so three things have to
+  hold, and each was checked rather than assumed.
+
+  Of the 133 collections `_snapshot` builds:
+
+  | | | |
+  | --- | --- | --- |
+  | **114** | pushdown-able | has the column, serialises it, no existing filter |
+  | 1 | already filtered | |
+  | 18 | no `project_id` column | re-included by the parent closure or an explicit rule |
+  | **0** | column present but not serialised | the case that would empty a collection silently |
+
+  That last row is the one the census was really looking for. A collection whose model has
+  `project_id` but whose row dict omits it would be dropped entirely by scoping while looking
+  healthy — every export missing it, every restore short of it, and nothing to see in the
+  code. **There are none.**
+
+  The 18 without the column are not a gap either. `_SNAPSHOT_CHILD_RELATIONS` re-includes
+  them by parent identity — `logic_runs` through `logic_functions`, `agent_sessions` through
+  `agent_definitions`, `stream_records` through `streams`, and so on. Verified rather than
+  read: a logic run whose function belongs to the project survives the scope, and one whose
+  function belongs to another project does not.
+
+  So the work splits cleanly, and the split is the point of doing this first:
+
+  - **114 collections take a one-line filter each.** The SQL predicate is exactly what the
+    Python loop already computes, so the equivalence test is that `_snapshot` output is
+    identical before and after on a multi-project fixture.
+  - **18 need a second phase** — scope the parents, then fetch children by `parent_id IN
+    (...)`. That is a design change to `_snapshot`, two passes instead of one dict literal,
+    not a per-line edit.
+  - The explicit closure rules stay in Python, because they read payloads.
+
+  One property here is worth a ratchet of its own and does not have one: a new collection
+  that neither serialises `project_id` nor is declared a child would vanish from every
+  snapshot silently. It is satisfied today at zero, which is exactly when a ratchet is
+  cheapest to install.
+
 ## What this is not
 
 Not a performance goal. Nothing here promises a route gets faster, and no threshold in it is
