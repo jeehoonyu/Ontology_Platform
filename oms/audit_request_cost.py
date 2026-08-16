@@ -137,6 +137,17 @@ def compare(measured: Dict[str, Dict[str, int]],
         if delta:
             notes.append(f"{path}: {recorded.get('queries')} -> {row['queries']} queries "
                          f"({delta:+d})")
+        # Shape drift with no query drift is a real signal and used to be
+        # invisible here. Pushing a project filter into 26 child collections
+        # rewrote their SQL without changing how many statements ran, so
+        # `/project/readiness` went from 160 distinct shapes to 163 and this
+        # reported nothing. The baseline records the field; it should say when
+        # it moves.
+        shapes = row["distinct_shapes"] - recorded.get("distinct_shapes", 0)
+        if shapes and not delta:
+            notes.append(f"{path}: same {row['queries']} queries, "
+                         f"{recorded.get('distinct_shapes')} -> {row['distinct_shapes']} "
+                         f"distinct shapes ({shapes:+d})")
     for path in sorted(set(baseline) - set(measured)):
         notes.append(f"route no longer measured: {path}")
     return failures, notes

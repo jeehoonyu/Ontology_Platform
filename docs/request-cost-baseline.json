@@ -593,12 +593,12 @@
       "worst_repeat": 2
     },
     "/project/readiness": {
-      "distinct_shapes": 160,
+      "distinct_shapes": 163,
       "queries": 169,
       "worst_repeat": 4
     },
     "/project/validate": {
-      "distinct_shapes": 160,
+      "distinct_shapes": 162,
       "queries": 168,
       "worst_repeat": 4
     },
@@ -728,7 +728,7 @@
       "worst_repeat": 3
     },
     "/ui-state/validation": {
-      "distinct_shapes": 160,
+      "distinct_shapes": 162,
       "queries": 168,
       "worst_repeat": 4
     },
