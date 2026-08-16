@@ -50,6 +50,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no read materializes an object type before filtering it",
         "runs_in": "suite",
     },
+    "audit_request_cost": {
+        "purpose": "no route runs one statement shape over and over",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

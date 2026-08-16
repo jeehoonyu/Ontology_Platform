@@ -163,9 +163,31 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   Still open: `/project/readiness` remains the worst route in the product at 169, and 226 of
   its statements are distinct shapes — so what is left there is breadth, not a loop, and it
   wants the same kind of look `/project/export` just got.
-- **E5 — A ratchet.** An audit that fails when a route's cost regresses past its recorded
-  ceiling, and *reports* drift rather than failing on it — the rule this project learned
-  twice, that a gate on something ordinary work breaks is a gate people route around.
+- **E5 — A ratchet.** `oms/audit_request_cost.py`, with the surface recorded in
+  `docs/request-cost-baseline.json`. **Done.**
+
+  **It gates the repeated shape and reports everything else**, and that split is the whole
+  design. One statement executed many times in a request is the N+1 signature — it is what
+  every defect in E4 looked like, and it is not something ordinary work does. Totals are
+  reported and never gated, because a large total is often correct: `/project/export` issues
+  139 queries and 138 are distinct. An audit that failed on totals would fail that endpoint
+  forever, and a check people route around is worse than no check. That is the rule this
+  project has now learned three times.
+
+  The ceiling is **6**, chosen from the measured surface after the loops came out: the worst
+  remaining repeat is 4, so there is room for an honest change and a ×13 or a ×32 fails the
+  day it lands. The ratchet is that the count of routes above the ceiling stays at zero.
+
+  It boots the app against a scratch SQLite database rather than whatever `DATABASE_URL`
+  happens to be set — an audit that measures the caller's database measures the machine it
+  runs on rather than the code it checks. 151 routes in **9 seconds**.
+
+  `oms/test_request_cost_audit.py` builds the states it must catch and the states it must
+  not: a shape over the ceiling fails **even when the baseline already recorded it** — a
+  ratchet that grandfathers what was there when it was written enforces nothing on existing
+  code, and every loop this found was pre-existing. The migration-record ×32 and the
+  command-center ×13 are both replayed as fixtures, so the audit is tested against the
+  defects it was built for rather than only against a tree that already passes.
 
 ## What this is not
 
