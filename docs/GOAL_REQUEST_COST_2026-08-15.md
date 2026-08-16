@@ -160,9 +160,49 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   unbounded memory. Named here rather than fixed, because for an export endpoint it may well
   be the correct trade, and deciding that is not the same as noticing it.
 
-  Still open: `/project/readiness` remains the worst route in the product at 169, and 226 of
-  its statements are distinct shapes — so what is left there is breadth, not a loop, and it
-  wants the same kind of look `/project/export` just got.
+  **`/project/readiness` got that look, and half of it was fixable.** It is not a loop:
+  169 queries, 160 distinct shapes. The breadth comes from `validate_project`, which builds
+  the **entire portable project snapshot** — the same 133-collection export `/project/export`
+  serves — and hands it to `_snapshot_coverage`. That function reads exactly two things from
+  it: which collection names are present, and how long each one is. **110 integers.**
+
+  Measured on a small project, before:
+
+  | | |
+  | --- | --- |
+  | `_snapshot(db)` | 26.6 ms |
+  | `_snapshot_coverage()`, all it needs from that | **0.009 ms** |
+  | rows materialised to compute 110 lengths | 324 |
+
+  So 68% of a readiness check was building an export it discarded. Both numbers grow with
+  the project; the answer does not.
+
+  Fixed here: `_snapshot(..., finalize=False)` for the coverage path. Finalizing deep-copies
+  the whole project, redacts secrets nobody will see, and takes a canonical-JSON sha256 of
+  the result — everything an *exported artifact* needs and a discarded one does not.
+
+  | Route | Before | After |
+  | --- | --- | --- |
+  | `_snapshot` | 26.3 ms | **19.3 ms** |
+  | `/project/readiness` | 39.0 ms | **33.2 ms** |
+  | `/project/validate` | 41.2 ms | **33.3 ms** |
+  | `/ui-state/validation` | 40.3 ms | **34.0 ms** |
+
+  Query counts are unchanged, as they should be — this is the memory and CPU axis, not the
+  round-trip one, and `audit_request_cost.py` correctly reports no drift.
+
+  `oms/test_project_validation_cost.py` pins both halves: coverage must be identical with
+  and without finalizing, and **the export must still be finalized**, because shipping an
+  artifact without its checksum is the defect this would otherwise introduce while removing
+  another. It counts `_finalize_snapshot` calls per route — zero for validate and readiness,
+  exactly one for export.
+
+  **Not fixed, and it is the larger half.** The remaining 19.3 ms is 133 `.all()` reads
+  materialising every row of every table so that 110 of them can be counted. Fixing it means
+  a count-only variant of a 586-line dict literal with 133 inline comprehensions — a real
+  refactor with real risk, and the same `.all()` question `/project/export` raises. The
+  difference is that export needs the rows and this does not. Recorded rather than attempted
+  at the end of a long session.
 - **E5 — A ratchet.** `oms/audit_request_cost.py`, with the surface recorded in
   `docs/request-cost-baseline.json`. **Done.**
 

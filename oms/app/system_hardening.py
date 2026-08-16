@@ -711,7 +711,18 @@ def _plugin_version_snapshot(row: plugin_runtime.PluginVersion) -> Dict[str, Any
     }
 
 
-def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> Dict[str, Any]:
+def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Optional[str] = None,
+              *, finalize: bool = True) -> Dict[str, Any]:
+    """Assemble the portable project snapshot.
+
+    `finalize=False` skips the redaction, deep copy and checksum that only an
+    exported artifact needs. `validate_project` reads nothing from the snapshot
+    but the *names* of its collections and their *lengths*, and paying for a
+    deepcopy plus a canonical-JSON sha256 of the whole project to compute 110
+    integers is the kind of cost that is invisible until someone counts it.
+    Measured on a small project: 5.6 ms of the snapshot's 26.6 ms, and both
+    halves grow with the project while the answer does not.
+    """
     _ensure_runtime_tables(db)
     snapshot = {
         "snapshot_version": PORTABLE_SNAPSHOT_VERSION,
@@ -1263,7 +1274,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
     }
     if project_id:
         snapshot = _scope_snapshot(db, snapshot, project_id, organization_id or "local")
-    return _finalize_snapshot(snapshot)
+    return _finalize_snapshot(snapshot) if finalize else snapshot
 
 
 _SNAPSHOT_CHILD_RELATIONS = {
@@ -1961,7 +1972,10 @@ def validate_project(db: Session = Depends(get_db)):
             },
         }
     event_info = event_consistency(db)
-    snapshot = _snapshot(db, "default", "local")
+    # Unfinalized: coverage reads the collection names and their lengths, and
+    # nothing else. The redaction, deep copy and checksum are what an *exported*
+    # snapshot needs, and this one is discarded.
+    snapshot = _snapshot(db, "default", "local", finalize=False)
     snapshot_info = _snapshot_coverage(snapshot)
     docs_info = _docs_matrix_summary()
     route_paths = [
