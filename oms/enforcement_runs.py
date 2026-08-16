@@ -54,6 +54,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no route runs one statement shape over and over",
         "runs_in": "suite",
     },
+    "audit_snapshot_scope": {
+        "purpose": "no snapshot collection is silently emptied by project scoping",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",
