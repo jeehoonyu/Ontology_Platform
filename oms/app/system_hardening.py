@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, String, inspect, select, text
+from sqlalchemy import Integer, String, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -751,7 +751,35 @@ def _narrowable(child_key: str, parent_model) -> bool:
     if parent_key in _SNAPSHOT_CHILD_QUERIES:
         grandparent = _SNAPSHOT_CHILD_QUERIES[parent_key][1]
         return _narrowable(parent_key, grandparent)
+    if parent_key in _SNAPSHOT_PARENT_PREDICATES:
+        return True
     return hasattr(parent_model, "project_id")
+
+
+def _ontology_package_scope(model, project_id):
+    """Which packages belong to a project: owned by it, or installed into it.
+
+    `_scope_snapshot` says it in Python -- a package is in scope when its
+    `owning_project_id` matches, *or* when some installation targeting this
+    project names it. That is an OR over two tables, which is why the first
+    pass of this work could not narrow the versions hanging off it and left
+    them reading every package's history. It is a subquery like any other; it
+    just is not a single column.
+    """
+    from . import ontology_packages
+
+    installed = select(ontology_packages.OntologyPackageInstallation.package_id).where(
+        ontology_packages.OntologyPackageInstallation.target_project_id == project_id
+    )
+    return or_(model.owning_project_id == project_id, model.id.in_(installed))
+
+
+# Parents whose scope is a rule rather than a `project_id` column. Keyed by the
+# parent's collection name, so a child asks about its parent rather than about
+# itself.
+_SNAPSHOT_PARENT_PREDICATES = {
+    "ontology_packages": _ontology_package_scope,
+}
 
 
 def _parent_id_select(child_key: str, project_id):
@@ -769,6 +797,9 @@ def _parent_id_select(child_key: str, project_id):
     if parent_key in _SNAPSHOT_CHILD_QUERIES:
         grandparent_fk = _SNAPSHOT_CHILD_QUERIES[parent_key][0]
         return statement.where(grandparent_fk.in_(_parent_id_select(parent_key, project_id)))
+    predicate = _SNAPSHOT_PARENT_PREDICATES.get(parent_key)
+    if predicate is not None:
+        return statement.where(predicate(parent_model, project_id))
     return statement.where(parent_model.project_id == project_id)
 
 

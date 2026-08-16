@@ -221,5 +221,47 @@ check("evt_theirs" not in parents,
 check(len(loaded.get("platform_event_log") or []) == 1,
       "only the one child row was read at all", len(loaded.get("platform_event_log") or []))
 
+# --- a parent whose scope is a rule, not a column ----------------------------
+#
+# `ontology_packages` is in scope when the project owns it *or* when some
+# installation targeting the project names it. That OR over two tables is why
+# `ontology_package_versions` was the one child left reading every package's
+# history: there was no single column to filter on. There is still no column --
+# there is a predicate, and a predicate is a subquery like any other.
+
+from app import ontology_packages  # noqa: E402
+from app.system_hardening import _SNAPSHOT_PARENT_PREDICATES  # noqa: E402
+
+check("ontology_packages" in _SNAPSHOT_PARENT_PREDICATES,
+      "the package scope is declared as a predicate", sorted(_SNAPSHOT_PARENT_PREDICATES))
+
+with SessionLocal() as db:
+    db.add(filled(ontology_packages.OntologyPackage, id="pkg_owned",
+                  owning_project_id=MINE, created_at=now, updated_at=now))
+    db.add(filled(ontology_packages.OntologyPackage, id="pkg_installed",
+                  owning_project_id=THEIRS, created_at=now, updated_at=now))
+    db.add(filled(ontology_packages.OntologyPackage, id="pkg_foreign",
+                  owning_project_id=THEIRS, created_at=now, updated_at=now))
+    db.flush()
+    db.add(filled(ontology_packages.OntologyPackageInstallation, id="install_1",
+                  package_id="pkg_installed", target_project_id=MINE, installed_at=now))
+    for package in ("pkg_owned", "pkg_installed", "pkg_foreign"):
+        db.add(filled(ontology_packages.OntologyPackageVersion, id=f"version_{package}",
+                      package_id=package, created_at=now, published_at=now))
+    db.commit()
+
+loaded, scoped = build(MINE)
+packages = sorted(row.get("id") for row in scoped.get("ontology_packages") or [])
+check(packages == ["pkg_installed", "pkg_owned"],
+      "a package is in scope when owned here or installed here, and not otherwise", packages)
+
+versions = sorted(row.get("id") for row in scoped.get("ontology_package_versions") or [])
+check(versions == ["version_pkg_installed", "version_pkg_owned"],
+      "their versions come with them -- including the installed package's", versions)
+
+read = sorted(row.get("id") for row in loaded.get("ontology_package_versions") or [])
+check(read == versions,
+      "and the foreign package's history was never read at all", read)
+
 print(f"Snapshot project pushdown verified: {passed} assertions passed "
       f"({len(loaded_types)} object types read, {len(kept_types)} kept, 25 foreign never touched).")

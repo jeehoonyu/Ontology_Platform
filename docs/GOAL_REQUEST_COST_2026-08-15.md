@@ -373,10 +373,26 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   than merely slow down. It recurses for the one two-deep relation
   (`event_stream_receipts` → `event_stream_bindings` → `streams`).
 
-  **26 of 27 are narrowed. One is not**: `ontology_package_versions`, whose parent
-  `ontology_packages` is scoped by an explicit rule that reads installations rather than by
-  a column. There is no subquery for that, so it stays loaded in full and the closure filters
-  it as before — slower than the rest and correct, which is the right way round.
+  **All 27 are narrowed.** The last one took a second look. `ontology_package_versions`
+  hangs off `ontology_packages`, which has no `project_id` — a package is in scope when the
+  project **owns** it *or* when some installation **targeting** the project names it. There
+  is no column for that, which is why the first pass left the versions reading every
+  package's history.
+
+  There is no column, but there is a predicate, and a predicate is a subquery like any
+  other:
+
+  ```sql
+  owning_project_id = :project
+  OR id IN (SELECT package_id FROM ontology_package_installations
+            WHERE target_project_id = :project)
+  ```
+
+  `_SNAPSHOT_PARENT_PREDICATES` holds it, keyed by the *parent's* collection name so a
+  child asks about its parent rather than about itself. The distinction that matters is
+  tested in all three directions: a package owned here keeps its versions, a package owned
+  elsewhere **but installed here** keeps its versions too, and a package owned elsewhere and
+  not installed has its history never read at all.
 
   `_SNAPSHOT_CHILD_QUERIES` was **derived** from the existing relation map and the builder's
   own queries rather than hand-written, and a test asserts the two maps describe the same
