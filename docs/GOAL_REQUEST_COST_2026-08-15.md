@@ -300,6 +300,54 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   snapshot silently. It is satisfied today at zero, which is exactly when a ratchet is
   cheapest to install.
 
+- **E7 — The ratchet, then phase one.** Both landed, in that order deliberately.
+
+  `oms/audit_snapshot_scope.py` refuses a collection that scoping would empty without a
+  symptom. 133 collections: **115** carry `project_id`, **12** come back through the parent
+  closure, **6** are assigned explicitly by `_scope_snapshot`, **0** are dropped. Nothing in
+  it is hand-maintained — child relations are read from the module, explicit rules from
+  `_scope_snapshot`'s own assignments, serialised keys from each entry — because a list of
+  exceptions is the part that rots. It went in at zero, which is when a ratchet costs
+  nothing and cannot be argued with.
+
+  Then the pushdown: `_for_project(query, column, project_id)` applied to the **114**
+  qualifying collections, filtering in SQL what `_scope_snapshot` filtered in Python
+  afterwards. Same rule, asked where it can be answered.
+
+  | With 200 rows in a second project | Before | After |
+  | --- | --- | --- |
+  | rows the builder loads | 322 | **122** |
+  | `_snapshot` (scoped) | 19.3 ms | **17.0 ms** |
+  | `/project/readiness` | 33.2 ms | **27.8 ms** |
+  | `/project/export` | 42.3 ms | **30.8 ms** |
+
+  The ratio is the point rather than the milliseconds: the old builder read every project to
+  serve one, so its cost grew with the tenants beside you. 122 rows is now the whole cost
+  whether the deployment holds one other project or ten thousand.
+
+  **Equivalence was proved against a fixed fixture, not argued.** The same SQLite file was
+  snapshotted before and after; the scoped output is byte-identical except for `created_at`
+  and `updated_at` on `projects` and `organizations` — and a **control run of the same code
+  twice** shows those two fields differing by themselves, because `_scope_snapshot`
+  synthesises those rows with a clock. Without the control they would have read as a
+  regression.
+
+  The harness produced one false regression before that, worth recording because it looked
+  exactly like a real one: copying a live SQLite fixture without its `-wal` sidecar silently
+  dropped every commit still in the write-ahead log, and the diff reported 18 missing rows
+  as a defect in the code under test. A measurement can be wrong in the direction of alarm
+  as easily as in the direction of comfort.
+
+  `oms/test_snapshot_project_pushdown.py` pins three properties: no foreign row is loaded,
+  every row that belongs is still there **including children re-added by parent identity**
+  (`logic_runs` has no `project_id` column at all), and an unscoped `_snapshot(db)` still
+  reads everything — because a filter on a missing project would quietly export nothing,
+  which is the failure this change could most easily have introduced.
+
+  **Phase two is not done**: the 12 child collections are still loaded in full and filtered
+  by parent id in Python. That needs a two-pass builder — scope the parents, then fetch
+  children by `parent_id IN (...)` — which is a design change rather than a per-line edit.
+
 ## What this is not
 
 Not a performance goal. Nothing here promises a route gets faster, and no threshold in it is
