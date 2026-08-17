@@ -45,13 +45,14 @@ the route table makes.
   fixture has to contain the crossed case.
 - **F5 — Extend the ratchet.** `audit_request_cost.py` gates the repeated shape over GET
   collection routes. If the suite can produce write costs reproducibly, the same ceiling
-  should cover writes.
+  should cover writes. **Met** — `oms/audit_suite_cost.py`, below.
 
 ## What the census found
 
-**3,643 requests over 695 route+method pairs — 2,368 writes and 1,275 reads.** Every one
-issued by the suite with a payload the route accepts. Worst observation per route, never the
-mean: a route called forty times with one expensive call is a route with an expensive call.
+**3,643 requests — 2,368 of them writes — over 695 route+method pairs, of which 400 are
+write pairs.** Every one issued by the suite with a payload the route accepts. Worst
+observation per route, never the mean: a route called forty times with one expensive call is
+a route with an expensive call.
 
 | Repeats | Queries | Calls | Route |
 | --- | --- | --- | --- |
@@ -67,7 +68,19 @@ mean: a route called forty times with one expensive call is a route with an expe
   request, holding a transaction open across all of it. The largest finding here, and a
   write — which is what this goal was opened to look at.
 - `/project/import` repeats a shape 85 times.
-- `/project/readiness` repeats `SELECT count(*) FROM (SELECT audit_logs …)` 33 times.
+- `/project/readiness` is **not** a defect, and saying so took three attempts. Its ×33 is
+  `INSERT INTO system_migration_records` — the 33 migration rows seeded on the first call
+  against a fresh database, which 23 of the suite's scripts each trigger once. Of its 57
+  calls, 31 sit at ×4 and 23 at exactly ×33; nothing in between scales. Measured directly
+  against a growing audit log it is flat — 169 queries and ×4 at 0, 200, 400 and 800 rows.
+
+The route was named as a defect twice before that: first at ×192, which was the instrument
+counting other threads' work, and then at ×33 attributed to a `count(*)` over `audit_logs`,
+which was a guess that the measurement above refutes. Both are left in this document on
+purpose. The lesson is not that the route is fine; it is that **a repeated shape is a
+question, not a finding** — one-time seeding, a fixed fan-out over seven event types, and a
+loop over rows all look identical until something separates them, which is what `shape()`
+is for and what neither claim used.
 
 **These are the second set of numbers.** The first set was measured with an instrument that
 was wrong under concurrency; what it claimed and what is true are set out below.
@@ -118,28 +131,69 @@ which path it traversed is not evidence at all.
 ## The finding that matters most is about the ratchet
 
 `audit_request_cost.py` walks **collection GET routes** against a **scratch, empty**
-database. That is what makes it fast and deterministic, and it is also why it sees none of
-this. The blind spot has two halves, and the corrected census sharpens rather than softens
-both:
+database, and the census says plainly which half of that is the problem.
 
-| | Ratchet sees | Suite sees |
-| --- | --- | --- |
-| `GET /project/readiness` | 169 queries, ×4 | 1,140 queries, **×33** |
-| `POST /pipeline-builder/workers/run-next` | **never called** | 10,203 queries, **×1006** |
+| | Ratchet | Suite | |
+| --- | --- | --- | --- |
+| `POST /pipeline-builder/workers/run-next` | **never called** | 10,203 queries, **×1006** | the blind spot |
+| `GET /project/readiness` | 169 queries, ×4 | 1,140 queries, ×33 | not a loop — see above |
 
-The first half is emptiness: a loop over rows has nothing to loop over when there are no
-rows, so the same route reads ×4 on the ratchet's database and ×33 on one the suite has
-used. The second half is method: the ratchet walks GETs, and the worst repeat in the
-codebase — by a factor of thirty — is a POST it never issues.
+**The blind spot is method, not emptiness.** The suspicion when this section was first
+written was that an empty database hides loops over rows, and the readiness numbers looked
+like proof. They were not: that route is flat in its data, and the gap between ×4 and ×33 is
+first-call migration seeding rather than anything the ratchet's emptiness conceals. Two
+attempts to seed a database into showing a loop — thirty object types, then eight hundred
+audit rows — moved nothing, which is the same answer arrived at from the other direction.
 
-The ceiling of 6 was chosen from the empty-database GET surface, and every route on that
-surface passes it, while a route in the same codebase repeats an `INSERT` a thousand times
-per request.
+What the census does establish is simpler and worse. The ratchet gates 151 collection GET
+routes. **547 write routes are gated by nothing**, and the worst repeated shape in the
+codebase — by a factor of nineteen over the next read — is an `INSERT` on a route the walk
+never issues. The ceiling of 6 was chosen from the GET surface, every route on that surface
+passes it, and a POST in the same codebase repeats an insert a thousand times per request
+while holding a transaction open across all of it.
 
-This is the same mistake as the snapshot equivalence fixture, one level up: **a fixture
-proves what it contains**, and an empty one contains nothing that grows. The ratchet is not
-wrong about what it measures; it is measuring a condition under which the defect cannot
-appear.
+So the fix is F5, and it is not a bigger fixture: it is the census itself as the measurement
+condition, because the suite already supplies the payloads that 547 invented bodies could
+not.
+
+## The ratchet that covers writes
+
+`oms/audit_suite_cost.py` gates the census. **695 route+method pairs, 400 of them writes**,
+against `docs/suite-cost-baseline.json`.
+
+The prerequisite was reproducibility, since a gate on a number that moves is a gate people
+learn to re-run until it passes. Two independent full censuses:
+
+| | Agreement |
+| --- | --- |
+| route+method pairs discovered | 695 vs 695, none in one run only |
+| **worst repeat per pair** | **695 / 695 identical** |
+| statements per pair | 692 / 695 |
+
+So the worst repeat is gated and the statement count is reported. The three that move —
+`/runtime/observability/summary` (83 vs 107), `/jobs/claim` (55 vs 58), `run-next` (10,203 vs
+10,202) — are exactly the notes the second census produced when checked against a baseline
+built from the first.
+
+What it gates, following the rule each ratchet here has had to be taught separately — *gate
+the thing ordinary work does not do, report the thing it does*:
+
+- **a route repeating a shape more often than its baseline.** Adding a query is ordinary;
+  turning a fixed cost into a repeating one is not. The 33 pairs already above the ceiling
+  are frozen at the value measured and may only go down — ×1006 fails at ×1007.
+- **a route absent from the baseline arriving above the ceiling of 6.** New code is held to
+  the standard rather than admitted to the debt.
+- **a watched route missing from the census.** Debt that goes dark is debt paid off on paper.
+- **a census that covered under 90% of the baseline.** A crashed run must not pass every gate
+  by never contradicting one — the empty-fixture lesson, applied to the fixture that is now
+  the whole suite.
+
+This is a weaker claim than the GET ratchet makes, where a violation fails even if the
+baseline recorded it, and the difference is deliberate: this surface starts with 33 real
+debts on it, and a gate that fails on day one is a gate someone turns off.
+
+It is not a pre-push check — the census is 225 subprocesses and about twenty minutes.
+`audit_request_cost.py` stays the fast one; this runs on demand.
 
 ## What this is not
 

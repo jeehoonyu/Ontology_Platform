@@ -1,0 +1,3481 @@
+{
+  "repeat_ceiling": 6,
+  "note": "Worst observation per route+method from a full suite census. worst_repeat is gated; queries is reported only, because two censuses agreed on repeats for 695/695 pairs and on statements for 692/695.",
+  "routes": {
+    "DELETE /ontology/object-types/{object_type_id}/properties/{property_name}": {
+      "worst_repeat": 3,
+      "queries": 38,
+      "calls": 2
+    },
+    "DELETE /pipeline-builder/graphs/{graph_id}/nodes/{node_id}": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "GET /": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 8
+    },
+    "GET /action-types": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 6
+    },
+    "GET /activity/objects/{object_type_id}/{object_id}/timeline": {
+      "worst_repeat": 2,
+      "queries": 24,
+      "calls": 3
+    },
+    "GET /activity/timeline": {
+      "worst_repeat": 2,
+      "queries": 21,
+      "calls": 4
+    },
+    "GET /admin/enrollments": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/groups": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/groups/{group_id}/members": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /admin/organizations": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/projects": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/roles": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/service-accounts": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/spaces": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /admin/tokens": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /admin/usage/summary": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "GET /admin/users": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /agents": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /aip/agents/{agent_id}/runs": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /aip/agents/{agent_id}/tools": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "GET /aip/document-intelligence/strategies": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /aip/evals/grader-types": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /aip/evals/runs": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "GET /aip/model-catalog": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /aip/tools": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /analytics/contour": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /analytics/fusion": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /analytics/quiver": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /api/v1": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /api/v1/agents/tasks/{task_id}": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 3
+    },
+    "GET /api/v1/artifacts/{artifact_id}/comments": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /api/v1/artifacts/{artifact_id}/proposals/{proposal_id}": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /api/v1/compatibility/manifest": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /api/v1/dataset-snapshots/{snapshot_id}/rows": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 6
+    },
+    "GET /api/v1/datasets/{asset_id}/snapshots": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /api/v1/event-stream-bindings/{binding_id}": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /api/v1/event-stream-bindings/{binding_id}/receipts": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /api/v1/events/log": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /api/v1/imports/templates": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /api/v1/industrial/workflows/asset-reliability/report": {
+      "worst_repeat": 3,
+      "queries": 37,
+      "calls": 3
+    },
+    "GET /api/v1/industrial/workflows/asset-reliability/state": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 3
+    },
+    "GET /api/v1/industrial/workflows/asset-reliability/workflow-state": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 6
+    },
+    "GET /api/v1/objects/{object_type_id}/{object_id}/history": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 9
+    },
+    "GET /api/v1/ontology/contracts/bindings": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 5
+    },
+    "GET /api/v1/ontology/contracts/health": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 4
+    },
+    "GET /api/v1/ontology/indexes": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /api/v1/ontology/schema/definitions": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /api/v1/outbox/events": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "GET /api/v1/outbox/summary": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "GET /api/v1/outbox/transport-receipts": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /api/v1/pipeline-plans/{plan_id}": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 1
+    },
+    "GET /api/v1/plugins/catalog": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /api/v1/plugins/executions/{execution_id}": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 3
+    },
+    "GET /api/v1/plugins/{version_id}/executions": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /api/v1/snapshot-cache/summary": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 2
+    },
+    "GET /api/v1/streams/processing/summary": {
+      "worst_repeat": 2,
+      "queries": 4,
+      "calls": 2
+    },
+    "GET /api/v1/streams/processors": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "GET /api/v1/streams/processors/{processor_id}": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 4
+    },
+    "GET /api/v1/streams/processors/{processor_id}/outer-receipts": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /api/v1/streams/processors/{processor_id}/quarantine": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /approvals": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 9
+    },
+    "GET /apps/carbon": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /apps/carbon/{workspace_id}": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /apps/carbon/{workspace_id}/render": {
+      "worst_repeat": 3,
+      "queries": 7,
+      "calls": 1
+    },
+    "GET /apps/carbon/{workspace_id}/resolve": {
+      "worst_repeat": 3,
+      "queries": 9,
+      "calls": 2
+    },
+    "GET /apps/slate": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /apps/workshop": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 6
+    },
+    "GET /apps/workshop/{module_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "GET /apps/workshop/{module_id}/dependencies": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /apps/workshop/{module_id}/render": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /apps/workshop/{module_id}/versions": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /artifacts": {
+      "worst_repeat": 2,
+      "queries": 4,
+      "calls": 6
+    },
+    "GET /artifacts/{artifact_id}": {
+      "worst_repeat": 2,
+      "queries": 12,
+      "calls": 52
+    },
+    "GET /artifacts/{artifact_id}/collaboration": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 2
+    },
+    "GET /artifacts/{artifact_id}/collaboration/events": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /artifacts/{artifact_id}/collaboration/stream": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 4
+    },
+    "GET /artifacts/{artifact_id}/diff": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /artifacts/{artifact_id}/versions": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /audit-logs": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 19
+    },
+    "GET /audit-logs/action-log": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /audit-logs/search": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /auth/session": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /automations": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /autopilot/boards": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /autopilot/workflows": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /builder/catalogs/{artifact_type}": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /builds": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /cases": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /checkpoints": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /cipher/channels": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /cipher/channels/{channel_id}/keys": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /classification/classifications": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /classification/schemes": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /code-repositories": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /code-workbooks": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /code-workspaces": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /compute-modules": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /connections/exports": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /connections/sources": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /connections/sources/{source_id}/fetch-attempts": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 6
+    },
+    "GET /connections/sources/{source_id}/runtime-credentials": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /connections/syncs": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /connections/syncs/{sync_id}/cursor": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 3
+    },
+    "GET /connections/webhooks": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 1
+    },
+    "GET /connections/webhooks/{webhook_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /connectors/adapters": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /data-assets": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 1
+    },
+    "GET /data-assets/{asset_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 14
+    },
+    "GET /data-assets/{dataset_id}/download": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "GET /datasets/{dataset_id}/changes": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /datasets/{dataset_id}/transactions": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /datasets/{dataset_id}/view": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 7
+    },
+    "GET /decision/objects/{object_type_id}/{object_id}/explain": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 4
+    },
+    "GET /decision/rules": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 6
+    },
+    "GET /decision/scenarios/{scenario_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /decision/scorecards": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 5
+    },
+    "GET /devops/products": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /devtools/compute-modules": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /entity-resolution/jobs": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 5
+    },
+    "GET /entity-resolution/jobs/{job_id}/candidates": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /eval-runs": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 6
+    },
+    "GET /eval-suites": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 6
+    },
+    "GET /events": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 7
+    },
+    "GET /events/stream": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /events/subscriptions": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 4
+    },
+    "GET /events/summary": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 5
+    },
+    "GET /fusion/workbooks": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /gis/displays": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /gis/map-layers": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /gis/map-layers/{layer_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /gis/map-layers/{layer_id}/features": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "GET /graph/overview": {
+      "worst_repeat": 12,
+      "queries": 55,
+      "calls": 7
+    },
+    "GET /health/live": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 6
+    },
+    "GET /health/pilot-recovery/marks/{run_id}/highest": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /health/ready": {
+      "worst_repeat": 11,
+      "queries": 400,
+      "calls": 11
+    },
+    "GET /imports/jobs": {
+      "worst_repeat": 2,
+      "queries": 15,
+      "calls": 7
+    },
+    "GET /imports/jobs/{job_id}": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 1
+    },
+    "GET /imports/jobs/{job_id}/mapping-suggestions": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 2
+    },
+    "GET /imports/summary": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 4
+    },
+    "GET /imports/templates": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 7
+    },
+    "GET /imports/templates/{template_id}/sample": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /ingestion/connectors/catalog": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /ingestion/dead-letters": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 5
+    },
+    "GET /ingestion/runs": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ingestion/summary": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 7
+    },
+    "GET /installations": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /interfaces": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /interfaces/{interface_id}/implementers": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /investigations": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 5
+    },
+    "GET /investigations/{investigation_id}": {
+      "worst_repeat": 3,
+      "queries": 16,
+      "calls": 2
+    },
+    "GET /investigations/{investigation_id}/graph": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 2
+    },
+    "GET /investigations/{investigation_id}/timeline": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 1
+    },
+    "GET /jobs": {
+      "worst_repeat": 2,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /jobs/summary": {
+      "worst_repeat": 13,
+      "queries": 46,
+      "calls": 7
+    },
+    "GET /jobs/{job_id}": {
+      "worst_repeat": 12,
+      "queries": 17,
+      "calls": 25
+    },
+    "GET /lineage/graph": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /lineage/resource/{kind}/{resource_id}": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "GET /link-types": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /links": {
+      "worst_repeat": 2,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /listeners": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 5
+    },
+    "GET /listeners/{listener_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /logic-functions": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /marketplace": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 5
+    },
+    "GET /marking-categories": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /markings": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /mcp/context": {
+      "worst_repeat": 0,
+      "queries": 19,
+      "calls": 4
+    },
+    "GET /mcp/proposals": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /mcp/tools": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /media-items/{media_item_id}/content": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "GET /media-sets": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /model-endpoints": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "GET /modeling/deployment-configs": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 1
+    },
+    "GET /modeling/objectives": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 2
+    },
+    "GET /modeling/objectives/{objective_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /modeling/objectives/{objective_id}/submissions": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /modeling/submissions/{submission_id}/release-eligibility": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 1
+    },
+    "GET /modelops/deployments/{deployment_id}/prediction-logs": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /modelops/monitors": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 3
+    },
+    "GET /modelops/monitors/{monitor_id}/runs": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /modelops/summary": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "GET /notepad/documents": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /notepad/documents/{document_id}/render": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /notepad/templates": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /object-explorer/explorations": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /object-explorer/explorations/{exploration_id}": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /object-sets/saved": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /object-types": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 7
+    },
+    "GET /object-views": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /object-views/{object_type_id}/{object_id}/rendered": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "GET /objects/{object_type_id}": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 4
+    },
+    "GET /objects/{object_type_id}/{object_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 11
+    },
+    "GET /objects/{object_type_id}/{object_id}/profile": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "GET /observability/monitoring-views": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /observability/summary": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 5
+    },
+    "GET /observability/traces": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology-functions": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology-generator/drafts": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology-generator/drafts/{draft_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /ontology-package-installations": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /ontology-packages": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 6
+    },
+    "GET /ontology-packages/{package_id}/versions/{version}/export": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 1
+    },
+    "GET /ontology/action-log": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology/base-types": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 5
+    },
+    "GET /ontology/branches": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology/change-sets": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology/environments": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /ontology/health/latest": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ontology/health/runs": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ontology/object-types/{object_type_id}/full": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /ontology/object-types/{object_type_id}/profile": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /ontology/proposals": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ontology/registry": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 6
+    },
+    "GET /ontology/registry/current": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ontology/registry/{entry_id}/packages": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ontology/registry/{entry_id}/packages/{language}/download": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 4
+    },
+    "GET /ontology/registry/{entry_id}/schema": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ontology/registry/{entry_id}/sdk/{language}": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "GET /ontology/revisions": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /ontology/validate": {
+      "worst_repeat": 0,
+      "queries": 16,
+      "calls": 5
+    },
+    "GET /ops/alert-rules": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 5
+    },
+    "GET /ops/alerts": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 5
+    },
+    "GET /ops/events": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 6
+    },
+    "GET /ops/inbox": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 5
+    },
+    "GET /ops/incidents": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 5
+    },
+    "GET /ops/incidents/{incident_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "GET /ops/runbooks": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 4
+    },
+    "GET /ops/summary": {
+      "worst_repeat": 0,
+      "queries": 16,
+      "calls": 6
+    },
+    "GET /outbound-applications": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /pipeline-builder/graphs": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 6
+    },
+    "GET /pipeline-builder/graphs/{graph_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /pipeline-builder/graphs/{graph_id}/ontology-contracts": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /pipeline-builder/node-types": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 8
+    },
+    "GET /pipeline-builder/ontology-contracts/{contract_run_id}": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "GET /pipeline-builder/ontology-contracts/{contract_run_id}/quarantine": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /pipeline-runs": {
+      "worst_repeat": 2,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /pipelines": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 5
+    },
+    "GET /policies": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 4
+    },
+    "GET /policies/decisions": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 5
+    },
+    "GET /project/export": {
+      "worst_repeat": 10,
+      "queries": 266,
+      "calls": 35
+    },
+    "GET /project/readiness": {
+      "worst_repeat": 33,
+      "queries": 1140,
+      "calls": 57
+    },
+    "GET /project/validate": {
+      "worst_repeat": 4,
+      "queries": 172,
+      "calls": 9
+    },
+    "GET /projects": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /reliability/backfills": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 4
+    },
+    "GET /reliability/data-contracts": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 4
+    },
+    "GET /reliability/summary": {
+      "worst_repeat": 0,
+      "queries": 16,
+      "calls": 5
+    },
+    "GET /restricted-views": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /retention-policies": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /roles": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /runtime/observability/budgets": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /runtime/observability/jobs/{job_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 5
+    },
+    "GET /runtime/observability/summary": {
+      "worst_repeat": 20,
+      "queries": 83,
+      "calls": 15
+    },
+    "GET /runtime/pilot-evidence": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 5
+    },
+    "GET /runtime/pilot-evidence/availability": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /runtime/queues": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 5
+    },
+    "GET /runtime/workers": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 6
+    },
+    "GET /scenarios/asset-reliability/report": {
+      "worst_repeat": 6,
+      "queries": 90,
+      "calls": 3
+    },
+    "GET /scenarios/asset-reliability/summary": {
+      "worst_repeat": 4,
+      "queries": 67,
+      "calls": 1
+    },
+    "GET /scenarios/asset-reliability/validation-dashboard": {
+      "worst_repeat": 4,
+      "queries": 67,
+      "calls": 3
+    },
+    "GET /scenarios/asset-reliability/workflow-state": {
+      "worst_repeat": 4,
+      "queries": 75,
+      "calls": 3
+    },
+    "GET /schedules": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 5
+    },
+    "GET /schedules/{schedule_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /search": {
+      "worst_repeat": 20,
+      "queries": 77,
+      "calls": 6
+    },
+    "GET /search/commands": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 5
+    },
+    "GET /security/resource-markings/{resource_id}": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /shared-property-types": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /streams": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "GET /streams/{stream_id}/records": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "GET /system/event-consistency": {
+      "worst_repeat": 4,
+      "queries": 34,
+      "calls": 6
+    },
+    "GET /system/migrations": {
+      "worst_repeat": 11,
+      "queries": 404,
+      "calls": 7
+    },
+    "GET /system/schema-health": {
+      "worst_repeat": 11,
+      "queries": 398,
+      "calls": 6
+    },
+    "GET /temporal/objects/{object_type_id}/{object_id}/diff": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 1
+    },
+    "GET /temporal/objects/{object_type_id}/{object_id}/timeline": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 5
+    },
+    "GET /tenancy/projects": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /threads": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /ui-state/command-center": {
+      "worst_repeat": 4,
+      "queries": 75,
+      "calls": 10
+    },
+    "GET /ui-state/imports": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 6
+    },
+    "GET /ui-state/ontology": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 5
+    },
+    "GET /ui-state/ontology/health": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ui-state/ontology/object-types/{object_type_id}": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 8
+    },
+    "GET /ui-state/ontology/object-types/{object_type_id}/sections/{section_id}": {
+      "worst_repeat": 3,
+      "queries": 18,
+      "calls": 4
+    },
+    "GET /ui-state/ontology/object-types/{object_type_id}/walkthrough": {
+      "worst_repeat": 3,
+      "queries": 12,
+      "calls": 1
+    },
+    "GET /ui-state/ontology/registry": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "GET /ui-state/pilot-evidence": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /ui-state/pipeline": {
+      "worst_repeat": 3,
+      "queries": 14,
+      "calls": 5
+    },
+    "GET /ui-state/pipeline/{graph_id}/canvas": {
+      "worst_repeat": 3,
+      "queries": 14,
+      "calls": 2
+    },
+    "GET /ui-state/pipeline/{graph_id}/nodes/{node_id}/details": {
+      "worst_repeat": 8,
+      "queries": 33,
+      "calls": 1
+    },
+    "GET /ui-state/pipeline/{graph_id}/ontology-contracts": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /ui-state/pipeline/{graph_id}/outputs": {
+      "worst_repeat": 3,
+      "queries": 14,
+      "calls": 1
+    },
+    "GET /ui-state/runtime-operations": {
+      "worst_repeat": 5,
+      "queries": 20,
+      "calls": 5
+    },
+    "GET /ui-state/validation": {
+      "worst_repeat": 11,
+      "queries": 569,
+      "calls": 6
+    },
+    "GET /ui-state/worker-fleet": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 5
+    },
+    "GET /ui/assets/app.js": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "GET /value-types": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /vertex/graphs": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /vertex/templates": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "GET /workspace": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "GET /workspace/{view}": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 57
+    },
+    "PATCH /action-types/{action_type_id}": {
+      "worst_repeat": 7,
+      "queries": 35,
+      "calls": 2
+    },
+    "PATCH /api/v1/artifacts/{artifact_id}/comments/{comment_id}": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 1
+    },
+    "PATCH /api/v1/artifacts/{artifact_id}/proposals/{proposal_id}": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 1
+    },
+    "PATCH /api/v1/streams/processors/{processor_id}": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 2
+    },
+    "PATCH /apps/workshop/{module_id}": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 4
+    },
+    "PATCH /artifacts/{artifact_id}": {
+      "worst_repeat": 3,
+      "queries": 21,
+      "calls": 2
+    },
+    "PATCH /imports/jobs/{job_id}": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 1
+    },
+    "PATCH /link-types/{link_type_id}": {
+      "worst_repeat": 6,
+      "queries": 36,
+      "calls": 1
+    },
+    "PATCH /object-explorer/explorations/{exploration_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "PATCH /ontology/object-types/{object_type_id}/metadata": {
+      "worst_repeat": 2,
+      "queries": 18,
+      "calls": 1
+    },
+    "PATCH /ontology/object-types/{object_type_id}/properties/order": {
+      "worst_repeat": 4,
+      "queries": 38,
+      "calls": 1
+    },
+    "PATCH /ontology/object-types/{object_type_id}/properties/{property_name}": {
+      "worst_repeat": 3,
+      "queries": 37,
+      "calls": 1
+    },
+    "PATCH /pipeline-builder/graphs/{graph_id}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "PATCH /pipeline-builder/graphs/{graph_id}/layout": {
+      "worst_repeat": 3,
+      "queries": 20,
+      "calls": 2
+    },
+    "PATCH /pipeline-builder/graphs/{graph_id}/nodes/{node_id}": {
+      "worst_repeat": 9,
+      "queries": 42,
+      "calls": 6
+    },
+    "POST /access/check": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "POST /action-types": {
+      "worst_repeat": 11,
+      "queries": 41,
+      "calls": 23
+    },
+    "POST /actions/execute": {
+      "worst_repeat": 2,
+      "queries": 39,
+      "calls": 16
+    },
+    "POST /admin/access-check": {
+      "worst_repeat": 3,
+      "queries": 7,
+      "calls": 5
+    },
+    "POST /admin/auth-providers": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /admin/auth-providers/{provider_id}/map-assertion": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /admin/enrollments": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /admin/groups": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /admin/groups/{group_id}/members": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "POST /admin/oauth-clients": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /admin/organizations": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "POST /admin/roles/grant": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 2
+    },
+    "POST /admin/service-accounts": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 4
+    },
+    "POST /admin/spaces": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /admin/tokens": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 4
+    },
+    "POST /admin/tokens/validate": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 5
+    },
+    "POST /admin/tokens/{token_id}/revoke": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /admin/usage/check-quota": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 3
+    },
+    "POST /admin/usage/quotas": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "POST /admin/usage/record": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 6
+    },
+    "POST /admin/users": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 2
+    },
+    "POST /admin/users/{user_id}/status": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 4
+    },
+    "POST /agents": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 7
+    },
+    "POST /agents/{agent_id}/sessions": {
+      "worst_repeat": 8,
+      "queries": 51,
+      "calls": 1
+    },
+    "POST /aip/agents/workers/run-next": {
+      "worst_repeat": 8,
+      "queries": 76,
+      "calls": 15
+    },
+    "POST /aip/agents/{agent_id}/invoke": {
+      "worst_repeat": 2,
+      "queries": 35,
+      "calls": 7
+    },
+    "POST /aip/agents/{agent_id}/invoke/async": {
+      "worst_repeat": 2,
+      "queries": 19,
+      "calls": 4
+    },
+    "POST /aip/document-intelligence/chunk": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /aip/document-intelligence/process": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "POST /aip/evals/grade": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 3
+    },
+    "POST /aip/evals/grade-logic": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 3
+    },
+    "POST /aip/evals/grade-one": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /aip/model-catalog/byom": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 2
+    },
+    "POST /analytics/contour": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 1
+    },
+    "POST /analytics/contour/apply": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 3
+    },
+    "POST /analytics/contour/{analysis_id}/run": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /analytics/fusion": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /analytics/fusion/{workbook_id}/evaluate": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /analytics/quiver": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /analytics/quiver/{analysis_id}/compute": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /api/v1/admin/service-accounts": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /api/v1/agents/tasks/{task_id}/cancel": {
+      "worst_repeat": 13,
+      "queries": 72,
+      "calls": 1
+    },
+    "POST /api/v1/agents/tasks/{task_id}/retry": {
+      "worst_repeat": 7,
+      "queries": 38,
+      "calls": 1
+    },
+    "POST /api/v1/agents/{agent_id}/task-graphs": {
+      "worst_repeat": 6,
+      "queries": 66,
+      "calls": 8
+    },
+    "POST /api/v1/agents/{agent_id}/tasks": {
+      "worst_repeat": 0,
+      "queries": 15,
+      "calls": 1
+    },
+    "POST /api/v1/artifacts/{artifact_id}/comments": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 3
+    },
+    "POST /api/v1/artifacts/{artifact_id}/proposals": {
+      "worst_repeat": 2,
+      "queries": 12,
+      "calls": 3
+    },
+    "POST /api/v1/artifacts/{artifact_id}/proposals/{proposal_id}/apply": {
+      "worst_repeat": 3,
+      "queries": 26,
+      "calls": 4
+    },
+    "POST /api/v1/artifacts/{artifact_id}/proposals/{proposal_id}/review": {
+      "worst_repeat": 2,
+      "queries": 12,
+      "calls": 4
+    },
+    "POST /api/v1/dataset-snapshots/{snapshot_id}/query": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 16
+    },
+    "POST /api/v1/datasets/{asset_id}/snapshots": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 12
+    },
+    "POST /api/v1/datasets/{asset_id}/snapshots/register": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 11
+    },
+    "POST /api/v1/event-stream-bindings": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 4
+    },
+    "POST /api/v1/event-stream-bindings/workers/run-next": {
+      "worst_repeat": 5,
+      "queries": 44,
+      "calls": 2
+    },
+    "POST /api/v1/event-stream-bindings/{binding_id}/enqueue": {
+      "worst_repeat": 0,
+      "queries": 16,
+      "calls": 2
+    },
+    "POST /api/v1/event-stream-bindings/{binding_id}/route": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 5
+    },
+    "POST /api/v1/graph/query": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 2
+    },
+    "POST /api/v1/imports/csv": {
+      "worst_repeat": 3,
+      "queries": 36,
+      "calls": 2
+    },
+    "POST /api/v1/industrial/workflows/asset-reliability/evaluator-evidence": {
+      "worst_repeat": 3,
+      "queries": 49,
+      "calls": 4
+    },
+    "POST /api/v1/industrial/workflows/asset-reliability/onboard": {
+      "worst_repeat": 12,
+      "queries": 205,
+      "calls": 18
+    },
+    "POST /api/v1/industrial/workflows/asset-reliability/triage": {
+      "worst_repeat": 9,
+      "queries": 126,
+      "calls": 2
+    },
+    "POST /api/v1/objects/query": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 17
+    },
+    "POST /api/v1/ontology/compile": {
+      "worst_repeat": 6,
+      "queries": 28,
+      "calls": 2
+    },
+    "POST /api/v1/ontology/contracts/bind": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 8
+    },
+    "POST /api/v1/ontology/contracts/validate": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 4
+    },
+    "POST /api/v1/ontology/indexes/{index_id}/apply": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 1
+    },
+    "POST /api/v1/outbox/events/{event_id}/replay": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 8
+    },
+    "POST /api/v1/outbox/kafka/workers/run-next": {
+      "worst_repeat": 3,
+      "queries": 8,
+      "calls": 12
+    },
+    "POST /api/v1/outbox/transport-receipts/{receipt_id}/replay": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 6
+    },
+    "POST /api/v1/outbox/workers/run-next": {
+      "worst_repeat": 3,
+      "queries": 10,
+      "calls": 21
+    },
+    "POST /api/v1/pipeline-plans/{plan_id}/execute": {
+      "worst_repeat": 5,
+      "queries": 65,
+      "calls": 29
+    },
+    "POST /api/v1/pipelines/{graph_id}/plans": {
+      "worst_repeat": 6,
+      "queries": 17,
+      "calls": 22
+    },
+    "POST /api/v1/plugins/register": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 9
+    },
+    "POST /api/v1/plugins/trust-keys": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 2
+    },
+    "POST /api/v1/plugins/trust-keys/{key_id}/revoke": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /api/v1/plugins/workers/complete": {
+      "worst_repeat": 2,
+      "queries": 18,
+      "calls": 4
+    },
+    "POST /api/v1/plugins/workers/fail": {
+      "worst_repeat": 2,
+      "queries": 18,
+      "calls": 3
+    },
+    "POST /api/v1/plugins/workers/work": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 3
+    },
+    "POST /api/v1/plugins/{version_id}/activate": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 3
+    },
+    "POST /api/v1/plugins/{version_id}/invoke": {
+      "worst_repeat": 2,
+      "queries": 16,
+      "calls": 11
+    },
+    "POST /api/v1/plugins/{version_id}/invoke-async": {
+      "worst_repeat": 2,
+      "queries": 16,
+      "calls": 4
+    },
+    "POST /api/v1/snapshot-cache/prune": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 3
+    },
+    "POST /api/v1/streams/processors": {
+      "worst_repeat": 3,
+      "queries": 15,
+      "calls": 15
+    },
+    "POST /api/v1/streams/processors/workers/run-next": {
+      "worst_repeat": 5,
+      "queries": 78,
+      "calls": 3
+    },
+    "POST /api/v1/streams/processors/{processor_id}/compact": {
+      "worst_repeat": 2,
+      "queries": 28,
+      "calls": 6
+    },
+    "POST /api/v1/streams/processors/{processor_id}/enqueue": {
+      "worst_repeat": 0,
+      "queries": 15,
+      "calls": 4
+    },
+    "POST /api/v1/streams/processors/{processor_id}/process": {
+      "worst_repeat": 3,
+      "queries": 64,
+      "calls": 26
+    },
+    "POST /api/v1/streams/processors/{processor_id}/watermarks": {
+      "worst_repeat": 3,
+      "queries": 39,
+      "calls": 9
+    },
+    "POST /api/v1/tenancy/organizations": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /api/v1/tenancy/projects": {
+      "worst_repeat": 2,
+      "queries": 5,
+      "calls": 1
+    },
+    "POST /approvals/{approval_id}/decision": {
+      "worst_repeat": 2,
+      "queries": 27,
+      "calls": 7
+    },
+    "POST /apps/carbon": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 3
+    },
+    "POST /apps/carbon/{workspace_id}/open/{module_id}": {
+      "worst_repeat": 2,
+      "queries": 10,
+      "calls": 3
+    },
+    "POST /apps/slate": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 2
+    },
+    "POST /apps/slate/{app_id}/event": {
+      "worst_repeat": 2,
+      "queries": 21,
+      "calls": 1
+    },
+    "POST /apps/slate/{app_id}/render": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /apps/slate/{app_id}/resolve": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /apps/slate/{app_id}/run-query/{query_name}": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /apps/workshop": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 8
+    },
+    "POST /apps/workshop/{module_id}/event": {
+      "worst_repeat": 5,
+      "queries": 31,
+      "calls": 6
+    },
+    "POST /apps/workshop/{module_id}/publish": {
+      "worst_repeat": 2,
+      "queries": 18,
+      "calls": 5
+    },
+    "POST /apps/workshop/{module_id}/render-live": {
+      "worst_repeat": 5,
+      "queries": 15,
+      "calls": 6
+    },
+    "POST /apps/workshop/{module_id}/resolve": {
+      "worst_repeat": 5,
+      "queries": 15,
+      "calls": 3
+    },
+    "POST /apps/workshop/{module_id}/versions/{version_id}/restore": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 3
+    },
+    "POST /artifacts": {
+      "worst_repeat": 2,
+      "queries": 21,
+      "calls": 15
+    },
+    "POST /artifacts/adopt": {
+      "worst_repeat": 2,
+      "queries": 19,
+      "calls": 1
+    },
+    "POST /artifacts/{artifact_id}/collaboration/commands": {
+      "worst_repeat": 3,
+      "queries": 25,
+      "calls": 353
+    },
+    "POST /artifacts/{artifact_id}/collaboration/heartbeat": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "POST /artifacts/{artifact_id}/collaboration/join": {
+      "worst_repeat": 2,
+      "queries": 15,
+      "calls": 5
+    },
+    "POST /artifacts/{artifact_id}/collaboration/leave": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "POST /artifacts/{artifact_id}/commands": {
+      "worst_repeat": 3,
+      "queries": 24,
+      "calls": 9
+    },
+    "POST /artifacts/{artifact_id}/leases": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "POST /artifacts/{artifact_id}/preview": {
+      "worst_repeat": 3,
+      "queries": 12,
+      "calls": 2
+    },
+    "POST /artifacts/{artifact_id}/publish": {
+      "worst_repeat": 3,
+      "queries": 27,
+      "calls": 2
+    },
+    "POST /artifacts/{artifact_id}/validate": {
+      "worst_repeat": 3,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /artifacts/{artifact_id}/versions/{version}/restore": {
+      "worst_repeat": 3,
+      "queries": 20,
+      "calls": 1
+    },
+    "POST /cipher/bulk-transform": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 6
+    },
+    "POST /cipher/channels": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "POST /cipher/channels/{channel_id}/licenses": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "POST /cipher/channels/{channel_id}/rotate": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 2
+    },
+    "POST /cipher/decrypt": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 2
+    },
+    "POST /cipher/encrypt": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /code-repositories": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 1
+    },
+    "POST /code-repositories/{repository_id}/branches": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /code-repositories/{repository_id}/checks/run": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /code-repositories/{repository_id}/commits": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /code-repositories/{repository_id}/merge": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /code-workbooks": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /code-workbooks/{workbook_id}/run": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /code-workspaces": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /code-workspaces/{workspace_id}/status": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /compute-modules": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 2
+    },
+    "POST /compute-modules/{module_id}/invoke": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 1
+    },
+    "POST /compute-modules/{module_id}/run": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /connections/exports": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /connections/exports/{export_id}/run": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /connections/sources": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 18
+    },
+    "POST /connections/sources/{source_id}/generate-import-job": {
+      "worst_repeat": 5,
+      "queries": 60,
+      "calls": 2
+    },
+    "POST /connections/sources/{source_id}/live-preview": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 17
+    },
+    "POST /connections/sources/{source_id}/preview": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "POST /connections/sources/{source_id}/runtime-credentials": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 9
+    },
+    "POST /connections/sources/{source_id}/syncs": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 10
+    },
+    "POST /connections/syncs/{sync_id}/run": {
+      "worst_repeat": 2,
+      "queries": 27,
+      "calls": 2
+    },
+    "POST /connections/syncs/{sync_id}/run-incremental": {
+      "worst_repeat": 2,
+      "queries": 10,
+      "calls": 2
+    },
+    "POST /connections/syncs/{sync_id}/validate": {
+      "worst_repeat": 2,
+      "queries": 27,
+      "calls": 1
+    },
+    "POST /connections/webhooks": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 4
+    },
+    "POST /data-assets": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 80
+    },
+    "POST /data-assets/{asset_id}/expectations/run": {
+      "worst_repeat": 2,
+      "queries": 23,
+      "calls": 1
+    },
+    "POST /data-assets/{dataset_id}/upload": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 5
+    },
+    "POST /datasets/{dataset_id}/branches": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /datasets/{dataset_id}/transactions": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 5
+    },
+    "POST /decision/evaluate": {
+      "worst_repeat": 2,
+      "queries": 32,
+      "calls": 9
+    },
+    "POST /decision/rules": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 8
+    },
+    "POST /decision/scenarios": {
+      "worst_repeat": 2,
+      "queries": 28,
+      "calls": 7
+    },
+    "POST /decision/scenarios/{scenario_id}/run": {
+      "worst_repeat": 2,
+      "queries": 26,
+      "calls": 1
+    },
+    "POST /decision/scorecards": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 8
+    },
+    "POST /devops/products": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /devops/products/{product_id}/releases": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 3
+    },
+    "POST /devops/products/{product_id}/releases/{release_id}/snapshot": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 2
+    },
+    "POST /devops/products/{product_id}/requirements": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /entity-resolution/candidates/{candidate_id}/accept": {
+      "worst_repeat": 4,
+      "queries": 17,
+      "calls": 1
+    },
+    "POST /entity-resolution/candidates/{candidate_id}/reject": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 2
+    },
+    "POST /entity-resolution/jobs": {
+      "worst_repeat": 2,
+      "queries": 14,
+      "calls": 5
+    },
+    "POST /entity-resolution/objects/{object_id}/split": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 1
+    },
+    "POST /eval-suites": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 2
+    },
+    "POST /eval-suites/{suite_id}/run": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 3
+    },
+    "POST /events/publish": {
+      "worst_repeat": 3,
+      "queries": 34,
+      "calls": 2
+    },
+    "POST /events/subscriptions": {
+      "worst_repeat": 2,
+      "queries": 18,
+      "calls": 1
+    },
+    "POST /events/subscriptions/{subscription_id}/evaluate": {
+      "worst_repeat": 0,
+      "queries": 13,
+      "calls": 1
+    },
+    "POST /gis/feature-collection": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /gis/geofence/evaluate": {
+      "worst_repeat": 2,
+      "queries": 24,
+      "calls": 1
+    },
+    "POST /gis/map-layers": {
+      "worst_repeat": 3,
+      "queries": 15,
+      "calls": 3
+    },
+    "POST /gis/mgrs/decode": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /gis/mgrs/encode": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "POST /gis/ops/area": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /gis/ops/bbox": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /gis/ops/buffer": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /gis/ops/centroid": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /gis/ops/distance": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /gis/route": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /gis/spatial-query": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "POST /governance/scan": {
+      "worst_repeat": 2,
+      "queries": 21,
+      "calls": 1
+    },
+    "POST /health/pilot-recovery/marks": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 8
+    },
+    "POST /imports/csv": {
+      "worst_repeat": 3,
+      "queries": 36,
+      "calls": 7
+    },
+    "POST /imports/files": {
+      "worst_repeat": 3,
+      "queries": 39,
+      "calls": 2
+    },
+    "POST /imports/jobs/{job_id}/apply-transforms": {
+      "worst_repeat": 3,
+      "queries": 34,
+      "calls": 3
+    },
+    "POST /imports/jobs/{job_id}/generate-ontology-draft": {
+      "worst_repeat": 6,
+      "queries": 80,
+      "calls": 5
+    },
+    "POST /imports/jobs/{job_id}/promote-to-dataset": {
+      "worst_repeat": 3,
+      "queries": 39,
+      "calls": 4
+    },
+    "POST /imports/jobs/{job_id}/validate": {
+      "worst_repeat": 3,
+      "queries": 36,
+      "calls": 4
+    },
+    "POST /imports/json": {
+      "worst_repeat": 3,
+      "queries": 36,
+      "calls": 2
+    },
+    "POST /ingestion/streams/{stream_id}/replay/enqueue": {
+      "worst_repeat": 3,
+      "queries": 26,
+      "calls": 2
+    },
+    "POST /ingestion/syncs/{sync_id}/enqueue": {
+      "worst_repeat": 3,
+      "queries": 26,
+      "calls": 15
+    },
+    "POST /ingestion/workers/run-next": {
+      "worst_repeat": 7,
+      "queries": 86,
+      "calls": 16
+    },
+    "POST /installations/{installation_id}/upgrade": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /interfaces": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 4
+    },
+    "POST /interfaces/{interface_id}/check-object-type": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /interfaces/{interface_id}/query-objects": {
+      "worst_repeat": 3,
+      "queries": 8,
+      "calls": 5
+    },
+    "POST /investigations": {
+      "worst_repeat": 2,
+      "queries": 33,
+      "calls": 5
+    },
+    "POST /investigations/{investigation_id}/evidence": {
+      "worst_repeat": 0,
+      "queries": 14,
+      "calls": 2
+    },
+    "POST /investigations/{investigation_id}/hypotheses": {
+      "worst_repeat": 0,
+      "queries": 14,
+      "calls": 2
+    },
+    "POST /investigations/{investigation_id}/report": {
+      "worst_repeat": 0,
+      "queries": 19,
+      "calls": 2
+    },
+    "POST /jobs": {
+      "worst_repeat": 2,
+      "queries": 16,
+      "calls": 42
+    },
+    "POST /jobs/claim": {
+      "worst_repeat": 13,
+      "queries": 55,
+      "calls": 47
+    },
+    "POST /jobs/{job_id}/cancel": {
+      "worst_repeat": 2,
+      "queries": 16,
+      "calls": 6
+    },
+    "POST /jobs/{job_id}/complete": {
+      "worst_repeat": 3,
+      "queries": 22,
+      "calls": 26
+    },
+    "POST /jobs/{job_id}/fail": {
+      "worst_repeat": 3,
+      "queries": 19,
+      "calls": 5
+    },
+    "POST /jobs/{job_id}/heartbeat": {
+      "worst_repeat": 2,
+      "queries": 10,
+      "calls": 3
+    },
+    "POST /jobs/{job_id}/retry": {
+      "worst_repeat": 2,
+      "queries": 15,
+      "calls": 4
+    },
+    "POST /link-types": {
+      "worst_repeat": 10,
+      "queries": 41,
+      "calls": 6
+    },
+    "POST /links": {
+      "worst_repeat": 4,
+      "queries": 15,
+      "calls": 5
+    },
+    "POST /listeners": {
+      "worst_repeat": 2,
+      "queries": 12,
+      "calls": 4
+    },
+    "POST /listeners/{listener_id}/events": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /logic-functions": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 15
+    },
+    "POST /logic-functions/{logic_id}/run": {
+      "worst_repeat": 10,
+      "queries": 122,
+      "calls": 14
+    },
+    "POST /marketplace/upgrade-diff": {
+      "worst_repeat": 2,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /marketplace/{product_id}/install": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /marketplace/{product_id}/install-resolved": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 2
+    },
+    "POST /marketplace/{product_id}/validate-install": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /markings": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 2
+    },
+    "POST /markings/{marking_id}/grant": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 2
+    },
+    "POST /media-items/{media_item_id}/chunk": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "POST /media-items/{media_item_id}/extract": {
+      "worst_repeat": 0,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /media-items/{media_item_id}/extract-entities": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /media-items/{media_item_id}/process": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /media-sets": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 3
+    },
+    "POST /media-sets/{media_set_id}/items": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 2
+    },
+    "POST /media-sets/{media_set_id}/items/upload": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /model-endpoints": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 2
+    },
+    "POST /modeling/deployment-configs": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /modeling/deployments": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 4
+    },
+    "POST /modeling/deployments/{deployment_id}/infer": {
+      "worst_repeat": 2,
+      "queries": 29,
+      "calls": 6
+    },
+    "POST /modeling/metrics/classification": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /modeling/metrics/regression": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 2
+    },
+    "POST /modeling/objectives": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 5
+    },
+    "POST /modeling/objectives/{objective_id}/checks": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 2
+    },
+    "POST /modeling/objectives/{objective_id}/release": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 2
+    },
+    "POST /modeling/objectives/{objective_id}/releases": {
+      "worst_repeat": 2,
+      "queries": 19,
+      "calls": 2
+    },
+    "POST /modeling/objectives/{objective_id}/train": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 5
+    },
+    "POST /modeling/submissions/{submission_id}/adapter/infer": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /modeling/submissions/{submission_id}/evaluate-checks": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 2
+    },
+    "POST /modelops/monitors": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 3
+    },
+    "POST /modelops/monitors/{monitor_id}/run": {
+      "worst_repeat": 2,
+      "queries": 32,
+      "calls": 5
+    },
+    "POST /models/gateway/infer": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 4
+    },
+    "POST /models/gateway/providers": {
+      "worst_repeat": 2,
+      "queries": 7,
+      "calls": 2
+    },
+    "POST /notepad/documents": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 2
+    },
+    "POST /notepad/documents/{document_id}/export": {
+      "worst_repeat": 2,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /notepad/documents/{document_id}/render-full": {
+      "worst_repeat": 2,
+      "queries": 5,
+      "calls": 1
+    },
+    "POST /object-explorer/explorations": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 2
+    },
+    "POST /object-explorer/grid-plot": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /object-explorer/histogram": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 4
+    },
+    "POST /object-explorer/listogram": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /object-explorer/property-stats": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /object-explorer/query": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 3
+    },
+    "POST /object-explorer/single-statistic": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /object-explorer/statistics-table": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /object-sets/aggregate": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 8
+    },
+    "POST /object-sets/facets/refresh": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 2
+    },
+    "POST /object-sets/saved": {
+      "worst_repeat": 2,
+      "queries": 12,
+      "calls": 3
+    },
+    "POST /object-sets/search": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 13
+    },
+    "POST /object-sets/search-around": {
+      "worst_repeat": 3,
+      "queries": 10,
+      "calls": 1
+    },
+    "POST /object-types": {
+      "worst_repeat": 7,
+      "queries": 30,
+      "calls": 69
+    },
+    "POST /object-types/{object_type_id}/implement-interface": {
+      "worst_repeat": 4,
+      "queries": 16,
+      "calls": 7
+    },
+    "POST /objects": {
+      "worst_repeat": 3,
+      "queries": 24,
+      "calls": 107
+    },
+    "POST /observability/checks/freshness": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /observability/checks/row-count": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 1
+    },
+    "POST /observability/metrics": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /observability/metrics/aggregate": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /observability/monitoring-views": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 3
+    },
+    "POST /observability/monitoring-views/{view_id}/evaluate": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /observability/traces": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /observability/traces/rollup": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /ontology-functions": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 4
+    },
+    "POST /ontology-functions/{function_id}/run": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 1
+    },
+    "POST /ontology-generator/drafts": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 4
+    },
+    "POST /ontology-generator/drafts/{draft_id}/apply": {
+      "worst_repeat": 3,
+      "queries": 43,
+      "calls": 7
+    },
+    "POST /ontology-generator/drafts/{draft_id}/validate": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 4
+    },
+    "POST /ontology-package-installations/{installation_id}/rollback": {
+      "worst_repeat": 4,
+      "queries": 25,
+      "calls": 2
+    },
+    "POST /ontology-packages": {
+      "worst_repeat": 3,
+      "queries": 14,
+      "calls": 1
+    },
+    "POST /ontology-packages/{package_id}/versions": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 1
+    },
+    "POST /ontology-packages/{package_id}/versions/capture": {
+      "worst_repeat": 2,
+      "queries": 16,
+      "calls": 1
+    },
+    "POST /ontology-packages/{package_id}/versions/{version}/install": {
+      "worst_repeat": 4,
+      "queries": 28,
+      "calls": 6
+    },
+    "POST /ontology-packages/{package_id}/versions/{version}/publish": {
+      "worst_repeat": 0,
+      "queries": 11,
+      "calls": 2
+    },
+    "POST /ontology/action-types/{action_type_id}/execute": {
+      "worst_repeat": 4,
+      "queries": 13,
+      "calls": 10
+    },
+    "POST /ontology/branches": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /ontology/change-sets": {
+      "worst_repeat": 2,
+      "queries": 17,
+      "calls": 11
+    },
+    "POST /ontology/change-sets/{change_set_id}/decision": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 11
+    },
+    "POST /ontology/change-sets/{change_set_id}/publish": {
+      "worst_repeat": 5,
+      "queries": 53,
+      "calls": 14
+    },
+    "POST /ontology/change-sets/{change_set_id}/validate": {
+      "worst_repeat": 3,
+      "queries": 12,
+      "calls": 11
+    },
+    "POST /ontology/changes/impact": {
+      "worst_repeat": 2,
+      "queries": 11,
+      "calls": 4
+    },
+    "POST /ontology/environments/{environment_name}/rollback": {
+      "worst_repeat": 5,
+      "queries": 47,
+      "calls": 2
+    },
+    "POST /ontology/health/run": {
+      "worst_repeat": 2,
+      "queries": 34,
+      "calls": 3
+    },
+    "POST /ontology/mappings/preview": {
+      "worst_repeat": 2,
+      "queries": 5,
+      "calls": 1
+    },
+    "POST /ontology/object-types/{object_type_id}/datasource-mappings": {
+      "worst_repeat": 2,
+      "queries": 17,
+      "calls": 2
+    },
+    "POST /ontology/object-types/{object_type_id}/generate-standard-view": {
+      "worst_repeat": 0,
+      "queries": 25,
+      "calls": 1
+    },
+    "POST /ontology/object-types/{object_type_id}/index": {
+      "worst_repeat": 2,
+      "queries": 16,
+      "calls": 1
+    },
+    "POST /ontology/object-types/{object_type_id}/open-from-pipeline": {
+      "worst_repeat": 2,
+      "queries": 17,
+      "calls": 1
+    },
+    "POST /ontology/object-types/{object_type_id}/policies/simulate": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /ontology/object-types/{object_type_id}/properties": {
+      "worst_repeat": 4,
+      "queries": 38,
+      "calls": 2
+    },
+    "POST /ontology/proposals": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "POST /ontology/proposals/{proposal_id}/decision": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /ontology/proposals/{proposal_id}/merge": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /ontology/proposals/{proposal_id}/submit": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /ontology/registry/compatibility": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /ontology/registry/publish": {
+      "worst_repeat": 2,
+      "queries": 28,
+      "calls": 4
+    },
+    "POST /ontology/revisions/capture": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 1
+    },
+    "POST /ontology/validate-api-name": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 3
+    },
+    "POST /ops/alert-rules": {
+      "worst_repeat": 0,
+      "queries": 17,
+      "calls": 4
+    },
+    "POST /ops/alerts/evaluate": {
+      "worst_repeat": 9,
+      "queries": 30,
+      "calls": 2
+    },
+    "POST /ops/events/ingest": {
+      "worst_repeat": 2,
+      "queries": 28,
+      "calls": 4
+    },
+    "POST /ops/inbox/{notification_id}/ack": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /ops/incidents": {
+      "worst_repeat": 3,
+      "queries": 37,
+      "calls": 7
+    },
+    "POST /ops/runbooks": {
+      "worst_repeat": 0,
+      "queries": 15,
+      "calls": 2
+    },
+    "POST /ops/runbooks/{runbook_id}/execute": {
+      "worst_repeat": 3,
+      "queries": 38,
+      "calls": 2
+    },
+    "POST /osdk/generate": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 3
+    },
+    "POST /osdk/generate-client": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "POST /pipeline-builder/graphs": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 39
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/deliver": {
+      "worst_repeat": 5,
+      "queries": 99,
+      "calls": 16
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/deliver/async": {
+      "worst_repeat": 0,
+      "queries": 15,
+      "calls": 2
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/nodes": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/nodes/{node_id}/insert-after": {
+      "worst_repeat": 3,
+      "queries": 20,
+      "calls": 1
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/nodes/{node_id}/preview": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/nodes/{node_id}/suggestions": {
+      "worst_repeat": 3,
+      "queries": 12,
+      "calls": 1
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/preview": {
+      "worst_repeat": 3,
+      "queries": 31,
+      "calls": 11
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/preview/async": {
+      "worst_repeat": 2,
+      "queries": 19,
+      "calls": 6
+    },
+    "POST /pipeline-builder/graphs/{graph_id}/validate": {
+      "worst_repeat": 2,
+      "queries": 25,
+      "calls": 7
+    },
+    "POST /pipeline-builder/workers/run-next": {
+      "worst_repeat": 1006,
+      "queries": 10203,
+      "calls": 44
+    },
+    "POST /pipelines": {
+      "worst_repeat": 2,
+      "queries": 12,
+      "calls": 10
+    },
+    "POST /pipelines/{pipeline_id}/run": {
+      "worst_repeat": 4,
+      "queries": 60,
+      "calls": 5
+    },
+    "POST /policies": {
+      "worst_repeat": 2,
+      "queries": 18,
+      "calls": 4
+    },
+    "POST /policies/evaluate": {
+      "worst_repeat": 3,
+      "queries": 36,
+      "calls": 3
+    },
+    "POST /policies/simulate": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 1
+    },
+    "POST /project/demo/bootstrap": {
+      "worst_repeat": 52,
+      "queries": 849,
+      "calls": 4
+    },
+    "POST /project/demo/reset": {
+      "worst_repeat": 49,
+      "queries": 786,
+      "calls": 1
+    },
+    "POST /project/import": {
+      "worst_repeat": 85,
+      "queries": 281,
+      "calls": 18
+    },
+    "POST /project/import/validate": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 15
+    },
+    "POST /projects": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 3
+    },
+    "POST /projects/{project_id}/grants": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /quiver/timeseries/forecast": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 1
+    },
+    "POST /quiver/timeseries/from-objects": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /quiver/timeseries/transform": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 4
+    },
+    "POST /reliability/backfills": {
+      "worst_repeat": 0,
+      "queries": 13,
+      "calls": 1
+    },
+    "POST /reliability/backfills/{backfill_id}/run": {
+      "worst_repeat": 2,
+      "queries": 30,
+      "calls": 1
+    },
+    "POST /reliability/data-contracts": {
+      "worst_repeat": 0,
+      "queries": 13,
+      "calls": 2
+    },
+    "POST /reliability/data-contracts/{contract_id}/run": {
+      "worst_repeat": 2,
+      "queries": 30,
+      "calls": 2
+    },
+    "POST /reliability/lineage-impact": {
+      "worst_repeat": 0,
+      "queries": 15,
+      "calls": 2
+    },
+    "POST /restricted-views": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /restricted-views/{view_id}/apply": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /roles": {
+      "worst_repeat": 0,
+      "queries": 3,
+      "calls": 1
+    },
+    "POST /runtime/observability/slo-policies": {
+      "worst_repeat": 2,
+      "queries": 5,
+      "calls": 1
+    },
+    "POST /runtime/observability/slo-policies/{policy_id}/evaluate": {
+      "worst_repeat": 2,
+      "queries": 27,
+      "calls": 1
+    },
+    "POST /runtime/workers/{worker_name}/drain": {
+      "worst_repeat": 4,
+      "queries": 22,
+      "calls": 3
+    },
+    "POST /runtime/workers/{worker_name}/heartbeat": {
+      "worst_repeat": 4,
+      "queries": 17,
+      "calls": 3
+    },
+    "POST /runtime/workers/{worker_name}/resume": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "POST /scenarios/asset-reliability/bootstrap": {
+      "worst_repeat": 44,
+      "queries": 705,
+      "calls": 4
+    },
+    "POST /scenarios/asset-reliability/run-triage": {
+      "worst_repeat": 19,
+      "queries": 294,
+      "calls": 3
+    },
+    "POST /schedules": {
+      "worst_repeat": 0,
+      "queries": 10,
+      "calls": 4
+    },
+    "POST /schedules/cron-due": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 5
+    },
+    "POST /schedules/evaluate-trigger": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 3
+    },
+    "POST /schedules/{schedule_id}/evaluate": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "POST /schedules/{schedule_id}/trigger": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 2
+    },
+    "POST /search/query": {
+      "worst_repeat": 3,
+      "queries": 38,
+      "calls": 2
+    },
+    "POST /security/access-decision": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 2
+    },
+    "POST /security/markings/propagate": {
+      "worst_repeat": 3,
+      "queries": 6,
+      "calls": 1
+    },
+    "POST /security/resource-markings": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /shared-property-types": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
+    "POST /streams": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 23
+    },
+    "POST /streams/{stream_id}/archive": {
+      "worst_repeat": 2,
+      "queries": 26,
+      "calls": 1
+    },
+    "POST /streams/{stream_id}/publish": {
+      "worst_repeat": 2,
+      "queries": 27,
+      "calls": 31
+    },
+    "POST /streams/{stream_id}/replay": {
+      "worst_repeat": 2,
+      "queries": 31,
+      "calls": 2
+    },
+    "POST /streams/{stream_id}/stateful": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "POST /streams/{stream_id}/window": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 3
+    },
+    "POST /tenancy/bootstrap": {
+      "worst_repeat": 2,
+      "queries": 8,
+      "calls": 2
+    },
+    "POST /tenancy/organizations": {
+      "worst_repeat": 2,
+      "queries": 3,
+      "calls": 19
+    },
+    "POST /tenancy/projects": {
+      "worst_repeat": 2,
+      "queries": 5,
+      "calls": 35
+    },
+    "POST /value-types": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 1
+    },
+    "POST /value-types/{value_type_id}/validate": {
+      "worst_repeat": 0,
+      "queries": 1,
+      "calls": 2
+    },
+    "PUT /aip/agents/{agent_id}/tools": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 4
+    },
+    "PUT /code-repositories/{repository_id}/files": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
+    },
+    "PUT /ingestion/budgets": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 1
+    },
+    "PUT /ontology/object-types/{object_type_id}/profile": {
+      "worst_repeat": 6,
+      "queries": 39,
+      "calls": 14
+    },
+    "PUT /runtime/observability/budgets": {
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 1
+    },
+    "PUT /runtime/queues/{project_id}": {
+      "worst_repeat": 0,
+      "queries": 8,
+      "calls": 7
+    },
+    "PUT /runtime/workers/{worker_name}": {
+      "worst_repeat": 5,
+      "queries": 25,
+      "calls": 6
+    }
+  }
+}
