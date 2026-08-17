@@ -24,9 +24,10 @@ distinct ids looks like N distinct queries and hides in plain sight.
 """
 from __future__ import annotations
 
+import contextvars
 import re
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 # Literals, bind parameters and whitespace vary between executions of one shape.
 # Collapsing them is what turns "281 different queries" into "one query, 281
@@ -41,6 +42,50 @@ def normalize(statement: str) -> str:
     collapsed = _IN_LIST.sub("IN (?)", statement)
     collapsed = _LITERAL.sub("?", collapsed)
     return _WHITESPACE.sub(" ", collapsed).strip()
+
+
+# One listener per engine, routing each statement to whichever request is in
+# scope. A listener that appends to a single list is correct only while one
+# request runs at a time -- and the moment two do, each of them records the
+# other's work. Measured: 48 concurrent requests whose true cost is 169
+# statements each recorded between 2,184 and 9,823, a sum of 195,377 against a
+# real total of 8,112. Twenty-four worker threads, twenty-four times the truth.
+_ACTIVE: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.ContextVar(
+    "request_cost_active", default=None)
+
+
+def attach(bind: Any) -> Any:
+    """Install the context-routing listener on `bind`, and return it.
+
+    Left installed for the life of the process. It costs nothing when no
+    collection is in scope, because the context variable is then None.
+    """
+    from sqlalchemy import event
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        collected = _ACTIVE.get()
+        if collected is not None:
+            collected.append(statement)
+
+    event.listen(bind, "before_cursor_execute", record)
+    return record
+
+
+@contextmanager
+def collecting() -> Iterator[List[str]]:
+    """Statements executed inside *this* context, not inside this process.
+
+    A context variable rather than a plain list, because Starlette runs a sync
+    endpoint on a worker thread and copies the caller's context into it. That is
+    what makes the attribution survive concurrency; a thread-local would not,
+    and a module-level list does not.
+    """
+    collected: List[str] = []
+    token = _ACTIVE.set(collected)
+    try:
+        yield collected
+    finally:
+        _ACTIVE.reset(token)
 
 
 @contextmanager

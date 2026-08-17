@@ -49,37 +49,92 @@ the route table makes.
 
 ## What the census found
 
-**3,641 requests over 695 route+method pairs — 2,368 writes and 1,273 reads.** Every one
+**3,643 requests over 695 route+method pairs — 2,368 writes and 1,275 reads.** Every one
 issued by the suite with a payload the route accepts. Worst observation per route, never the
 mean: a route called forty times with one expensive call is a route with an expensive call.
 
 | Repeats | Queries | Calls | Route |
 | --- | --- | --- | --- |
-| **×1006** | 10,202 | 44 | `POST /pipeline-builder/workers/run-next` |
-| **×192** | 13,500 | 55 | `GET /project/readiness` |
+| **×1006** | 10,203 | 44 | `POST /pipeline-builder/workers/run-next` |
 | ×85 | 281 | 18 | `POST /project/import` |
-| ×84 | 408 | 47 | `POST /jobs/claim` |
-| ×78 | 351 | 15 | `GET /runtime/observability/summary` |
+| ×52 | 849 | 4 | `POST /project/demo/bootstrap` |
+| ×49 | 786 | 1 | `POST /project/demo/reset` |
+| ×44 | 705 | 4 | `POST /scenarios/asset-reliability/bootstrap` |
+| ×33 | 1,140 | 57 | `GET /project/readiness` |
+| ×20 | 83 | 15 | `GET /runtime/observability/summary` |
 
 - `run-next` repeats **one `INSERT INTO event_outbox`** a thousand times in a single
-  request, holding a transaction open across all of it.
-- `/project/readiness` repeats `SELECT count(*) FROM (SELECT audit_logs …)` 192 times.
-- `/jobs/claim` repeats a `platform_job_leases` lookup 84 times, on the path every worker
-  polls.
+  request, holding a transaction open across all of it. The largest finding here, and a
+  write — which is what this goal was opened to look at.
+- `/project/import` repeats a shape 85 times.
+- `/project/readiness` repeats `SELECT count(*) FROM (SELECT audit_logs …)` 33 times.
+
+**These are the second set of numbers.** The first set was measured with an instrument that
+was wrong under concurrency; what it claimed and what is true are set out below.
+
+## Correction — the instrument was measuring the process, not the request
+
+The recorder first published here attached a listener to the engine for the duration of one
+request and appended every statement it saw to one list. That is correct while one request
+runs at a time. **18 of the 224 suite scripts issue requests from more than one thread**, and
+in those, each request collected every other in-flight request's statements. Because the
+summariser takes the worst observation per route, the contaminated number is precisely the
+one that won.
+
+Measured directly, on 48 concurrent calls to `/project/readiness` whose true cost is 169
+statements each:
+
+| | Recorded per request | Sum |
+| --- | --- | --- |
+| listener on the engine | 2,184 – 9,823 | 195,377 |
+| truth (same request, run alone) | 169 | 8,112 |
+
+Twenty-four worker threads, twenty-four times the truth. What the two censuses say about the
+findings that were published:
+
+| Route | Published | Corrected | |
+| --- | --- | --- | --- |
+| `POST /pipeline-builder/workers/run-next` | ×1006 | **×1006** | holds exactly |
+| `POST /project/import` | ×85 | **×85** | holds exactly |
+| `GET /project/readiness` | ×192 | ×33 | overstated 6× |
+| `POST /jobs/claim` | ×84 | ×13 | overstated 6× |
+| `GET /runtime/observability/summary` | ×78 | ×20 | overstated 4× |
+
+Every route named was really repeating a shape — none of the findings was invented — but
+three were overstated by four to six times, and one of those was the example this document
+leaned on hardest.
+
+The fix is a context variable rather than a shared list: Starlette copies the calling context
+into the worker thread that runs a sync endpoint, so a variable set in the middleware is
+readable from the listener and names the request that owns the statement. With it, all 48
+concurrent requests record 169 statements and a worst repeat of 4 — identical, to the
+statement, to the same request run alone. `oms/test_request_cost_concurrency.py` asserts
+that equality, and it is the assertion the old recorder could not have passed.
+
+This is the third standing invariant turned on the tooling instead of the product: *a
+measurement is evidence only for the path it traverses*, and a measurement that cannot say
+which path it traversed is not evidence at all.
 
 ## The finding that matters most is about the ratchet
 
-`audit_request_cost.py` walks the route table against a **scratch, empty** database. That is
-what makes it fast and deterministic, and it is also why it sees none of this:
+`audit_request_cost.py` walks **collection GET routes** against a **scratch, empty**
+database. That is what makes it fast and deterministic, and it is also why it sees none of
+this. The blind spot has two halves, and the corrected census sharpens rather than softens
+both:
 
-| `/project/readiness` | Queries | Worst repeat |
+| | Ratchet sees | Suite sees |
 | --- | --- | --- |
-| ratchet, empty database | 169 | **4** |
-| suite, populated database | **13,500** | **192** |
+| `GET /project/readiness` | 169 queries, ×4 | 1,140 queries, **×33** |
+| `POST /pipeline-builder/workers/run-next` | **never called** | 10,203 queries, **×1006** |
 
-A loop over rows has nothing to loop over when there are no rows. The ceiling of 6 was
-chosen from the empty-database surface and every route passes it, while a route in the same
-codebase repeats a shape a thousand times under real traffic.
+The first half is emptiness: a loop over rows has nothing to loop over when there are no
+rows, so the same route reads ×4 on the ratchet's database and ×33 on one the suite has
+used. The second half is method: the ratchet walks GETs, and the worst repeat in the
+codebase — by a factor of thirty — is a POST it never issues.
+
+The ceiling of 6 was chosen from the empty-database GET surface, and every route on that
+surface passes it, while a route in the same codebase repeats an `INSERT` a thousand times
+per request.
 
 This is the same mistake as the snapshot equivalence fixture, one level up: **a fixture
 proves what it contains**, and an empty one contains nothing that grows. The ratchet is not

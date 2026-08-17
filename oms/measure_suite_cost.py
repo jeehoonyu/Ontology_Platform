@@ -43,13 +43,18 @@ def install(app: Any, engine: Any, sink: Path) -> None:
     """
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    from request_cost import counting, summarize
+    from request_cost import attach, collecting, summarize
 
     handle = sink.open("a", encoding="utf-8")
+    attach(engine)
 
     class Recorder(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
-            with counting(engine) as collected:
+            # `collecting`, not `counting`: one listener is attached to the engine
+            # for the whole process and routes each statement to the request in
+            # scope. A per-block listener on a shared engine records every
+            # concurrent request's work as this one's.
+            with collecting() as collected:
                 response = await call_next(request)
             route = request.scope.get("route")
             template = getattr(route, "path", None) or request.url.path
