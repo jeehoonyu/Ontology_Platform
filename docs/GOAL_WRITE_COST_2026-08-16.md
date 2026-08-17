@@ -47,6 +47,45 @@ the route table makes.
   collection routes. If the suite can produce write costs reproducibly, the same ceiling
   should cover writes.
 
+## What the census found
+
+**3,641 requests over 695 route+method pairs — 2,368 writes and 1,273 reads.** Every one
+issued by the suite with a payload the route accepts. Worst observation per route, never the
+mean: a route called forty times with one expensive call is a route with an expensive call.
+
+| Repeats | Queries | Calls | Route |
+| --- | --- | --- | --- |
+| **×1006** | 10,202 | 44 | `POST /pipeline-builder/workers/run-next` |
+| **×192** | 13,500 | 55 | `GET /project/readiness` |
+| ×85 | 281 | 18 | `POST /project/import` |
+| ×84 | 408 | 47 | `POST /jobs/claim` |
+| ×78 | 351 | 15 | `GET /runtime/observability/summary` |
+
+- `run-next` repeats **one `INSERT INTO event_outbox`** a thousand times in a single
+  request, holding a transaction open across all of it.
+- `/project/readiness` repeats `SELECT count(*) FROM (SELECT audit_logs …)` 192 times.
+- `/jobs/claim` repeats a `platform_job_leases` lookup 84 times, on the path every worker
+  polls.
+
+## The finding that matters most is about the ratchet
+
+`audit_request_cost.py` walks the route table against a **scratch, empty** database. That is
+what makes it fast and deterministic, and it is also why it sees none of this:
+
+| `/project/readiness` | Queries | Worst repeat |
+| --- | --- | --- |
+| ratchet, empty database | 169 | **4** |
+| suite, populated database | **13,500** | **192** |
+
+A loop over rows has nothing to loop over when there are no rows. The ceiling of 6 was
+chosen from the empty-database surface and every route passes it, while a route in the same
+codebase repeats a shape a thousand times under real traffic.
+
+This is the same mistake as the snapshot equivalence fixture, one level up: **a fixture
+proves what it contains**, and an empty one contains nothing that grows. The ratchet is not
+wrong about what it measures; it is measuring a condition under which the defect cannot
+appear.
+
 ## What this is not
 
 Not a latency goal, for the same reason as its predecessor: round-trips are countable
