@@ -125,15 +125,17 @@ kilobytes-per-route worth gating, and only one of them has a baseline file.
 
 - **G1 — A gate that opens a browser.** Register the Playwright suite in `check_registry.py`
   and `enforcement_runs.py` like every other check, with a purpose and a cadence. It takes
-  1.8 minutes; there is no cost argument against running it.
+  1.8 minutes; there is no cost argument against running it. **Met** — `audit_browser_evidence`,
+  the fifteenth declared check and the first that opens a browser.
 - **G2 — The bundle under test is the bundle in the repo.** The e2e run must build from
   source, or refuse. A run that serves a stale `dist` — or silently serves the legacy UI
-  because `dist` is missing — must fail loudly rather than pass quietly. The assertion is
-  cheap: the served `index.html` names its own asset hashes.
+  because `dist` is missing — must fail loudly rather than pass quietly. **Met** — a source
+  fingerprint written at build time and checked at gate time, plus three browser assertions
+  on what the server actually served.
 - **G3 — Make the skip a number, and ratchet it.** 115 skips is a fact nobody had. Record
   skipped-per-viewport as a baseline and gate it downward, so behavioural coverage can widen
-  and never narrow. Gate the thing ordinary work does not do: adding a test is ordinary,
-  adding a `test.skip` is not.
+  and never narrow. **Met** — `docs/browser-evidence-baseline.json`, 228 entries, one outcome
+  per test per viewport.
 - **G4 — Decide what touch is owed, then enforce the decision.** Either the pipeline builder
   gains a touch-capable path to the first node — an insert control that exists on an empty
   canvas would very nearly do it — or the product states that authoring is desktop-only and
@@ -145,6 +147,67 @@ kilobytes-per-route worth gating, and only one of them has a baseline file.
   `?legacy=1` and served by default on any machine that has not run a build. Either it is
   supported — in which case it needs the render sweep at minimum — or it is retired. Carrying
   an untested second UI as the silent fallback is the worst of the three options.
+
+## G1–G3, and what the gate found in its first run
+
+`oms/measure_browser_evidence.py` builds the bundle, records what source it was built from,
+and runs the suite to Playwright's JSON reporter. `oms/audit_browser_evidence.py` judges the
+result. Separate files for the same reason the suite-cost census is separate from its
+ratchet: a measurement that can only be read through its own judge is hard to disagree with.
+
+**G2 — the bundle is pinned.** `build-provenance.json` records a SHA-256 over all 66 build
+inputs — `src/**`, `index.html`, both `tsconfig`s, `vite.config.ts`, `package.json` and the
+lockfile. The gate recomputes it and refuses a bundle built from anything else, so the run
+that found the original 42-file staleness could not now pass. Three browser assertions cover
+what a hash cannot: the served page carries `id="root"` and no `unpkg.com` stylesheet (the
+legacy shell's signature), every `/react/assets/…` it names returns 200 and appears in the
+built `index.html`, and the bundle carries provenance at all.
+
+Checked the way every gate here is checked — against the state it claims to refuse. Appending
+one comment line to `PipelineBuilder.tsx` without rebuilding turns the gate red:
+
+```
+FAIL -- the bundle was built from different source than the repository contains
+        (recorded 6dd0f30e1b909ca6, actual 98c72557b844793c). A run against it
+        proves nothing about this commit.
+```
+
+Restoring the file turns it green again. The 2026-08-11 bundle could not pass this.
+
+**G3 — the skip is a number now.** 228 entries, one per test per viewport. A test that ran at
+baseline and is skipped now fails the gate by name; a deleted test, a new test and a
+newly-running test are notes. Adding a desktop-only test takes nothing away and is ordinary;
+turning a test that ran into one that does not is the move that produced this shape, and is
+gated.
+
+### What it found immediately
+
+| | |
+| --- | --- |
+| `pipeline deploys an immutable snapshot…` | **fails**, both attempts, and three isolated runs in a row |
+| `pipeline creates a graph and accepts a dragged node` | **flaky** — failed once with zero nodes, passed on retry |
+
+The first is a real inconsistency rather than a slow test. The execution panel reads
+`SUCCEEDED`, and `/jobs/{id}` then returns a result carrying the finalizer's metadata —
+`engine`, `plan_id`, `partition_count`, `partition_job_ids` — but no `row_count`. It passed
+inside a slower full suite and failed alone every time, which is the signature of the status
+being published before the result is complete. A consumer polling after `SUCCEEDED` can read
+an incomplete job, so it is recorded rather than smoothed over.
+
+The second matters more than its severity suggests: it is the test that answers *"does
+drag-and-drop work?"*. It does — but the proof is not reliable, and nothing knew that either.
+
+Both were invisible for the same reason everything else in this document was: nothing ran the
+suite. Neither is softened. `retries: 1` means a timing blip is reported as **flaky** rather
+than failed, and every flaky test is printed by name on every run, because a suite whose
+flakes are invisible is a suite people stop believing. The known failure sits in
+`known_failing` with the paragraph above as its reason; a failure that is *not* on that list
+still fails the gate, and the list is in the baseline where growing it is an edit a reviewer
+can see.
+
+That is the write-cost ratchet's treatment of debt applied to tests. A gate that goes red on
+day one for a defect it just found is a gate someone turns off; a gate that hides the defect
+is worse than no gate.
 
 ## What this is not
 

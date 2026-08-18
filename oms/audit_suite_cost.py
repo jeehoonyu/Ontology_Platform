@@ -165,7 +165,13 @@ def compare(measured: Dict[Tuple[str, str], Dict[str, int]],
 
 
 def build_baseline(measured: Dict[Tuple[str, str], Dict[str, int]]) -> Dict[str, Any]:
+    from audit_evidence_corpus import current_head
+
     return {
+        # A census measures a schema as much as it measures code: the statements
+        # a route runs depend on the tables it has. Recorded so this file can be
+        # shown to be stale, which is what `audit_evidence_corpus` ratchets.
+        "provenance": {"migration_head": current_head()},
         "repeat_ceiling": REPEAT_CEILING,
         "note": ("Worst observation per route+method from a full suite census. "
                  "worst_repeat is gated; queries is reported only, because two "

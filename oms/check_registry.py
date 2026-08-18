@@ -47,6 +47,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_request_cost": {"gates": "no route runs one statement shape over and over", "cadence": "every suite run"},
     "audit_snapshot_scope": {"gates": "no snapshot collection is silently emptied by scoping", "cadence": "every push"},
     "audit_suite_cost": {"gates": "no route, write included, repeats a shape more than its baseline", "cadence": "on demand"},
+    "audit_browser_evidence": {"gates": "the browser suite ran against this commit's bundle and its coverage did not narrow", "cadence": "on demand"},
     "audit_route_coverage": {"gates": "compatibility routes have typed equivalents before retirement", "cadence": "every push"},
     "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every push"},
     "validate_schema_freeze": {"gates": "no migration lands during a pilot window", "cadence": "every push"},
