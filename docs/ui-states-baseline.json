@@ -1,0 +1,7 @@
+{
+  "provenance": {
+    "recorded_at": "2026-08-18T17:47:58Z"
+  },
+  "note": "Raw className=\"empty\" sites not yet routed through EmptyState. May fall, must never rise.",
+  "raw_empty_ceiling": 32
+}

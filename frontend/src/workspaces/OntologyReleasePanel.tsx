@@ -15,7 +15,7 @@ import {
   type OntologyEnvironmentState,
   type OntologyRevisionSummary
 } from "../api/ontologyLifecycleApi";
-import { Panel, StatusBadge } from "../components/data/DataDisplay";
+import { EmptyState, Panel, StatusBadge } from "../components/data/DataDisplay";
 
 const PROPERTY_TYPES = ["string", "integer", "double", "boolean", "date", "timestamp", "json", "array", "geometry"];
 
@@ -168,7 +168,7 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
               <span><strong>{changeSet.title}</strong><small>{changeSet.diff.classification || "NOT_VALIDATED"} · {changeSet.diff.summary?.changes || 0} changes</small></span>
               <StatusBadge value={changeSet.status} />
             </button>
-          )) : <div className="empty">Capture the current ontology and propose the first reviewed change.</div>}
+          )) : <EmptyState inline>Capture the current ontology and propose the first reviewed change.</EmptyState>}
         </Panel>
       </div>
 
@@ -236,7 +236,7 @@ function ContractHealthPanel({ health }: { health: OntologyContractHealth | null
             </article>
           ))}
         </div>
-      ) : <div className="empty">No published downstream consumer is bound to this ontology yet.</div>}
+      ) : <EmptyState inline>No published downstream consumer is bound to this ontology yet.</EmptyState>}
     </Panel>
   );
 }

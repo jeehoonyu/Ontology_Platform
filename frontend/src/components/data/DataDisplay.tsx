@@ -19,7 +19,34 @@ export function LoadingState({ label = "Loading workspace data..." }: { label?: 
   return <div className="state-block loading-state">{label}</div>;
 }
 
-export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+/**
+ * The one place "there is nothing here" is rendered.
+ *
+ * Two treatments existed and both are kept, because they are not the same
+ * thing visually and `.empty` is not a lesser version of `.empty-state-card` --
+ * it is the terser one, and it is the app's most common, used at 42 sites
+ * against the card's handful. Collapsing them would have been a design change
+ * dressed as a cleanup.
+ *
+ * What was actually wrong is that only one of the two had a component, so only
+ * one was countable or changeable in a single place. `inline` renders the other
+ * one, byte for byte:
+ *
+ *   <div className="empty">…</div>   ->   <EmptyState inline>…</EmptyState>
+ *
+ * `audit_ui_states.py` counts the raw form that remains and ratchets it down.
+ */
+export function EmptyState({ title, description, action, inline, compact, children }: {
+  title?: string;
+  description?: string;
+  action?: ReactNode;
+  inline?: boolean;
+  compact?: boolean;
+  children?: ReactNode;
+}) {
+  if (inline) {
+    return <div className={compact ? "empty compact" : "empty"}>{children ?? description}</div>;
+  }
   return (
     <div className="state-block empty-state-card">
       <strong>{title}</strong>

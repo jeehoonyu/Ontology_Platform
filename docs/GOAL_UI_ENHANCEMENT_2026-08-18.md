@@ -62,13 +62,33 @@ What is uneven is who uses it.
 
 **Seven workspaces use neither `LoadingState` nor `EmptyState`:** `OntologyManager` (908
 lines), `PipelineBuilder` (668), `OntologyReleasePanel`, `AgentRuntimePanel`,
-`OntologyRegistryPanel`, `OntologyHealthPanel`, `OntologyPackagePanel`. Two of those are the
-largest screens in the product and the rest are the entire ontology panel family — the part a
-user of an ontology platform spends the most time in.
+`OntologyRegistryPanel`, `OntologyHealthPanel`, `OntologyPackagePanel`.
 
-This is what "inconsistent UX" actually means in a codebase: not ugliness, but a screen that
-shows nothing while it loads and a blank region when a collection is empty, sitting next to
-one that handles both. A user reads that as unreliability.
+### Correction — that measured adoption, and was described as absence
+
+Doing the work showed the sentence that followed here was wrong. It said those screens *show
+nothing while loading and a blank region when empty*. **All seven handle every state.** What
+they use is a bare `<div className="empty">`, and `OntologyHealthPanel`'s is better than the
+generic form — its text changes with health status, "No active findings" against "Run a health
+check", which `EmptyState` cannot express. Its `message` line carries successes as well as
+errors, so rendering it through `ErrorBanner` would have been a regression, not an adoption.
+
+Measuring the treatments rather than the imports gives the real shape:
+
+| Treatment | Sites |
+| --- | --- |
+| bare `<div className="empty">` | **42** |
+| `.empty-state-card` via `EmptyState` | a handful |
+| `health-empty`, `package-empty-state`, `agent-runtime-empty` | 1 each |
+| `review-empty`, `inspector-empty`, `visual-builder-empty` | found only when the gate ran |
+
+The bare form is not a deviation in seven screens. It is the **most common** treatment in the
+application, and there were **seven** distinct treatments where five had been counted — the
+last three surfaced by the gate on its first run, not by reading.
+
+So the defect was never a missing state. It was that of the two main treatments only one had a
+component, so only one could be counted, changed in one place, or kept consistent. The other
+was forty-two copies of the same three lines.
 
 ## Finding 3 — one stylesheet, 357 classes, nothing scoped
 
@@ -97,10 +117,14 @@ Carried forward from the browser-evidence goal, unchanged and still owed:
 
 New, from what is measured here:
 
-- **J1 — Every workspace handles loading, empty and error.** **Open** — Adopt `LoadingState`,
-  `EmptyState` and `ErrorBanner` in the seven workspaces that use none of them, or record per
-  screen why a state cannot occur there. Then ratchet adoption: it may rise and must not fall.
-  The gate is a count, not a judgement of taste.
+- **J1 — One component behind every way of saying "there is nothing here".** **Met** —
+  `EmptyState` gained an `inline` variant rendering the bare form byte for byte, so migrating a
+  site cannot change what a user sees; twelve sites in the named workspaces moved onto it, and
+  `oms/audit_ui_states.py` freezes the 32 that remain and refuses a new treatment that has not
+  said what the existing ones cannot express. The condition as first written — adopt the
+  primitives in seven screens that lack the states — was based on a measurement of imports
+  described as a measurement of behaviour. It is restated here as what the evidence supports.
+  Browser suite after the migration: 113 passed, 0 failed.
 - **J2 — A change to one screen cannot silently restyle another.** **Open** — Give the
   stylesheet scope: tokens for what is genuinely global (colour, spacing, type) and module or
   component scope for the rest. Measure first — how many of the 357 classes are used by more

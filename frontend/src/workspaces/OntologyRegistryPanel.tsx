@@ -14,7 +14,7 @@ import {
   type OntologyRevisionSummary,
   type RegistryCompatibility
 } from "../api/ontologyRegistryApi";
-import { DataTable, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
 
 export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
   const [state, setState] = useState<OntologyRegistryState | null>(null);
@@ -163,7 +163,7 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
         <Panel title="Published Versions">
           <div className="ontology-contract-list">
             {(state?.sections.entries || []).map((entry) => <button key={entry.id} className="ontology-contract-row" onClick={() => { setSelected(entry); setCompatibility(null); }}><span><strong>{entry.version}</strong><small>{entry.channel} · revision {entry.revision_number}</small></span><StatusBadge value={entry.compatibility.classification} /></button>)}
-            {!state?.sections.entries.length ? <div className="empty">No registry versions have been published.</div> : null}
+            {!state?.sections.entries.length ? <EmptyState inline>No registry versions have been published.</EmptyState> : null}
           </div>
         </Panel>
         <Panel title="Contract Evidence" action={selected ? <StatusBadge value={selected.compatibility.classification} /> : undefined}>
@@ -176,7 +176,7 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
                 <button onClick={() => downloadPackage(packageInfo)} disabled={Boolean(busy)}>{busy === `package-${packageInfo.ecosystem}` ? "Preparing..." : `Download ${packageInfo.filename.endsWith(".whl") ? ".whl" : ".tgz"}`}</button>
               </div>)}
             </div>
-          </> : <div className="empty">Select a published version to inspect its contract.</div>}
+          </> : <EmptyState inline>Select a published version to inspect its contract.</EmptyState>}
         </Panel>
       </div>
       <Panel title="Semantic Compatibility">

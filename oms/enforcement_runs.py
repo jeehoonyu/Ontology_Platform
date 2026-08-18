@@ -70,6 +70,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "every goal condition carries a state, every check runs where it says, every baseline is dated",
         "runs_in": "suite",
     },
+    "audit_ui_states": {
+        "purpose": "no new hand-written empty state, and every treatment declares its reason",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

@@ -24,7 +24,7 @@ import {
   updatePipelineNode
 } from "../api/workspaceState";
 import { BottomDrawer, PipelineCanvas } from "../components/canvas/PipelineCanvas";
-import { DataTable, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { Toolbar, WorkspaceHeader } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asRows, asString, classNames, formatValue } from "../utils/format";
@@ -451,7 +451,7 @@ export function PipelineBuilder() {
                 <button onClick={retryExecution} disabled={!["FAILED", "CANCELLED"].includes(executionJob.status)}>Retry</button>
               </div>
               {executionJob.events?.length ? <details><summary>Execution events</summary><DataTable rows={executionJob.events.map((event) => ({ event: event.event_type, status: event.status, created_at: event.created_at }))} /></details> : null}
-            </div> : <div className="empty">Preview or deploy to create durable execution evidence.</div>}
+            </div> : <EmptyState inline>Preview or deploy to create durable execution evidence.</EmptyState>}
           </Panel>
           <Panel title="Selected Node">
             {details ? <>
@@ -480,7 +480,7 @@ export function PipelineBuilder() {
               {details.node.type === "ontology_output" ? (
                 <OntologyContractPanel contract={prospectiveContract || latestContract || null} mode={prospectiveContract ? "preview" : "latest run"} />
               ) : null}
-            </> : <div className="empty">Select a node to inspect lineage, config, and preview details.</div>}
+            </> : <EmptyState inline>Select a node to inspect lineage, config, and preview details.</EmptyState>}
           </Panel>
           <Panel title="Ontology Contracts" action={<StatusBadge value={contracts?.summary.status || "NOT_RUN"} />}>
             {contracts?.sections.latest.length ? (
@@ -492,7 +492,7 @@ export function PipelineBuilder() {
                   </button>
                 ))}
               </div>
-            ) : <div className="empty">Deploy an ontology output to record reconciliation and quarantine evidence.</div>}
+            ) : <EmptyState inline>Deploy an ontology output to record reconciliation and quarantine evidence.</EmptyState>}
           </Panel>
           <Panel title="Pipeline Outputs" action={<button onClick={() => insertAfter("dataset_output")}>Add</button>}>
             <input className="compact-input" placeholder="Search outputs..." />
@@ -534,7 +534,7 @@ export function PipelineBuilder() {
 }
 
 function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyContract | null; mode: string }) {
-  if (!contract) return <div className="empty">Configure the ontology output to preview its data contract.</div>;
+  if (!contract) return <EmptyState inline>Configure the ontology output to preview its data contract.</EmptyState>;
   const issues = contract.violations.flatMap((violation) => violation.errors.map((error) => ({
     row: violation.row_index + 1,
     object: violation.object_id || "Not resolved",

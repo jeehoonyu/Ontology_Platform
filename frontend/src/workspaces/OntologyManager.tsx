@@ -26,7 +26,7 @@ import {
   updateOntologyProperty,
   updateOntologyMetadata
 } from "../api/workspaceState";
-import { DataTable, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "../components/data/DataDisplay";
+import { DataTable, EmptyState, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "../components/data/DataDisplay";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
 import { navigate } from "../utils/navigation";
@@ -252,7 +252,7 @@ export function OntologyManager() {
               onResourceMutation={() => setRefreshKey((key) => key + 1)}
             />
           ) : (
-            <div className="empty">Generate or select an object type to inspect manager details.</div>
+            <EmptyState inline>Generate or select an object type to inspect manager details.</EmptyState>
           )}
         </section>
       </div>
@@ -468,7 +468,7 @@ function ActionTypeEditor({ objectTypeId, rows, onMutation }: { objectTypeId: st
         <button onClick={createAction} disabled={!name.trim()}>Add action</button>
       </div>
       {message ? <div className="operation-message" role="status">{message}</div> : null}
-      {rows.length ? rows.map((row) => <EditableOntologyResource key={asString(row.id)} kind="action" row={row} onMutation={onMutation} />) : <div className="empty">No action types use this object type.</div>}
+      {rows.length ? rows.map((row) => <EditableOntologyResource key={asString(row.id)} kind="action" row={row} onMutation={onMutation} />) : <EmptyState inline>No action types use this object type.</EmptyState>}
     </Panel>
   );
 }
@@ -604,7 +604,7 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
           {preview.errors.length || preview.warnings.length ? <DataTable rows={[...preview.errors, ...preview.warnings]} empty="Mapping is valid." /> : null}
           <details className="mapping-preview-drawer" open><summary>Hydrated object preview · {preview.hydrated_preview.length} rows</summary><DataTable rows={preview.hydrated_preview} empty="No objects can be previewed." /></details>
         </>
-      ) : <div className="empty">Choose a dataset to map fields and preview object hydration.</div>}
+      ) : <EmptyState inline>Choose a dataset to map fields and preview object hydration.</EmptyState>}
     </Panel>
   );
 }
@@ -703,7 +703,7 @@ function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { o
             <MiniMap pannable zoomable nodeColor={(node) => node.id === selectedObjectTypeId ? "#2386a8" : "#7c5aa6"} />
             <Controls showInteractive={false} />
           </ReactFlow>
-        ) : <div className="empty">Apply an ontology draft to begin designing relationships.</div>}
+        ) : <EmptyState inline>Apply an ontology draft to begin designing relationships.</EmptyState>}
       </div>
     </Panel>
   );
