@@ -66,6 +66,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "the browser suite ran against this commit's bundle and its coverage did not narrow",
         "runs_in": "on demand",
     },
+    "audit_iteration_state": {
+        "purpose": "every goal condition carries a state, every check runs where it says, every baseline is dated",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",
@@ -177,6 +181,38 @@ def classify(runs: Dict[str, Any], head: str) -> Dict[str, Dict[str, Any]]:
     return report
 
 
+def _baseline_mtimes() -> Dict[str, float]:
+    found: Dict[str, float] = {}
+    for path in (REPO_ROOT / "docs").glob("*baseline*.json"):
+        try:
+            found[path.name] = path.stat().st_mtime
+        except OSError:
+            continue
+    return found
+
+
+def _stamp_rewritten_baselines(before: Dict[str, float]) -> None:
+    """Date any baseline this run rewrote, with the moment it was rewritten."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for path in (REPO_ROOT / "docs").glob("*baseline*.json"):
+        try:
+            if before.get(path.name) == path.stat().st_mtime:
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        provenance = payload.get("provenance")
+        provenance = provenance if isinstance(provenance, dict) else {}
+        provenance["recorded_at"] = now
+        payload = {"provenance": provenance,
+                   **{k: v for k, v in payload.items() if k != "provenance"}}
+        path.write_text(json.dumps(payload, indent=2) + chr(10), encoding="utf-8")
+
+
 def recording(check: str, main: Callable[[], int]) -> int:
     """Run a check's `main` and record that it ran, whatever the outcome.
 
@@ -186,6 +222,13 @@ def recording(check: str, main: Callable[[], int]) -> int:
     a check that executed and needs looking at, not a check that is silently
     absent.
     """
+    # Every audit that records a baseline goes through here, and none of them
+    # stamped the file with when it was recorded. Rather than teach eight writers
+    # the same lesson separately, note which baselines exist before the check runs
+    # and date whichever one it rewrote. An undated baseline cannot be shown to be
+    # stale, so it never expires -- the argument `audit_evidence_corpus` already
+    # makes about evidence, applied to the files holding the ratchets.
+    _before = _baseline_mtimes()
     verdict, code = "ERROR", 1
     try:
         code = int(main() or 0)
@@ -197,6 +240,10 @@ def recording(check: str, main: Callable[[], int]) -> int:
         verdict = "PASS" if code == 0 else "FAIL"
         raise
     finally:
+        try:
+            _stamp_rewritten_baselines(_before)
+        except Exception as error:  # dating is bookkeeping, never the check
+            print(f"[enforcement-runs] could not date a baseline: {error}")
         try:
             record(check, verdict=verdict)
         except Exception as error:  # never let bookkeeping mask the check itself

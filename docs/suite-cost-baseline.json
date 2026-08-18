@@ -1,6 +1,7 @@
 {
   "provenance": {
-    "migration_head": "0042_stream_outer_joins"
+    "migration_head": "0042_stream_outer_joins",
+    "recorded_at": "2026-08-17T21:31:12Z"
   },
   "repeat_ceiling": 6,
   "note": "Worst observation per route+method from a full suite census. worst_repeat is gated; queries is reported only, because two censuses agreed on repeats for 695/695 pairs and on statements for 692/695.",

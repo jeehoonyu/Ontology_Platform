@@ -1,4 +1,7 @@
 {
+  "provenance": {
+    "recorded_at": "2026-08-06T14:28:44Z"
+  },
   "note": "Ratchet. This count may fall and must never rise. A new call site on an unbounded primitive fails the build.",
   "unbounded_call_sites_ceiling": 0
 }

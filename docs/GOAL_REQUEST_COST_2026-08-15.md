@@ -42,14 +42,14 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
 
 ## Conditions
 
-- **E1 — An instrument.** `oms/request_cost.py`: count the statements one request executes,
+- **E1 — An instrument.** **Met** — `oms/request_cost.py`. `oms/request_cost.py`: count the statements one request executes,
   normalise them so a shape run many times reads as *one shape, N times*, and decide from a
   series of measurements whether cost follows the data. **Done**, with
   `oms/test_request_cost.py` pinning the properties that carry the weight — a shape with
   varying literals must collapse, the listener must not outlive its block or every
   measurement after the first is wrong, and a verdict must be refused on fewer than three
   points rather than guessed.
-- **E2 — A census.** Walk the reachable route surface and record what each request costs.
+- **E2 — A census.** **Met** — 151 collection GET routes walked. Walk the reachable route surface and record what each request costs.
   **Done for the 151 collection routes**, the shape where a per-row query hides. Two
   exclusions were needed and both are honest: routes that reach outside the process block on
   their own timeouts, and streaming routes, which never return a body — `/events/stream`
@@ -71,7 +71,7 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   migration** in a Python loop. There are 32 records and the number only goes up. That is a
   real per-item loop, and `/project/readiness` is now a worse offender than `/health/ready`
   was at 275.
-- **E3 — Growth, not size.** The absolute count is the weak signal; the strong one is
+- **E3 — Growth, not size.** **Met** — `request_cost.shape()`, which refuses fewer than three points. The absolute count is the weak signal; the strong one is
   whether the count moves when rows are added.
 
   **No route's cost grew with object-type count.** The single candidate did not survive
@@ -90,7 +90,7 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   types, and the first run of the census seeded **nothing at all** — the payload was wrong
   and every creation returned 422 — so its "0 routes grew" was a null result wearing a
   pass. The census now aborts if it seeds nothing.
-- **E4 — Fix what the census finds.** Two landed.
+- **E4 — Fix what the census finds.** **Met** — five defects fixed and measured. Two landed.
 
   `_ensure_migration_records` asked `db.get(MigrationRecord, version)` once per migration
   inside a loop, on four routes. One `SELECT` answers all 32 questions, and the first run
@@ -234,7 +234,7 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   piece of work than this goal set out to do, and it is worth its own measurement first —
   which collections carry a `project_id` column, and which of the closure rules survive
   being asked in SQL.
-- **E5 — A ratchet.** `oms/audit_request_cost.py`, with the surface recorded in
+- **E5 — A ratchet.** **Met** — `oms/audit_request_cost.py` with `docs/request-cost-baseline.json`. `oms/audit_request_cost.py`, with the surface recorded in
   `docs/request-cost-baseline.json`. **Done.**
 
   **It gates the repeated shape and reports everything else**, and that split is the whole
@@ -260,7 +260,7 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   command-center ×13 are both replayed as fixtures, so the audit is tested against the
   defects it was built for rather than only against a tree that already passes.
 
-- **E6 — The column census, before any pushdown.** The scope-pushdown idea needs to know,
+- **E6 — The column census, before any pushdown.** **Met** — the column census recorded in this document. The scope-pushdown idea needs to know,
   per collection, whether `project_id` can be asked in SQL. `_scope_snapshot` filters on
   `row.get("project_id")` — the *serialised* key, not the column — so three things have to
   hold, and each was checked rather than assumed.
@@ -300,7 +300,7 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   snapshot silently. It is satisfied today at zero, which is exactly when a ratchet is
   cheapest to install.
 
-- **E7 — The ratchet, then phase one.** Both landed, in that order deliberately.
+- **E7 — The ratchet, then phase one.** **Met** — `oms/audit_snapshot_scope.py` landed before phase one. Both landed, in that order deliberately.
 
   `oms/audit_snapshot_scope.py` refuses a collection that scoping would empty without a
   symptom. 133 collections: **115** carry `project_id`, **12** come back through the parent
@@ -400,7 +400,7 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   is kept though its own column says otherwise, and a child claiming my project is dropped
   because its parent is not mine.
 
-- **E8 — The full suite, which found what the harnesses did not.** 224 test scripts,
+- **E8 — The full suite, which found what the harnesses did not.** **Met** — the full suite found the two regressions the harnesses did not. 224 test scripts,
   **223 passed and one failed**: `test_durable_ingestion_runtime.py`, on a restore.
 
   ```

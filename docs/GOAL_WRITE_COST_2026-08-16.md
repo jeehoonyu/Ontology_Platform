@@ -32,13 +32,13 @@ the route table makes.
 
 ## Conditions
 
-- **F1 — A recorder that attaches to a running app.** Count the statements each request
+- **F1 — A recorder that attaches to a running app.** **Met** — `oms/measure_suite_cost.py`. Count the statements each request
   executes, keyed by route template and method, without touching production code. The
   existing `oms/request_cost.py` already counts and normalises; what is missing is the part
   that attributes a count to the route that caused it.
-- **F2 — A census from the suite.** Run all 224 scripts with the recorder attached and
+- **F2 — A census from the suite.** **Met** — 3,643 requests over 695 route+method pairs. Run all 224 scripts with the recorder attached and
   aggregate. Reads and writes together, ranked by worst repeated shape and by total.
-- **F3 — Find the writes that repeat a shape.** The N+1 signature is the same on a write as
+- **F3 — Find the writes that repeat a shape.** **Met** — the census table above. The N+1 signature is the same on a write as
   on a read, and a write loop is worse: it holds a transaction open while it runs.
 - **F4 — Fix what it finds**, on the evidence, with the equivalence discipline this project
   has now learned three times the hard way — a fixture proves what it contains, so the

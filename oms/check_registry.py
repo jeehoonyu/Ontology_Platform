@@ -48,13 +48,14 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_snapshot_scope": {"gates": "no snapshot collection is silently emptied by scoping", "cadence": "every push"},
     "audit_suite_cost": {"gates": "no route, write included, repeats a shape more than its baseline", "cadence": "on demand"},
     "audit_browser_evidence": {"gates": "the browser suite ran against this commit's bundle and its coverage did not narrow", "cadence": "on demand"},
+    "audit_iteration_state": {"gates": "every goal condition carries a state, every check runs where it says, every baseline is dated", "cadence": "every suite run"},
     "audit_route_coverage": {"gates": "compatibility routes have typed equivalents before retirement", "cadence": "every push"},
-    "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every push"},
+    "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every suite run"},
     "validate_schema_freeze": {"gates": "no migration lands during a pilot window", "cadence": "every push"},
-    "validate_tier_b_evidence": {"gates": "Tier B gates are current and threshold-checked", "cadence": "every push"},
-    "validate_external_evaluations": {"gates": "external evaluations carry provenance", "cadence": "every push"},
+    "validate_tier_b_evidence": {"gates": "Tier B gates are current and threshold-checked", "cadence": "every suite run"},
+    "validate_external_evaluations": {"gates": "external evaluations carry provenance", "cadence": "every suite run"},
     "audit_check_coverage": {"gates": "every check is declared and homed", "cadence": "every push"},
-    "audit_dependency_provenance": {"gates": "evidence names the third-party code that produced it", "cadence": "every push"},
+    "audit_dependency_provenance": {"gates": "evidence names the third-party code that produced it", "cadence": "every suite run"},
 
     # --- need a database ------------------------------------------------------
     "benchmark_ontology_scale_postgres": {"gates": "Tier B ontology scale", "cadence": "per release candidate"},

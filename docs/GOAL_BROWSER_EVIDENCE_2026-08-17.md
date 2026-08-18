@@ -136,14 +136,14 @@ kilobytes-per-route worth gating, and only one of them has a baseline file.
   skipped-per-viewport as a baseline and gate it downward, so behavioural coverage can widen
   and never narrow. **Met** — `docs/browser-evidence-baseline.json`, 228 entries, one outcome
   per test per viewport.
-- **G4 — Decide what touch is owed, then enforce the decision.** Either the pipeline builder
+- **G4 — Decide what touch is owed, then enforce the decision.** **Open** — needs a product decision, not more measurement. Either the pipeline builder
   gains a touch-capable path to the first node — an insert control that exists on an empty
   canvas would very nearly do it — or the product states that authoring is desktop-only and
   the suite stops declaring `mobile-375` and `tablet-768` as though they were supported. Both
   are defensible. Shipping a screen that renders and cannot be used is not.
-- **G5 — A payload budget per route.** Record KB per workspace route and gate growth, the way
+- **G5 — A payload budget per route.** **Open** Record KB per workspace route and gate growth, the way
   `docs/suite-cost-baseline.json` gates statements. Report the total; gate the regression.
-- **G6 — Say what the legacy UI is for.** 7,856 lines that no test touches, reachable by
+- **G6 — Say what the legacy UI is for.** **Open** 7,856 lines that no test touches, reachable by
   `?legacy=1` and served by default on any machine that has not run a build. Either it is
   supported — in which case it needs the render sweep at minimum — or it is retired. Carrying
   an untested second UI as the silent fallback is the worst of the three options.

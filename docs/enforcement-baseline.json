@@ -1,5 +1,8 @@
 {
-  "ever_run_floor": 15,
+  "provenance": {
+    "recorded_at": "2026-08-18T05:22:26Z"
+  },
+  "ever_run_floor": 16,
   "note": "Floor. May be raised, never lowered. Staleness is reported, not gated: advancing the head makes every check stale at once, and a ratchet that fires on ordinary work gets ignored.",
   "recorded_at_head": "0042_stream_outer_joins"
 }

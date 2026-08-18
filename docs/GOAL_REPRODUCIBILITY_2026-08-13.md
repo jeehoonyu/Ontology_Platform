@@ -62,14 +62,13 @@ The related mechanism is already built and has never been used:
 
 ## Conditions
 
-| # | Condition | Threshold | Baseline 2026-08-13 |
-| --- | --- | --- | --- |
-| **D1** | Every runtime dependency is pinned to an exact version, or carries a recorded reason it cannot be | 0 unpinned | **16 unpinned of 16** |
-| **D2** | Evidence provenance records the dependency set that produced it | 100% of gates | **0 of 7** |
-| **D3** | An auditor reports evidence produced against a dependency set that differs from the current one | exists and is ratcheted | **does not exist** |
-| **D4** | One Tier B gate is reproduced from a clean environment built only from the pinned manifest | ≥ 1 gate | **0** |
-| **D5** | The documented path from clone to a reproduced measurement is executable by a reader | exists and is tested | **not written** |
-
+| # | Condition | Threshold | Baseline 2026-08-13 | State |
+| --- | --- | --- | --- | --- |
+| **D1** | Every runtime dependency is pinned to an exact version, or carries a recorded reason it cannot be | 0 unpinned | **16 unpinned of 16** | **Met** — `oms/requirements.txt` carries 17 exact pins and no unpinned line |
+| **D2** | Evidence provenance records the dependency set that produced it | 100% of gates | **0 of 7** | **Open** — `audit_dependency_provenance` reports 1 of 25 evidence files recording a dependency set |
+| **D3** | An auditor reports evidence produced against a dependency set that differs from the current one | exists and is ratcheted | **does not exist** | **Met** — `audit_dependency_provenance.py`, ratcheted by `test_reproducibility_conditions.py` |
+| **D4** | One Tier B gate is reproduced from a clean environment built only from the pinned manifest | ≥ 1 gate | **0** | **Met** — `docs/REPRODUCING_A_MEASUREMENT.md` records the pipeline-scale gate reproduced by that path |
+| **D5** | The documented path from clone to a reproduced measurement is executable by a reader | exists and is tested | **not written** | **Met** — `scripts/reproduce-measurement.sh` with `docs/REPRODUCING_A_MEASUREMENT.md` |
 D2 is the substance. D1 without D2 pins the future and still leaves every existing number
 unattributable; D2 without D1 records a set nobody can recreate. Together they make a
 measurement something a stranger can argue with.

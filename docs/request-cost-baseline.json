@@ -1,4 +1,7 @@
 {
+  "provenance": {
+    "recorded_at": "2026-08-15T23:02:59Z"
+  },
   "note": "Per-request database round-trips. Written by oms/audit_request_cost.py --write-baseline.",
   "repeat_ceiling": 6,
   "routes": {

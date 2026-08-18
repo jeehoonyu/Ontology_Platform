@@ -114,4 +114,17 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # This is the one audit that does not run through `enforcement_runs.recording`,
+    # because it audits the run records and would otherwise be recording itself.
+    # It still owes its baseline a date, so it borrows the same two helpers.
+    from enforcement_runs import _baseline_mtimes, _stamp_rewritten_baselines
+
+    _seen = _baseline_mtimes()
+    try:
+        _code = main()
+    finally:
+        try:
+            _stamp_rewritten_baselines(_seen)
+        except Exception as _error:
+            print(f"[enforcement-runs] could not date a baseline: {_error}")
+    sys.exit(_code)
