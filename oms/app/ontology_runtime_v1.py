@@ -318,12 +318,55 @@ def _event_dict(row: ObjectChangeEvent) -> Dict[str, Any]:
     }
 
 
+def _table_present(db: Session, bind: Any, table_name: str) -> bool:
+    """Does `table_name` exist? Asked once per request, not once per row.
+
+    Reflection is a database round-trip, and this question sits inside a loop
+    that runs once per object written. A bulk hydrate asked it 1,002 times in a
+    single request.
+
+    Only a positive answer is cached. A missing table is the partial-schema
+    compatibility path, where a caller may create the table later in the same
+    session; a table that exists cannot stop existing under a live request, so
+    that direction is safe to remember and is the one that repeats.
+    """
+    present = db.info.setdefault("_tables_present", set())
+    if table_name in present:
+        return True
+    if inspect(bind).has_table(table_name):
+        present.add(table_name)
+        return True
+    return False
+
+
 def _active_revision_id(db: Session, project_id: str) -> Optional[str]:
-    environment = db.query(ontology_versioning.OntologyEnvironment).filter(
-        ontology_versioning.OntologyEnvironment.project_id == project_id,
-        ontology_versioning.OntologyEnvironment.name == "production",
-    ).first()
-    return environment.current_revision_id if environment else None
+    """The production revision for a project, looked up once per request.
+
+    This sits in the same per-row loop as everything else here and was another
+    ~1,000 statements on a bulk hydrate, all returning the same row.
+
+    What is cached is the **entity, not the value**, and the difference is the
+    whole reason this is safe. The industrial hydrate promotes a revision --
+    `environment.current_revision_id = revision.id` -- and *then* writes the
+    objects, in one request. A cached value would stamp every one of them with
+    the superseded revision. A cached entity is the identity-mapped instance the
+    promotion mutated, so reading the attribute here sees the new id; and if the
+    session commits in between, the expired instance refreshes itself.
+
+    Only a found row is cached: a project with no production environment yet may
+    acquire one later in the same request.
+    """
+    cache = db.info.setdefault("_production_environments", {})
+    environment = cache.get(project_id)
+    if environment is None:
+        environment = db.query(ontology_versioning.OntologyEnvironment).filter(
+            ontology_versioning.OntologyEnvironment.project_id == project_id,
+            ontology_versioning.OntologyEnvironment.name == "production",
+        ).first()
+        if environment is None:
+            return None
+        cache[project_id] = environment
+    return environment.current_revision_id
 
 
 _OBJECT_REFERENCE_KEYS = {
@@ -948,7 +991,7 @@ def record_object_change(
     valid_from: Optional[int] = None,
 ) -> Optional[ObjectChangeEvent]:
     bind = db.get_bind()
-    if bind is None or not inspect(bind).has_table(ObjectChangeEvent.__tablename__):
+    if bind is None or not _table_present(db, bind, ObjectChangeEvent.__tablename__):
         # Standalone compatibility routers may intentionally construct only a
         # subset of the schema. Production migrations require this table.
         return None

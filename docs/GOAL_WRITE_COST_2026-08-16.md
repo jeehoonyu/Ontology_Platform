@@ -42,7 +42,7 @@ the route table makes.
   on a read, and a write loop is worse: it holds a transaction open while it runs.
 - **F4 — Fix what it finds**, on the evidence, with the equivalence discipline this project
   has now learned three times the hard way — a fixture proves what it contains, so the
-  fixture has to contain the crossed case.
+  fixture has to contain the crossed case. **Met** — below.
 - **F5 — Extend the ratchet.** `audit_request_cost.py` gates the repeated shape over GET
   collection routes. If the suite can produce write costs reproducibly, the same ceiling
   should cover writes. **Met** — `oms/audit_suite_cost.py`, below.
@@ -155,6 +155,65 @@ while holding a transaction open across all of it.
 So the fix is F5, and it is not a bigger fixture: it is the census itself as the measurement
 condition, because the suite already supplies the payloads that 547 invented bodies could
 not.
+
+## What the fix found: the loop was asking the schema a question
+
+`POST /pipeline-builder/workers/run-next` hydrates about a thousand objects in one request.
+Dumping the statement sequence rather than the summary showed a cycle of ten statements per
+object, and **three of the ten asked a question whose answer was already known**:
+
+| Per object, before | | |
+| --- | --- | --- |
+| `PRAGMA table_info("object_snapshots")` | 1,002× | `create(checkfirst=True)`, once per snapshot |
+| `PRAGMA table_info("object_change_events")` | 1,002× | `has_table`, once per change event |
+| `SELECT … ontology_environments …` | ~1,000× | the project's production revision |
+
+A fifth of the most expensive request in the codebase was spent asking whether two tables
+exist. Tables do not appear or vanish under a live request, so all three are now looked up
+once per request and cached on the session.
+
+| `POST /pipeline-builder/workers/run-next` | Statements | Per object |
+| --- | --- | --- |
+| before | 10,202 | 10.2 |
+| after | **7,201** | **7.2** |
+| removed | 3,002 (**29%**) | |
+
+The census found the same fix reached six other routes, none of them touched deliberately:
+`/project/demo/bootstrap` and `/project/demo/reset` (−8 each), `/scenarios/asset-reliability/bootstrap`
+(−8), the industrial onboard route (−6), `/pipeline-builder/graphs/{graph_id}/deliver` (−4)
+and an entity-resolution accept (−1). Every path that writes an object was paying it.
+
+### The one that was not safe to cache the obvious way
+
+The revision lookup is not constant, and the route that motivated the fix is exactly where
+it changes. `industrial_workflow` promotes a new revision — `environment.current_revision_id
+= revision.id` — and *then* hydrates the objects belonging to it, in one request. Caching the
+revision **id** would have stamped every one of those objects with the revision the promotion
+had just superseded, and the suite would have said nothing: the objects get written, the
+request succeeds, and only the lineage is wrong.
+
+So what is cached is the environment **row**, not the id read off it. SQLAlchemy's identity
+map makes it the same instance the promotion mutates, so the read sees the new value, and a
+commit in between expires the instance into refreshing itself rather than serving a stale
+copy.
+
+`oms/test_change_event_revision_freshness.py` contains a promotion followed by a write, and
+was checked against the wrong implementation before being trusted: with the id cached it
+fails with `got 'revision-one'`. A fixture that only records events against a stable revision
+passes either way, which is the trap this project has now walked into four times.
+
+### What is left, and why it is not waste
+
+The worst repeat is unchanged at **×1006** — one `INSERT INTO event_outbox` per object — and
+that is structural rather than sloppy. Sessions here are `autoflush=False`, so the explicit
+`db.flush()` inside the change-event recorder is load-bearing: the next object's version
+comes from `max(object_version)` over rows already written, and two changes to the same
+object in one request would otherwise both compute version 1. Batching the inserts means
+redesigning how versions are assigned, which is a different piece of work with a real
+correctness surface, not a caching win.
+
+It is recorded here rather than folded in, and the ratchet now holds it at 1006: it may go
+down, and it fails at 1007.
 
 ## The ratchet that covers writes
 

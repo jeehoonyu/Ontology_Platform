@@ -34,10 +34,25 @@ def _new_id(prefix: str) -> str:
 
 
 def _ensure_object_snapshot_table(db: Session) -> None:
-    """Support legacy standalone callers that create Base tables before this module is imported."""
+    """Support legacy standalone callers that create Base tables before this module is imported.
+
+    `checkfirst=True` asks the database whether the table exists, and it asks
+    every single call. On a bulk hydrate that records one snapshot per row this
+    was 1,002 `PRAGMA table_info` round-trips in one request -- a fifth of the
+    most expensive request in the codebase spent asking a question whose answer
+    cannot change while the request runs.
+
+    Cached on the session rather than the engine: a table cannot appear or
+    vanish mid-request, and a per-request cache cannot go stale between them.
+    """
     if os.getenv("APP_ENV", "").strip().lower() == "production":
         return
-    ObjectSnapshot.__table__.create(bind=db.get_bind(), checkfirst=True)
+    bind = db.get_bind()
+    ready = db.info.setdefault("_created_tables", set())
+    if bind in ready:
+        return
+    ObjectSnapshot.__table__.create(bind=bind, checkfirst=True)
+    ready.add(bind)
 
 
 class DecisionRule(Base):

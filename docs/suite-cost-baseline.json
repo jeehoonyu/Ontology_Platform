@@ -675,7 +675,7 @@
     "GET /health/ready": {
       "worst_repeat": 11,
       "queries": 400,
-      "calls": 11
+      "calls": 12
     },
     "GET /imports/jobs": {
       "worst_repeat": 2,
@@ -1254,7 +1254,7 @@
     },
     "GET /runtime/observability/summary": {
       "worst_repeat": 20,
-      "queries": 83,
+      "queries": 107,
       "calls": 15
     },
     "GET /runtime/pilot-evidence": {
@@ -1859,7 +1859,7 @@
     },
     "POST /api/v1/industrial/workflows/asset-reliability/onboard": {
       "worst_repeat": 12,
-      "queries": 205,
+      "queries": 199,
       "calls": 18
     },
     "POST /api/v1/industrial/workflows/asset-reliability/triage": {
@@ -2364,7 +2364,7 @@
     },
     "POST /entity-resolution/candidates/{candidate_id}/accept": {
       "worst_repeat": 4,
-      "queries": 17,
+      "queries": 16,
       "calls": 1
     },
     "POST /entity-resolution/candidates/{candidate_id}/reject": {
@@ -3144,7 +3144,7 @@
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver": {
       "worst_repeat": 5,
-      "queries": 99,
+      "queries": 95,
       "calls": 16
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver/async": {
@@ -3189,7 +3189,7 @@
     },
     "POST /pipeline-builder/workers/run-next": {
       "worst_repeat": 1006,
-      "queries": 10203,
+      "queries": 7201,
       "calls": 44
     },
     "POST /pipelines": {
@@ -3219,12 +3219,12 @@
     },
     "POST /project/demo/bootstrap": {
       "worst_repeat": 52,
-      "queries": 849,
+      "queries": 841,
       "calls": 4
     },
     "POST /project/demo/reset": {
       "worst_repeat": 49,
-      "queries": 786,
+      "queries": 778,
       "calls": 1
     },
     "POST /project/import": {
@@ -3329,7 +3329,7 @@
     },
     "POST /scenarios/asset-reliability/bootstrap": {
       "worst_repeat": 44,
-      "queries": 705,
+      "queries": 697,
       "calls": 4
     },
     "POST /scenarios/asset-reliability/run-triage": {
