@@ -70,3 +70,6 @@ Thumbs.db
 # Local object storage (uploaded files)
 storage/
 oms/storage/
+
+# artifacts written by oms/verify.py --full
+.verify/
