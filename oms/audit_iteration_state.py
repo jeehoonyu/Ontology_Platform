@@ -61,6 +61,13 @@ def summarise(report) -> Dict[str, Any]:
         "blocked": states.get(BLOCKED, 0),
         "cadence_gaps": len(report.cadence_gaps),
         "undated_baselines": sum(1 for b in report.baselines if not b.recorded_at),
+        "lifeless_baselines": sum(1 for b in report.baselines if not b.stale_after),
+        "overdue_baselines": sum(1 for b in report.baselines if b.overdue),
+        # Declaring evidence head-bound and recording no head is a shelf life
+        # nothing can check. It is not the same as having no life declared, and
+        # it hides better.
+        "headless_baselines": sum(1 for b in report.baselines
+                                  if b.stale_after == "migration head" and not b.migration_head),
         "unparsed_documents": len(report.unparsed),
     }
 
@@ -79,8 +86,15 @@ def compare(counts: Dict[str, Any], baseline: Dict[str, Any]):
             f"{counts['cadence_gaps']} check(s) run somewhere other than where they say, or "
             f"nowhere at all -- correct the declaration, or give the check a home")
 
+    for entry in [b for b in getattr(counts, "_overdue", [])]:
+        pass
     for field, label in (("unrecorded", "condition(s) with no recorded state"),
-                         ("undated_baselines", "baseline(s) with no recorded date")):
+                         ("undated_baselines", "baseline(s) with no recorded date"),
+                         ("lifeless_baselines", "baseline(s) declaring no shelf life"),
+                         ("overdue_baselines", "baseline(s) past the life they declare"),
+                         ("headless_baselines",
+                          "baseline(s) claiming to expire with the migration head "
+                          "while recording no head")):
         ceiling = baseline.get(f"{field}_ceiling")
         if ceiling is None:
             continue
@@ -141,14 +155,25 @@ def main() -> int:
             # written.
             "provenance": {
                 "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                # Ceilings on the tree, recomputed from it on every run, so this
+                # file cannot go stale the way a census can. Saying so is the
+                # point: the gate refuses a baseline that declares no life, and
+                # this one refused itself until it did.
+                "stale_after": "recomputed each run",
             },
             "note": ("Ceilings on what the project has not written down about itself. "
                      "Both may fall and must never rise."),
             "unrecorded_ceiling": counts["unrecorded"],
             "undated_baselines_ceiling": counts["undated_baselines"],
+            "lifeless_baselines_ceiling": counts["lifeless_baselines"],
+            "overdue_baselines_ceiling": counts["overdue_baselines"],
+            "headless_baselines_ceiling": counts["headless_baselines"],
         }, indent=2) + "\n", encoding="utf-8")
         print(f"\nBaseline set: {counts['unrecorded']} unrecorded condition(s), "
-              f"{counts['undated_baselines']} undated baseline(s).")
+              f"{counts['undated_baselines']} undated, "
+              f"{counts['lifeless_baselines']} without a declared life, "
+              f"{counts['overdue_baselines']} overdue, "
+              f"{counts['headless_baselines']} head-bound with no head.")
         return 0
 
     print(f"\nNext: {next_step(report)}")

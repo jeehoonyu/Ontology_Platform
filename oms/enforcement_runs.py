@@ -212,6 +212,19 @@ def _stamp_rewritten_baselines(before: Dict[str, float]) -> None:
         provenance = payload.get("provenance")
         provenance = provenance if isinstance(provenance, dict) else {}
         provenance["recorded_at"] = now
+        # A baseline that claims to expire with the migration head must record
+        # which head it was measured at, or the claim is unfalsifiable. Two did
+        # exactly that until the gate counted them.
+        if provenance.get("stale_after") == "migration head":
+            try:
+                import sys
+
+                sys.path.insert(0, str(REPO_ROOT / "oms"))
+                from audit_evidence_corpus import current_head
+
+                provenance["migration_head"] = current_head()
+            except Exception:
+                pass
         payload = {"provenance": provenance,
                    **{k: v for k, v in payload.items() if k != "provenance"}}
         path.write_text(json.dumps(payload, indent=2) + chr(10), encoding="utf-8")

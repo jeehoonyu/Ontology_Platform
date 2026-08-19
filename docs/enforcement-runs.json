@@ -6,31 +6,31 @@
     "verdict": "PASS"
   },
   "audit_check_coverage": {
-    "at": 1787081496,
+    "at": 1787104470,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_dependency_provenance": {
-    "at": 1787081496,
+    "at": 1787104269,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_evidence_corpus": {
-    "at": 1787081496,
+    "at": 1787104269,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_extensibility": {
-    "at": 1787081497,
+    "at": 1787104269,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_iteration_state": {
-    "at": 1787081495,
+    "at": 1787105577,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
@@ -42,25 +42,25 @@
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1787081499,
+    "at": 1787104468,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_request_cost": {
-    "at": 1786999629,
+    "at": 1787104213,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_route_coverage": {
-    "at": 1787081502,
+    "at": 1787104274,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "audit_snapshot_scope": {
-    "at": 1787081504,
+    "at": 1787104277,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
@@ -72,7 +72,7 @@
     "verdict": "PASS"
   },
   "audit_ui_states": {
-    "at": 1787081504,
+    "at": 1787104277,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
@@ -84,25 +84,25 @@
     "verdict": "PASS"
   },
   "validate_docs_conformance": {
-    "at": 1787081505,
+    "at": 1787104468,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1787081505,
+    "at": 1787104713,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
-    "verdict": "FAIL"
+    "verdict": "PASS"
   },
   "validate_schema_freeze": {
-    "at": 1787081505,
+    "at": 1787104277,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1787081505,
+    "at": 1787104470,
     "environment": "local",
     "migration_head": "0042_stream_outer_joins",
     "verdict": "FAIL"

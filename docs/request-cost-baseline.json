@@ -1,6 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-15T23:02:59Z"
+    "recorded_at": "2026-08-19T01:50:27Z",
+    "migration_head": "0042_stream_outer_joins",
+    "stale_after": "migration head"
   },
   "note": "Per-request database round-trips. Written by oms/audit_request_cost.py --write-baseline.",
   "repeat_ceiling": 6,

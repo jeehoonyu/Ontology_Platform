@@ -1,6 +1,7 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-18T05:22:34Z"
+    "recorded_at": "2026-08-18T05:22:34Z",
+    "stale_after": "recomputed each run"
   },
   "note": "Ceilings. May be lowered, never raised.",
   "unautomated_ceiling": 0,

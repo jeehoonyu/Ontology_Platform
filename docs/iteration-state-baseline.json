@@ -1,8 +1,12 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-18T05:00:17Z"
+    "recorded_at": "2026-08-19T01:50:42Z",
+    "stale_after": "recomputed each run"
   },
   "note": "Ceilings on what the project has not written down about itself. Both may fall and must never rise.",
   "unrecorded_ceiling": 0,
-  "undated_baselines_ceiling": 0
+  "undated_baselines_ceiling": 0,
+  "lifeless_baselines_ceiling": 0,
+  "overdue_baselines_ceiling": 0,
+  "headless_baselines_ceiling": 0
 }

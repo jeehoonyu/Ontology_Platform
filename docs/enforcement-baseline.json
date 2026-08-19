@@ -1,6 +1,7 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-18T18:22:54Z"
+    "recorded_at": "2026-08-18T18:22:54Z",
+    "stale_after": "recomputed each run"
   },
   "ever_run_floor": 17,
   "note": "Floor. May be raised, never lowered. Staleness is reported, not gated: advancing the head makes every check stale at once, and a ratchet that fires on ordinary work gets ignored.",

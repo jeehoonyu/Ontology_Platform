@@ -1,6 +1,7 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-12T19:00:43Z"
+    "recorded_at": "2026-08-12T19:00:43Z",
+    "stale_after": "recomputed each run"
   },
   "note": "Ratchet. The ceiling may be lowered, never raised; the floor may be raised, never lowered.",
   "recorded_at_head": "0042_stream_outer_joins",

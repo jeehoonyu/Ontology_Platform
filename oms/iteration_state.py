@@ -82,6 +82,8 @@ class Baseline:
     recorded_at: Optional[str]
     migration_head: Optional[str]
     age_days: Optional[float]
+    stale_after: Optional[str] = None
+    overdue: Optional[str] = None
 
 
 @dataclass
@@ -168,22 +170,20 @@ def cadence_gaps() -> List[str]:
     hook = PRE_PUSH.read_text(encoding="utf-8")
     on_push = set(re.findall(r"(audit_[a-z_]+|validate_[a-z_]+)", hook))
 
-    suite_text = ""
-    for path in (REPO_ROOT / "oms").glob("test_*.py"):
-        try:
-            suite_text += path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
+    # `check_registry.suite_executions` already draws this line, and draws it
+    # better: an import, not a mention. Every benchmark here has a contract test
+    # that reads its source with `read_text`, and counting those as a home is what
+    # made this surface look covered when it was not. This file had its own
+    # containment scan, which was a weaker duplicate of that -- a mention would
+    # have satisfied it.
+    from check_registry import suite_executions
+
+    homed = suite_executions()
 
     gaps: List[str] = []
     for name, declaration in sorted(DECLARATIONS.items()):
         cadence = declaration.get("cadence", "")
-        # Plain containment, not a word-boundary regex: check names are long
-        # and distinctive, and the escape needed for the regex form did not
-        # survive being written through a shell heredoc -- it arrived as a
-        # literal backspace, which matches nothing and silently reported every
-        # check as unhomed.
-        in_suite = name in suite_text
+        in_suite = name in homed
         if cadence == "every push":
             if name in on_push:
                 continue
@@ -195,6 +195,18 @@ def cadence_gaps() -> List[str]:
         elif cadence == "every suite run":
             if not in_suite:
                 gaps.append(f"{name}: declares `every suite run` and no suite test runs it")
+        elif cadence.startswith("manual"):
+            # `manual` is an honest answer and the only one that has to justify
+            # itself: it must say what it needs. Twenty-seven checks previously
+            # said `per release candidate`, `on demand`, `before enabling
+            # downstream consumers` or `when the connector changes` -- four
+            # phrasings naming no event that happens in this repository, which
+            # read like a schedule and behaved like a hope.
+            if cadence == "manual":
+                gaps.append(f"{name}: declares `manual` without saying what it needs")
+        else:
+            gaps.append(f"{name}: cadence {cadence!r} names no mechanism -- use "
+                        f"`every push`, `every suite run`, or `manual: needs ...`")
     return gaps
 
 
@@ -222,13 +234,43 @@ def read_baselines(docs: Path | None = None) -> List[Baseline]:
         provenance = payload.get("provenance") if isinstance(payload, dict) else None
         provenance = provenance if isinstance(provenance, dict) else {}
         stamp = provenance.get("recorded_at")
+        head = provenance.get("migration_head")
+        age = _age_days(stamp) if stamp else None
+        # Two kinds of shelf life, because two kinds of evidence live here and
+        # only one of them ages. A census of what routes cost is a statement
+        # about a schema, so it expires when the migration head moves, not after
+        # some number of days. A ceiling on how many conditions lack a state is
+        # recomputed from the tree on every run, so it cannot go stale at all.
+        # Writing "30 days" over both would have been a number invented to fill
+        # a field.
+        life = provenance.get("stale_after")
+        overdue = None
+        if life == "migration head" and head and head != _current_head():
+            overdue = f"measured at {head}, head is now {_current_head()}"
+        elif isinstance(life, str) and life.endswith(" days"):
+            try:
+                limit = float(life.split()[0])
+            except ValueError:
+                limit = None
+            if limit is not None and age is not None and age > limit:
+                overdue = f"{age} days old, declared life {life}"
         found.append(Baseline(
-            name=path.name,
-            recorded_at=stamp,
-            migration_head=provenance.get("migration_head"),
-            age_days=_age_days(stamp) if stamp else None,
+            name=path.name, recorded_at=stamp, migration_head=head,
+            age_days=age, stale_after=life, overdue=overdue,
         ))
     return found
+
+
+def _current_head() -> Optional[str]:
+    try:
+        import sys
+
+        sys.path.insert(0, str(REPO_ROOT / "oms"))
+        from audit_evidence_corpus import current_head
+
+        return current_head()
+    except Exception:
+        return None
 
 
 def build() -> Report:
