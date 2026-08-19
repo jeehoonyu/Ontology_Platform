@@ -82,6 +82,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no workspace route exceeds the bytes it costs a browser today",
         "runs_in": "suite",
     },
+    "audit_style_scope": {
+        "purpose": "no stylesheet class couples a second screen without being declared",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

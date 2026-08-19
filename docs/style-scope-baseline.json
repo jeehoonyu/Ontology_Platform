@@ -1,0 +1,228 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-08-19T20:49:37Z"
+  },
+  "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
+  "single_file_classes": 297,
+  "shared": {
+    "button-row": [
+      "App.tsx",
+      "components/data/DataDisplay.tsx",
+      "components/workbench/Workbench.tsx",
+      "workspaces/Analytics.tsx",
+      "workspaces/Automate.tsx",
+      "workspaces/ControlPanel.tsx",
+      "workspaces/DataMedia.tsx",
+      "workspaces/DecisionWorkspace.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/MapWorkspace.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/ObjectExplorer.tsx",
+      "workspaces/OntologyHealthPanel.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/OntologyRegistryPanel.tsx",
+      "workspaces/OntologyReleasePanel.tsx",
+      "workspaces/OpsWorkspace.tsx",
+      "workspaces/Security.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "compact-input": [
+      "workspaces/DataMedia.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/PipelineBuilder.tsx"
+    ],
+    "developer-evidence": [
+      "components/data/DataDisplay.tsx",
+      "workspaces/Analytics.tsx"
+    ],
+    "empty": [
+      "App.tsx",
+      "components/canvas/PipelineCanvas.tsx",
+      "components/data/DataDisplay.tsx",
+      "workspaces/Analytics.tsx",
+      "workspaces/DataMedia.tsx",
+      "workspaces/DecisionWorkspace.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/MapWorkspace.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/ObjectExplorer.tsx",
+      "workspaces/OpsWorkspace.tsx",
+      "workspaces/Security.tsx"
+    ],
+    "eyebrow": [
+      "App.tsx",
+      "workspaces/OntologyRegistryPanel.tsx",
+      "workspaces/VisualBuilder.tsx"
+    ],
+    "grid": [
+      "App.tsx",
+      "workspaces/Analytics.tsx",
+      "workspaces/Automate.tsx",
+      "workspaces/ControlPanel.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/Security.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "inline-success": [
+      "workspaces/ControlPanel.tsx",
+      "workspaces/DecisionWorkspace.tsx",
+      "workspaces/MapWorkspace.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/ObjectExplorer.tsx",
+      "workspaces/OpsWorkspace.tsx"
+    ],
+    "legacy-button": [
+      "components/workbench/Workbench.tsx",
+      "workspaces/DataMedia.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/PipelineBuilder.tsx"
+    ],
+    "manager-chip-row": [
+      "workspaces/ControlPanel.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/OntologyHealthPanel.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/OntologyReleasePanel.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "manager-header-card": [
+      "workspaces/OntologyHealthPanel.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/OntologyReleasePanel.tsx"
+    ],
+    "manager-topbar": [
+      "workspaces/Delivery.tsx",
+      "workspaces/OntologyManager.tsx"
+    ],
+    "metadata-edit-grid": [
+      "workspaces/ControlPanel.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/Security.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "metrics": [
+      "App.tsx",
+      "workspaces/Analytics.tsx",
+      "workspaces/Automate.tsx",
+      "workspaces/ControlPanel.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/Security.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "notice": [
+      "App.tsx",
+      "workspaces/ControlPanel.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "object-icon": [
+      "workspaces/OntologyHealthPanel.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/OntologyReleasePanel.tsx"
+    ],
+    "ontology-contract-list": [
+      "workspaces/OntologyRegistryPanel.tsx",
+      "workspaces/PipelineBuilder.tsx"
+    ],
+    "ontology-contract-row": [
+      "workspaces/OntologyRegistryPanel.tsx",
+      "workspaces/PipelineBuilder.tsx"
+    ],
+    "ontology-release-header": [
+      "workspaces/OntologyRegistryPanel.tsx",
+      "workspaces/OntologyReleasePanel.tsx"
+    ],
+    "operation-message": [
+      "workspaces/OntologyHealthPanel.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/OntologyReleasePanel.tsx",
+      "workspaces/VisualBuilder.tsx"
+    ],
+    "panel-description": [
+      "workspaces/ControlPanel.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/OntologyManager.tsx"
+    ],
+    "primary-action": [
+      "workspaces/AgentRuntimePanel.tsx",
+      "workspaces/OntologyManager.tsx",
+      "workspaces/OntologyRegistryPanel.tsx",
+      "workspaces/PipelineBuilder.tsx",
+      "workspaces/VisualBuilder.tsx"
+    ],
+    "proof-trail": [
+      "App.tsx",
+      "components/data/DataDisplay.tsx"
+    ],
+    "section-card": [
+      "components/data/DataDisplay.tsx",
+      "workspaces/Delivery.tsx"
+    ],
+    "section-card-grid": [
+      "components/data/DataDisplay.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "stacked-field": [
+      "workspaces/DecisionWorkspace.tsx",
+      "workspaces/MapWorkspace.tsx",
+      "workspaces/ModelOps.tsx",
+      "workspaces/OpsWorkspace.tsx"
+    ],
+    "summary-list": [
+      "App.tsx",
+      "workspaces/DataMedia.tsx",
+      "workspaces/Delivery.tsx"
+    ],
+    "table-wrap": [
+      "components/data/DataDisplay.tsx",
+      "workspaces/Analytics.tsx",
+      "workspaces/Automate.tsx",
+      "workspaces/DataMedia.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/ObjectExplorer.tsx"
+    ],
+    "top-actions": [
+      "App.tsx",
+      "workspaces/Delivery.tsx"
+    ],
+    "two-col": [
+      "App.tsx",
+      "workspaces/Analytics.tsx",
+      "workspaces/Automate.tsx",
+      "workspaces/ControlPanel.tsx",
+      "workspaces/DataMedia.tsx",
+      "workspaces/Delivery.tsx",
+      "workspaces/Fusion.tsx",
+      "workspaces/Security.tsx",
+      "workspaces/Vertex.tsx"
+    ],
+    "workbench-page": [
+      "workspaces/Delivery.tsx",
+      "workspaces/PipelineBuilder.tsx",
+      "workspaces/Security.tsx"
+    ],
+    "workbench-status-strip": [
+      "workspaces/OntologyManager.tsx",
+      "workspaces/PipelineBuilder.tsx"
+    ],
+    "workspace-header": [
+      "components/workbench/Workbench.tsx",
+      "workspaces/ControlPanel.tsx",
+      "workspaces/Security.tsx"
+    ],
+    "workspace-summary-row": [
+      "App.tsx",
+      "workspaces/DataMedia.tsx"
+    ]
+  }
+}

@@ -125,11 +125,30 @@ New, from what is measured here:
   primitives in seven screens that lack the states — was based on a measurement of imports
   described as a measurement of behaviour. It is restated here as what the evidence supports.
   Browser suite after the migration: 113 passed, 0 failed.
-- **J2 — A change to one screen cannot silently restyle another.** **Open** — Give the
-  stylesheet scope: tokens for what is genuinely global (colour, spacing, type) and module or
-  component scope for the rest. Measure first — how many of the 357 classes are used by more
-  than one workspace — because the ones used once are the cheap half and the ones used
-  everywhere are the design system in disguise.
+- **J2 — A change to one screen cannot silently restyle another.** **Met** — and the
+  measurement it asked for first is what decided the work. It is lopsided:
+
+  | Of 358 classes in the one stylesheet | |
+  | --- | --- |
+  | used by exactly one file | **297 (83%)** |
+  | used by two or more | **33** |
+  | in no `className` literal | 28, of which 16 are built at runtime |
+
+  So the stylesheet was **not** scoped. Rewriting hundreds of class usages across twenty-two
+  files, verified by a render sweep that checks overflow and contrast rather than layout,
+  would be a large risky change against a coupling that is mostly theoretical: a class one
+  file uses cannot restyle another file.
+
+  The 33 are the coupling, and they are the design system nobody had named — `.button-row`
+  across twenty files, `.empty` across thirteen, then `.two-col`, `.metrics`, `.grid`,
+  `.table-wrap`. `oms/audit_style_scope.py` records them and gates the *event* rather than the
+  layout: **a class going from one user to two fails**, naming the second screen, because that
+  is the moment a change to it starts moving both. Declaring it shared is a one-line edit;
+  doing it by accident is what is refused.
+
+  Deleting the 28 is deliberately not gated. Sixteen are assembled at runtime —
+  `context-action-${kind}` and the like — so "no literal mentions it" is not "nothing uses
+  it", and a gate that cannot tell those apart would push someone to delete a live style.
 - **J3 — The primitives are documented where they are used.** **Open** — `WorkspaceHeader` is
   used by one screen of twenty-two. Either it is the intended header and twenty-one screens
   have not adopted it, or it is dead. A primitive nobody can find gets rewritten inline, which

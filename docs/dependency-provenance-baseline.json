@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-13T14:01:17Z",
+    "recorded_at": "2026-08-19T20:48:17Z",
     "stale_after": "recomputed each run"
   },
   "note": "Ceiling. May be lowered, never raised. Drift is reported and never gated: upgrading a dependency is ordinary work, and a ratchet that fires on ordinary work gets routed around.",
-  "unrecorded_ceiling": 24
+  "unrecorded_ceiling": 23
 }

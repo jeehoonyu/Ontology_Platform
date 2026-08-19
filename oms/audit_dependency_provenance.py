@@ -52,6 +52,12 @@ def classify(docs: Path | None = None) -> Dict[str, Dict[str, Any]]:
     now = digest(installed)
     report: Dict[str, Dict[str, Any]] = {}
     for path in sorted(directory.glob("*evidence*.json")):
+        # A ratchet baseline is not evidence. `evidence-corpus-baseline.json`
+        # matches the glob by name and was being counted as an unprovenanced
+        # measurement, which made the corpus look one file worse than it is.
+        # Only this audit's own baseline was excluded; the rule is broader.
+        if path.name.endswith("-baseline.json"):
+            continue
         if path.name == BASELINE.name:
             continue
         try:
