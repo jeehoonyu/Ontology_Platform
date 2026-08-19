@@ -1,15 +1,17 @@
 {
   "provenance": {
     "migration_head": "0042_stream_outer_joins",
-    "bundle_source_hash": "baf471735e95554e8b63162a506bbc679652d3a17f890646b931fda4805086bc",
+    "bundle_source_hash": "119f13fdd3543213fb1df64f0eebcca819fe6bfea3dc54e58ae5c03e771ecde4",
     "dependencies": {
       "digest": "a727fd9a41cfa7b6",
       "closure": 45
     },
-    "recorded_at": "2026-08-19T04:03:35Z",
+    "recorded_at": "2026-08-19T05:17:32Z",
     "stale_after": "migration head"
   },
-  "known_failing": {},
+  "known_failing": {
+    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "Found by the first run of this audit, 2026-08-17. The execution panel reads SUCCEEDED and the test then reads /jobs/{id}, whose result carries the finalizer metadata but not row_count. Failed both attempts then, and three isolated runs in a row. Has since passed three consecutive full runs -- not a discharge: the criterion recorded here is the race being fixed, or several consecutive *isolated* runs passing, and neither has been shown. Restored after a re-baseline dropped it silently, which is the failure this list exists to prevent."
+  },
   "note": "One outcome per viewport per test from a full browser run. A test that ran here may not become skipped; new tests and deletions are reported, not gated.",
   "viewports": {
     "desktop-1280": {

@@ -61,6 +61,7 @@ FAST_CHECKS = [
     "audit_snapshot_scope",
     "audit_ui_states",
     "audit_tier_a",
+    "audit_route_payload",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",

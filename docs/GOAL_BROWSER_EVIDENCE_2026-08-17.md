@@ -150,8 +150,26 @@ kilobytes-per-route worth gating, and only one of them has a baseline file.
   One correction from writing that test: `page.touchscreen.tap(x, y)` dispatches touch events
   without the click a browser synthesises from them, so it failed against a working button and
   read like a broken product. `locator.tap()` is the honest instrument.
-- **G5 — A payload budget per route.** **Open** Record KB per workspace route and gate growth, the way
-  `docs/suite-cost-baseline.json` gates statements. Report the total; gate the regression.
+- **G5 — A payload budget per route.** **Met** — `oms/audit_route_payload.py`, computed from
+  Vite's build manifest. The number is a **closure**: the entry chunk and everything it
+  statically imports, plus that route's lazy chunk and everything it imports. Measuring the
+  file named after a workspace would have reported `Automate` at 7 KB when a browser downloads
+  436 KB to render it.
+
+  Measuring it properly found something worth fixing. `@xyflow/react` — the node-graph
+  library, 178 KB — was listed in `manualChunks`, which made it a static import of the entry,
+  so **all seventeen routes carried it including the fourteen that never draw a graph**. One
+  line removed:
+
+  | | Before | After |
+  | --- | --- | --- |
+  | shared closure, paid by every route | 577 KB | **429 KB** |
+  | lightest route | 568 KB | **436 KB** |
+
+  Ceilings are per route rather than one global number, because the routes are not alike: a
+  map carrying Leaflet is legitimately heavier than a settings screen, and a single budget
+  would either forgive the map or forbid it. A route with **no** recorded ceiling fails, since
+  a new workspace is exactly when a payload gets away.
 - **G6 — Say what the legacy UI is for.** **Open** 7,856 lines that no test touches, reachable by
   `?legacy=1` and served by default on any machine that has not run a build. Either it is
   supported — in which case it needs the render sweep at minimum — or it is retired. Carrying

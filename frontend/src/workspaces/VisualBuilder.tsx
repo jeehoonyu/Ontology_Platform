@@ -1,3 +1,4 @@
+import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {

@@ -312,7 +312,17 @@ def main() -> int:
             for failure in provenance_failures:
                 print(f"  {failure}")
             return 1
-        BASELINE.write_text(json.dumps(build_baseline(found), indent=2) + "\n", encoding="utf-8")
+        # Carry the quarantine forward. Re-recording a baseline must not
+        # discharge a debt that is still owed -- this dropped the deploy
+        # test's entry once, silently, which is exactly the failure the
+        # list exists to prevent.
+        carried = {}
+        if BASELINE.exists():
+            carried = json.loads(BASELINE.read_text(encoding="utf-8")).get(
+                "known_failing", {})
+        BASELINE.write_text(
+            json.dumps(build_baseline(found, carried), indent=2) + chr(10),
+            encoding="utf-8")
         print(f"\nBaseline written to {BASELINE.relative_to(REPO_ROOT)} "
               f"({len(found)} entries, {total_skipped} of them skipped).")
         return 0

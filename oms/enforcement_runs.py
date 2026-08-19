@@ -78,6 +78,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no Tier A sub-condition regresses from met",
         "runs_in": "suite",
     },
+    "audit_route_payload": {
+        "purpose": "no workspace route exceeds the bytes it costs a browser today",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

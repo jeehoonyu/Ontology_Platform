@@ -1,0 +1,28 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-08-19T05:14:01Z"
+  },
+  "note": "Bytes a browser downloads to render each workspace route from cold: the entry closure plus that route's lazy chunk closure. May fall, must never rise beyond the tolerance.",
+  "tolerance_kb": 8,
+  "shared_closure_bytes": 439088,
+  "routes": {
+    "Analytics": 449636,
+    "Automate": 446267,
+    "ControlPanel": 484289,
+    "DataMedia": 448259,
+    "DecisionWorkspace": 461274,
+    "Delivery": 452007,
+    "Fusion": 449474,
+    "MapWorkspace": 619250,
+    "ModelOps": 464201,
+    "ObjectExplorer": 449582,
+    "OntologyManager": 689990,
+    "OpsWorkspace": 450804,
+    "PipelineBuilder": 462520,
+    "PlatformGraph": 638602,
+    "Security": 463138,
+    "Vertex": 454861,
+    "VisualBuilder": 673576
+  }
+}

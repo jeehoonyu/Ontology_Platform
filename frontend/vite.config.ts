@@ -7,10 +7,12 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // The chunk graph, so `oms/audit_route_payload.py` can say what each
+    // workspace route costs a browser rather than guessing from filenames.
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks: {
-          "canvas-vendor": ["@xyflow/react"],
           "dragdrop-vendor": ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"],
           "query-vendor": ["@tanstack/react-query"],
           "icons-vendor": ["lucide-react"]
