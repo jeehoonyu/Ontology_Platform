@@ -317,8 +317,18 @@ def next_step(report: Report) -> str:
                    key=lambda b: -(b.age_days or 0))
     if stale and (stale[0].age_days or 0) > 30:
         return f"Re-measure {stale[0].name} -- it is {stale[0].age_days} days old."
-    still_open = [c for c in report.conditions if c.state in (OPEN, BLOCKED)]
-    if still_open:
-        first = still_open[0]
+    # Open before blocked. A blocked condition is waiting on something outside
+    # the tree -- postgres, docker, an account with billing -- and naming it as
+    # the next step sends a reader to do work that cannot be done. Tier A sat at
+    # the head of this list for exactly that reason while six of its eight parts
+    # were already met.
+    actionable = [c for c in report.conditions if c.state == OPEN]
+    blocked = [c for c in report.conditions if c.state == BLOCKED]
+    if actionable:
+        first = actionable[0]
         return f"Take {first.identifier} from {first.document}: {first.title}"
+    if blocked:
+        first = blocked[0]
+        return (f"Everything actionable is done. {len(blocked)} blocked condition(s) remain, "
+                f"starting with {first.identifier} in {first.document}: {first.title}")
     return "Nothing is open, undated, or unproven. State a new goal."

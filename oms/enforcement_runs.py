@@ -189,11 +189,24 @@ def classify(runs: Dict[str, Any], head: str) -> Dict[str, Dict[str, Any]]:
     return report
 
 
-def _baseline_mtimes() -> Dict[str, float]:
-    found: Dict[str, float] = {}
+def _baseline_mtimes() -> Dict[str, Any]:
+    """When each baseline was last written, and the shelf life it declared.
+
+    The life is captured because several writers rebuild `provenance` from
+    scratch and drop it. Rather than teach each of them separately -- the same
+    lesson `recorded_at` needed -- it is carried across the rewrite here.
+    """
+    found: Dict[str, Any] = {}
     for path in (REPO_ROOT / "docs").glob("*baseline*.json"):
         try:
-            found[path.name] = path.stat().st_mtime
+            life = None
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    life = (payload.get("provenance") or {}).get("stale_after")
+            except (json.JSONDecodeError, OSError):
+                pass
+            found[path.name] = (path.stat().st_mtime, life)
         except OSError:
             continue
     return found
@@ -206,7 +219,9 @@ def _stamp_rewritten_baselines(before: Dict[str, float]) -> None:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for path in (REPO_ROOT / "docs").glob("*baseline*.json"):
         try:
-            if before.get(path.name) == path.stat().st_mtime:
+            prior = before.get(path.name)
+            prior_mtime, prior_life = prior if prior else (None, None)
+            if prior_mtime == path.stat().st_mtime:
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -216,6 +231,8 @@ def _stamp_rewritten_baselines(before: Dict[str, float]) -> None:
         provenance = payload.get("provenance")
         provenance = provenance if isinstance(provenance, dict) else {}
         provenance["recorded_at"] = now
+        if prior_life and not provenance.get("stale_after"):
+            provenance["stale_after"] = prior_life
         # A baseline that claims to expire with the migration head must record
         # which head it was measured at, or the claim is unfalsifiable. Two did
         # exactly that until the gate counted them.

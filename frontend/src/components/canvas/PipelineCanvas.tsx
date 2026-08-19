@@ -19,6 +19,8 @@ export function PipelineCanvas({
   onDrop,
   onDragOver,
   onInsertEdge,
+  onAddFirst,
+  quickAddType,
   onContextInsert,
   onMoveNode,
   onDeleteNode
@@ -31,6 +33,8 @@ export function PipelineCanvas({
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
   onInsertEdge: () => void;
+  onAddFirst?: () => void;
+  quickAddType?: string;
   onContextInsert: (nodeType: string) => void;
   onMoveNode: (nodeId: string, position: { x: number; y: number }, commit: boolean) => void;
   onDeleteNode: (nodeId: string) => void;
@@ -153,6 +157,15 @@ export function PipelineCanvas({
             </button>
           );
         })}
+        {!nodes.length && onAddFirst ? (
+          <div className="pipeline-canvas-first">
+            <strong>Empty canvas</strong>
+            <span>Drag a node from the palette, or add the selected type here.</span>
+            <button className="primary" onClick={onAddFirst}>
+              Add {quickAddType || "node"}
+            </button>
+          </div>
+        ) : null}
         {nodes.map((node) => (
           <PipelineNodeCard
             key={node.id}

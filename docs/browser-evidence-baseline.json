@@ -1,42 +1,40 @@
 {
   "provenance": {
     "migration_head": "0042_stream_outer_joins",
-    "bundle_source_hash": "6dd0f30e1b909ca664a078f2b2def91d6e62820d022d8857eeef29c2c02677f5",
+    "bundle_source_hash": "baf471735e95554e8b63162a506bbc679652d3a17f890646b931fda4805086bc",
     "dependencies": {
       "digest": "a727fd9a41cfa7b6",
       "closure": 45
     },
-    "recorded_at": "2026-08-17T21:31:12Z",
+    "recorded_at": "2026-08-19T04:03:35Z",
     "stale_after": "migration head"
   },
-  "known_failing": {
-    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "Found by the first run of this audit, 2026-08-17. The execution panel reads SUCCEEDED and the test then reads /jobs/{id}, whose result carries the finalizer metadata (engine, plan_id, partition_count, partition_job_ids) but not row_count. Failed both attempts here and three isolated runs in a row, and passed inside a slower full suite -- so the execution reports success before the finalize job's result is complete. Owed: decide whether SUCCEEDED should wait on the result, or the test should poll. Not softened here because a consumer polling after SUCCEEDED can read an incomplete job. Passed on 2026-08-18 and the gate said RECOVERED; not discharged on that basis, because this test failed three isolated runs in a row and passed inside two slower full ones, so a single green run is consistent with the race still being there. Discharge it when the execution stops reporting SUCCEEDED before the result is complete, or after several consecutive isolated runs pass."
-  },
+  "known_failing": {},
   "note": "One outcome per viewport per test from a full browser run. A test that ran here may not become skipped; new tests and deletions are reported, not gated.",
   "viewports": {
     "desktop-1280": {
-      "failed": 1,
-      "flaky": 1,
-      "ran": 50,
+      "failed": 0,
+      "flaky": 0,
+      "ran": 53,
       "skipped": 5
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 21,
-      "skipped": 36
+      "skipped": 37
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 20,
-      "skipped": 37
+      "skipped": 38
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 20,
-      "skipped": 37
+      "skipped": 38
     }
   },
   "tests": {
@@ -47,6 +45,7 @@
     "desktop-1280 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "ran",
     "desktop-1280 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "ran",
     "desktop-1280 :: Operational Map renders ontology features and supports selection and MGRS": "ran",
+    "desktop-1280 :: a touch user can add the first node to a pipeline": "ran",
     "desktop-1280 :: aip is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: builder route transitions release collaboration stream database sessions": "ran",
     "desktop-1280 :: command center completes Connect-to-Report with a promoted project dataset": "ran",
@@ -80,7 +79,7 @@
     "desktop-1280 :: ontology schema registry publishes a revision and downloads source and an installable package": "ran",
     "desktop-1280 :: ops is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: pipeline creates a graph and accepts a dragged node": "ran",
-    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "failed",
+    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "ran",
     "desktop-1280 :: pipeline is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: pipeline ontology output previews and persists contract evidence": "ran",
     "desktop-1280 :: pipeline preview runs through durable worker evidence": "ran",
@@ -104,6 +103,7 @@
     "mobile-375 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "mobile-375 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "mobile-375 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "mobile-375 :: a touch user can add the first node to a pipeline": "skipped",
     "mobile-375 :: aip is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: builder route transitions release collaboration stream database sessions": "skipped",
     "mobile-375 :: command center completes Connect-to-Report with a promoted project dataset": "skipped",
@@ -161,6 +161,7 @@
     "tablet-768 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "tablet-768 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-768 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "tablet-768 :: a touch user can add the first node to a pipeline": "skipped",
     "tablet-768 :: aip is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: builder route transitions release collaboration stream database sessions": "skipped",
     "tablet-768 :: command center completes Connect-to-Report with a promoted project dataset": "skipped",
@@ -218,6 +219,7 @@
     "wide-1600 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "wide-1600 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "wide-1600 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "wide-1600 :: a touch user can add the first node to a pipeline": "skipped",
     "wide-1600 :: aip is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: builder route transitions release collaboration stream database sessions": "skipped",
     "wide-1600 :: command center completes Connect-to-Report with a promoted project dataset": "skipped",

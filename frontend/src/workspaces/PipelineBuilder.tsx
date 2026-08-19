@@ -216,6 +216,20 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
+  async function addFirstNode(nodeType = quickAddType) {
+    // The only way to place the first node was an HTML5 drag, which does not
+    // fire from touch input. Measured on a 390x844 viewport: palette and canvas
+    // both visible, and neither a tap nor a touch-drag produced a node. The
+    // `+` control that inserts a node exists per *edge*, so an empty canvas --
+    // which is what "New pipeline" gives you -- had none.
+    if (!selectedGraphId) return;
+    const nextCanvas = await createPipelineNode(selectedGraphId, nodeType, { x: 120, y: 80 });
+    setCanvas(nextCanvas);
+    setSelectedNodeId(nextCanvas.selected_node?.id || "");
+    setActionStatus(`Added ${nodeType} at drop location. Layout is saved.`);
+    setRefreshKey((key) => key + 1);
+  }
+
   async function insertAfter(nodeType = quickAddType) {
     const nodeId = selectedNodeId || canvas?.nodes[0]?.id;
     if (!selectedGraphId || !nodeId) return;
@@ -363,6 +377,8 @@ export function PipelineBuilder() {
               onDrop={handleNodeDrop}
               onDragOver={(event) => event.preventDefault()}
               onInsertEdge={() => insertAfter(quickAddType)}
+              onAddFirst={() => addFirstNode(quickAddType)}
+              quickAddType={quickAddType}
               onContextInsert={(nodeType) => insertAfter(nodeType)}
               onMoveNode={moveNode}
               onDeleteNode={removeNode}
