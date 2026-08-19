@@ -86,6 +86,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no stylesheet class couples a second screen without being declared",
         "runs_in": "suite",
     },
+    "audit_ui_primitives": {
+        "purpose": "every shared primitive is used, and the reference matches the source",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

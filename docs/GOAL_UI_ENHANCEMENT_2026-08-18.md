@@ -149,10 +149,32 @@ New, from what is measured here:
   Deleting the 28 is deliberately not gated. Sixteen are assembled at runtime —
   `context-action-${kind}` and the like — so "no literal mentions it" is not "nothing uses
   it", and a gate that cannot tell those apart would push someone to delete a live style.
-- **J3 — The primitives are documented where they are used.** **Open** — `WorkspaceHeader` is
-  used by one screen of twenty-two. Either it is the intended header and twenty-one screens
-  have not adopted it, or it is dead. A primitive nobody can find gets rewritten inline, which
-  is how the seven screens in Finding 2 came to hand-roll their states.
+- **J3 — The primitives are documented where they are used.** **Met** — and the premise was
+  wrong in an instructive way. `WorkspaceHeader` was not the intended header that twenty-one
+  screens had failed to adopt. It hardcodes the word *"Batch"* and highlights a tab called
+  *"Graph"*: it is the pipeline builder's header, wearing a general name in the shared layer.
+  One workspace used it and two wrote the same markup by hand. That is worse than no
+  primitive — a reader who opens it learns not to trust the layer. It now lives in
+  `PipelineBuilder.tsx` as `PipelineHeader`.
+
+  [`UI_PRIMITIVES.md`](UI_PRIMITIVES.md) lists all twenty, where each is defined and which
+  files import it. It is **generated from source**, because a hand-maintained component list
+  is a claim that decays the first time someone adds a component; the gate regenerates and
+  fails if the committed file disagrees.
+
+  It also failed on its first run, naming `DebugJson` as an export nobody imports — and the
+  fix I made was wrong. Deleting it broke `test_ui_alignment_acceptance.py`, which asserts
+  that raw JSON is isolated to collapsed developer evidence: `DebugJson` was the only
+  component rendering raw JSON, and it renders it inside `DeveloperEvidence`. **Unimported is
+  not dead.** It is restored, and the rule now takes a declaration — an unused export may stay
+  if it says what it holds, so a reader who finds it learns why it is there.
+
+  The suite caught that inside one run, which is the argument for verifying before pushing
+  rather than after.
+
+  Adoption is reported, never gated upward. Twelve of twenty-two workspaces using `Page` is a
+  fact worth seeing, not a rule — some screens legitimately do not want the wrapper, and a
+  gate demanding uniformity would be enforcing taste rather than preventing a defect.
 - **J4 — Perceived performance has a number.** **Open** — Nobody measures what a workspace
   costs to open: requests issued, bytes fetched, time to first meaningful content. The
   request-cost work counted what the *server* spends per call; the equivalent for the browser

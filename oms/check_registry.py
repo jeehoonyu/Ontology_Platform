@@ -53,6 +53,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_tier_a": {"gates": "no Tier A sub-condition regresses from met", "cadence": "every suite run"},
     "audit_route_payload": {"gates": "no workspace route exceeds the bytes it costs a browser today", "cadence": "every suite run"},
     "audit_style_scope": {"gates": "no stylesheet class couples a second screen without being declared", "cadence": "every suite run"},
+    "audit_ui_primitives": {"gates": "every shared primitive is used, and the reference matches the source", "cadence": "every suite run"},
     "audit_route_coverage": {"gates": "compatibility routes have typed equivalents before retirement", "cadence": "every push"},
     "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every suite run"},
     "validate_schema_freeze": {"gates": "no migration lands during a pilot window", "cadence": "every push"},

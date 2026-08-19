@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from "react";
+import { ReactNode, type DragEvent, useEffect, useState } from "react";
 import { postJson } from "../api";
 import {
   cancelJob,
@@ -25,7 +25,7 @@ import {
 } from "../api/workspaceState";
 import { BottomDrawer, PipelineCanvas } from "../components/canvas/PipelineCanvas";
 import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
-import { Toolbar, WorkspaceHeader } from "../components/workbench/Workbench";
+import { Toolbar } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asRows, asString, classNames, formatValue } from "../utils/format";
 import type {
@@ -42,6 +42,26 @@ import type {
   PipelineUiState,
   PlatformJob
 } from "../types";
+
+/**
+ * The pipeline builder's header. It lived in the shared primitives file under
+ * the name `WorkspaceHeader`, where it read as the header every workspace should
+ * use -- and it hardcodes the word "Batch" and highlights a tab called "Graph".
+ * One workspace used it and two wrote the same markup by hand, which is what a
+ * primitive nobody can trust looks like from the outside.
+ */
+function PipelineHeader({ title, tabs, actions }: { title: string; tabs: string[]; actions: ReactNode }) {
+  return (
+    <div className="workspace-header">
+      <div>
+        <strong>{title}</strong>
+        <span>Batch</span>
+      </div>
+      <nav>{tabs.map((tab) => <button key={tab} className={tab === "Graph" ? "active" : ""}>{tab}</button>)}</nav>
+      <div className="button-row">{actions}</div>
+    </div>
+  );
+}
 
 export function PipelineBuilder() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -330,7 +350,7 @@ export function PipelineBuilder() {
     <section className="workbench-page pipeline-workbench-page">
       <div className="builder-shell">
         <section className="builder-main">
-          <WorkspaceHeader
+          <PipelineHeader
             title={canvas?.graph.display_name || "Pipeline graph"}
             tabs={["Graph", "Proposals", "History"]}
             actions={<>

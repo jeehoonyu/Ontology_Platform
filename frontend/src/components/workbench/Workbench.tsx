@@ -17,18 +17,6 @@ export function Page({ title, subtitle, children }: { title: string; subtitle: s
   );
 }
 
-export function WorkspaceHeader({ title, tabs, actions }: { title: string; tabs: string[]; actions: ReactNode }) {
-  return (
-    <div className="workspace-header">
-      <div>
-        <strong>{title}</strong>
-        <span>Batch</span>
-      </div>
-      <nav>{tabs.map((tab) => <button key={tab} className={tab === "Graph" ? "active" : ""}>{tab}</button>)}</nav>
-      <div className="button-row">{actions}</div>
-    </div>
-  );
-}
 
 export function Toolbar({ groups }: { groups: PipelineCanvasState["toolbar_groups"] }) {
   return (

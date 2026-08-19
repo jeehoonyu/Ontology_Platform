@@ -60,9 +60,9 @@ FAST_CHECKS = [
     "audit_route_coverage",
     "audit_snapshot_scope",
     "audit_ui_states",
-    "audit_tier_a",
     "audit_route_payload",
     "audit_style_scope",
+    "audit_ui_primitives",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",
@@ -186,21 +186,17 @@ def main() -> int:
         suffix = f"  -- {result.detail}" if name in REPORTING else ""
         print(f"  {mark}  {result.seconds:6.1f}s  {name}{suffix}")
 
+    # `audit_tier_a` reads what the last recorded run established, so it runs
+    # *after* the suite rather than with the other static checks. Ordered first,
+    # it judged this run by the previous one's record -- and a single failure then
+    # made the next run's fast tier fail for a reason that was already fixed,
+    # which is a loop that cannot clear itself.
     if not args.fast:
         print()
         results.append(run_suite())
         last = results[-1]
         print(f"  {'ok  ' if last.ok else 'FAIL'}  {last.seconds:6.1f}s  python suite "
               f"({last.detail})")
-
-    if args.full:
-        print()
-        for result in run_browser(artifacts / "browser-report.json"):
-            results.append(result)
-            print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  {result.name}")
-        for result in run_census(artifacts / "costs.jsonl"):
-            results.append(result)
-            print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  {result.name}")
 
     # Record what this run established, so a later check can read it instead of
     # re-running twenty-five minutes of suite. `audit_tier_a` asks whether the
@@ -224,6 +220,21 @@ def main() -> int:
             "suite_detail": suite.detail,
             "seconds": round(suite.seconds, 1),
         }, indent=2) + chr(10), encoding="utf-8")
+
+    if not args.fast:
+        # The record is now this run's, so the question it answers is current.
+        result = run_check("audit_tier_a")
+        results.append(result)
+        print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  audit_tier_a")
+
+    if args.full:
+        print()
+        for result in run_browser(artifacts / "browser-report.json"):
+            results.append(result)
+            print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  {result.name}")
+        for result in run_census(artifacts / "costs.jsonl"):
+            results.append(result)
+            print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  {result.name}")
 
     failures = [result for result in results if not result.ok]
     total = sum(result.seconds for result in results)
