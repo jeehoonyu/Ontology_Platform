@@ -74,6 +74,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no new hand-written empty state, and every treatment declares its reason",
         "runs_in": "suite",
     },
+    "audit_tier_a": {
+        "purpose": "no Tier A sub-condition regresses from met",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

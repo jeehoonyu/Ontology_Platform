@@ -26,6 +26,7 @@ last one worked.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -59,6 +60,7 @@ FAST_CHECKS = [
     "audit_route_coverage",
     "audit_snapshot_scope",
     "audit_ui_states",
+    "audit_tier_a",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",
@@ -197,6 +199,29 @@ def main() -> int:
         for result in run_census(artifacts / "costs.jsonl"):
             results.append(result)
             print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  {result.name}")
+
+    # Record what this run established, so a later check can read it instead of
+    # re-running twenty-five minutes of suite. `audit_tier_a` asks whether the
+    # backend suite passes sequentially; the answer existed and was discarded.
+    suite = next((r for r in results if r.name == "python suite"), None)
+    if suite is not None:
+        from datetime import datetime, timezone
+
+        try:
+            sys.path.insert(0, str(OMS))
+            from audit_evidence_corpus import current_head
+
+            head = current_head()
+        except Exception:
+            head = None
+        (artifacts / "last-run.json").write_text(json.dumps({
+            "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "migration_head": head,
+            "tier": label,
+            "suite_passed": suite.ok,
+            "suite_detail": suite.detail,
+            "seconds": round(suite.seconds, 1),
+        }, indent=2) + chr(10), encoding="utf-8")
 
     failures = [result for result in results if not result.ok]
     total = sum(result.seconds for result in results)
