@@ -6,7 +6,7 @@
       "digest": "a727fd9a41cfa7b6",
       "closure": 45
     },
-    "recorded_at": "2026-08-19T05:17:32Z",
+    "recorded_at": "2026-08-19T05:51:07Z",
     "stale_after": "migration head"
   },
   "known_failing": {
@@ -15,27 +15,27 @@
   "note": "One outcome per viewport per test from a full browser run. A test that ran here may not become skipped; new tests and deletions are reported, not gated.",
   "viewports": {
     "desktop-1280": {
-      "failed": 0,
+      "failed": 1,
       "flaky": 0,
-      "ran": 53,
+      "ran": 56,
       "skipped": 5
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
-      "ran": 21,
+      "ran": 25,
       "skipped": 37
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
-      "ran": 20,
+      "ran": 24,
       "skipped": 38
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
-      "ran": 20,
+      "ran": 24,
       "skipped": 38
     }
   },
@@ -69,6 +69,9 @@
     "desktop-1280 :: graph is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: imports is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: investigations is aligned, human-readable, and accessible": "ran",
+    "desktop-1280 :: legacy command-center renders when explicitly requested": "ran",
+    "desktop-1280 :: legacy ontology renders when explicitly requested": "ran",
+    "desktop-1280 :: legacy pipeline renders when explicitly requested": "ran",
     "desktop-1280 :: map is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: models is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: object-explorer is aligned, human-readable, and accessible": "ran",
@@ -81,7 +84,7 @@
     "desktop-1280 :: ontology schema registry publishes a revision and downloads source and an installable package": "ran",
     "desktop-1280 :: ops is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: pipeline creates a graph and accepts a dragged node": "ran",
-    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "ran",
+    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "failed",
     "desktop-1280 :: pipeline is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: pipeline ontology output previews and persists contract evidence": "ran",
     "desktop-1280 :: pipeline preview runs through durable worker evidence": "ran",
@@ -91,6 +94,7 @@
     "desktop-1280 :: runtime operations shows durable telemetry, budgets, and SLO controls": "ran",
     "desktop-1280 :: signed plugin executor production rehearsal stage": "skipped",
     "desktop-1280 :: the bundle records the source it was built from": "ran",
+    "desktop-1280 :: the legacy shell grows no new serious accessibility violation": "ran",
     "desktop-1280 :: the served shell names assets that exist on disk": "ran",
     "desktop-1280 :: the server serves the built React shell, not the legacy fallback": "ran",
     "desktop-1280 :: validation is aligned, human-readable, and accessible": "ran",
@@ -127,6 +131,9 @@
     "mobile-375 :: graph is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: imports is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: investigations is aligned, human-readable, and accessible": "ran",
+    "mobile-375 :: legacy command-center renders when explicitly requested": "ran",
+    "mobile-375 :: legacy ontology renders when explicitly requested": "ran",
+    "mobile-375 :: legacy pipeline renders when explicitly requested": "ran",
     "mobile-375 :: map is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: models is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: object-explorer is aligned, human-readable, and accessible": "ran",
@@ -149,6 +156,7 @@
     "mobile-375 :: runtime operations shows durable telemetry, budgets, and SLO controls": "skipped",
     "mobile-375 :: signed plugin executor production rehearsal stage": "skipped",
     "mobile-375 :: the bundle records the source it was built from": "ran",
+    "mobile-375 :: the legacy shell grows no new serious accessibility violation": "ran",
     "mobile-375 :: the served shell names assets that exist on disk": "ran",
     "mobile-375 :: the server serves the built React shell, not the legacy fallback": "ran",
     "mobile-375 :: validation is aligned, human-readable, and accessible": "ran",
@@ -185,6 +193,9 @@
     "tablet-768 :: graph is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: imports is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: investigations is aligned, human-readable, and accessible": "ran",
+    "tablet-768 :: legacy command-center renders when explicitly requested": "ran",
+    "tablet-768 :: legacy ontology renders when explicitly requested": "ran",
+    "tablet-768 :: legacy pipeline renders when explicitly requested": "ran",
     "tablet-768 :: map is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: models is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: object-explorer is aligned, human-readable, and accessible": "ran",
@@ -207,6 +218,7 @@
     "tablet-768 :: runtime operations shows durable telemetry, budgets, and SLO controls": "skipped",
     "tablet-768 :: signed plugin executor production rehearsal stage": "skipped",
     "tablet-768 :: the bundle records the source it was built from": "ran",
+    "tablet-768 :: the legacy shell grows no new serious accessibility violation": "ran",
     "tablet-768 :: the served shell names assets that exist on disk": "ran",
     "tablet-768 :: the server serves the built React shell, not the legacy fallback": "ran",
     "tablet-768 :: validation is aligned, human-readable, and accessible": "ran",
@@ -243,6 +255,9 @@
     "wide-1600 :: graph is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: imports is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: investigations is aligned, human-readable, and accessible": "ran",
+    "wide-1600 :: legacy command-center renders when explicitly requested": "ran",
+    "wide-1600 :: legacy ontology renders when explicitly requested": "ran",
+    "wide-1600 :: legacy pipeline renders when explicitly requested": "ran",
     "wide-1600 :: map is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: models is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: object-explorer is aligned, human-readable, and accessible": "ran",
@@ -265,6 +280,7 @@
     "wide-1600 :: runtime operations shows durable telemetry, budgets, and SLO controls": "skipped",
     "wide-1600 :: signed plugin executor production rehearsal stage": "skipped",
     "wide-1600 :: the bundle records the source it was built from": "ran",
+    "wide-1600 :: the legacy shell grows no new serious accessibility violation": "ran",
     "wide-1600 :: the served shell names assets that exist on disk": "ran",
     "wide-1600 :: the server serves the built React shell, not the legacy fallback": "ran",
     "wide-1600 :: validation is aligned, human-readable, and accessible": "ran",

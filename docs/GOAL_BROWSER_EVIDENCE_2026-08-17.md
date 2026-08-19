@@ -170,10 +170,41 @@ kilobytes-per-route worth gating, and only one of them has a baseline file.
   map carrying Leaflet is legitimately heavier than a settings screen, and a single budget
   would either forgive the map or forbid it. A route with **no** recorded ceiling fails, since
   a new workspace is exactly when a payload gets away.
-- **G6 — Say what the legacy UI is for.** **Open** 7,856 lines that no test touches, reachable by
-  `?legacy=1` and served by default on any machine that has not run a build. Either it is
-  supported — in which case it needs the render sweep at minimum — or it is retired. Carrying
-  an untested second UI as the silent fallback is the worst of the three options.
+- **G6 — Say what the legacy UI is for.** **Met** — and the answer was already written; the
+  code just did not honour it. `VALIDATION_MATRIX.md` records `?legacy=1` as *"an explicit
+  compatibility aid rather than the default route"*, and the React app links to it from two
+  places — the sidebar's legacy items and the workbench's **Legacy view** button. It is not
+  abandoned code. A user reaches it by clicking, which means it is supported, which means it
+  owes the same minimum every other route owes.
+
+  `frontend/tests/legacy-shell.spec.ts` is that minimum: three routes render at four
+  viewports, serve the legacy shell rather than the React bundle, leak no `[object Object]`,
+  and are swept by axe. Deliberately a render sweep and not a behavioural suite — nobody is
+  claiming the legacy shell does what the React one does.
+
+  The first run found three things. One is fixed: two `<select>`s and a filter input had no
+  accessible name, so a screen reader announced them as "combo box". Two are recorded as
+  ceilings rather than hidden, because they are real and rewriting 7,856 lines of legacy CSS
+  is not a test's job — `/workspace/pipeline?legacy=1` scrolls **48px** sideways where the
+  other routes scroll none, and colour contrast fails on the ontology page.
+
+  What is gated there is the **kind** of violation, not how many elements it touches. The
+  first version capped `color-contrast` at the five nodes measured in isolation and failed
+  inside the full suite, because the legacy ontology page lists objects earlier tests created
+  and the count grows with the data. That is the census lesson in a new place: a ceiling on a
+  number that moves with content teaches people to re-run until it passes. A new kind of
+  violation fails outright; the spread of a known kind is printed and not gated.
+
+  Running it inside the full suite rather than alone then found a defect an empty page cannot
+  show: **`scrollable-region-focusable`** — a list long enough to scroll, with no keyboard
+  access to scroll it. It needs rows to exist, so it surfaces only after earlier tests have
+  created some. That is the argument for the browser gate stated back to itself, and it is
+  recorded as a known kind rather than fixed here.
+
+  What remains, named rather than closed: `_workspace_shell` still serves the legacy shell by
+  default whenever `frontend/dist` is absent, which contradicts "rather than the default
+  route" on every machine that has not run a build. The documentation and the code disagree,
+  and the documentation is the one worth keeping.
 
 ## G1–G3, and what the gate found in its first run
 

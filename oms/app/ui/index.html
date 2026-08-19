@@ -152,7 +152,7 @@
           <div class="page-heading centered-heading">
             <h1>Object Explorer search</h1>
             <div class="object-search-bar">
-              <select id="ontologyFilterSelect">
+              <select id="ontologyFilterSelect" aria-label="Filter objects by type">
                 <option value="">Filter by...</option>
                 <option value="asset">Asset</option>
                 <option value="work_order">Work order</option>
@@ -228,8 +228,8 @@
             <div class="section-title">
               <h2>Object type catalog</h2>
               <div class="button-row">
-                <input id="objectTypeCatalogFilter" placeholder="Filter for an object type..." />
-                <select><option>Relevancy</option><option>Name</option></select>
+                <input id="objectTypeCatalogFilter" aria-label="Filter object types" placeholder="Filter for an object type..." />
+                <select aria-label="Sort object types"><option>Relevancy</option><option>Name</option></select>
               </div>
             </div>
             <div id="ontologyCatalogTable" class="table-wrap platform-table"></div>
