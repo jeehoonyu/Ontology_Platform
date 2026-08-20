@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0042_stream_outer_joins",
-    "bundle_source_hash": "119f13fdd3543213fb1df64f0eebcca819fe6bfea3dc54e58ae5c03e771ecde4",
+    "bundle_source_hash": "491d7b94b3728d6f9aeaf3030d83c5a36798ac4623e5333d6dff4fc5fd87efb6",
     "dependencies": {
       "digest": "a727fd9a41cfa7b6",
       "closure": 45
     },
-    "recorded_at": "2026-08-19T05:51:07Z",
+    "recorded_at": "2026-08-20T06:33:26Z",
     "stale_after": "migration head"
   },
   "known_failing": {
@@ -16,27 +16,27 @@
   "viewports": {
     "desktop-1280": {
       "failed": 1,
-      "flaky": 0,
-      "ran": 56,
+      "flaky": 1,
+      "ran": 60,
       "skipped": 5
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 25,
-      "skipped": 37
+      "skipped": 42
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 24,
-      "skipped": 38
+      "skipped": 43
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 24,
-      "skipped": 38
+      "skipped": 43
     }
   },
   "tests": {
@@ -47,6 +47,9 @@
     "desktop-1280 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "ran",
     "desktop-1280 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "ran",
     "desktop-1280 :: Operational Map renders ontology features and supports selection and MGRS": "ran",
+    "desktop-1280 :: a library node reaches the canvas without a drag": "ran",
+    "desktop-1280 :: a property row reorders without a drag": "ran",
+    "desktop-1280 :: a source field maps onto a property without a drag": "ran",
     "desktop-1280 :: a touch user can add the first node to a pipeline": "ran",
     "desktop-1280 :: aip is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: builder route transitions release collaboration stream database sessions": "ran",
@@ -73,6 +76,7 @@
     "desktop-1280 :: legacy ontology renders when explicitly requested": "ran",
     "desktop-1280 :: legacy pipeline renders when explicitly requested": "ran",
     "desktop-1280 :: map is aligned, human-readable, and accessible": "ran",
+    "desktop-1280 :: measure what each workspace route costs to open": "ran",
     "desktop-1280 :: models is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: object-explorer is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: ontology health center evaluates, remediates, and simulates policy": "ran",
@@ -97,6 +101,7 @@
     "desktop-1280 :: the legacy shell grows no new serious accessibility violation": "ran",
     "desktop-1280 :: the served shell names assets that exist on disk": "ran",
     "desktop-1280 :: the server serves the built React shell, not the legacy fallback": "ran",
+    "desktop-1280 :: the sortable field list reorders from touch": "ran",
     "desktop-1280 :: validation is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: visual builder reviews and applies a governed change proposal": "ran",
     "desktop-1280 :: visual builder supports typed configuration, preview, save, and publish": "ran",
@@ -109,6 +114,9 @@
     "mobile-375 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "mobile-375 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "mobile-375 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "mobile-375 :: a library node reaches the canvas without a drag": "skipped",
+    "mobile-375 :: a property row reorders without a drag": "skipped",
+    "mobile-375 :: a source field maps onto a property without a drag": "skipped",
     "mobile-375 :: a touch user can add the first node to a pipeline": "skipped",
     "mobile-375 :: aip is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: builder route transitions release collaboration stream database sessions": "skipped",
@@ -135,6 +143,7 @@
     "mobile-375 :: legacy ontology renders when explicitly requested": "ran",
     "mobile-375 :: legacy pipeline renders when explicitly requested": "ran",
     "mobile-375 :: map is aligned, human-readable, and accessible": "ran",
+    "mobile-375 :: measure what each workspace route costs to open": "skipped",
     "mobile-375 :: models is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: object-explorer is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: ontology health center evaluates, remediates, and simulates policy": "skipped",
@@ -159,6 +168,7 @@
     "mobile-375 :: the legacy shell grows no new serious accessibility violation": "ran",
     "mobile-375 :: the served shell names assets that exist on disk": "ran",
     "mobile-375 :: the server serves the built React shell, not the legacy fallback": "ran",
+    "mobile-375 :: the sortable field list reorders from touch": "skipped",
     "mobile-375 :: validation is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: visual builder reviews and applies a governed change proposal": "skipped",
     "mobile-375 :: visual builder supports typed configuration, preview, save, and publish": "skipped",
@@ -171,6 +181,9 @@
     "tablet-768 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "tablet-768 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-768 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "tablet-768 :: a library node reaches the canvas without a drag": "skipped",
+    "tablet-768 :: a property row reorders without a drag": "skipped",
+    "tablet-768 :: a source field maps onto a property without a drag": "skipped",
     "tablet-768 :: a touch user can add the first node to a pipeline": "skipped",
     "tablet-768 :: aip is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: builder route transitions release collaboration stream database sessions": "skipped",
@@ -197,6 +210,7 @@
     "tablet-768 :: legacy ontology renders when explicitly requested": "ran",
     "tablet-768 :: legacy pipeline renders when explicitly requested": "ran",
     "tablet-768 :: map is aligned, human-readable, and accessible": "ran",
+    "tablet-768 :: measure what each workspace route costs to open": "skipped",
     "tablet-768 :: models is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: object-explorer is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: ontology health center evaluates, remediates, and simulates policy": "skipped",
@@ -221,6 +235,7 @@
     "tablet-768 :: the legacy shell grows no new serious accessibility violation": "ran",
     "tablet-768 :: the served shell names assets that exist on disk": "ran",
     "tablet-768 :: the server serves the built React shell, not the legacy fallback": "ran",
+    "tablet-768 :: the sortable field list reorders from touch": "skipped",
     "tablet-768 :: validation is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: visual builder reviews and applies a governed change proposal": "skipped",
     "tablet-768 :: visual builder supports typed configuration, preview, save, and publish": "skipped",
@@ -233,6 +248,9 @@
     "wide-1600 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "wide-1600 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "wide-1600 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "wide-1600 :: a library node reaches the canvas without a drag": "skipped",
+    "wide-1600 :: a property row reorders without a drag": "skipped",
+    "wide-1600 :: a source field maps onto a property without a drag": "skipped",
     "wide-1600 :: a touch user can add the first node to a pipeline": "skipped",
     "wide-1600 :: aip is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: builder route transitions release collaboration stream database sessions": "skipped",
@@ -259,6 +277,7 @@
     "wide-1600 :: legacy ontology renders when explicitly requested": "ran",
     "wide-1600 :: legacy pipeline renders when explicitly requested": "ran",
     "wide-1600 :: map is aligned, human-readable, and accessible": "ran",
+    "wide-1600 :: measure what each workspace route costs to open": "skipped",
     "wide-1600 :: models is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: object-explorer is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: ontology health center evaluates, remediates, and simulates policy": "skipped",
@@ -283,6 +302,7 @@
     "wide-1600 :: the legacy shell grows no new serious accessibility violation": "ran",
     "wide-1600 :: the served shell names assets that exist on disk": "ran",
     "wide-1600 :: the server serves the built React shell, not the legacy fallback": "ran",
+    "wide-1600 :: the sortable field list reorders from touch": "skipped",
     "wide-1600 :: validation is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: visual builder reviews and applies a governed change proposal": "skipped",
     "wide-1600 :: visual builder supports typed configuration, preview, save, and publish": "skipped",

@@ -19,6 +19,22 @@ import { fileURLToPath } from "node:url";
  * identical across two runs -- and reproducibly measuring the wrong thing, which
  * is the more dangerous kind.
  *
+ * **And it only writes the artifact when it is the thing being run.** That is the
+ * second correction of the same kind. A fresh context removes what the previous
+ * *page* left behind; it does nothing about what the previous *spec* left in the
+ * database. Inside a full suite run this test executes after every stateful spec
+ * has seeded object types and scenarios, and every screen then issues more calls
+ * against more rows: the map went 25 requests to 38, the pipeline 12 to 19. Those
+ * numbers are real, but they describe a database rather than a change, and
+ * writing them over the isolated measurement left a contaminated file for the
+ * next `verify.py --fast` to judge — which is how a green full run was followed
+ * by eleven ceiling failures with no code between them.
+ *
+ * So the run inside the suite stays as coverage, sixteen routes opened and
+ * loaded, and `measure_route_cost.py` sets `ROUTE_COST_MEASUREMENT` when it wants
+ * the file. The artifact records that it was taken that way, and the audit
+ * refuses one that does not.
+ *
  * Three numbers, and they are not equally trustworthy. Which may be gated is a
  * question for the measurement, answered by running it twice; see
  * `audit_route_cost.py`.
@@ -81,10 +97,19 @@ test("measure what each workspace route costs to open", async ({ browser }, test
     bundle = null;
   }
 
+  if (process.env.ROUTE_COST_MEASUREMENT !== "1") {
+    // Coverage, not evidence. Every route opened and loaded, against whatever
+    // the specs before this one left in the database.
+    console.log(`ROUTE-COST ${Object.keys(measured).length} routes opened; not written, `
+                + `because this run was not the measurement`);
+    return;
+  }
+
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(
     OUT,
-    JSON.stringify({ bundle_source_hash: bundle, routes: measured }, null, 2) + "\n",
+    JSON.stringify({ isolated: true, bundle_source_hash: bundle, routes: measured }, null, 2)
+      + "\n",
     "utf-8"
   );
   console.log(`ROUTE-COST ${Object.keys(measured).length} routes, bundle ${bundle?.slice(0, 12)}`);

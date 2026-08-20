@@ -94,6 +94,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no workspace route issues more requests on open than it does today",
         "runs_in": "suite",
     },
+    "audit_drag_affordances": {
+        "purpose": "every drag can also be done without dragging, and a browser test operates the alternative",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

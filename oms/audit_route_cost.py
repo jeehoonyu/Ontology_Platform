@@ -61,6 +61,11 @@ def load(path: Path | None = None) -> Dict[str, Dict[str, int]]:
         recorded = payload.get("bundle_source_hash")
         if recorded and recorded != _bundle_hash():
             return {}
+        # And a measurement taken inside a full suite run is evidence about the
+        # rows the specs before it created, not about this build. It reads as a
+        # regression on eleven routes with no code between them.
+        if not payload.get("isolated"):
+            return {}
         return payload["routes"]
     return payload
 
@@ -117,6 +122,21 @@ def main() -> int:
     args = parser.parse_args()
 
     measured = load(Path(args.measurement) if args.measurement else None)
+    if not measured and MEASUREMENT.exists():
+        # Distinguish the two silences. A file that exists and was refused says
+        # something a reader can act on; "not measured here" does not.
+        try:
+            payload = json.loads(MEASUREMENT.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict) and "routes" in payload:
+            reason = ("it was taken inside a full suite run, so it describes the rows those "
+                      "specs created" if not payload.get("isolated")
+                      else "it describes a bundle that is no longer on disk")
+            print(f"{MEASUREMENT.relative_to(REPO_ROOT)} exists and is not evidence: {reason}.")
+            print("Re-measure it: python oms/measure_route_cost.py")
+            print("Nothing is claimed about route cost from this run.")
+            return 0
     if not measured:
         # Absent is not the same as failing. This measurement comes from a
         # browser run, so a machine without node has nothing to judge, and

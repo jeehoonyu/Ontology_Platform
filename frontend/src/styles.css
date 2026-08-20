@@ -1451,6 +1451,7 @@ button:disabled {
 .drag-grip {
   cursor: grab;
   color: #607581;
+  touch-action: none;
 }
 
 .inspector-empty {

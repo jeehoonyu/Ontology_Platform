@@ -595,7 +595,7 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
       {preview ? (
         <>
           <div className="ontology-mapping-grid">
-            <section><h3>Dataset fields</h3><p>Drag a source field onto a target property.</p><div className="mapping-source-list">{preview.source_fields.map((field) => <button key={field.name} draggable onDragStart={() => setDraggedField(field.name)} className={classNames(field.mapped && "mapped")}><strong>{field.name}</strong><small>{field.inferred_type}</small></button>)}</div></section>
+            <section><h3>Dataset fields</h3><p>Drag a source field onto a target property, or pick it from that property's list.</p><div className="mapping-source-list">{preview.source_fields.map((field) => <button key={field.name} draggable onDragStart={() => setDraggedField(field.name)} className={classNames(field.mapped && "mapped")}><strong>{field.name}</strong><small>{field.inferred_type}</small></button>)}</div></section>
             <section><h3>Object properties</h3><p>Required properties must be mapped before saving.</p><div className="mapping-target-list">{preview.target_properties.map((property) => {
               const source = mappings.find((item) => item.target_property === property.name)?.source_field;
               const compatibility = preview.compatibility.find((item) => item.target_property === property.name);
@@ -878,8 +878,8 @@ function PropertyEditor({
                   </label>
                   <input value={asString(draft.description)} onChange={(event) => updateDraft(name, { description: event.target.value })} placeholder="Description" />
                   <button onClick={() => saveRow(name)}>Save</button>
-                  <button onClick={() => moveByButton(name, -1)}>Up</button>
-                  <button onClick={() => moveByButton(name, 1)}>Down</button>
+                  <button aria-label={`Move ${name} up`} onClick={() => moveByButton(name, -1)}>Up</button>
+                  <button aria-label={`Move ${name} down`} onClick={() => moveByButton(name, 1)}>Down</button>
                   <button disabled={row.can_delete === false} onClick={() => archiveRow(name)}>
                     {confirmArchive === name ? "Confirm archive" : "Archive"}
                   </button>

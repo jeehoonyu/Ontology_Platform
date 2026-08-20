@@ -27,10 +27,17 @@ def main() -> int:
     if not (FRONTEND / "node_modules").exists():
         print("needs node_modules; run npm ci in frontend/")
         return 1
+    # The spec writes the artifact only when this is set. Inside a full suite run
+    # it executes after every stateful spec has seeded the database, and the
+    # numbers then describe those rows rather than this build -- which is how a
+    # green full run was followed by eleven ceiling failures with no code
+    # between them. Here the server starts on a freshly migrated database.
+    environment = {**os.environ, "ROUTE_COST_MEASUREMENT": "1"}
     completed = subprocess.run(
         ["npx", "playwright", "test", "--project=desktop-1280", "route-cost",
          "--reporter=line"],
-        cwd=FRONTEND, capture_output=True, text=True, shell=os.name == "nt")
+        cwd=FRONTEND, capture_output=True, text=True, env=environment,
+        shell=os.name == "nt")
     if not OUT.exists():
         print(completed.stdout[-2000:])
         print(completed.stderr[-1000:])
