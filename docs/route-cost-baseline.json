@@ -1,0 +1,74 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-08-19T23:29:05Z"
+  },
+  "note": "What each workspace route costs to open, measured in a browser. Requests and bytes are gated; settled_ms is recorded and never gated, because two runs agreed on the first two for 16 of 16 routes and on timing for none of them.",
+  "bytes_tolerance": 0.15,
+  "routes": {
+    "analytics": {
+      "requests": 11,
+      "bytes": 451409
+    },
+    "automate": {
+      "requests": 11,
+      "bytes": 448040
+    },
+    "command-center": {
+      "requests": 11,
+      "bytes": 448464
+    },
+    "control-panel": {
+      "requests": 13,
+      "bytes": 486066
+    },
+    "decision": {
+      "requests": 13,
+      "bytes": 463047
+    },
+    "delivery": {
+      "requests": 16,
+      "bytes": 453795
+    },
+    "graph": {
+      "requests": 13,
+      "bytes": 640439
+    },
+    "imports": {
+      "requests": 12,
+      "bytes": 445915
+    },
+    "map": {
+      "requests": 25,
+      "bytes": 917980
+    },
+    "models": {
+      "requests": 15,
+      "bytes": 466105
+    },
+    "object-explorer": {
+      "requests": 13,
+      "bytes": 451357
+    },
+    "ontology": {
+      "requests": 17,
+      "bytes": 692371
+    },
+    "ops": {
+      "requests": 18,
+      "bytes": 452967
+    },
+    "pipeline": {
+      "requests": 12,
+      "bytes": 475717
+    },
+    "security": {
+      "requests": 11,
+      "bytes": 464911
+    },
+    "validation": {
+      "requests": 12,
+      "bytes": 564288
+    }
+  }
+}

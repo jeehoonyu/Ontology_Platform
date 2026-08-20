@@ -63,6 +63,7 @@ FAST_CHECKS = [
     "audit_route_payload",
     "audit_style_scope",
     "audit_ui_primitives",
+    "audit_route_cost",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",
@@ -229,6 +230,16 @@ def main() -> int:
 
     if args.full:
         print()
+        # Produce the route-cost measurement before judging it, so the full tier
+        # actually exercises the gate rather than skipping it for a missing file.
+        measured = run_named("measure_route_cost")
+        results.append(measured)
+        print(f"  {'ok  ' if measured.ok else 'FAIL'}  {measured.seconds:6.1f}s  "
+              f"measure_route_cost")
+        judged = run_check("audit_route_cost")
+        results.append(judged)
+        print(f"  {'ok  ' if judged.ok else 'FAIL'}  {judged.seconds:6.1f}s  audit_route_cost")
+
         for result in run_browser(artifacts / "browser-report.json"):
             results.append(result)
             print(f"  {'ok  ' if result.ok else 'FAIL'}  {result.seconds:6.1f}s  {result.name}")

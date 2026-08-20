@@ -90,6 +90,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "every shared primitive is used, and the reference matches the source",
         "runs_in": "suite",
     },
+    "audit_route_cost": {
+        "purpose": "no workspace route issues more requests on open than it does today",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

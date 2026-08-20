@@ -175,11 +175,30 @@ New, from what is measured here:
   Adoption is reported, never gated upward. Twelve of twenty-two workspaces using `Page` is a
   fact worth seeing, not a rule — some screens legitimately do not want the wrapper, and a
   gate demanding uniformity would be enforcing taste rather than preventing a defect.
-- **J4 — Perceived performance has a number.** **Open** — Nobody measures what a workspace
-  costs to open: requests issued, bytes fetched, time to first meaningful content. The
-  request-cost work counted what the *server* spends per call; the equivalent for the browser
-  does not exist. Measure before budgeting, and budget only what proves reproducible — the
-  suite-cost census had to demonstrate 695 of 695 agreement before it was allowed to gate.
+- **J4 — Perceived performance has a number.** **Met** — three of them, and which may be
+  gated was decided by measuring twice rather than by judgement:
+
+  | | Two runs, 16 routes | |
+  | --- | --- | --- |
+  | requests on open | identical **16/16** | gated, no tolerance |
+  | bytes transferred | identical **16/16** | gated, 15% tolerance |
+  | wall-clock to settle | identical **0/16**, worst drift 2.6% | recorded, never gated |
+
+  The map issues **25 requests** to open; the median screen issues 13, and 223 across sixteen
+  routes. Requests are gated with no tolerance because they were exactly stable and because
+  the failure mode is creep — one more call per change, until a screen makes forty. Bytes get
+  a tolerance, since a response body legitimately moves with the data behind it. Wall-clock is
+  wall-clock: a gate on it fails for reasons a reader cannot act on, which is how a gate
+  becomes something people re-run until it passes. It is not even written into the baseline,
+  because recording a number the gate refuses to use invites someone to start using it.
+
+  `measure_route_cost.py` drives the browser and `audit_route_cost.py` judges the file, split
+  the way the census is split from its ratchet. A machine with no measurement says so and
+  claims nothing, rather than reddening the fast tier for a missing artifact; `verify.py
+  --full` produces it and then judges it, so the gate has teeth where a browser exists.
+
+  This is `audit_route_payload`'s other half. That one asks what the *bundle* costs, computed
+  statically from the build manifest. This asks what the *screen* costs once it is running.
 
 ## What this is not
 
