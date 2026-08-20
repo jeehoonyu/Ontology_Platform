@@ -51,7 +51,28 @@ def load(path: Path | None = None) -> Dict[str, Dict[str, int]]:
         payload = json.loads(source.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    # Newer measurements name the bundle they describe; older ones are the bare
+    # mapping. A measurement whose bundle is not the one on disk is evidence
+    # about a build that no longer exists, and judging it failed a ceiling for a
+    # change that had already happened.
+    if "routes" in payload:
+        recorded = payload.get("bundle_source_hash")
+        if recorded and recorded != _bundle_hash():
+            return {}
+        return payload["routes"]
+    return payload
+
+
+def _bundle_hash() -> str | None:
+    provenance = REPO_ROOT / "frontend" / "dist" / "build-provenance.json"
+    if not provenance.exists():
+        return None
+    try:
+        return json.loads(provenance.read_text(encoding="utf-8")).get("source_hash")
+    except json.JSONDecodeError:
+        return None
 
 
 def compare(measured: Dict[str, Dict[str, int]],

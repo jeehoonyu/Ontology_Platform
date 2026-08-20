@@ -36,7 +36,8 @@ def main() -> int:
         print(completed.stderr[-1000:])
         print(f"No measurement written to {OUT}")
         return completed.returncode or 1
-    measured = json.loads(OUT.read_text(encoding="utf-8"))
+    payload = json.loads(OUT.read_text(encoding="utf-8"))
+    measured = payload.get("routes", payload)
     total = sum(entry["requests"] for entry in measured.values())
     print(f"{len(measured)} routes measured, {total} requests on open, "
           f"written to {OUT.relative_to(REPO_ROOT)}")

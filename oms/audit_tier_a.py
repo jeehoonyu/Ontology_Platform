@@ -149,7 +149,24 @@ def check_browser(report: Path | None) -> Tuple[str, str]:
     failures = [name for name, outcome in found.items() if outcome == FAILED]
     skips = sum(1 for outcome in found.values() if outcome == SKIPPED)
     if failures:
-        return UNMET, f"{len(failures)} failing test(s); {skips} skips"
+        # A failure declared in `known_failing` is debt the browser gate carries
+        # deliberately, and it is still a failure here. Tier A is a completion
+        # claim -- "the matrix passes" -- so a quarantined failure means it does
+        # not pass. Recording this sub-condition as met once meant recording a
+        # run in which a known race happened not to fire.
+        declared = {}
+        baseline = REPO_ROOT / "docs" / "browser-evidence-baseline.json"
+        if baseline.exists():
+            try:
+                declared = json.loads(baseline.read_text(encoding="utf-8")).get(
+                    "known_failing", {})
+            except json.JSONDecodeError:
+                declared = {}
+        known = [name for name in failures if name in declared]
+        detail = f"{len(failures)} failing test(s); {skips} skips"
+        if known:
+            detail += f"; {len(known)} of them declared in known_failing"
+        return UNMET, detail
     return MET, f"no failures, {skips} skips, all from declared project conditions"
 
 

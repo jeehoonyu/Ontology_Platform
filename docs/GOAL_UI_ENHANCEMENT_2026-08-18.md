@@ -200,6 +200,19 @@ New, from what is measured here:
   This is `audit_route_payload`'s other half. That one asks what the *bundle* costs, computed
   statically from the build manifest. This asks what the *screen* costs once it is running.
 
+  **Correction, from the first run after the chunk split.** The measurement originally reused
+  one browser page for all sixteen routes, so every route after the first was measured against
+  a warm cache. `security` read 454 KB on one build and 26 KB on the next — not because the
+  screen changed, but because more of what it needed had already been fetched by whatever ran
+  before it. The number was a function of visit order, and it was **reproducible while being
+  wrong**: 16 of 16 identical across two runs, which is the more dangerous kind of stable.
+  Each route now gets a fresh context. It is still 16 of 16 on requests and bytes, and timing
+  now drifts 53.8% rather than 2.6%, which only strengthens keeping it out of the gate.
+
+  The measurement also stamps the bundle it describes, because the gate judged one taken
+  against an older build and failed a ceiling for a change that had already happened. Every
+  baseline here already guards against stale evidence; this artifact did not.
+
 ## What this is not
 
 Not a redesign, and not a component-library migration. The primitives are good and the render

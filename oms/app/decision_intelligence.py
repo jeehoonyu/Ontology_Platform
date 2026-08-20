@@ -778,6 +778,18 @@ def record_object_snapshot(
         ObjectSnapshot.object_id == obj.id,
         ObjectSnapshot.object_type_id == obj.object_type_id,
     ).order_by(ObjectSnapshot.seq.desc()).first()
+    # Sessions here are `autoflush=False`, so that query cannot see a snapshot
+    # added earlier in this same request. Until now the sequence came out right
+    # by accident: the change-event recorder called `db.flush()` per object, and
+    # a flush writes everything pending, snapshots included. Removing that flush
+    # -- it was issuing 1,006 outbox inserts on a bulk hydrate -- would have left
+    # two snapshots of one object both claiming seq 1. So the pending ones are
+    # counted here rather than depended on being written by someone else.
+    pending = db.info.setdefault("_pending_snapshot_seqs", {})
+    key = (obj.project_id, obj.object_id if hasattr(obj, "object_id") else obj.id,
+           obj.object_type_id)
+    next_seq = max((last.seq if last else 0), pending.get(key, 0)) + 1
+    pending[key] = next_seq
     lineage = copy.deepcopy(obj.lineage or {})
     if extra_lineage:
         lineage.update(extra_lineage)
@@ -793,7 +805,7 @@ def record_object_snapshot(
         source_type=source_type,
         source_id=source_id,
         created_at=_now(),
-        seq=(last.seq + 1) if last else 1,
+        seq=next_seq,
     )
     db.add(snapshot)
     return snapshot

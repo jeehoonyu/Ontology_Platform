@@ -1,7 +1,7 @@
 {
   "provenance": {
     "migration_head": "0042_stream_outer_joins",
-    "recorded_at": "2026-08-17T21:31:12Z",
+    "recorded_at": "2026-08-20T02:14:54Z",
     "stale_after": "migration head"
   },
   "repeat_ceiling": 6,
@@ -680,7 +680,7 @@
     "GET /health/ready": {
       "worst_repeat": 11,
       "queries": 400,
-      "calls": 12
+      "calls": 13
     },
     "GET /imports/jobs": {
       "worst_repeat": 2,
@@ -1259,7 +1259,7 @@
     },
     "GET /runtime/observability/summary": {
       "worst_repeat": 20,
-      "queries": 107,
+      "queries": 87,
       "calls": 15
     },
     "GET /runtime/pilot-evidence": {
@@ -1864,7 +1864,7 @@
     },
     "POST /api/v1/industrial/workflows/asset-reliability/onboard": {
       "worst_repeat": 12,
-      "queries": 199,
+      "queries": 191,
       "calls": 18
     },
     "POST /api/v1/industrial/workflows/asset-reliability/triage": {
@@ -2369,7 +2369,7 @@
     },
     "POST /entity-resolution/candidates/{candidate_id}/accept": {
       "worst_repeat": 4,
-      "queries": 16,
+      "queries": 17,
       "calls": 1
     },
     "POST /entity-resolution/candidates/{candidate_id}/reject": {
@@ -2579,7 +2579,7 @@
     },
     "POST /jobs/claim": {
       "worst_repeat": 13,
-      "queries": 55,
+      "queries": 66,
       "calls": 47
     },
     "POST /jobs/{job_id}/cancel": {
@@ -2609,7 +2609,7 @@
     },
     "POST /link-types": {
       "worst_repeat": 10,
-      "queries": 41,
+      "queries": 43,
       "calls": 6
     },
     "POST /links": {
@@ -2870,7 +2870,7 @@
     "POST /object-types": {
       "worst_repeat": 7,
       "queries": 30,
-      "calls": 69
+      "calls": 70
     },
     "POST /object-types/{object_type_id}/implement-interface": {
       "worst_repeat": 4,
@@ -2879,7 +2879,7 @@
     },
     "POST /objects": {
       "worst_repeat": 3,
-      "queries": 24,
+      "queries": 23,
       "calls": 107
     },
     "POST /observability/checks/freshness": {
@@ -3149,7 +3149,7 @@
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver": {
       "worst_repeat": 5,
-      "queries": 95,
+      "queries": 87,
       "calls": 16
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver/async": {
@@ -3193,8 +3193,8 @@
       "calls": 7
     },
     "POST /pipeline-builder/workers/run-next": {
-      "worst_repeat": 1006,
-      "queries": 7201,
+      "worst_repeat": 1002,
+      "queries": 3200,
       "calls": 44
     },
     "POST /pipelines": {

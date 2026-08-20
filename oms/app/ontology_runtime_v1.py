@@ -318,6 +318,59 @@ def _event_dict(row: ObjectChangeEvent) -> Dict[str, Any]:
     }
 
 
+def _declared(instance: Any, column_name: str) -> Any:
+    """An attribute's value, with the column's declared default applied.
+
+    `ObjectInstance.is_active` is `default=True`, which SQLAlchemy applies when
+    the row is flushed. While `record_object_change` called `db.flush()` on every
+    object, that happened before the payload was built and nobody had to think
+    about it. Removing the flush -- it was issuing 1,006 outbox inserts on a bulk
+    hydrate -- made the payload read `active: None` for an object created in the
+    same request, and the suite caught it.
+
+    The default is read from the mapping rather than written here as `True`,
+    because a copy of a default is a second place for it to be wrong.
+    """
+    value = getattr(instance, column_name, None)
+    if value is not None:
+        return value
+    column = getattr(type(instance), "__table__", None)
+    column = column.columns.get(column_name) if column is not None else None
+    default = getattr(column, "default", None) if column is not None else None
+    if default is not None and getattr(default, "is_scalar", False):
+        return default.arg
+    return value
+
+
+def _next_change_version(db: Session, project_id: str, object_id: str) -> int:
+    """The next version for one object, counting rows not yet written.
+
+    This used to be `db.flush()` followed by `max(object_version)`. The flush was
+    load-bearing -- sessions here are `autoflush=False`, so a query cannot see
+    pending rows -- and it was also the single most expensive line in this
+    repository. It runs once per object written, and a bulk hydrate writes a
+    thousand: `POST /pipeline-builder/workers/run-next` issued 1,006 separate
+    `INSERT INTO event_outbox` statements, one per flush, holding a transaction
+    open across all of them, because the outbox is filled by a `before_flush`
+    hook that fired a thousand times instead of once.
+
+    Flushing was never what the version needed; *seeing the pending rows* was.
+    So the pending ones are counted directly. The persisted maximum still comes
+    from the database, and the answer is the greater of the two, which stays
+    correct if something else flushes midway -- the pending record can only lag
+    the database, never lead it.
+    """
+    pending = db.info.setdefault("_pending_change_versions", {})
+    key = (project_id, object_id)
+    persisted = int(db.query(func.max(ObjectChangeEvent.object_version)).filter(
+        ObjectChangeEvent.project_id == project_id,
+        ObjectChangeEvent.object_id == object_id,
+    ).scalar() or 0)
+    version = max(persisted, pending.get(key, 0)) + 1
+    pending[key] = version
+    return version
+
+
 def _table_present(db: Session, bind: Any, table_name: str) -> bool:
     """Does `table_name` exist? Asked once per request, not once per row.
 
@@ -995,13 +1048,9 @@ def record_object_change(
         # Standalone compatibility routers may intentionally construct only a
         # subset of the schema. Production migrations require this table.
         return None
-    db.flush()
     before = dict(before_state or {})
     after = dict(object_instance.properties or {})
-    version = int(db.query(func.max(ObjectChangeEvent.object_version)).filter(
-        ObjectChangeEvent.project_id == object_instance.project_id,
-        ObjectChangeEvent.object_id == object_instance.id,
-    ).scalar() or 0) + 1
+    version = _next_change_version(db, object_instance.project_id, object_instance.id)
     changed_fields = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
     now = _now()
     row = ObjectChangeEvent(
@@ -1052,9 +1101,9 @@ def record_object_change(
             "valid_from": row.valid_from,
             "transaction_time": row.transaction_time,
             "materialization": {
-                "id": object_instance.materialization_id,
-                "active": object_instance.is_active,
-                "retired_at": object_instance.retired_at,
+                "id": _declared(object_instance, "materialization_id"),
+                "active": _declared(object_instance, "is_active"),
+                "retired_at": _declared(object_instance, "retired_at"),
             },
         },
         idempotency_key=f"object_change:{row.id}",
