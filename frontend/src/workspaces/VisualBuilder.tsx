@@ -1,5 +1,5 @@
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Background,
@@ -31,9 +31,9 @@ import {
   Trash2,
   Undo2
 } from "lucide-react";
-import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, closestCenter, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { DragHandle, dropPointOf, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
 import {
   acquireArtifactLease,
   applyArtifactCommands,
@@ -158,6 +158,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
+  const sensors = useWorkspaceSensors();
   const [instance, setInstance] = useState<ReactFlowInstance<Node<ArtifactNodeData>, Edge> | null>(null);
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [breakpoint, setBreakpoint] = useState<"desktop" | "tablet" | "mobile">("desktop");
@@ -420,11 +421,12 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     setDirty(true);
   }
 
-  function drop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const nodeType = event.dataTransfer.getData("application/ontology-builder-node");
-    if (!nodeType || !instance) return;
-    addNode(nodeType, instance.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+  function dropLibraryNode(event: DragEndEvent) {
+    const nodeType = String(event.active.id).replace("library:", "");
+    if (event.over?.id !== "visual-canvas" || !instance) return;
+    const point = dropPointOf(event);
+    if (!point) return;
+    addNode(nodeType, instance.screenToFlowPosition(point));
   }
 
   function undo() {
@@ -604,23 +606,23 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
         </div>
       ) : null}
       <div className="visual-builder-grid">
+        <DndContext sensors={sensors} onDragEnd={dropLibraryNode}>
         <aside className="node-library-panel">
           <div className="search-field"><Search size={15} /><input aria-label="Search node library" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tools" /></div>
           <div className="node-library-list">
             {library.map((item) => (
-              <button
+              <LibraryEntry
                 key={item.type}
-                draggable
-                onDragStart={(event) => event.dataTransfer.setData("application/ontology-builder-node", item.type)}
-                onClick={() => addNode(item.type)}
-              >
-                <Plus size={14} /><span><strong>{item.label}</strong><small>{"category" in item ? `${item.category} · ` : ""}{item.description}</small></span>
-              </button>
+                type={item.type}
+                label={item.label}
+                detail={`${"category" in item ? `${item.category} · ` : ""}${item.description}`}
+                onAdd={() => addNode(item.type)}
+              />
             ))}
           </div>
         </aside>
         <div className="visual-builder-center">
-          <div className={`visual-flow-canvas visual-breakpoint-${breakpoint}`} onDrop={drop} onDragOver={(event) => event.preventDefault()}>
+          <BuilderCanvas breakpoint={breakpoint}>
             <ReactFlow<Node<ArtifactNodeData>, Edge>
               nodes={nodes}
               edges={edges}
@@ -642,7 +644,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
               <MiniMap pannable zoomable />
               <Controls showInteractive />
             </ReactFlow>
-          </div>
+          </BuilderCanvas>
           <section className="builder-execution-drawer" aria-label="Builder preview and validation">
             <div className="builder-drawer-tabs"><strong>Preview</strong><span>Validation</span><span>Evidence</span></div>
             <div className="builder-drawer-content">
@@ -714,6 +716,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
             {(artifact.evidence_links || []).map((link) => <a className="builder-evidence-link" href={link.href} key={link.href}>{link.label}</a>)}
           </details>
         </aside>
+        </DndContext>
       </div>
     </section>
   );
@@ -721,6 +724,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
 
 function NodeInspector({ node, onChange, onDuplicate, onDelete }: { node: Node<ArtifactNodeData>; onChange: (data: ArtifactNodeData) => void; onDuplicate: () => void; onDelete: () => void }) {
   const fields = node.data.fields || [];
+  const sensors = useWorkspaceSensors("sortable");
   function reorder(event: DragEndEvent) {
     if (!event.over || event.active.id === event.over.id) return;
     const from = fields.findIndex((field) => field.id === event.active.id);
@@ -733,7 +737,7 @@ function NodeInspector({ node, onChange, onDuplicate, onDelete }: { node: Node<A
       <label>Name<input value={node.data.label} onChange={(event) => onChange({ ...node.data, label: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={node.data.description || ""} onChange={(event) => onChange({ ...node.data, description: event.target.value })} /></label>
       <div className="field-list-heading"><strong>Configuration fields</strong><button onClick={() => onChange({ ...node.data, fields: [...fields, { id: crypto.randomUUID(), name: "field", label: "Custom field", value: "", type: "string" }] })}><Plus size={14} /> Add</button></div>
-      <DndContext collisionDetection={closestCenter} onDragEnd={reorder}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
         <SortableContext items={fields.map((field) => field.id)} strategy={verticalListSortingStrategy}>
           <div className="config-field-list">
             {fields.map((field) => <SortableField key={field.id} field={field} onChange={(next) => onChange({ ...node.data, fields: fields.map((item) => item.id === field.id ? next : item) })} onDelete={() => onChange({ ...node.data, fields: fields.filter((item) => item.id !== field.id) })} />)}
@@ -749,8 +753,12 @@ type InspectorField = NonNullable<ArtifactNodeData["fields"]>[number];
 function SortableField({ field, onChange, onDelete }: { field: InspectorField; onChange: (field: InspectorField) => void; onDelete: () => void }) {
   const sortable = useSortable({ id: field.id });
   return (
-    <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition }} className="config-field-row">
-      <button className="drag-grip" aria-label={`Reorder ${field.name}`} {...sortable.attributes} {...sortable.listeners}>⋮⋮</button>
+    <div
+      ref={sortable.setNodeRef}
+      style={sortableStyle(sortable.transform, sortable.transition, sortable.isDragging)}
+      className="config-field-row"
+    >
+      <DragHandle label={field.name} grip={sortable} />
       <span className="config-field-label"><strong>{field.label || field.name}</strong><small>{field.required ? "Required" : field.type || "string"}</small></span>
       {field.type === "select" ? (
         <select aria-label={field.label || field.name} value={field.value} onChange={(event) => onChange({ ...field, value: event.target.value })}><option value="">Choose...</option>{(field.options || []).map((option) => <option value={option} key={option}>{option.replace(/_/g, " ")}</option>)}</select>
@@ -763,5 +771,44 @@ function SortableField({ field, onChange, onDelete }: { field: InspectorField; o
       )}
       <button aria-label={`Delete ${field.name}`} onClick={onDelete}><Trash2 size={14} /></button>
     </div>
+  );
+}
+
+
+/**
+ * A node type in the library: a button that adds it, and a drag that places it.
+ *
+ * Both, deliberately. The drag is how a mouse user chooses *where*; the click is
+ * how everyone else adds it at all, and `useWorkspaceSensors` keeps an 8px
+ * activation distance so one does not eat the other.
+ */
+function LibraryEntry({ type, label, detail, onAdd }: {
+  type: string;
+  label: string;
+  detail: string;
+  onAdd: () => void;
+}) {
+  const draggable = useDraggable({ id: `library:${type}` });
+  return (
+    <button
+      ref={draggable.setNodeRef}
+      onClick={onAdd}
+      style={draggable.isDragging ? { opacity: 0.5 } : undefined}
+      {...draggable.attributes}
+      {...draggable.listeners}
+    >
+      <Plus size={14} /><span><strong>{label}</strong><small>{detail}</small></span>
+    </button>
+  );
+}
+
+/** The artifact canvas, and the region a library node can be dropped onto. */
+function BuilderCanvas({ breakpoint, children }: { breakpoint: string; children: ReactNode }) {
+  const droppable = useDroppable({ id: "visual-canvas" });
+  return (
+    <div
+      ref={droppable.setNodeRef}
+      className={`visual-flow-canvas visual-breakpoint-${breakpoint}${droppable.isOver ? " drag-active" : ""}`}
+    >{children}</div>
   );
 }

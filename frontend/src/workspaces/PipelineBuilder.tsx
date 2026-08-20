@@ -1,4 +1,6 @@
-import { ReactNode, type DragEvent, useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import { DndContext, useDraggable, type DragEndEvent } from "@dnd-kit/core";
+import { dropPointOf, useWorkspaceSensors } from "../components/dnd/DragKit";
 import { postJson } from "../api";
 import {
   cancelJob,
@@ -75,6 +77,8 @@ export function PipelineBuilder() {
   const [contracts, setContracts] = useState<PipelineOntologyContractState | null>(null);
   const [zoom, setZoom] = useState(0.86);
   const [quickAddType, setQuickAddType] = useState("filter");
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const sensors = useWorkspaceSensors();
   const [executionJob, setExecutionJob] = useState<PlatformJob | null>(null);
   const [executionPlan, setExecutionPlan] = useState<PipelineExecutionPlan | null>(null);
   const [executionEngine, setExecutionEngine] = useState<"builder" | "duckdb">("builder");
@@ -260,14 +264,8 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
-  async function addNodeAtDrop(event: DragEvent<HTMLDivElement>, nodeType: string) {
+  async function addNodeAtDrop(position: { x: number; y: number }, nodeType: string) {
     if (!selectedGraphId) return;
-    const container = event.currentTarget;
-    const rect = container.getBoundingClientRect();
-    const position = {
-      x: Math.max(0, (event.clientX - rect.left + container.scrollLeft) / zoom - 86),
-      y: Math.max(0, (event.clientY - rect.top + container.scrollTop) / zoom - 28)
-    };
     setActionStatus(`Adding ${nodeType} at ${Math.round(position.x)}, ${Math.round(position.y)}...`);
     const nextCanvas = await createPipelineNode(selectedGraphId, nodeType, position, selectedNodeId || undefined);
     setCanvas(nextCanvas);
@@ -319,10 +317,27 @@ export function PipelineBuilder() {
     setActionStatus("Layout saved for this graph.");
   }
 
-  function handleNodeDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const nodeType = event.dataTransfer.getData("application/x-node-type");
-    if (nodeType) void addNodeAtDrop(event, nodeType);
+  function endCanvasDrag(event: DragEndEvent) {
+    const id = String(event.active.id);
+    if (id.startsWith("node:")) {
+      // A node already on the canvas: commit once, where it came to rest.
+      const node = canvas?.nodes.find((item) => item.id === id.slice(5));
+      if (!node || (!event.delta.x && !event.delta.y)) return;
+      moveNode(node.id, {
+        x: Math.max(0, node.position.x + event.delta.x / zoom),
+        y: Math.max(0, node.position.y + event.delta.y / zoom)
+      }, true);
+      return;
+    }
+    if (event.over?.id !== "pipeline-canvas") return;
+    const point = dropPointOf(event);
+    const container = canvasRef.current;
+    if (!point || !container) return;
+    const rect = container.getBoundingClientRect();
+    void addNodeAtDrop({
+      x: Math.max(0, (point.x - rect.left + container.scrollLeft) / zoom - 86),
+      y: Math.max(0, (point.y - rect.top + container.scrollTop) / zoom - 28)
+    }, id.replace("palette:", ""));
   }
 
   const outputRows = asRows((outputs?.outputs || canvas?.outputs)?.nodes);
@@ -371,21 +386,23 @@ export function PipelineBuilder() {
             <StatusBadge value={canvas?.validation.status || "loading"} />
             <span>{actionStatus}</span>
           </div>
+          <DndContext sensors={sensors} onDragStart={(event) => {
+            const id = String(event.active.id);
+            if (id.startsWith("node:")) setSelectedNodeId(id.slice(5));
+          }} onDragEnd={endCanvasDrag}>
           <div className="pipeline-body">
             <aside className="node-library">
               <h2>Add data / transforms</h2>
               <p>Drag a node onto the canvas, click a node type to set the edge insert action, or use the selected-node menu.</p>
               {(state.value?.node_library || []).map((item) => (
-                <button
+                <PaletteEntry
                   key={item.type}
-                  draggable
-                  onDragStart={(event) => event.dataTransfer.setData("application/x-node-type", item.type)}
-                  onClick={() => setQuickAddType(item.type)}
-                  className={classNames(quickAddType === item.type && "selected")}
-                >
-                  <strong>{item.label}</strong>
-                  <span>{item.category}</span>
-                </button>
+                  type={item.type}
+                  label={item.label}
+                  category={item.category}
+                  selected={quickAddType === item.type}
+                  onArm={() => setQuickAddType(item.type)}
+                />
               ))}
             </aside>
             <PipelineCanvas
@@ -394,19 +411,18 @@ export function PipelineBuilder() {
               selectedNodeId={selectedNodeId}
               details={details}
               onSelect={setSelectedNodeId}
-              onDrop={handleNodeDrop}
-              onDragOver={(event) => event.preventDefault()}
+              containerRef={canvasRef}
               onInsertEdge={() => insertAfter(quickAddType)}
               onAddFirst={() => addFirstNode(quickAddType)}
               quickAddType={quickAddType}
               onContextInsert={(nodeType) => insertAfter(nodeType)}
-              onMoveNode={moveNode}
               onDeleteNode={removeNode}
             />
             <aside className="pipeline-utility-rail" aria-label="Pipeline utility rail">
               {["R", "S", "L", "B", "C", "D"].map((item) => <button key={item}>{item}</button>)}
             </aside>
           </div>
+          </DndContext>
           <BottomDrawer
             preview={preview}
             selectedNode={canvas?.selected_node || null}
@@ -701,4 +717,36 @@ function parseConfigValue(value: string, type: string): string | number | boolea
     return value.trim() !== "" && Number.isFinite(number) ? number : value;
   }
   return value;
+}
+
+
+/**
+ * A node type in the palette: a button that arms it, and a drag that places it.
+ *
+ * Arming is what a touch user does — tap the type, then tap `Add` on the empty
+ * canvas or the insert control on an edge. The drag is how a mouse user chooses
+ * the position in one gesture, and the 8px activation distance in
+ * `useWorkspaceSensors` is what keeps the two from eating each other.
+ */
+function PaletteEntry({ type, label, category, selected, onArm }: {
+  type: string;
+  label: string;
+  category: string;
+  selected: boolean;
+  onArm: () => void;
+}) {
+  const draggable = useDraggable({ id: `palette:${type}` });
+  return (
+    <button
+      ref={draggable.setNodeRef}
+      onClick={onArm}
+      className={classNames(selected && "selected", draggable.isDragging && "dragging")}
+      style={draggable.isDragging ? { opacity: 0.5 } : undefined}
+      {...draggable.attributes}
+      {...draggable.listeners}
+    >
+      <strong>{label}</strong>
+      <span>{category}</span>
+    </button>
+  );
 }

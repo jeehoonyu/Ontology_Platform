@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0042_stream_outer_joins",
-    "bundle_source_hash": "491d7b94b3728d6f9aeaf3030d83c5a36798ac4623e5333d6dff4fc5fd87efb6",
+    "bundle_source_hash": "33fb8fb77478008de8dc38d23aa800cde13cc534ae6f54b297dedc80b490881e",
     "dependencies": {
       "digest": "a727fd9a41cfa7b6",
       "closure": 45
     },
-    "recorded_at": "2026-08-20T06:33:26Z",
+    "recorded_at": "2026-08-20T19:33:07Z",
     "stale_after": "migration head"
   },
   "known_failing": {
@@ -16,27 +16,27 @@
   "viewports": {
     "desktop-1280": {
       "failed": 1,
-      "flaky": 1,
-      "ran": 60,
+      "flaky": 0,
+      "ran": 62,
       "skipped": 5
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 25,
-      "skipped": 42
+      "skipped": 43
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 24,
-      "skipped": 43
+      "skipped": 44
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 24,
-      "skipped": 43
+      "skipped": 44
     }
   },
   "tests": {
@@ -48,6 +48,7 @@
     "desktop-1280 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "ran",
     "desktop-1280 :: Operational Map renders ontology features and supports selection and MGRS": "ran",
     "desktop-1280 :: a library node reaches the canvas without a drag": "ran",
+    "desktop-1280 :: a pipeline node moves with the keyboard": "ran",
     "desktop-1280 :: a property row reorders without a drag": "ran",
     "desktop-1280 :: a source field maps onto a property without a drag": "ran",
     "desktop-1280 :: a touch user can add the first node to a pipeline": "ran",
@@ -115,6 +116,7 @@
     "mobile-375 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "mobile-375 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "mobile-375 :: a library node reaches the canvas without a drag": "skipped",
+    "mobile-375 :: a pipeline node moves with the keyboard": "skipped",
     "mobile-375 :: a property row reorders without a drag": "skipped",
     "mobile-375 :: a source field maps onto a property without a drag": "skipped",
     "mobile-375 :: a touch user can add the first node to a pipeline": "skipped",
@@ -182,6 +184,7 @@
     "tablet-768 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-768 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "tablet-768 :: a library node reaches the canvas without a drag": "skipped",
+    "tablet-768 :: a pipeline node moves with the keyboard": "skipped",
     "tablet-768 :: a property row reorders without a drag": "skipped",
     "tablet-768 :: a source field maps onto a property without a drag": "skipped",
     "tablet-768 :: a touch user can add the first node to a pipeline": "skipped",
@@ -249,6 +252,7 @@
     "wide-1600 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "wide-1600 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "wide-1600 :: a library node reaches the canvas without a drag": "skipped",
+    "wide-1600 :: a pipeline node moves with the keyboard": "skipped",
     "wide-1600 :: a property row reorders without a drag": "skipped",
     "wide-1600 :: a source field maps onto a property without a drag": "skipped",
     "wide-1600 :: a touch user can add the first node to a pipeline": "skipped",

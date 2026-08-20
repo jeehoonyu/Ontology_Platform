@@ -1,5 +1,5 @@
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -11,6 +11,9 @@ import {
   type Node,
   type NodeChange
 } from "@xyflow/react";
+import { DndContext, closestCenter, useDraggable, useDroppable } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { DragHandle, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
 import { api, postJson } from "../api";
 import {
   addOntologyProperty,
@@ -526,7 +529,7 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
   const [assetId, setAssetId] = useState("");
   const [preview, setPreview] = useState<OntologyMappingPreview | null>(null);
   const [mappings, setMappings] = useState<OntologyFieldMapping[]>([]);
-  const [draggedField, setDraggedField] = useState("");
+  const sensors = useWorkspaceSensors();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -561,11 +564,10 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
     }
   }
 
-  function mapField(targetProperty: string, sourceField = draggedField) {
+  function mapField(targetProperty: string, sourceField: string) {
     if (!sourceField) return;
     const next = [...mappings.filter((item) => item.target_property !== targetProperty && item.source_field !== sourceField), { source_field: sourceField, target_property: targetProperty }];
     setMappings(next);
-    setDraggedField("");
     void refreshPreview(next);
   }
 
@@ -594,14 +596,20 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
       {message ? <div className="workbench-status-strip" role="status">{message}</div> : null}
       {preview ? (
         <>
+          <DndContext sensors={sensors} onDragEnd={(event) => {
+            if (!event.over) return;
+            mapField(String(event.over.id).replace("property:", ""),
+                     String(event.active.id).replace("field:", ""));
+          }}>
           <div className="ontology-mapping-grid">
-            <section><h3>Dataset fields</h3><p>Drag a source field onto a target property, or pick it from that property's list.</p><div className="mapping-source-list">{preview.source_fields.map((field) => <button key={field.name} draggable onDragStart={() => setDraggedField(field.name)} className={classNames(field.mapped && "mapped")}><strong>{field.name}</strong><small>{field.inferred_type}</small></button>)}</div></section>
+            <section><h3>Dataset fields</h3><p>Drag a source field onto a target property, or pick it from that property's list.</p><div className="mapping-source-list">{preview.source_fields.map((field) => <SourceField key={field.name} name={field.name} inferredType={field.inferred_type} mapped={Boolean(field.mapped)} />)}</div></section>
             <section><h3>Object properties</h3><p>Required properties must be mapped before saving.</p><div className="mapping-target-list">{preview.target_properties.map((property) => {
               const source = mappings.find((item) => item.target_property === property.name)?.source_field;
               const compatibility = preview.compatibility.find((item) => item.target_property === property.name);
-              return <div key={property.name} onDragOver={(event) => event.preventDefault()} onDrop={() => mapField(property.name)} className={classNames("mapping-target", source && "mapped", compatibility && !compatibility.compatible && "incompatible")}><span><strong>{property.name}</strong><small>{property.base_type || property.type}{property.required ? " · required" : ""}</small></span><select aria-label={`Map ${property.name}`} value={source || ""} onChange={(event) => mapField(property.name, event.target.value)}><option value="">Not mapped</option>{preview.source_fields.map((field) => <option value={field.name} key={field.name}>{field.name}</option>)}</select></div>;
+              return <MappingTarget key={property.name} property={property.name} className={classNames("mapping-target", source && "mapped", compatibility && !compatibility.compatible && "incompatible")}><span><strong>{property.name}</strong><small>{property.base_type || property.type}{property.required ? " · required" : ""}</small></span><select aria-label={`Map ${property.name}`} value={source || ""} onChange={(event) => mapField(property.name, event.target.value)}><option value="">Not mapped</option>{preview.source_fields.map((field) => <option value={field.name} key={field.name}>{field.name}</option>)}</select></MappingTarget>;
             })}</div></section>
           </div>
+          </DndContext>
           {preview.errors.length || preview.warnings.length ? <DataTable rows={[...preview.errors, ...preview.warnings]} empty="Mapping is valid." /> : null}
           <details className="mapping-preview-drawer" open><summary>Hydrated object preview · {preview.hydrated_preview.length} rows</summary><DataTable rows={preview.hydrated_preview} empty="No objects can be previewed." /></details>
         </>
@@ -763,7 +771,7 @@ function PropertyEditor({
   const [drafts, setDrafts] = useState<Record<string, JsonObject>>({});
   const [newField, setNewField] = useState<JsonObject>({ name: "", display_name: "", base_type: "string", status: "active", required: false, indexed: false, sensitive: false, description: "", unit: "", minimum: "", maximum: "", enum_text: "" });
   const [confirmArchive, setConfirmArchive] = useState("");
-  const [dragName, setDragName] = useState("");
+  const sensors = useWorkspaceSensors("sortable");
   const [impactMessage, setImpactMessage] = useState("");
   const rows = manager.cards.properties.rows;
 
@@ -813,14 +821,6 @@ function PropertyEditor({
     await onReorderProperties(order);
   }
 
-  async function dropOn(targetName: string) {
-    if (!dragName || dragName === targetName) return;
-    const order = orderedNames().filter((name) => name !== dragName);
-    const targetIndex = order.indexOf(targetName);
-    order.splice(targetIndex < 0 ? order.length : targetIndex, 0, dragName);
-    setDragName("");
-    await onReorderProperties(order);
-  }
 
   return (
     <Panel title={`Properties ${manager.cards.properties.count}`} className="property-panel" action={<button onClick={() => setEditing((value) => !value)}>{editing ? "Done" : "Edit fields"}</button>}>
@@ -851,20 +851,21 @@ function PropertyEditor({
               </div>
             </details>
           </div>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(event) => {
+            if (!event.over || event.active.id === event.over.id) return;
+            const order = orderedNames();
+            void onReorderProperties(arrayMove(
+              order,
+              order.indexOf(String(event.active.id)),
+              order.indexOf(String(event.over.id))));
+          }}>
+          <SortableContext items={orderedNames()} strategy={verticalListSortingStrategy}>
           <div className="property-field-list">
             {rows.map((row) => {
               const name = rowName(row);
               const draft = drafts[name] || rowEditState(row);
               return (
-                <article
-                  key={name}
-                  className="property-field-row"
-                  draggable
-                  onDragStart={() => setDragName(name)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => dropOn(name)}
-                >
-                  <span className="drag-handle" title="Drag to reorder">::</span>
+                <SortablePropertyRow key={name} name={name}>
                   <input value={asString(draft.name)} onChange={(event) => updateDraft(name, { name: event.target.value })} />
                   <select value={asString(draft.base_type, "string")} onChange={(event) => updateDraft(name, { base_type: event.target.value })}>
                     {BASE_TYPE_OPTIONS.map((type) => <option key={type} value={type}>{type}</option>)}
@@ -896,14 +897,72 @@ function PropertyEditor({
                       <label className="checkbox-field"><input type="checkbox" checked={Boolean(draft.sensitive)} onChange={(event) => updateDraft(name, { sensitive: event.target.checked })} />Sensitive / masked</label>
                     </div>
                   </details>
-                </article>
+                </SortablePropertyRow>
               );
             })}
           </div>
+          </SortableContext>
+          </DndContext>
         </div>
       ) : (
         <DataTable rows={rows} />
       )}
     </Panel>
+  );
+}
+
+
+/** A dataset field, draggable onto a property and listed in every property's select. */
+function SourceField({ name, inferredType, mapped }: {
+  name: string;
+  inferredType?: string;
+  mapped: boolean;
+}) {
+  const draggable = useDraggable({ id: `field:${name}` });
+  return (
+    <button
+      ref={draggable.setNodeRef}
+      className={classNames(mapped && "mapped")}
+      style={draggable.isDragging ? { opacity: 0.5 } : undefined}
+      {...draggable.attributes}
+      {...draggable.listeners}
+    ><strong>{name}</strong><small>{inferredType}</small></button>
+  );
+}
+
+/** A target property, and the region a source field can be dropped onto. */
+function MappingTarget({ property, className, children }: {
+  property: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const droppable = useDroppable({ id: `property:${property}` });
+  return (
+    <div ref={droppable.setNodeRef} className={droppable.isOver ? `${className} drag-active` : className}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A property row, reorderable by its grip.
+ *
+ * The row itself is not the drag target: it holds seven inputs and a details
+ * disclosure, and making all of that draggable is why the native version fought
+ * with text selection. The grip is a button, so this list is now reorderable
+ * from the keyboard as well as by pointer — which `Up` and `Down` already did,
+ * and the drag never could.
+ */
+function SortablePropertyRow({ name, children }: { name: string; children: ReactNode }) {
+  const sortable = useSortable({ id: name });
+  return (
+    <article
+      ref={sortable.setNodeRef}
+      style={sortableStyle(sortable.transform, sortable.transition, sortable.isDragging)}
+      className="property-field-row"
+    >
+      <DragHandle label={name} grip={sortable} className="drag-handle" />
+      {children}
+    </article>
   );
 }

@@ -20,6 +20,7 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `Page` | `components/workbench/Workbench.tsx` | **13** — App, Analytics, Automate, ControlPanel, and 9 more |
 | `Metric` | `components/data/DataDisplay.tsx` | **12** — App, Analytics, Automate, ControlPanel, and 8 more |
 | `DeveloperEvidence` | `components/data/DataDisplay.tsx` | **5** — App, DataMedia, Delivery, Security, and 1 more |
+| `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |

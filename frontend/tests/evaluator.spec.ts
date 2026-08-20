@@ -917,17 +917,30 @@ test("pipeline creates a graph and accepts a dragged node", async ({ page }, tes
   await expect(page.getByRole("button", { name: "Propose" })).toBeEnabled();
   const canvas = page.locator(".pipeline-canvas");
   const source = page.getByRole("button", { name: "Input Dataset input" });
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
   const canvasBox = await canvas.boundingBox();
+  const sourceBox = await source.boundingBox();
   expect(canvasBox).not.toBeNull();
-  await source.dispatchEvent("dragstart", { dataTransfer });
-  await canvas.dispatchEvent("dragover", { dataTransfer });
-  await canvas.dispatchEvent("drop", {
-    dataTransfer,
-    clientX: (canvasBox?.x || 0) + 360,
-    clientY: (canvasBox?.y || 0) + 180
-  });
-  await source.dispatchEvent("dragend", { dataTransfer });
+  expect(sourceBox).not.toBeNull();
+
+  // A real mouse drag, moved in steps.
+  //
+  // This used to synthesise `dragstart`/`dragover`/`drop` with a hand-made
+  // `DataTransfer`, which proved that handlers with those names existed and
+  // nothing about whether a person could drag anything -- and it was the flakiest
+  // test in the suite. The palette now drags through `@dnd-kit`, whose pointer
+  // sensor waits for 8px of real movement before it activates, so a synthetic
+  // event pair cannot start it and the steps below are not decoration.
+  await page.mouse.move((sourceBox?.x || 0) + (sourceBox?.width || 0) / 2,
+                        (sourceBox?.y || 0) + (sourceBox?.height || 0) / 2);
+  await page.mouse.down();
+  const targetX = (canvasBox?.x || 0) + 360;
+  const targetY = (canvasBox?.y || 0) + 180;
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move((sourceBox?.x || 0) + ((targetX - (sourceBox?.x || 0)) * step) / 8,
+                          (sourceBox?.y || 0) + ((targetY - (sourceBox?.y || 0)) * step) / 8);
+  }
+  await page.mouse.up();
+
   await expect(canvas.locator(".pipeline-node")).toHaveCount(1);
   await expect(page.getByText(/Added input_dataset at drop location/)).toBeVisible();
 });

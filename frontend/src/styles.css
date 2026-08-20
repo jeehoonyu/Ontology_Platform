@@ -4769,6 +4769,14 @@ pre {
   color: #7d8b99;
   cursor: grab;
   font-weight: 800;
+  /* A button now, not a decorated span. Reset the chrome the button rules give
+     it, and take the touch gesture: this target is 22px wide, so nothing scrolls
+     by starting on it, and without this a finger cannot reorder the list at all
+     -- measured on `.drag-grip`, which had the same omission. */
+  padding: 0;
+  border: 0;
+  background: none;
+  touch-action: none;
 }
 
 @media (max-width: 1100px) {

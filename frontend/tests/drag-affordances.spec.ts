@@ -1,26 +1,32 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Every drag in the product, done without a drag, by a finger.
+ * Every drag in the product, reached without a mouse.
  *
- * Native HTML5 drag-and-drop does not fire from touch input. That is a property
- * of the platform: a finger on `<button draggable>` scrolls the page, and no
- * care in the handler changes it. `touch-authoring.spec.ts` measured that on the
- * pipeline builder and this covers the other three sites, which
- * `oms/audit_drag_affordances.py` enumerates from the source so the list cannot
- * quietly fall behind it.
+ * Four of these were native HTML5 `draggable` and a fifth was hand-rolled on raw
+ * pointer events. All five now run on `@dnd-kit` through `components/dnd/DragKit`,
+ * and `oms/audit_drag_affordances.py` refuses anything that leaves that path, so
+ * the list here cannot quietly fall behind the source.
  *
- * The alternatives being exercised here already existed in two of the three
- * cases -- a select beside each mapping target, `Up`/`Down` on each property row,
- * a library entry that is also a button. That is the point. They existed,
- * nothing operated them, and nothing said they were load-bearing, so the next
- * person to tidy up a screen could have removed one and left a workspace
- * mouse-only without a single test going red.
+ * Two different claims are proven below, and they are not interchangeable.
  *
- * Everything below is `locator.tap()` or a native select. Never a drag, never a
- * mouse click. `page.touchscreen.tap(x, y)` is deliberately unused: it
- * dispatches touch without the click a browser synthesises from it, so it fails
- * against a working button and reads like a broken product.
+ * **A control beside the drag.** A select beside each mapping target, `Up`/`Down`
+ * on each property row, a library entry that is also a button. Those already
+ * existed and nothing operated them, so a tidy-up could have deleted one and left
+ * a workspace mouse-only with the suite green. These are `locator.tap()` on a
+ * touch viewport -- never a drag, never a mouse click, and never
+ * `page.touchscreen.tap(x, y)`, which dispatches touch without the click a
+ * browser synthesises from it and so fails against a working button.
+ *
+ * **The drag itself, from a keyboard.** New, and the reason the migration was
+ * worth doing. A pipeline node's position had no second control at all. The first
+ * version of that test asserted on the node's bounding box and passed against a
+ * build with the keyboard wiring *removed* -- an arrow key scrolls a container,
+ * which moves the box without moving the node. It reads the committed position
+ * now, and running it against that same broken build is what then exposed a
+ * second bug: the shared sensors were passing `sortableKeyboardCoordinates` to
+ * every context, and outside a `SortableContext` it returns nothing, so keyboard
+ * dragging on both canvases was inert while every pointer drag worked.
  */
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
@@ -130,6 +136,77 @@ test.describe("a drag is never the only way", () => {
     await expect(canvas.locator(".visual-node"),
                  "tapping a library entry placed no node, so the canvas is drag-only")
       .toHaveCount(before + 1);
+  });
+
+  test("a pipeline node moves with the keyboard", async ({ page, browser }) => {
+    // The capability the migration bought, and the reason it was worth doing.
+    // Node positions were moved by `onPointerDown` and `setPointerCapture` --
+    // hand-rolled, counted by no census, and with no other control anywhere. The
+    // layout of a pipeline could not be changed without a mouse or a finger.
+    //
+    // A keyboard is not touch, so this one runs in its own desktop context
+    // rather than the touch viewport this file otherwise uses.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const desktop = await context.newPage();
+    try {
+      await desktop.goto("/workspace/pipeline");
+      await desktop.getByRole("button", { name: "New pipeline" }).click();
+      await expect(desktop.getByText(/Pipeline draft created/)).toBeVisible();
+
+      const canvas = desktop.locator(".pipeline-canvas");
+      await desktop.getByRole("button", { name: "Input Dataset input" }).click();
+      await canvas.getByRole("button", { name: /^Add / }).click();
+
+      const node = canvas.locator(".pipeline-node").first();
+      await expect(node).toBeVisible();
+      // Creating the node is a server round-trip that bumps a refresh key, and
+      // the workspace polls readiness besides. Starting the drag while either is
+      // in flight loses the focus the keyboard sensor needs -- which is why this
+      // passed alone and failed after other specs had put rows in the database.
+      await desktop.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+      // The committed position, not the viewport box: an arrow key can scroll a
+      // container, which moves the box without moving the node.
+      const left = async () => Number.parseFloat(
+        (await node.evaluate((element) => (element as HTMLElement).style.left)) || "0");
+      const before = await left();
+
+      // Focus the node, pick it up, walk it right, put it down. dnd-kit's
+      // keyboard sensor activates on Space and moves in fixed steps.
+      await node.focus();
+      // Assert the focus rather than assume it. If a re-render steals it the
+      // failure should say so, not report a node that did not move.
+      await expect(node, "the node lost focus before the drag could start")
+        .toBeFocused();
+      await desktop.keyboard.press("Space");
+
+      // Wait for the drag to have actually started before moving it. Sleeping
+      // instead of synchronising is what made the first version of this flaky:
+      // it passed alone and failed inside a full suite, because pressing arrows
+      // before the sensor had picked the node up loses them entirely.
+      //
+      // dnd-kit announces each phase into a live region, so this is both the
+      // synchronisation point and a check that a screen reader is told what
+      // happened -- which the hand-rolled pointer drag never did.
+      // Target dnd-kit's own region by id: the workspace has `role="status"`
+      // strips of its own. And match any announcement rather than the pick-up
+      // one specifically -- the node starts already over the canvas droppable,
+      // so "Picked up" is replaced by "was moved over" before this can read it.
+      const announcement = desktop.locator("[id^='DndLiveRegion']");
+      await expect(announcement, "no live-region announcement, so the drag never started")
+        .toContainText(/draggable item/i);
+
+      for (let step = 0; step < 4; step += 1) {
+        await desktop.keyboard.press("ArrowRight");
+      }
+      await desktop.keyboard.press("Space");
+      await expect(announcement, "no drop was announced").toContainText(/dropped/i);
+
+      await expect
+        .poll(left, { message: "the node did not move, so its position is still mouse-only" })
+        .toBeGreaterThan(before + 20);
+    } finally {
+      await context.close();
+    }
   });
 
   test("the sortable field list reorders from touch", async ({ page }) => {

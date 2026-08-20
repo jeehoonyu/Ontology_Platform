@@ -1,25 +1,28 @@
-"""Every drag has a second way, and a browser test operates it with a finger.
+"""One drag mechanism, and nothing may leave through the gaps.
 
 Also this check's home: `audit_drag_affordances` declares `every suite run`.
 
 The question this came from was whether React would suit a complicated
-drag-and-drop UI. React is already the product, so the framework was never the
-variable. The variable is the mechanism, and three run at once: native HTML5 in
-four places, `@dnd-kit` in one, `@xyflow/react` on three canvases.
+drag-and-drop UI. React was never the variable — it has been the product
+throughout, and a browser fires `dragstart` the same way whatever renders the
+element. The variable was the mechanism, and there were four:
 
-Native HTML5 drag-and-drop does not fire from touch input and is not
-keyboard-operable -- a property of the platform, not of this code. Two of those
-four sites already had an alternative and nobody had ever operated it, so a
-tidy-up could have deleted one and left a workspace mouse-only with the suite
-still green. That is what these assertions are for.
+    html5     4 sources   native `draggable` + `dataTransfer`
+    pointer   1 canvas    `onPointerDown` with `setPointerCapture`, hand-rolled
+    dnd-kit   1 source    `useSortable`
+    xyflow    3 canvases  a third-party graph editor, left alone
 
-The tidy conclusion -- that the library-backed drag is the safe one and the other
-four should move onto it -- is the thing measuring disproved. The `@dnd-kit`
-sortable was the single drag in this product a finger could not use at all,
-because `.drag-grip` had no `touch-action: none` and the browser spent every
-gesture on scrolling before the pointer sensor saw a move. So the gate treats
-both kinds the same way: the alternative, or the sensor, is proven in a browser
-or it is not claimed.
+The first two are gone. The assertions below hold that: native drag cannot be
+operated from a keyboard or touch at all, and the hand-rolled pointer drag was
+worse than either — it could not be reached from a keyboard, a pipeline node's
+position had no other control, and *no census counted it*. The first version of
+this audit reported three mechanisms and there were four, so the rule that
+catches raw pointer drags is here because one hid from the rule that came first.
+
+The other thing held here is the sensor configuration. A `DndContext` built
+without `useWorkspaceSensors` loses the 8px activation distance, and every
+draggable in this product is also a button that does the same job on click — so
+losing it does not break the drag, it breaks the control beside it.
 """
 import sys
 from pathlib import Path
@@ -27,8 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit_drag_affordances import (  # noqa: E402
-    NON_DRAG_PATHS, REFERENCE, SENSOR_BACKED, SPECS, _body, _key_for, compare, proof_missing,
-    render, scan,
+    KIT, REFERENCE, SENSOR_BACKED, SPECS, compare, proof_missing, render, scan,
 )
 
 checks = 0
@@ -40,71 +42,87 @@ def check(condition, message):
     checks += 1
 
 
-# --- the key is the payload, so it survives the line moving -------------------
-check(_key_for('{(event) => event.dataTransfer.setData("application/x-node-type", t)}')
-      == "application/x-node-type", "a MIME payload names the drag")
-check(_key_for("{() => setDragName(name)}") == "setDragName",
-      "a drag with no dataTransfer is named by the state it sets")
-check(_key_for("{() => noop()}") == "unnamed", "an unrecognisable drag is still keyed")
-
-# Brace balancing, because a handler body contains braces of its own and a naive
-# scan to the first `}` would key every arrow function as `unnamed`.
-sample = 'onDragStart={(e) => { if (x) { set(1) } }} onDrop={y}'
-check(_body(sample, sample.index("=") + 1) == "{(e) => { if (x) { set(1) } }}", _body(sample, 11))
-
-# --- the live tree -------------------------------------------------------------
 found = scan()
-html5 = found["html5"]
-check(len(html5) == 4, f"expected the four known HTML5 drags, found {sorted(html5)}")
-check(found["dnd-kit"] == ["workspaces/VisualBuilder.tsx"], found["dnd-kit"])
-check(len(found["xyflow"]) == 3, found["xyflow"])
 
-# Every native drag is declared. A new one fails here rather than at the point a
-# touch user opens the screen.
-undeclared = [key for key in html5 if key not in NON_DRAG_PATHS]
-check(not undeclared, f"HTML5 drags with no non-drag path declared: {undeclared}")
+# --- the two mechanisms that were migrated away are gone, and stay gone --------
+check(found["html5"] == [], f"native HTML5 drag is back in: {found['html5']}")
+check(found["pointer"] == [],
+      f"a hand-rolled pointer drag is back in: {found['pointer']}. This is the class no "
+      f"census counted; it is gated because one hid in the pipeline canvas.")
+check(found["kit"], f"{KIT} is gone; there is no shared mechanism left to be on")
 
-stale = [key for key in NON_DRAG_PATHS if key not in html5]
-check(not stale, f"declared drags that no longer exist in the source: {stale}")
+# The rule must be able to see what it claims to see. A file that drags on raw
+# pointer events has to trip it, or "0 hand-rolled" means only that nothing
+# matched a pattern that matches nothing.
+from audit_drag_affordances import _HTML5, _POINTER, _CONTEXT  # noqa: E402
 
-# The one library-backed drag needed proof as much as the hand-rolled ones, and
-# for a while did not have it. `@dnd-kit`'s pointer sensor supports touch; this
-# screen did not, because the grip had no `touch-action: none` and the browser
-# spent every gesture on scrolling. A finger could not reorder a configuration
-# field at all. Moving the other four onto the library would have spread that.
-unproven = [f for f in found["dnd-kit"] if f not in SENSOR_BACKED]
-check(not unproven, f"sensor drags with nothing proving they work from touch: {unproven}")
-check(proof_missing(SENSOR_BACKED["workspaces/VisualBuilder.tsx"]) == "",
-      "the sortable reorder names a touch test that is gone")
+check(_POINTER.search("event.currentTarget.setPointerCapture(event.pointerId);"),
+      "the pointer rule does not match setPointerCapture")
+check(_POINTER.search("onPointerMove={moveNode}"), "the pointer rule does not match onPointerMove")
 
-# --- the declarations point at tests that exist and still carry the title ------
-for key, declaration in sorted(NON_DRAG_PATHS.items()):
+# Those two spellings are exactly what the migration deleted, so matching them
+# proves only that the rule catches code that is already gone. A review of the
+# migration found two ordinary ways back in that the first version scanned
+# clean, and neither trips any other rule here either -- no dnd-kit hook means
+# no declaration is owed and the file is invisible to the whole audit.
+check(_POINTER.search('window.addEventListener("pointermove", onMove);'),
+      "a drag hand-rolled on a window listener -- the standard way to write one that "
+      "survives the pointer leaving the element -- is not caught")
+check(_POINTER.search("window.addEventListener('mousemove', onMove);"),
+      "the single-quoted window listener is not caught")
+check(_POINTER.search("<div onMouseDown={start} onMouseMove={move} onMouseUp={stop} />"),
+      "the pre-pointer-events spelling of the same drag is not caught")
+# ...and the rule must not swallow things that are not drags.
+check(not _POINTER.search('window.addEventListener("keydown", handler);'),
+      "a keyboard listener reads as a hand-rolled drag")
+check(not _POINTER.search('<div className="modal-backdrop" onMouseDown={onClose}>'),
+      "a modal backdrop that closes on an outside press reads as a drag; three of "
+      "those exist and none of them drags anything")
+check(_HTML5.search('onDragStart={() => setDragName(name)}'), "the native rule misses onDragStart")
+check(_HTML5.search('onDrop={() => dropOn(name)}'), "the native rule misses onDrop")
+# ...and must not trip on dnd-kit's context props, which share three of the names.
+context = '<DndContext sensors={sensors} onDragStart={pick} onDragEnd={drop}>'
+check(not _HTML5.search(_CONTEXT.sub("", context)),
+      "dnd-kit's own onDragStart reads as a native drag once the context is stripped")
+
+# --- every context takes the shared sensors -----------------------------------
+check(found["unshared_context"] == [],
+      f"DndContext without `sensors` in: {found['unshared_context']}. The 8px activation "
+      f"distance is what stops a click on a draggable button reading as a zero-length drag.")
+
+# --- every file that drags is declared, and proven ----------------------------
+check(len(found["dnd-kit"]) == 4, sorted(found["dnd-kit"]))
+check("components/canvas/PipelineCanvas.tsx" in found["dnd-kit"],
+      "the pipeline canvas is where the uncounted mechanism lived; it must stay declared")
+undeclared = [f for f in found["dnd-kit"] if f not in SENSOR_BACKED]
+check(not undeclared, f"files that drag and declare nothing: {undeclared}")
+stale = [f for f in SENSOR_BACKED if f not in found["dnd-kit"]]
+check(not stale, f"declared as dragging and no longer does: {stale}")
+
+for file, declaration in sorted(SENSOR_BACKED.items()):
     gap = proof_missing(declaration)
-    check(not gap, f"{key} {gap}")
-    check(len(declaration["without_drag"]) > 30,
-          f"{key} declares an alternative without saying what it is")
-    check(len(declaration["moves"]) > 20, f"{key} does not say what the drag moves")
+    check(not gap, f"{file} {gap}")
+    check(len(declaration["reachable"]) > 30, f"{file} does not say how it is reached")
+    check(len(declaration["moves"]) > 20, f"{file} does not say what it drags")
 
-# Three of the four are proven by one spec written for this; the fourth was
-# already proven by the touch-authoring measurement, and is not restated.
-specs = {declaration["proven_by"].split("::")[0]
-         for declaration in list(NON_DRAG_PATHS.values()) + list(SENSOR_BACKED.values())}
+# The specs must operate these without a mouse. A spec reaching for `dragTo`
+# would be proving the thing that already worked.
+specs = {declaration["proven_by"].split("::")[0] for declaration in SENSOR_BACKED.values()}
 check(specs == {"drag-affordances.spec.ts", "touch-authoring.spec.ts"}, sorted(specs))
-
-# Those specs must operate the alternatives by tap, never by drag. A spec that
-# reached for `dragTo` would be proving the thing that already works.
 for name in sorted(specs):
     text = (SPECS / name).read_text(encoding="utf-8")
     check(".tap()" in text, f"{name} proves a touch path without tapping anything")
     check("dragTo" not in text and "dragAndDrop" not in text,
-          f"{name} drags, so it cannot be evidence that a drag is unnecessary")
+          f"{name} drags with a mouse, so it cannot be evidence that a mouse is unnecessary")
+check("keyboard.press" in (SPECS / "drag-affordances.spec.ts").read_text(encoding="utf-8"),
+      "nothing presses a key, so the capability the migration bought is unproven")
 
 # --- rendering is a pure function of the scan ---------------------------------
 text = render(found)
 check(render(found) == text, "rendering twice gives the same bytes")
-check("| Drag | Moves | Without a drag | Proven by |" in text, text[:200])
-for key in html5:
-    check(html5[key]["carries"] in text, f"{key} is missing from the reference")
+check("| File | Drags | Reachable without a mouse | Proven by |" in text, text[:200])
+for file in found["dnd-kit"]:
+    check(f"`{file}`" in text, f"{file} is missing from the reference")
 
 # --- the gate ------------------------------------------------------------------
 ok, failures, notes = compare(found)
@@ -113,5 +131,5 @@ check(REFERENCE.exists(), f"no reference at {REFERENCE}")
 check(REFERENCE.read_text(encoding="utf-8") == text,
       "the committed reference is stale; run --write")
 
-print(f"Drag affordance gate verified: {checks} assertions passed "
-      f"({len(html5)} native drags, {len(html5)} declared, 0 reachable only by dragging).")
+print(f"Drag mechanism gate verified: {checks} assertions passed "
+      f"({len(found['dnd-kit'])} files on the shared kit, 0 native, 0 hand-rolled).")

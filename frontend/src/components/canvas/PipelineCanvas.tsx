@@ -1,4 +1,5 @@
-import { useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, type MutableRefObject } from "react";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { DataTable, KeyValueGrid, StatusBadge } from "../data/DataDisplay";
 import { asString, classNames, formatValue } from "../../utils/format";
 import type {
@@ -16,13 +17,11 @@ export function PipelineCanvas({
   selectedNodeId,
   details,
   onSelect,
-  onDrop,
-  onDragOver,
+  containerRef,
   onInsertEdge,
   onAddFirst,
   quickAddType,
   onContextInsert,
-  onMoveNode,
   onDeleteNode
 }: {
   canvas: PipelineCanvasState | null;
@@ -30,83 +29,25 @@ export function PipelineCanvas({
   selectedNodeId: string;
   details?: PipelineNodeDetails | null;
   onSelect: (nodeId: string) => void;
-  onDrop: (event: DragEvent<HTMLDivElement>) => void;
-  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  containerRef: MutableRefObject<HTMLDivElement | null>;
   onInsertEdge: () => void;
   onAddFirst?: () => void;
   quickAddType?: string;
   onContextInsert: (nodeType: string) => void;
-  onMoveNode: (nodeId: string, position: { x: number; y: number }, commit: boolean) => void;
   onDeleteNode: (nodeId: string) => void;
 }) {
-  const [dragging, setDragging] = useState<{
-    nodeId: string;
-    offsetX: number;
-    offsetY: number;
-    startX: number;
-    startY: number;
-  } | null>(null);
-  const [dropActive, setDropActive] = useState(false);
+  const droppable = useDroppable({ id: "pipeline-canvas" });
   const nodes = canvas?.nodes || [];
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const selectedNode = byId.get(selectedNodeId);
-  const toCanvasPoint = (event: ReactPointerEvent<HTMLElement>) => {
-    const container = event.currentTarget.closest(".pipeline-canvas") as HTMLDivElement | null;
-    const rect = container?.getBoundingClientRect();
-    return {
-      x: ((event.clientX - (rect?.left || 0) + (container?.scrollLeft || 0)) / zoom),
-      y: ((event.clientY - (rect?.top || 0) + (container?.scrollTop || 0)) / zoom)
-    };
-  };
-
-  function startNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: PipelineNode) {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const point = toCanvasPoint(event);
-    setDragging({
-      nodeId: node.id,
-      offsetX: point.x - node.position.x,
-      offsetY: point.y - node.position.y,
-      startX: point.x,
-      startY: point.y
-    });
-    onSelect(node.id);
-  }
-
-  function moveNode(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (!dragging) return;
-    const point = toCanvasPoint(event);
-    if (Math.hypot(point.x - dragging.startX, point.y - dragging.startY) < 3) return;
-    onMoveNode(dragging.nodeId, {
-      x: Math.max(0, point.x - dragging.offsetX),
-      y: Math.max(0, point.y - dragging.offsetY)
-    }, false);
-  }
-
-  function endNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (!dragging) return;
-    const point = toCanvasPoint(event);
-    if (Math.hypot(point.x - dragging.startX, point.y - dragging.startY) >= 3) {
-      onMoveNode(dragging.nodeId, {
-        x: Math.max(0, point.x - dragging.offsetX),
-        y: Math.max(0, point.y - dragging.offsetY)
-      }, true);
-    }
-    setDragging(null);
-  }
 
   return (
     <div
-      className={classNames("pipeline-canvas", dropActive && "drag-active")}
-      onDrop={(event) => {
-        setDropActive(false);
-        onDrop(event);
+      ref={(element) => {
+        droppable.setNodeRef(element);
+        containerRef.current = element;
       }}
-      onDragOver={(event) => {
-        setDropActive(true);
-        onDragOver(event);
-      }}
-      onDragLeave={() => setDropActive(false)}
+      className={classNames("pipeline-canvas", droppable.isOver && "drag-active")}
     >
       <div className="canvas-controls">
         <button title="Zoom in">+</button>
@@ -171,11 +112,7 @@ export function PipelineCanvas({
             key={node.id}
             node={node}
             selected={selectedNodeId === node.id}
-            dragging={dragging?.nodeId === node.id}
             onSelect={onSelect}
-            onPointerDown={startNodeDrag}
-            onPointerMove={moveNode}
-            onPointerUp={endNodeDrag}
           />
         ))}
         {selectedNode ? (
@@ -197,31 +134,41 @@ export function PipelineCanvas({
   );
 }
 
-function PipelineNodeCard({
-  node,
-  selected,
-  dragging,
-  onSelect,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp
-}: {
+/**
+ * A node on the canvas, moved by dragging it.
+ *
+ * This was the fourth drag mechanism in the product and the census missed it:
+ * `onPointerDown` with `setPointerCapture`, hand-rolled, counted by nothing
+ * because it is neither `draggable` nor a sensor library. It worked from touch,
+ * because pointer events fire for touch and `.pipeline-node` already carried
+ * `touch-action: none`. It could not be reached from a keyboard at all, and a
+ * node's position had no other control, so its layout was mouse-and-finger only.
+ *
+ * `useDraggable` moves it live through a transform and commits once at the end,
+ * which also removes the uncommitted position updates the old version pushed on
+ * every pointer move.
+ */
+function PipelineNodeCard({ node, selected, onSelect }: {
   node: PipelineNode;
   selected: boolean;
-  dragging: boolean;
   onSelect: (nodeId: string) => void;
-  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, node: PipelineNode) => void;
-  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
+  const draggable = useDraggable({ id: `node:${node.id}` });
   return (
     <button
-      className={classNames("pipeline-node", node.category, node.type, selected && "selected", dragging && "dragging", node.status === "ERROR" && "error")}
-      style={{ left: node.position.x, top: node.position.y }}
+      ref={draggable.setNodeRef}
+      className={classNames("pipeline-node", node.category, node.type, selected && "selected", draggable.isDragging && "dragging", node.status === "ERROR" && "error")}
+      style={{
+        left: node.position.x,
+        top: node.position.y,
+        transform: draggable.transform
+          ? `translate3d(${draggable.transform.x}px, ${draggable.transform.y}px, 0)`
+          : undefined,
+        zIndex: draggable.isDragging ? 3 : undefined
+      }}
       onClick={() => onSelect(node.id)}
-      onPointerDown={(event) => onPointerDown(event, node)}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
+      {...draggable.attributes}
+      {...draggable.listeners}
     >
       <strong>{node.label}</strong>
       <small>{node.row_count ?? 0} rows</small>
