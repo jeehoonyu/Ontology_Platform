@@ -21,24 +21,72 @@
 #
 # Measured at about 10 seconds total. To skip in an emergency: git push --no-verify
 # -- stated plainly, because a hook that pretends to be unavoidable is not.
+#
+# Two things were wrong with this hook on every machine that is not the one it
+# was written on, and both made it silent rather than loud:
+#
+#   1. `python` is not a command on a stock macOS or a modern Linux; `python3`
+#      is. The hook resolved `${PYTHON:-python}` and died on its first check
+#      with "command not found", which reads like a broken hook rather than a
+#      missing interpreter. It now walks a list and says which one it took.
+#   2. Two of these checks import the application, so they need the pinned
+#      requirements installed. Reporting that as FAIL put a dependency gap and
+#      a real regression under one word. `unavailable` is now counted apart,
+#      the way tier-a-baseline.json counts it, and still blocks the push --
+#      a machine that cannot run half the gate has not passed it.
 
 set -e
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
-python=${PYTHON:-python}
+# Take the first interpreter that exists, unless PYTHON says otherwise. The
+# repository's venv comes before the system one: it is the only one that has the
+# pinned requirements, and preferring it is what makes the two importing checks
+# run at all.
+if [ -n "${PYTHON:-}" ]; then
+    python=$PYTHON
+else
+    python=""
+    for candidate in "$root/oms/venv/bin/python" "$root/.venv/bin/python" python3.12 python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            python=$candidate
+            break
+        fi
+    done
+    if [ -z "$python" ]; then
+        echo "pre-push: no python interpreter found. Set PYTHON=/path/to/python and retry." >&2
+        exit 1
+    fi
+fi
+
+echo "pre-push: running enforcement checks with $python ($("$python" --version 2>&1))"
+
 checks="audit_enforcement audit_check_coverage audit_evidence_corpus audit_query_bounds audit_extensibility audit_latency_observations audit_route_coverage audit_snapshot_scope validate_schema_freeze"
 
-echo "pre-push: running enforcement checks"
 failed=""
+unavailable=""
 for check in $checks; do
-    if "$python" "oms/$check.py" >/tmp/pre-push-$check.log 2>&1; then
-        printf '  ok    %s\n' "$check"
+    if "$python" "oms/$check.py" >"/tmp/pre-push-$check.log" 2>&1; then
+        printf '  ok           %s\n' "$check"
+    elif grep -q "ModuleNotFoundError" "/tmp/pre-push-$check.log"; then
+        # The check did not judge the tree. That is not a pass and not a
+        # regression; naming it separately is the difference between "fix the
+        # code" and "install the requirements".
+        printf '  unavailable  %s (%s)\n' "$check" \
+            "$(grep -m1 ModuleNotFoundError "/tmp/pre-push-$check.log" | sed 's/.*No module named //')"
+        unavailable="$unavailable $check"
     else
-        printf '  FAIL  %s\n' "$check"
+        printf '  FAIL         %s\n' "$check"
         failed="$failed $check"
     fi
 done
+
+if [ -n "$unavailable" ]; then
+    echo
+    echo "pre-push blocked. Checks that could not run:$unavailable"
+    echo "These import the application. Install the pinned requirements, then retry:"
+    echo "  python3 -m venv oms/venv && oms/venv/bin/pip install -r oms/requirements.txt"
+fi
 
 if [ -n "$failed" ]; then
     echo
@@ -49,6 +97,9 @@ if [ -n "$failed" ]; then
     done
     echo
     echo "Fix the ratchet, or push with --no-verify if you have a reason and will say what it is."
+fi
+
+if [ -n "$failed" ] || [ -n "$unavailable" ]; then
     exit 1
 fi
 
