@@ -76,8 +76,48 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named: `action_outbox`, `AgentStudio.py`, `ontology_value_types`, `system_migration_records`, the shadowed interface check, `POST /schedules/{id}/trigger` | **Open** |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
+| **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## What history costs on a bulk hydrate
+
+Measured by `oms/measure_object_write_cost.py`, recorded in
+`docs/object-write-cost-evidence.json`, at 100 and 1,000 records because a repeat count
+means nothing until you know how it moves with the data.
+
+| records | history | statements | outbox rows | ms |
+| --- | --- | --- | --- | --- |
+| 1,000 | no | 1,005 | 0 | 238 |
+| 1,000 | yes | 2,010 | 1,000 | 498 |
+| 1,000 | yes, project with no production environment | 3,009 | 1,000 | 729 |
+
+Giving hydration the history every other write path has costs **one extra statement and
+one outbox row per record**: double the statements, roughly double the wall clock. It does
+not introduce a new class of defect -- the loop is already O(N) with a repeated shape of
+1,000, from `record_object_snapshot`'s per-object read -- it multiplies one that is
+already there.
+
+The added statement is a single shape: `SELECT max(object_change_events.object_version)`,
+one per object, from `_next_change_version`. `a6a4218` removed the per-object *flush* from
+that path and said so plainly -- *"the worst shape is now a read"* -- and this is that
+read. For a bulk hydrate of new objects the answer is always the same, so batching the
+lookup across the record set would take the cost back to inserts alone. **That is the work
+R3's last two sites are waiting on, and it is a smaller change than the conversion it
+unblocks.**
+
+The third row is a separate finding. `_active_revision_id` caches the environment row per
+session but caches only a *found* one, deliberately, so that a project acquiring an
+environment mid-request still sees it. A project without one therefore re-queries per
+record and pays a third statement. Correct, documented, and worth knowing before anyone
+measures a bare project and concludes history costs 3x.
+
+### The ratchet cannot see this route
+
+`audit_request_cost` selects `"GET" in route.methods`. Every route it measures is a GET, so
+`POST /pipeline-builder/workers/run-next` -- the route whose 1,006 outbox inserts prompted
+the ratchet's own rule -- has never been measured by it. That is R13, and it is why this
+measurement had to be written by hand.
 
 ## The suite is green on one machine
 

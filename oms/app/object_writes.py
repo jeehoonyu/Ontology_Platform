@@ -57,18 +57,57 @@ def resolved_schema(db: Session, object_type: models.ObjectType) -> Dict[str, An
     object type's own column is the whole truth, which is exactly the state this
     resolution exists to handle.
     """
-    from sqlalchemy import inspect as sa_inspect
+    from . import ontology_runtime_v1
 
-    from . import ontology_core, ontology_runtime_v1
-
-    bind = db.get_bind()
-    if bind is None or not sa_inspect(bind).has_table(
-            ontology_core.ObjectTypeProfile.__tablename__):
+    if not _profiles_table_present(db):
         return {name: spec for name, spec in (object_type.properties or {}).items()
                 if not str(name).startswith("__")}
 
     specs, _profile = ontology_runtime_v1._property_specs(db, object_type)
     return specs
+
+
+def _profiles_table_present(db: Session) -> bool:
+    """Ask the catalog once per session, not once per object.
+
+    `sa_inspect(bind)` builds a fresh Inspector with a fresh cache, so calling it
+    per record issues one `PRAGMA table_info` per record -- 100 records, 100
+    catalog round-trips. That is the shape `audit_request_cost` exists to catch
+    (`/health/ready` at 275) and it was measured here at 16x the repeat ceiling
+    before it reached a route. The answer cannot change within a session in any
+    way this code should react to, so it is cached on the session's own `info`.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from . import ontology_core
+
+    cache = db.info.setdefault("_object_writes_catalog", {})
+    if "profiles" not in cache:
+        bind = db.get_bind()
+        cache["profiles"] = bool(
+            bind is not None
+            and sa_inspect(bind).has_table(ontology_core.ObjectTypeProfile.__tablename__))
+    return cache["profiles"]
+
+
+def schema_resolver(db: Session):
+    """A resolver that answers once per object type, for callers in a loop.
+
+    Resolving the schema is a per-*type* question asked from per-*record* code.
+    `hydrate_objects` runs the loop ten million rows wide in the benchmarks, and
+    `validate_ontology_integrity` sweeps every object in a project, so the
+    difference between resolving once and resolving per row is the difference
+    between a constant and an N. The cache lives as long as the loop, not the
+    session, so a schema edited between operations is still seen.
+    """
+    cache: Dict[str, Dict[str, Any]] = {}
+
+    def resolve(object_type: models.ObjectType) -> Dict[str, Any]:
+        if object_type.id not in cache:
+            cache[object_type.id] = resolved_schema(db, object_type)
+        return cache[object_type.id]
+
+    return resolve
 
 
 def validate(db: Session, object_type: models.ObjectType,

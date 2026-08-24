@@ -1,0 +1,183 @@
+{
+  "measurements": [
+    {
+      "change_event_rows": 0,
+      "change_events_recorded": false,
+      "distinct_shapes": 6,
+      "elapsed_ms": 33.4,
+      "outbox_rows": 0,
+      "production_environment": true,
+      "records": 100,
+      "repeats": [
+        {
+          "count": 100,
+          "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
+        }
+      ],
+      "statements": 105,
+      "worst_repeat": 100,
+      "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
+    },
+    {
+      "change_event_rows": 100,
+      "change_events_recorded": true,
+      "distinct_shapes": 12,
+      "elapsed_ms": 57.1,
+      "outbox_rows": 100,
+      "production_environment": true,
+      "records": 100,
+      "repeats": [
+        {
+          "count": 100,
+          "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
+        },
+        {
+          "count": 100,
+          "statement": "SELECT max(object_change_events.object_version) AS max_1 FROM object_change_events WHERE object_"
+        }
+      ],
+      "statements": 210,
+      "worst_repeat": 100,
+      "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
+    },
+    {
+      "change_event_rows": 100,
+      "change_events_recorded": false,
+      "distinct_shapes": 6,
+      "elapsed_ms": 253.3,
+      "outbox_rows": 100,
+      "production_environment": true,
+      "records": 1000,
+      "repeats": [
+        {
+          "count": 1000,
+          "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
+        }
+      ],
+      "statements": 1005,
+      "worst_repeat": 1000,
+      "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
+    },
+    {
+      "change_event_rows": 1100,
+      "change_events_recorded": true,
+      "distinct_shapes": 12,
+      "elapsed_ms": 526.2,
+      "outbox_rows": 1100,
+      "production_environment": true,
+      "records": 1000,
+      "repeats": [
+        {
+          "count": 1000,
+          "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
+        },
+        {
+          "count": 1000,
+          "statement": "SELECT max(object_change_events.object_version) AS max_1 FROM object_change_events WHERE object_"
+        }
+      ],
+      "statements": 2010,
+      "worst_repeat": 1000,
+      "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
+    }
+  ],
+  "note": "What giving bulk hydration the history every other write path has would cost. Read against audit_request_cost's rule: gate the repeated shape, report the total.",
+  "provenance": {
+    "captured_at": 1787581208,
+    "dependencies": {
+      "closure": 43,
+      "declared": 17,
+      "digest": "3b46328dc32aa64f",
+      "python": "3.12.13",
+      "versions": {
+        "alembic": "1.18.4",
+        "annotated-doc": "0.0.5",
+        "annotated-types": "0.8.0",
+        "anyio": "4.14.2",
+        "authlib": "1.7.2",
+        "bcrypt": "5.0.0",
+        "boto3": "1.43.59",
+        "botocore": "1.43.78",
+        "certifi": "2026.7.22",
+        "cffi": "2.1.1",
+        "click": "8.4.2",
+        "cryptography": "49.0.0",
+        "duckdb": "1.5.5",
+        "fastapi": "0.136.3",
+        "h11": "0.16.0",
+        "httpcore": "1.0.9",
+        "httpx": "0.28.1",
+        "idna": "3.19",
+        "jmespath": "1.1.0",
+        "joserfc": "1.7.4",
+        "kafka-python": "2.3.2",
+        "mako": "1.4.1",
+        "markupsafe": "3.0.3",
+        "paramiko": "3.5.1",
+        "psycopg2-binary": "2.9.12",
+        "pyarrow": "21.0.0",
+        "pycparser": "3.0",
+        "pydantic": "2.13.4",
+        "pydantic-core": "2.46.4",
+        "pydantic-settings": "2.14.1",
+        "pynacl": "1.6.2",
+        "python-dateutil": "2.9.0.post0",
+        "python-dotenv": "1.2.3",
+        "python-multipart": "0.0.32",
+        "s3transfer": "0.19.2",
+        "six": "1.17.0",
+        "sqlalchemy": "2.0.50",
+        "starlette": "1.6.0",
+        "typing-extensions": "4.16.0",
+        "typing-inspection": "0.4.4",
+        "urllib3": "2.7.0",
+        "uvicorn": "0.49.0",
+        "websockets": "15.0.1"
+      }
+    },
+    "entry_points": [
+      "runtime.hydrate_objects",
+      "ontology_runtime_v1.record_object_change",
+      "decision_intelligence.record_object_snapshot"
+    ],
+    "git_commit": "68ee5f9",
+    "harness": "oms/measure_object_write_cost.py",
+    "host": {
+      "cpu_count": 8,
+      "platform": "darwin",
+      "release": "25.5.0"
+    },
+    "migration_head": "0042_stream_outer_joins",
+    "observed_migration_head": null,
+    "request_shapes": [
+      "bulk map_to_ontology hydration"
+    ]
+  },
+  "stale_after": "migration head",
+  "without_production_environment": {
+    "change_event_rows": 2100,
+    "change_events_recorded": true,
+    "distinct_shapes": 12,
+    "elapsed_ms": 766.9,
+    "outbox_rows": 2100,
+    "production_environment": false,
+    "records": 1000,
+    "repeats": [
+      {
+        "count": 1000,
+        "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
+      },
+      {
+        "count": 1000,
+        "statement": "SELECT max(object_change_events.object_version) AS max_1 FROM object_change_events WHERE object_"
+      },
+      {
+        "count": 1000,
+        "statement": "SELECT ontology_environments.id AS ontology_environments_id, ontology_environments.project_id AS"
+      }
+    ],
+    "statements": 3009,
+    "worst_repeat": 1000,
+    "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
+  }
+}
