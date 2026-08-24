@@ -114,5 +114,25 @@ for installer in (POSIX_INSTALLER, WINDOWS_INSTALLER):
           f"{installer.name} states the number of checks the hook actually runs",
           f"says {stated.group(1)}, hook runs {len(hook_checks)}")
 
+# --- an installed copy must not drift from its source ------------------------
+
+# The installer copies, so editing scripts/hooks/pre-push leaves the installed
+# hook running the previous version -- which is how a check added to the list
+# silently did not run. Only asserted when a hook is installed, because CI clones
+# have none. `git config core.hooksPath scripts/hooks` avoids the copy entirely
+# and is the recommended setup for exactly this reason.
+installed = Path(
+    subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=REPO_ROOT,
+                   capture_output=True, text=True, check=True).stdout.strip())
+if not installed.is_absolute():
+    installed = REPO_ROOT / installed
+installed_hook = installed / "pre-push"
+if installed_hook.exists():
+    check(installed_hook.read_text(encoding="utf-8") == hook_text,
+          "the installed hook matches its source; re-run scripts/install-hooks.sh "
+          "after editing, or set core.hooksPath to skip the copy")
+    check(installed_hook.stat().st_mode & 0o111,
+          "and the installed copy is executable")
+
 print(f"Hook installability verified: {passed} assertions passed "
       f"({len(hook_checks)} checks named, tracked mode 100755).")

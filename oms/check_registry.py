@@ -44,6 +44,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_extensibility": {"gates": "the next object type costs no more than the last", "cadence": "every push"},
     "audit_latency_observations": {"gates": "a latency gate is the worst of at least six runs", "cadence": "every push"},
     "audit_query_bounds": {"gates": "no read materializes an object type before filtering", "cadence": "every push"},
+    "audit_object_writes": {"gates": "every object write passes the chokepoint that validates and records history", "cadence": "every push"},
     "audit_request_cost": {"gates": "no route runs one statement shape over and over", "cadence": "every suite run"},
     "audit_snapshot_scope": {"gates": "no snapshot collection is silently emptied by scoping", "cadence": "every push"},
     "audit_suite_cost": {"gates": "no route, write included, repeats a shape more than its baseline", "cadence": "manual: needs a full suite census (~20 min)"},

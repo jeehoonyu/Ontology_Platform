@@ -78,9 +78,19 @@ def _matches_type(value: Any, declared_type: Optional[str]) -> bool:
     return True
 
 
-def validate_object_properties(object_type: models.ObjectType, properties: Dict[str, Any]) -> List[str]:
+def validate_object_properties(object_type: models.ObjectType, properties: Dict[str, Any],
+                               schema: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Errors in `properties` against the object type's declared schema.
+
+    `schema` exists because `object_type.properties` is not always where the
+    declared schema lives. Once an ObjectTypeProfile exists, property edits are
+    written to the profile and this column stops being updated, so validating
+    from it enforces the schema as it was at creation and ignores every edit
+    since. Callers that have resolved the live schema pass it; the four that
+    predate this pass nothing and behave exactly as before.
+    """
     errors: List[str] = []
-    schema = object_type.properties or {}
+    schema = schema if schema is not None else (object_type.properties or {})
 
     for field, definition in schema.items():
         if _schema_required(definition) and field not in properties:
