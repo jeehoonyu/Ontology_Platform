@@ -111,7 +111,49 @@ def check_alembic_sqlite() -> Tuple[str, str]:
 
 
 def check_alembic_postgres() -> Tuple[str, str]:
-    return UNAVAILABLE, "needs postgres, and downgrade/upgrade verification"
+    """The chain applies twice on postgres and survives a downgrade round trip.
+
+    This returned `unavailable` unconditionally and inspected nothing, so the
+    sub-condition could not change verdict on a machine that had postgres. It is
+    reached only when DATABASE_URL names a postgres dialect, which is a
+    deliberate act, so the cost is paid by whoever asked for it.
+    """
+    url = os.getenv("TIER_A_POSTGRES_URL") or os.getenv("DATABASE_URL", "")
+    if not url:
+        return UNAVAILABLE, ("needs postgres: set TIER_A_POSTGRES_URL (or DATABASE_URL) "
+                             "to a postgresql:// dialect")
+    if not url.startswith("postgres"):
+        return UNAVAILABLE, f"needs postgres; DATABASE_URL names {url.split(':', 1)[0]}"
+
+    env = dict(os.environ, DATABASE_URL=url)
+
+    def alembic(*command: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-m", "alembic", "-c", "alembic.ini", *command],
+                              cwd=OMS, env=env, capture_output=True, text=True)
+
+    reachable = alembic("current")
+    if reachable.returncode:
+        # A database that cannot be reached is not a failing migration chain, and
+        # calling it one would put an unplugged server and a broken revision
+        # under the same word.
+        return UNAVAILABLE, f"postgres unreachable: {(reachable.stderr or '').strip()[-70:]}"
+
+    for attempt in (1, 2):
+        completed = alembic("upgrade", "head")
+        if completed.returncode:
+            return UNMET, f"upgrade {attempt} failed: {(completed.stderr or '').strip()[-70:]}"
+
+    down = alembic("downgrade", "-1")
+    if down.returncode:
+        return UNMET, f"downgrade -1 failed: {(down.stderr or '').strip()[-70:]}"
+    back = alembic("upgrade", "head")
+    if back.returncode:
+        return UNMET, f"upgrade after downgrade failed: {(back.stderr or '').strip()[-70:]}"
+
+    current = alembic("current")
+    head = re.findall(r"[0-9]{4}_[a-z_]+", current.stdout or "")
+    return MET, (f"applies twice and survives downgrade/upgrade at "
+                 f"{head[-1] if head else 'unknown head'} (PostgreSQL)")
 
 
 def check_frontend() -> Tuple[str, str]:
@@ -200,8 +242,54 @@ def check_suite() -> Tuple[str, str]:
     return (MET if payload.get("suite_passed") else UNMET), detail
 
 
-def check_images() -> Tuple[str, str]:
-    return UNAVAILABLE, "needs docker to render compose and build the images"
+COMPOSE_MODEL = ("-f", "docker-compose.yml", "-f", "docker-compose.production.yml")
+PRODUCTION_IMAGES = (
+    ("oms/Dockerfile", "ontology-platform:tier-a"),
+    ("oms/plugin-executor.Dockerfile", "ontology-plugin-executor:tier-a"),
+    ("oms/plugin-egress-proxy.Dockerfile", "ontology-plugin-egress-proxy:tier-a"),
+)
+
+
+def check_images(deep: bool = False) -> Tuple[str, str]:
+    """Does the production model render, and do its images build?
+
+    This returned `unavailable` unconditionally and inspected nothing, which made
+    the sub-condition unsatisfiable by any amount of work on any machine -- and
+    since `unavailable` is not a pass, it made Tier A unclaimable in principle
+    rather than in fact. It is two questions and they cost two orders of
+    magnitude apart, so they are answered separately: rendering needs no daemon
+    and takes under a second, building needs one and takes minutes.
+    """
+    docker = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+    if docker.returncode:
+        return UNAVAILABLE, "needs docker to render compose and build the images"
+
+    rendered = subprocess.run(["docker", "compose", *COMPOSE_MODEL, "config", "--quiet"],
+                              cwd=REPO_ROOT, capture_output=True, text=True)
+    if rendered.returncode:
+        message = (rendered.stderr or "").strip()
+        missing = sorted(set(re.findall(r'required variable "?([A-Z_]+)"? is missing', message)))
+        if missing:
+            # An unset deployment secret is not a broken compose model. Naming
+            # them is the difference between "fix the file" and "set the env".
+            return UNAVAILABLE, f"compose needs {', '.join(missing[:4])} set in the environment"
+        return UNMET, f"production compose does not render: {message[-70:]}"
+
+    if not deep:
+        return UNAVAILABLE, "compose renders; the image build needs --deep"
+
+    engine = subprocess.run(["docker", "info"], capture_output=True, text=True)
+    if engine.returncode:
+        return UNAVAILABLE, "compose renders; the docker engine is not running, so images cannot build"
+
+    for dockerfile, tag in PRODUCTION_IMAGES:
+        built = subprocess.run(["docker", "build", "--file", dockerfile, "--tag", tag, "."],
+                               cwd=REPO_ROOT, capture_output=True, text=True)
+        if built.returncode:
+            return UNMET, f"{dockerfile} does not build: {(built.stderr or '').strip()[-70:]}"
+
+    return MET, (f"production compose renders and {len(PRODUCTION_IMAGES)} images build "
+                 f"(application, plugin executor, egress proxy)")
 
 
 CHEAP = [
@@ -209,7 +297,6 @@ CHEAP = [
     ("documentation conformance passes", check_docs),
     ("backend suite passes sequentially", check_suite),
     ("alembic applies twice on postgres, with downgrade", check_alembic_postgres),
-    ("production compose renders and images build", check_images),
 ]
 DEEP = [
     ("alembic applies twice on sqlite", check_alembic_sqlite),
@@ -222,6 +309,8 @@ def evaluate(deep: bool, report: Path | None) -> List[Tuple[str, str, str]]:
     for label, probe in CHEAP:
         state, detail = probe()
         results.append((label, state, detail))
+    state, detail = check_images(deep)
+    results.append(("production compose renders and images build", state, detail))
     state, detail = check_browser(report)
     results.append(("browser matrix passes with attributable skips", state, detail))
     for label, probe in DEEP:
