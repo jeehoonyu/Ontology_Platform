@@ -2127,7 +2127,7 @@ def hydrate_objects(
     hydrated_records: List[Dict[str, Any]] = []
     materialized = 0
     updated = 0
-    from . import decision_intelligence, ontology_runtime_v1
+    from . import decision_intelligence, object_writes, ontology_runtime_v1
 
     for record in records:
         if object_id_expr is not None:
@@ -2146,7 +2146,7 @@ def hydrate_objects(
         if step.get("omit_nulls"):
             properties = {key: value for key, value in properties.items() if value is not None}
 
-        errors = validate_object_properties(object_type, properties)
+        errors = object_writes.validate(db, object_type, properties)
         if errors:
             raise ValueError("; ".join(errors))
 
@@ -2645,6 +2645,8 @@ def _validation_issue(
 
 
 def validate_ontology_integrity(db: Session, project_id: Optional[str] = None) -> Dict[str, Any]:
+    from . import object_writes
+
     issues: List[Dict[str, Any]] = []
     def project_rows(model: Any) -> List[Any]:
         query = db.query(model)
@@ -2736,7 +2738,7 @@ def validate_ontology_integrity(db: Session, project_id: Optional[str] = None) -
                 message="Object instance properties must be a dictionary.",
             )
             continue
-        for error in validate_object_properties(object_type, obj.properties or {}):
+        for error in object_writes.validate(db, object_type, obj.properties or {}):
             _validation_issue(
                 issues,
                 severity="ERROR",
@@ -3045,7 +3047,7 @@ def apply_action_mutations(
     rules = action_type.rules or {}
     mutations = rules.get("object_mutations", [])
     mutated_ids: List[str] = []
-    from . import decision_intelligence, ontology_runtime_v1
+    from . import decision_intelligence, object_writes, ontology_runtime_v1
 
     for mutation in mutations:
         object_type_id = mutation["object_type_id"]
@@ -3083,7 +3085,7 @@ def apply_action_mutations(
             for field, expression in (mutation.get("set") or {}).items()
         }
         next_properties = {**(existing.properties or {}), **updates}
-        errors = validate_object_properties(object_type, next_properties)
+        errors = object_writes.validate(db, object_type, next_properties)
         if errors:
             raise ValueError("; ".join(errors))
 

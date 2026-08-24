@@ -167,6 +167,38 @@ check(object_writes.resolved_schema(db, object_type).keys() == {"serial", "site"
 
 db.close()
 
+# --- a partial schema is not a schema violation -------------------------------
+
+# Compatibility routers and several suite tests build a deliberate subset of the
+# tables. Resolving the schema through an unguarded query against
+# object_type_profiles raised `no such table` on them, which is the validator
+# reporting its own dependency as a defect in the caller. Caught by
+# test_automate_action_effect.py, which builds exactly such a subset.
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+
+partial_path = os.path.join(tmpdir.name, "partial.db")
+partial_engine = create_engine(f"sqlite:///{partial_path}")
+models.ObjectType.__table__.create(bind=partial_engine)
+models.ObjectInstance.__table__.create(bind=partial_engine)
+partial_db = sessionmaker(bind=partial_engine)()
+partial_db.add(models.ObjectType(
+    id="widget", display_name="Widget", description="",
+    properties={"sku": {"type": "string", "required": True}, "__manager": {"project_id": "x"}},
+    project_id="tenant-a", created_at=now, updated_at=now))
+partial_db.commit()
+
+partial_type = partial_db.get(models.ObjectType, "widget")
+resolved = object_writes.resolved_schema(partial_db, partial_type)
+check(resolved == {"sku": {"type": "string", "required": True}},
+      "with no profile table, the object type's own column is the whole schema, "
+      "and __-prefixed metadata is still dropped", resolved)
+check(object_writes.validate(partial_db, partial_type, {"sku": "W-1"}) == [],
+      "so a valid write validates rather than raising `no such table`")
+check(object_writes.validate(partial_db, partial_type, {}) != [],
+      "and an invalid one is still caught")
+partial_db.close()
+
 # --- the suite home for the ratchet ------------------------------------------
 
 reading = audit_object_writes.read()

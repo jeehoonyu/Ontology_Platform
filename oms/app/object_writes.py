@@ -48,8 +48,24 @@ def resolved_schema(db: Session, object_type: models.ObjectType) -> Dict[str, An
     `ontology_health`, `pipeline_builder_ops` and the typed query path all already
     use. Duplicating it here is how the two stores drifted apart in the first
     place.
+
+    Guarded on the table existing, the way `record_object_change` and
+    `ontology_interfaces_ops` are. Compatibility routers and several suite tests
+    construct a deliberate subset of the schema, and a validator that raises
+    `no such table: object_type_profiles` on them has not found a schema
+    violation -- it has found its own dependency. Where the profile is absent the
+    object type's own column is the whole truth, which is exactly the state this
+    resolution exists to handle.
     """
-    from . import ontology_runtime_v1
+    from sqlalchemy import inspect as sa_inspect
+
+    from . import ontology_core, ontology_runtime_v1
+
+    bind = db.get_bind()
+    if bind is None or not sa_inspect(bind).has_table(
+            ontology_core.ObjectTypeProfile.__tablename__):
+        return {name: spec for name, spec in (object_type.properties or {}).items()
+                if not str(name).startswith("__")}
 
     specs, _profile = ontology_runtime_v1._property_specs(db, object_type)
     return specs

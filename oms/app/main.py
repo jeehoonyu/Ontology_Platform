@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 import os
 
-from . import models, schemas, models_action
+from . import models, models_action, object_writes, schemas
 # New Foundry tool-equivalent modules (self-contained routers + ORM models).
 # Importing them here registers their tables on the shared Base before create_all().
 from . import (
@@ -519,10 +519,6 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate,
     if existing:
         raise HTTPException(status_code=400, detail="ObjectInstance already exists")
 
-    errors = validate_object_properties(object_type, obj.properties)
-    if errors:
-        raise HTTPException(status_code=422, detail=errors)
-
     # Enforce the configured primary-key uniqueness when the object type has a
     # profile that declares one (no profile / no PK => no enforcement, so existing
     # callers without a configured profile are unaffected).
@@ -550,17 +546,25 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate,
                 )
 
     now = now_ts()
-    db_model = models.ObjectInstance(
-        id=object_id,
-        project_id=obj.project_id,
+    # Validation moved inside the write: it now reads the schema as it stands,
+    # which is the profile's once one exists, rather than the object type's own
+    # column -- which stops being updated on the first property edit.
+    db_model = object_writes.create_object(
+        db,
+        object_id=object_id,
         object_type_id=obj.object_type_id,
+        project_id=obj.project_id,
         properties=obj.properties,
         source_asset_id=obj.source_asset_id,
         lineage=obj.lineage,
-        created_at=now,
-        updated_at=now,
+        actor=semantic_scope.principal_id(principal),
+        event_type="ontology.object.created",
+        source_type="object_api",
+        source_id=object_id,
+        evidence={"audit_event": "ontology.object.created", "lineage": obj.lineage},
+        object_type=object_type,
+        now=now,
     )
-    db.add(db_model)
     create_audit_log(
         db,
         actor=semantic_scope.principal_id(principal),
@@ -568,24 +572,6 @@ def create_object_instance(obj: schemas.ObjectInstanceCreate,
         subject_type="object_instance",
         subject_id=object_id,
         payload={"project_id": obj.project_id, "object_type_id": obj.object_type_id, "lineage": obj.lineage},
-    )
-    decision_intelligence.record_object_snapshot(
-        db,
-        db_model,
-        event_type="ontology.object.created",
-        actor=semantic_scope.principal_id(principal),
-        source_type="object_api",
-        source_id=object_id,
-    )
-    ontology_runtime_v1.record_object_change(
-        db,
-        db_model,
-        before_state={},
-        event_type="ontology.object.created",
-        actor=semantic_scope.principal_id(principal),
-        source_type="object_api",
-        source_id=object_id,
-        evidence={"audit_event": "ontology.object.created", "lineage": obj.lineage},
     )
     db.commit()
     db.refresh(db_model)
