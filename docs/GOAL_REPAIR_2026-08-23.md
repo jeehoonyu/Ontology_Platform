@@ -76,7 +76,30 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named: `action_outbox`, `AgentStudio.py`, `ontology_value_types`, `system_migration_records`, the shadowed interface check, `POST /schedules/{id}/trigger` | **Open** |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
+| **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## The suite is green on one machine
+
+Measured 2026-08-23 by running all 240 scripts individually on macOS 15 arm64, which
+reproduces `verify.py`'s count exactly. Six fail, none of them for a reason the product
+would fail in production, and none of them introduced by the commits above:
+
+| Script | Why it fails here |
+| --- | --- |
+| `test_recovery_scripts.py` | executes `powershell.exe` by name |
+| `test_dependency_provenance.py` | asserts `greenlet` is in the closure. SQLAlchemy declares it for `aarch64`; Apple Silicon reports `arm64`, so the pins resolve to a different closure per platform -- which is the defect D1 was opened about, in the file that checks for it |
+| `test_plugin_executor_production_rehearsal.py` | `import yaml`, and PyYAML is not in `requirements.txt`. The same undeclared-import defect the file's own header records fixing for httpx on 2026-08-13 |
+| `test_partitioned_snapshot_pipeline.py` | `removeprefix("file:///")` yields `C:/...` on Windows and a *relative* `var/...` on POSIX |
+| `test_signed_plugin_runtime.py` | expects `PermissionError` in a denial the sandbox words differently here |
+| `test_s3_snapshot_pipeline.py` | **a product defect, not a test one.** `/var` is a symlink to `/private/var` on macOS, so the snapshot path-safety check compares an unresolved parent against a resolved child and rejects its own file: *"is not in the subpath of"*. It fires on any host whose temporary directory traverses a symlink |
+
+Five are the suite encoding its author's host. The sixth is `data_plane` rejecting a Parquet
+file it just wrote, and it would do that in production on any such host.
+
+This is R1 one layer further out. The hook ran on one machine; the suite passes on one
+machine; and in both cases nothing said so, because the only host that ever ran them was the
+one they were written on.
 
 ## Non-completion rule
 
