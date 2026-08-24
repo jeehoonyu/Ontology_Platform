@@ -30,7 +30,7 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, object_writes
 from . import production_auth, runtime, semantic_scope, tenancy
 
 router = APIRouter(tags=["ontology_core"])
@@ -1515,7 +1515,7 @@ def _run_function_backed(action: models.ActionType, function_id: str,
 def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
                         action_type_id: str, project_id: str, now: int, db: Session,
                         mutated_objects: List[str], links_changed: List[str],
-                        reversal: List[Dict[str, Any]]) -> None:
+                        reversal: List[Dict[str, Any]], actor: str = "system") -> None:
     """Apply the documented mutation set, capturing before-values for undo."""
     for m in mutations:
         op = m.get("op", "modify-object")
@@ -1530,19 +1530,26 @@ def _apply_mutation_set(mutations: List[Dict[str, Any]], params: Dict[str, Any],
                 if not otype:
                     raise HTTPException(status_code=422, detail="create-object requires object_type_id")
                 new_id = str(oid) if oid else uuid.uuid4().hex
-                inst = models.ObjectInstance(
-                    id=new_id, project_id=project_id, object_type_id=otype, properties=sets, source_asset_id=None,
-                    lineage={"created_by_action": action_type_id}, created_at=now, updated_at=now)
-                db.add(inst)
+                object_writes.create_object(
+                    db, object_id=new_id, object_type_id=otype, project_id=project_id,
+                    properties=sets, actor=actor,
+                    event_type="ontology.object.created", source_type="action",
+                    source_id=action_type_id,
+                    lineage={"created_by_action": action_type_id}, now=now,
+                    evidence={"action_type_id": action_type_id},
+                )
                 mutated_objects.append(new_id)
                 reversal.append({"op": "create-object", "object_id": new_id})
             else:
                 if existing.project_id != project_id:
                     raise HTTPException(status_code=409, detail="Object mutation crosses a project boundary")
-                before = dict(existing.properties or {})
-                existing.properties = {**before, **sets}
-                existing.lineage = {**(existing.lineage or {}), "last_action_id": action_type_id}
-                existing.updated_at = now
+                _updated, before = object_writes.update_object(
+                    db, existing, properties=sets, actor=actor,
+                    event_type="ontology.object.updated", source_type="action",
+                    source_id=action_type_id,
+                    lineage={"last_action_id": action_type_id}, now=now,
+                    evidence={"action_type_id": action_type_id},
+                )
                 mutated_objects.append(existing.id)
                 # store the prior values for exactly the keys we changed
                 reversal.append({"op": "modify-object", "object_id": existing.id,
@@ -1652,11 +1659,11 @@ def execute_action_faithful(
     if function_id:
         fn_mutations = _run_function_backed(action, function_id, params, db)
         _apply_mutation_set(fn_mutations, params, action_type_id, project_id, now, db,
-                            mutated_objects, links_changed, reversal)
+                            mutated_objects, links_changed, reversal, actor=actor)
 
     # 3b) inline mutation set
     _apply_mutation_set(mutations, params, action_type_id, project_id, now, db,
-                        mutated_objects, links_changed, reversal)
+                        mutated_objects, links_changed, reversal, actor=actor)
 
     # 4) side effects
     fired = []
@@ -1742,9 +1749,13 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
                     props[key] = before[key]
                 else:
                     props.pop(key, None)
-            inst.properties = props
-            inst.lineage = {**(inst.lineage or {}), "undo_of_action_log": log_id}
-            inst.updated_at = now
+            object_writes.update_object(
+                db, inst, properties=props, actor=actor,
+                event_type="ontology.object.updated", source_type="action_undo",
+                source_id=log_id, lineage={"undo_of_action_log": log_id}, now=now,
+                merge=False,
+                evidence={"undo_of_action_log": log_id},
+            )
             restored.append(inst.id)
         elif op == "create-object":
             inst = db.get(models.ObjectInstance, entry.get("object_id"))
@@ -1753,10 +1764,14 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
                 restored.append(entry.get("object_id"))
         elif op == "delete-object":
             if db.get(models.ObjectInstance, entry.get("object_id")) is None:
-                db.add(models.ObjectInstance(
-                    id=entry.get("object_id"), project_id=row.project_id, object_type_id=entry.get("object_type_id"),
-                    properties=dict(entry.get("before") or {}), source_asset_id=None,
-                    lineage={"restored_by_undo": log_id}, created_at=now, updated_at=now))
+                object_writes.create_object(
+                    db, object_id=entry.get("object_id"), object_type_id=entry.get("object_type_id"),
+                    project_id=row.project_id, properties=dict(entry.get("before") or {}),
+                    actor=actor, event_type="ontology.object.created",
+                    source_type="action_undo", source_id=log_id,
+                    lineage={"restored_by_undo": log_id}, now=now,
+                    evidence={"undo_of_action_log": log_id},
+                )
                 restored.append(entry.get("object_id"))
         elif op == "add-link":
             link = db.get(models.LinkInstance, entry.get("link_id"))

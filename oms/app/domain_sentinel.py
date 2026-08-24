@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
-from . import models
+from . import models, object_writes
 from .runtime import create_audit_log, extract_document_intelligence, now_ts
 
 
@@ -168,6 +168,10 @@ def _upsert_eval_suite(
     return _resource_summary("eval_suite", id, "created")
 
 
+# The project every Sentinel object has always been written into, by omission.
+DEFAULT_PROJECT_ID = "default"
+
+
 def _object_payload(obj: models.ObjectInstance) -> Dict[str, Any]:
     return {
         "id": obj.id,
@@ -196,25 +200,45 @@ def _upsert_object_instance(
     actor: str,
     lineage: Optional[Dict[str, Any]] = None,
 ) -> models.ObjectInstance:
+    # An optional argument left unset used to be written through as `None`, into a
+    # property this module's own ontology declares as `string`. Nothing rejected it,
+    # because nothing on this path validated. The property language has `required`
+    # and no `nullable`, so absence *is* how it says "no value" -- and a task with
+    # no assignee is the ordinary case, not an error. Dropping the key here says
+    # that in the vocabulary the ontology actually has.
+    properties = {key: value for key, value in (properties or {}).items() if value is not None}
+
     existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == id).first()
     if existing:
         existing.object_type_id = object_type_id
-        existing.properties = {**(existing.properties or {}), **properties}
-        existing.lineage = {**(existing.lineage or {}), **(lineage or {})}
-        existing.updated_at = now_ts()
-        return existing
+        updated, _before = object_writes.update_object(
+            db, existing,
+            properties=properties,
+            actor=actor,
+            event_type="ontology.object.updated",
+            source_type="domain_sentinel",
+            source_id=id,
+            lineage=lineage or {},
+        )
+        return updated
 
-    obj = models.ObjectInstance(
-        id=id,
+    return object_writes.create_object(
+        db,
+        object_id=id,
         object_type_id=object_type_id,
+        # This module never set project_id, so every object it creates has always
+        # landed in the column default. Passing it explicitly changes nothing and
+        # stops it being an accident: a Sentinel case is readable by anyone with
+        # `view` on `default`, and that is a tenancy question this module cannot
+        # answer on its own.
+        project_id=DEFAULT_PROJECT_ID,
         properties=properties,
-        source_asset_id=None,
+        actor=actor,
+        event_type="ontology.object.created",
+        source_type="domain_sentinel",
+        source_id=id,
         lineage=lineage or {"created_by": actor},
-        created_at=now_ts(),
-        updated_at=now_ts(),
     )
-    db.add(obj)
-    return obj
 
 
 def _upsert_link_instance(

@@ -68,7 +68,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | --- | --- | --- | --- | --- |
 | **R1** | The enforcement hook executes on a clone that is not Windows | 9 of 9 checks run | 9 of 9, tracked mode `100755` | **Met** — `oms/test_hook_installable.py`, 43 assertions; reverting the mode fails it |
 | **R2** | A CI run provisions a runner and executes at least one step | ≥ 1 completed run | 0 of 69 | **Blocked** — inherits C1 of `GOAL_2026-08-13`; account billing, or a public repository, or a self-hosted runner. A decision, not work |
-| **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validate, 5 of 7 record a change | **Open** |
+| **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Open** — 3 of 7 converted, ceiling 7 -> 4. The three that did neither are done; the four left already do one or both. Suite identical to baseline, 6 failures either side |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Open** — after R3 |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Open** — after R3 |
 | **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet exists | **Open** — ratchet before fix |
@@ -100,6 +100,22 @@ file it just wrote, and it would do that in production on any such host.
 This is R1 one layer further out. The hook ran on one machine; the suite passes on one
 machine; and in both cases nothing said so, because the only host that ever ran them was the
 one they were written on.
+
+## What the first conversion found
+
+Routing `domain_sentinel` through the chokepoint failed immediately, on its own bootstrap:
+`Property 'assignee' expected string, got NoneType`. The Python signature says
+`Optional[str] = None` and the ontology declares `{"type": "string"}`, so an unassigned task
+wrote a `None` into a typed property and nothing objected, because nothing on that path
+validated.
+
+The property language has `required` and no `nullable`, so absence is how it says "no
+value" -- which makes dropping unset keys the fix in the vocabulary the ontology actually
+has. But the gap is worth recording on its own: **the type system cannot express an optional
+typed property**, only a required one and an absent one. Ten arguments in that module alone
+are `Optional`. That belongs to R4, and R4 should settle it before enforcing the remaining
+constraint kinds, or the first `enum` on an optional property will produce the same
+surprise.
 
 ## Non-completion rule
 

@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-24T06:47:31Z",
+    "recorded_at": "2026-08-24T08:38:10Z",
     "stale_after": "recomputed each run"
   },
-  "bypass_sites_ceiling": 7,
+  "bypass_sites_ceiling": 4,
   "note": "Ratchet. Object writes outside app/object_writes.py. This count may fall and must never rise: a new direct construction is a write that can skip validation and leave no history."
 }
