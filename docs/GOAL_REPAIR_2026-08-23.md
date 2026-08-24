@@ -68,7 +68,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | --- | --- | --- | --- | --- |
 | **R1** | The enforcement hook executes on a clone that is not Windows | 9 of 9 checks run | 9 of 9, tracked mode `100755` | **Met** — `oms/test_hook_installable.py`, 43 assertions; reverting the mode fails it |
 | **R2** | A CI run provisions a runner and executes at least one step | ≥ 1 completed run | 0 of 69 | **Blocked** — inherits C1 of `GOAL_2026-08-13`; account billing, or a public repository, or a self-hosted runner. A decision, not work |
-| **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Open** — 4 of 7 converted, ceiling 7 -> 3. Every site now validates against the resolved schema. The three left construct directly and each needs a decision, not a move: `apply_action_mutations` raises `ValueError` that six callers catch, and `hydrate_objects` and `_execute_ontology_contract` would add one outbox row per hydrated object. Suite identical to baseline, 6 failures either side |
+| **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Open** — after R3 |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Open** — after R3 |
 | **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet exists | **Open** — ratchet before fix |
@@ -92,19 +92,25 @@ means nothing until you know how it moves with the data.
 | 1,000 | yes | 2,010 | 1,000 | 498 |
 | 1,000 | yes, project with no production environment | 3,009 | 1,000 | 729 |
 
-Giving hydration the history every other write path has costs **one extra statement and
-one outbox row per record**: double the statements, roughly double the wall clock. It does
-not introduce a new class of defect -- the loop is already O(N) with a repeated shape of
-1,000, from `record_object_snapshot`'s per-object read -- it multiplies one that is
-already there.
+Measured first at **+1,005 statements per 1,000 records** -- one extra read each, from
+`_next_change_version`. `a6a4218` removed the per-object *flush* from that path and said so
+plainly, *"the worst shape is now a read"*; this was that read. A bulk hydrate writes a
+thousand *distinct* objects, so the pending-version map it left behind never hits.
 
-The added statement is a single shape: `SELECT max(object_change_events.object_version)`,
-one per object, from `_next_change_version`. `a6a4218` removed the per-object *flush* from
-that path and said so plainly -- *"the worst shape is now a read"* -- and this is that
-read. For a bulk hydrate of new objects the answer is always the same, so batching the
-lookup across the record set would take the cost back to inserts alone. **That is the work
-R3's last two sites are waiting on, and it is a smaller change than the conversion it
-unblocks.**
+`prime_change_versions` answers the whole batch with one grouped query before the loop
+starts. The cost of history then falls to **+7 statements at 1,000 records, and +6 at 100**
+-- constant, not linear -- leaving only the inserts it must do:
+
+| records | history | statements | outbox rows | ms |
+| --- | --- | --- | --- | --- |
+| 1,000 | no | 1,005 | 0 | 236 |
+| 1,000 | yes | **1,012** | 1,000 | 371 |
+| 1,000 | yes, without the batched read | 2,010 | 1,000 | 490 |
+| 1,000 | yes, project with no production environment | 2,011 | 1,000 | 608 |
+
+So the answer to what history costs a hydrate is: two rows per object and seven statements
+per batch. The remaining O(N) shape on that path is `record_object_snapshot`'s own
+per-object read, which predates this work and is now the worst one left.
 
 The third row is a separate finding. `_active_revision_id` caches the environment row per
 session but caches only a *found* one, deliberately, so that a project acquiring an

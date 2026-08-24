@@ -167,6 +167,57 @@ check(object_writes.resolved_schema(db, object_type).keys() == {"serial", "site"
 
 db.close()
 
+# --- null means absent, but only where the type says so ----------------------
+
+null_type = models.ObjectType(
+    id="reading", display_name="Reading", description="",
+    properties={"sku": {"type": "string"}, "payload": {"type": "json"},
+                "count": {"type": "integer"}},
+    project_id="tenant-a", created_at=now, updated_at=now)
+db2 = SessionLocal()
+db2.add(null_type)
+db2.commit()
+declared = db2.get(models.ObjectType, "reading")
+schema = object_writes.resolved_schema(db2, declared)
+
+kept = object_writes.drop_unrepresentable_nulls(
+    schema, {"sku": None, "count": None, "payload": None, "other": None})
+check("sku" not in kept and "count" not in kept,
+      "a None the declared type cannot hold is dropped, because absence is the "
+      "ontology's only word for it", kept)
+check("payload" in kept and kept["payload"] is None,
+      "but a None a `json` property can hold is kept -- the rule is narrow on purpose", kept)
+check("other" in kept,
+      "and an undeclared property is left exactly as the caller passed it", kept)
+
+written = object_writes.create_object(
+    db2, object_id="reading-1", object_type_id="reading", project_id="tenant-a",
+    properties={"sku": None, "count": 3}, actor="tester",
+    event_type="ontology.object.created", source_type="test")
+db2.commit()
+check(written.properties == {"count": 3},
+      "so a write carrying an unset optional lands without it, rather than as a 422",
+      written.properties)
+
+required_type = models.ObjectType(
+    id="strict", display_name="Strict", description="",
+    properties={"sku": {"type": "string", "required": True}},
+    project_id="tenant-a", created_at=now, updated_at=now)
+db2.add(required_type)
+db2.commit()
+try:
+    object_writes.create_object(
+        db2, object_id="strict-1", object_type_id="strict", project_id="tenant-a",
+        properties={"sku": None}, actor="tester",
+        event_type="ontology.object.created", source_type="test")
+    required_still_enforced = False
+except HTTPException as error:
+    required_still_enforced = error.status_code == 422
+db2.rollback()
+check(required_still_enforced,
+      "and dropping the null does not weaken `required`: absent is still an error")
+db2.close()
+
 # --- a partial schema is not a schema violation -------------------------------
 
 # Compatibility routers and several suite tests build a deliberate subset of the
@@ -202,12 +253,26 @@ partial_db.close()
 # --- the suite home for the ratchet ------------------------------------------
 
 reading = audit_object_writes.read()
-check(reading["bypass_sites"] >= 1,
-      "the ratchet reads construction sites from the tree", reading["bypass_sites"])
+check(reading["bypass_sites"] == 0,
+      "every object write passes the chokepoint -- R3's threshold, 7 of 7",
+      reading["sites"])
 check("object_writes.py" not in reading["modules"],
-      "and does not count the chokepoint itself as a bypass", reading["modules"])
-check("models.py" not in reading["modules"] and "schemas.py" not in reading["modules"],
-      "nor the modules that only declare or name the class", reading["modules"])
+      "and the chokepoint itself is not counted as a bypass", reading["modules"])
+
+# A scan that only recognised one spelling could be satisfied by changing the
+# import rather than the write, so both forms are asserted directly against the
+# detector rather than against whatever the tree currently happens to contain.
+import ast  # noqa: E402
+
+for spelling in ("models.ObjectInstance(id='x')", "ObjectInstance(id='x')"):
+    node = ast.parse(spelling, mode="eval").body
+    check(audit_object_writes._constructs_object_instance(node),
+          f"the scan recognises `{spelling}` as a construction")
+for benign in ("db.query(models.ObjectInstance)", "isinstance(row, ObjectInstance)",
+               "ObjectInstanceCreate(id='x')"):
+    node = ast.parse(benign, mode="eval").body
+    check(not audit_object_writes._constructs_object_instance(node),
+          f"and does not mistake `{benign}` for one")
 
 argv = sys.argv[:]
 sys.argv = ["audit_object_writes"]

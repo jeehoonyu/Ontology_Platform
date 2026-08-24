@@ -110,6 +110,43 @@ def schema_resolver(db: Session):
     return resolve
 
 
+def drop_unrepresentable_nulls(schema: Dict[str, Any],
+                               properties: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove `None`s the declared type cannot hold, because absence is the ontology's word for them.
+
+    The property language has `required` and no `nullable`. It can say a typed
+    property must be present and it can say nothing at all, but it cannot say
+    "a string or no string" -- so an unset optional value has exactly one
+    representation, which is absence.
+
+    Three independent writers produced `None` into a typed property and each was
+    right to: `domain_sentinel` from an `Optional[str] = None` argument,
+    `asset_reliability_scenario` from a source row with no `status`, and
+    `pipeline_builder_ops`, whose own contract check returns True for None on
+    purpose and enforces requiredness separately. Nothing objected while writes
+    validated against `ObjectType.properties`, which stops being updated once a
+    profile exists. Validating against the profile turned all three into 422s.
+
+    Fixing it three times would have left the fourth writer to find it again, so
+    the rule lives here. It is narrow on purpose: a `None` is dropped only where
+    the declared type would reject it, so a property declared `json` -- whose
+    matcher accepts None -- keeps a null that was meant.
+
+    This does not weaken `required`. A required property that is absent is still
+    an error, and it is the same error whether it arrived missing or as None.
+    """
+    from .runtime import _matches_type, _schema_type
+
+    surviving = {}
+    for name, value in (properties or {}).items():
+        if value is None:
+            spec = schema.get(name)
+            if spec is not None and not _matches_type(None, _schema_type(spec)):
+                continue
+        surviving[name] = value
+    return surviving
+
+
 def validate(db: Session, object_type: models.ObjectType,
              properties: Dict[str, Any]) -> List[str]:
     from .runtime import validate_object_properties
@@ -138,15 +175,34 @@ def create_object(
     evidence: Optional[Dict[str, Any]] = None,
     now: Optional[int] = None,
     object_type: Optional[models.ObjectType] = None,
+    materialization_id: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    retired_at: Optional[int] = None,
 ) -> models.ObjectInstance:
-    """Create one object, validated against its live schema, with its history."""
+    """Create one object, validated against its live schema, with its history.
+
+    The materialization columns are named rather than left to the caller to set
+    afterwards: `is_active` has a mapped default that SQLAlchemy applies at
+    flush, and a caller that assigns it after construction writes a value the
+    outbox payload has already read as None. That exact bug was found once
+    already, in a6a4218.
+    """
     stamp = now if now is not None else _now()
     declared = object_type if object_type is not None else _object_type(db, object_type_id)
 
     if declared is not None:
-        errors = validate(db, declared, properties or {})
+        properties = drop_unrepresentable_nulls(resolved_schema(db, declared), properties or {})
+        errors = validate(db, declared, properties)
         if errors:
             raise HTTPException(status_code=422, detail=errors)
+
+    optional: Dict[str, Any] = {}
+    if materialization_id is not None:
+        optional["materialization_id"] = materialization_id
+    if is_active is not None:
+        optional["is_active"] = is_active
+    if retired_at is not None:
+        optional["retired_at"] = retired_at
 
     instance = models.ObjectInstance(
         id=object_id,
@@ -157,6 +213,7 @@ def create_object(
         lineage=lineage or {},
         created_at=stamp,
         updated_at=stamp,
+        **optional,
     )
     db.add(instance)
     _record(db, instance, before_state={}, event_type=event_type, actor=actor,
@@ -191,6 +248,7 @@ def update_object(
 
     declared = _object_type(db, instance.object_type_id)
     if declared is not None:
+        after = drop_unrepresentable_nulls(resolved_schema(db, declared), after)
         errors = validate(db, declared, after)
         if errors:
             raise HTTPException(status_code=422, detail=errors)

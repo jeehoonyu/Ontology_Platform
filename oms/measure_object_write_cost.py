@@ -36,7 +36,8 @@ from typing import Any, Dict, List
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _measure(size: int, record_changes: bool, production_environment: bool = True) -> Dict[str, Any]:
+def _measure(size: int, record_changes: bool, production_environment: bool = True,
+             prime: bool = True) -> Dict[str, Any]:
     """One hydrate-shaped run: construct, snapshot, and optionally record history.
 
     `production_environment` is not a detail. `_active_revision_id` caches the
@@ -54,7 +55,7 @@ def _measure(size: int, record_changes: bool, production_environment: bool = Tru
 
     db = SessionLocal()
     now = now_ts()
-    type_id = f"widget_{size}_{int(record_changes)}_{int(production_environment)}"
+    type_id = f"widget_{size}_{int(record_changes)}_{int(production_environment)}_{int(prime)}"
     # One project per run: ontology_environments is unique on (project, name), and
     # a shared project would also share the per-session revision cache between
     # variants, which is the thing being measured.
@@ -77,8 +78,14 @@ def _measure(size: int, record_changes: bool, production_environment: bool = Tru
     # from per-record code, and resolving it per record is its own N.
     resolve = object_writes.schema_resolver(db)
 
+    object_ids = [f"{type_id}-{index}" for index in range(size)]
+
     started = time.perf_counter()
     with counting(engine) as statements:
+        if record_changes and prime:
+            # What hydrate_objects now does before its loop: one grouped read for
+            # the whole batch instead of one max() per object.
+            ontology_runtime_v1.prime_change_versions(db, project, object_ids)
         for index in range(size):
             properties = {"sku": f"{type_id}-{index}"}
             errors = validate_object_properties(object_type, properties,
@@ -114,6 +121,7 @@ def _measure(size: int, record_changes: bool, production_environment: bool = Tru
         "records": size,
         "change_events_recorded": record_changes,
         "production_environment": production_environment,
+        "primed": prime,
         "statements": summary["queries"],
         "distinct_shapes": summary["distinct_shapes"],
         "worst_repeat": summary["worst_repeat"],
@@ -160,6 +168,7 @@ def main() -> int:
         for record_changes in (False, True):
             rows.append(_measure(size, record_changes, production_environment=True))
     bare = _measure(max(sizes), True, production_environment=False)
+    unprimed = _measure(max(sizes), True, production_environment=True, prime=False)
 
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -175,9 +184,11 @@ def main() -> int:
               f"{row['statements']:>7}  {row['distinct_shapes']:>7}  {row['worst_repeat']:>6}  "
               f"{row['outbox_rows']:>7}  {row['change_event_rows']:>7}  {row['elapsed_ms']:>8.1f}")
 
-    print(f"\n  {bare['records']:>8}  {'yes':>8}  {bare['statements']:>7}  "
-          f"{bare['distinct_shapes']:>7}  {bare['worst_repeat']:>6}  {bare['outbox_rows']:>7}  "
-          f"{bare['change_event_rows']:>7}  {bare['elapsed_ms']:>8.1f}   <- no production environment")
+    for row, label in ((unprimed, "without the batched version read"),
+                       (bare, "no production environment")):
+        print(f"  {row['records']:>8}  {'yes':>8}  {row['statements']:>7}  "
+              f"{row['distinct_shapes']:>7}  {row['worst_repeat']:>6}  {row['outbox_rows']:>7}  "
+              f"{row['change_event_rows']:>7}  {row['elapsed_ms']:>8.1f}   <- {label}")
 
     largest = max(sizes)
     print(f"\nWhat repeats, at {largest} records:")
@@ -222,6 +233,7 @@ def main() -> int:
             "stale_after": "migration head",
             "measurements": rows,
             "without_production_environment": bare,
+            "without_batched_version_read": unprimed,
         }
         target = REPO_ROOT / "docs" / "object-write-cost-evidence.json"
         target.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")

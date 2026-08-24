@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, platform_runtime, tenancy
+from . import models, models_action, object_writes, platform_runtime, tenancy
 from .database import Base, get_db
 from .datasets_ext import DatasetTransaction, _fold, _next_seq, _txns_for
 from .production_auth import Principal, require_permission
@@ -1590,8 +1590,9 @@ def _execute_ontology_contract(
                         evidence={"node_id": node_id, "field_lineage": field_lineage, "materialization_id": materialization_id},
                     )
             else:
-                created = models.ObjectInstance(
-                    id=object_id, project_id=graph.project_id, object_type_id=object_type_id,
+                created = object_writes.create_object(
+                    db, object_id=object_id, project_id=graph.project_id,
+                    object_type_id=object_type_id,
                     properties=mapped_properties, source_asset_id=config.get("source_asset_id"),
                     materialization_id=materialization_id, is_active=True, retired_at=None,
                     lineage={
@@ -1599,16 +1600,13 @@ def _execute_ontology_contract(
                         "field_lineage": field_lineage,
                         **({"materialization_id": materialization_id, "materialization_active": True} if materialization_id else {}),
                     },
-                    created_at=_now(), updated_at=_now(),
-                )
-                db.add(created)
-                created_count += 1
-                decision_intelligence.record_object_snapshot(db, created, event_type="pipeline_builder.object.created", actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id)
-                ontology_runtime_v1.record_object_change(
-                    db, created, before_state={}, event_type="pipeline_builder.object.created",
-                    actor="pipeline_builder", source_type="pipeline_builder_graph", source_id=graph.id,
+                    actor="pipeline_builder",
+                    event_type="pipeline_builder.object.created",
+                    source_type="pipeline_builder_graph", source_id=graph.id,
                     evidence={"node_id": node_id, "field_lineage": field_lineage, "materialization_id": materialization_id},
+                    now=_now(),
                 )
+                created_count += 1
     else:
         for _row_index, _row, _object_id, mapped_properties, existing in accepted:
             if not existing:

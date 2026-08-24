@@ -250,6 +250,15 @@ def _upsert_asset_reliability_data(db: Session) -> List[Dict[str, str]]:
                 "operation": "map_to_ontology",
                 "object_type_id": "asset",
                 "object_id_field": "asset_id",
+                # A source row without a `status` mapped it through as None, into
+                # a property the ontology declares as `string`. Nothing objected
+                # while hydration validated against `ObjectType.properties`, which
+                # stops being updated once a profile exists; validating against the
+                # profile makes it a 422. The property language has `required` and
+                # no `nullable`, so absence is how it says "no value" -- which is
+                # what this flag is for, and what the sibling scenario in
+                # industrial_workflow.py:313 already does.
+                "omit_nulls": True,
                 "property_map": {
                     "name": "$name",
                     "facility_id": "$facility_id",

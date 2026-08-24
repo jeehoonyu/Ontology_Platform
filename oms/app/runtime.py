@@ -2127,15 +2127,28 @@ def hydrate_objects(
     hydrated_records: List[Dict[str, Any]] = []
     materialized = 0
     updated = 0
-    from . import decision_intelligence, object_writes, ontology_runtime_v1
+    from . import object_writes, ontology_runtime_v1
+
+    def _object_id_for(record: Dict[str, Any]) -> Any:
+        if object_id_expr is not None:
+            return resolve_value(object_id_expr, record)
+        if object_id_field:
+            return record.get(object_id_field)
+        return stable_object_id(object_type_id, record)
+
+    # Two per-record statements removed before the loop starts, both measured by
+    # oms/measure_object_write_cost.py. The schema is a per-type fact, so it is
+    # resolved once; the persisted change-event version is a per-object fact, so
+    # it is read for the whole batch in one grouped query rather than one max()
+    # per object -- the last per-object read a6a4218 left on this path.
+    resolve_schema = object_writes.schema_resolver(db)
+    ontology_runtime_v1.prime_change_versions(
+        db, object_type.project_id,
+        [str(candidate) for candidate in (_object_id_for(record) for record in records)
+         if candidate])
 
     for record in records:
-        if object_id_expr is not None:
-            object_id = resolve_value(object_id_expr, record)
-        elif object_id_field:
-            object_id = record.get(object_id_field)
-        else:
-            object_id = stable_object_id(object_type_id, record)
+        object_id = _object_id_for(record)
         if not object_id:
             raise ValueError("map_to_ontology step could not resolve object id")
 
@@ -2146,7 +2159,11 @@ def hydrate_objects(
         if step.get("omit_nulls"):
             properties = {key: value for key, value in properties.items() if value is not None}
 
-        errors = object_writes.validate(db, object_type, properties)
+        # Checked here rather than left to the chokepoint so the contract this
+        # function has always had survives: pipeline execution catches ValueError,
+        # and a 422 raised from inside the write would pass straight through it.
+        errors = validate_object_properties(object_type, properties,
+                                            schema=resolve_schema(object_type))
         if errors:
             raise ValueError("; ".join(errors))
 
@@ -2162,38 +2179,36 @@ def hydrate_objects(
                 raise ValueError(f"ObjectInstance '{object_id}' belongs to another project")
             if not upsert:
                 raise ValueError(f"ObjectInstance '{object_id}' already exists")
-            existing.properties = {**(existing.properties or {}), **properties}
             existing.source_asset_id = source_asset_id
-            existing.lineage = {**(existing.lineage or {}), **lineage}
-            existing.updated_at = now_ts()
-            decision_intelligence.record_object_snapshot(
+            object_writes.update_object(
                 db,
                 existing,
-                event_type="pipeline.object.updated",
+                properties=properties,
                 actor="pipeline",
+                event_type="pipeline.object.updated",
                 source_type="pipeline_run",
                 source_id=run_id,
+                lineage=lineage,
+                evidence={"pipeline_id": pipeline_id, "pipeline_run_id": run_id,
+                          "source_asset_id": source_asset_id},
             )
             updated += 1
         else:
-            created = models.ObjectInstance(
-                id=str(object_id),
-                project_id=object_type.project_id,
+            object_writes.create_object(
+                db,
+                object_id=str(object_id),
                 object_type_id=object_type_id,
+                project_id=object_type.project_id,
                 properties=properties,
                 source_asset_id=source_asset_id,
                 lineage=lineage,
-                created_at=now_ts(),
-                updated_at=now_ts(),
-            )
-            db.add(created)
-            decision_intelligence.record_object_snapshot(
-                db,
-                created,
-                event_type="pipeline.object.created",
                 actor="pipeline",
+                event_type="pipeline.object.created",
                 source_type="pipeline_run",
                 source_id=run_id,
+                evidence={"pipeline_id": pipeline_id, "pipeline_run_id": run_id,
+                          "source_asset_id": source_asset_id},
+                object_type=object_type,
             )
             materialized += 1
 
@@ -3047,7 +3062,7 @@ def apply_action_mutations(
     rules = action_type.rules or {}
     mutations = rules.get("object_mutations", [])
     mutated_ids: List[str] = []
-    from . import decision_intelligence, object_writes, ontology_runtime_v1
+    from . import object_writes
 
     for mutation in mutations:
         object_type_id = mutation["object_type_id"]
@@ -3062,58 +3077,56 @@ def apply_action_mutations(
             raise ValueError("Action mutation could not resolve object id")
 
         existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == str(object_id)).first()
-        before_state = dict(existing.properties or {}) if existing else {}
-        if not existing:
-            if not mutation.get("create_if_missing"):
-                raise ValueError(f"ObjectInstance '{object_id}' not found")
-            existing = models.ObjectInstance(
-                id=str(object_id),
-                project_id=object_type.project_id,
-                object_type_id=object_type_id,
-                properties={},
-                source_asset_id=None,
-                lineage={"created_by_action": action_type.id},
-                created_at=now_ts(),
-                updated_at=now_ts(),
-            )
-            db.add(existing)
-        elif existing.project_id != object_type.project_id:
+        if not existing and not mutation.get("create_if_missing"):
+            raise ValueError(f"ObjectInstance '{object_id}' not found")
+        if existing and existing.project_id != object_type.project_id:
             raise ValueError(f"ObjectInstance '{object_id}' belongs to another project")
 
         updates = {
             field: resolve_value(expression, parameters)
             for field, expression in (mutation.get("set") or {}).items()
         }
-        next_properties = {**(existing.properties or {}), **updates}
+        next_properties = {**(existing.properties or {} if existing else {}), **updates}
+
+        # Validated here, before the write, so this function keeps the contract it
+        # has always had. Six callers catch ValueError; the chokepoint raises
+        # HTTPException, which would pass through every one of them as a 422
+        # instead of the error each converts. Checking first makes the
+        # chokepoint's own 422 unreachable rather than merely unlikely.
         errors = object_writes.validate(db, object_type, next_properties)
         if errors:
             raise ValueError("; ".join(errors))
 
-        existing.properties = next_properties
-        existing.lineage = {
-            **(existing.lineage or {}),
-            "last_action_id": action_type.id,
-            "last_action_actor": actor,
-        }
-        existing.updated_at = now_ts()
-        decision_intelligence.record_object_snapshot(
-            db,
-            existing,
-            event_type="action.object.mutated",
-            actor=actor,
-            source_type="action_type",
-            source_id=action_type.id,
-        )
-        ontology_runtime_v1.record_object_change(
-            db,
-            existing,
-            before_state=before_state,
-            event_type="action.object.mutated",
-            actor=actor,
-            source_type="action_type",
-            source_id=action_type.id,
-            evidence={"action_type_id": action_type.id},
-        )
+        lineage = {"last_action_id": action_type.id, "last_action_actor": actor}
+        if existing is None:
+            existing = object_writes.create_object(
+                db,
+                object_id=str(object_id),
+                object_type_id=object_type_id,
+                project_id=object_type.project_id,
+                properties=next_properties,
+                lineage={"created_by_action": action_type.id, **lineage},
+                actor=actor,
+                event_type="action.object.mutated",
+                source_type="action_type",
+                source_id=action_type.id,
+                evidence={"action_type_id": action_type.id},
+                object_type=object_type,
+                now=now_ts(),
+            )
+        else:
+            object_writes.update_object(
+                db,
+                existing,
+                properties=updates,
+                actor=actor,
+                event_type="action.object.mutated",
+                source_type="action_type",
+                source_id=action_type.id,
+                lineage=lineage,
+                evidence={"action_type_id": action_type.id},
+                now=now_ts(),
+            )
         mutated_ids.append(existing.id)
 
     return mutated_ids

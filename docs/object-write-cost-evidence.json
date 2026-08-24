@@ -4,8 +4,9 @@
       "change_event_rows": 0,
       "change_events_recorded": false,
       "distinct_shapes": 6,
-      "elapsed_ms": 33.4,
+      "elapsed_ms": 29.9,
       "outbox_rows": 0,
+      "primed": true,
       "production_environment": true,
       "records": 100,
       "repeats": [
@@ -22,21 +23,18 @@
       "change_event_rows": 100,
       "change_events_recorded": true,
       "distinct_shapes": 12,
-      "elapsed_ms": 57.1,
+      "elapsed_ms": 39.2,
       "outbox_rows": 100,
+      "primed": true,
       "production_environment": true,
       "records": 100,
       "repeats": [
         {
           "count": 100,
           "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
-        },
-        {
-          "count": 100,
-          "statement": "SELECT max(object_change_events.object_version) AS max_1 FROM object_change_events WHERE object_"
         }
       ],
-      "statements": 210,
+      "statements": 111,
       "worst_repeat": 100,
       "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
     },
@@ -44,8 +42,9 @@
       "change_event_rows": 100,
       "change_events_recorded": false,
       "distinct_shapes": 6,
-      "elapsed_ms": 253.3,
+      "elapsed_ms": 236.3,
       "outbox_rows": 100,
+      "primed": true,
       "production_environment": true,
       "records": 1000,
       "repeats": [
@@ -62,8 +61,9 @@
       "change_event_rows": 1100,
       "change_events_recorded": true,
       "distinct_shapes": 12,
-      "elapsed_ms": 526.2,
+      "elapsed_ms": 371.3,
       "outbox_rows": 1100,
+      "primed": true,
       "production_environment": true,
       "records": 1000,
       "repeats": [
@@ -72,18 +72,18 @@
           "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
         },
         {
-          "count": 1000,
-          "statement": "SELECT max(object_change_events.object_version) AS max_1 FROM object_change_events WHERE object_"
+          "count": 2,
+          "statement": "SELECT object_change_events.object_id AS object_change_events_object_id, max(object_change_event"
         }
       ],
-      "statements": 2010,
+      "statements": 1012,
       "worst_repeat": 1000,
       "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
     }
   ],
   "note": "What giving bulk hydration the history every other write path has would cost. Read against audit_request_cost's rule: gate the repeated shape, report the total.",
   "provenance": {
-    "captured_at": 1787581208,
+    "captured_at": 1787588967,
     "dependencies": {
       "closure": 43,
       "declared": 17,
@@ -140,7 +140,7 @@
       "ontology_runtime_v1.record_object_change",
       "decision_intelligence.record_object_snapshot"
     ],
-    "git_commit": "68ee5f9",
+    "git_commit": "fbb8434",
     "harness": "oms/measure_object_write_cost.py",
     "host": {
       "cpu_count": 8,
@@ -154,13 +154,14 @@
     ]
   },
   "stale_after": "migration head",
-  "without_production_environment": {
-    "change_event_rows": 2100,
+  "without_batched_version_read": {
+    "change_event_rows": 3100,
     "change_events_recorded": true,
     "distinct_shapes": 12,
-    "elapsed_ms": 766.9,
-    "outbox_rows": 2100,
-    "production_environment": false,
+    "elapsed_ms": 490.4,
+    "outbox_rows": 3100,
+    "primed": false,
+    "production_environment": true,
     "records": 1000,
     "repeats": [
       {
@@ -170,13 +171,36 @@
       {
         "count": 1000,
         "statement": "SELECT max(object_change_events.object_version) AS max_1 FROM object_change_events WHERE object_"
+      }
+    ],
+    "statements": 2010,
+    "worst_repeat": 1000,
+    "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
+  },
+  "without_production_environment": {
+    "change_event_rows": 2100,
+    "change_events_recorded": true,
+    "distinct_shapes": 12,
+    "elapsed_ms": 607.9,
+    "outbox_rows": 2100,
+    "primed": true,
+    "production_environment": false,
+    "records": 1000,
+    "repeats": [
+      {
+        "count": 1000,
+        "statement": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.project_id AS object_snapsho"
       },
       {
         "count": 1000,
         "statement": "SELECT ontology_environments.id AS ontology_environments_id, ontology_environments.project_id AS"
+      },
+      {
+        "count": 2,
+        "statement": "SELECT object_change_events.object_id AS object_change_events_object_id, max(object_change_event"
       }
     ],
-    "statements": 3009,
+    "statements": 2011,
     "worst_repeat": 1000,
     "worst_shape": "SELECT object_snapshots.id AS object_snapshots_id, object_snapshots.pr"
   }

@@ -14,7 +14,7 @@ import math
 import os
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -361,14 +361,71 @@ def _next_change_version(db: Session, project_id: str, object_id: str) -> int:
     the database, never lead it.
     """
     pending = db.info.setdefault("_pending_change_versions", {})
+    primed = db.info.get("_primed_change_versions") or {}
     key = (project_id, object_id)
-    persisted = int(db.query(func.max(ObjectChangeEvent.object_version)).filter(
-        ObjectChangeEvent.project_id == project_id,
-        ObjectChangeEvent.object_id == object_id,
-    ).scalar() or 0)
+    if key in primed:
+        # Already answered for this batch by one grouped query. See
+        # prime_change_versions: a bulk hydrate writes a thousand *distinct*
+        # objects, so the pending map never hits and this read was the last
+        # per-object statement left on that path.
+        persisted = primed[key]
+    else:
+        persisted = int(db.query(func.max(ObjectChangeEvent.object_version)).filter(
+            ObjectChangeEvent.project_id == project_id,
+            ObjectChangeEvent.object_id == object_id,
+        ).scalar() or 0)
     version = max(persisted, pending.get(key, 0)) + 1
     pending[key] = version
     return version
+
+
+# SQLite's default variable ceiling is 999, and an IN list is one variable per
+# element. Chunking keeps a large hydrate from becoming a statement nobody can
+# execute, which is a worse outcome than the reads it replaces.
+_PRIME_CHUNK = 500
+
+
+def prime_change_versions(db: Session, project_id: str, object_ids: Iterable[str]) -> int:
+    """Answer `_next_change_version` for a whole batch with one grouped query.
+
+    The per-object read is what `a6a4218` left behind when it removed the
+    per-object flush -- *"the worst shape is now a read"*. It is a max() per
+    object, and a bulk hydrate writes a thousand distinct objects, so the pending
+    map cannot absorb it: measured at 1,000 extra statements per 1,000 records by
+    `oms/measure_object_write_cost.py`.
+
+    Priming reads the persisted maximum for the whole set at once and remembers
+    it, so the recorder answers from memory. Returns how many objects it primed.
+
+    What this trades: a primed answer is the state at prime time, so a change
+    event written by *another* session between priming and recording is not seen.
+    That race already exists between the per-object read and its own insert; this
+    widens it from one statement to one batch. Within the session it stays exact,
+    because `pending` still carries every version this session hands out.
+    """
+    if not _table_present(db, db.get_bind(), ObjectChangeEvent.__tablename__):
+        return 0
+    primed = db.info.setdefault("_primed_change_versions", {})
+    unknown = sorted({str(object_id) for object_id in object_ids
+                      if (project_id, str(object_id)) not in primed})
+    if not unknown:
+        return 0
+    for start in range(0, len(unknown), _PRIME_CHUNK):
+        chunk = unknown[start:start + _PRIME_CHUNK]
+        rows = db.query(
+            ObjectChangeEvent.object_id,
+            func.max(ObjectChangeEvent.object_version),
+        ).filter(
+            ObjectChangeEvent.project_id == project_id,
+            ObjectChangeEvent.object_id.in_(chunk),
+        ).group_by(ObjectChangeEvent.object_id).all()
+        found = {str(object_id): int(version or 0) for object_id, version in rows}
+        for object_id in chunk:
+            # An object with no history primes to 0, which is the answer the
+            # per-object read would have given. Recording the miss is the point:
+            # otherwise every new object falls through to its own query.
+            primed[(project_id, object_id)] = found.get(object_id, 0)
+    return len(unknown)
 
 
 def _table_present(db: Session, bind: Any, table_name: str) -> bool:

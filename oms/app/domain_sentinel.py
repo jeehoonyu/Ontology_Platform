@@ -200,14 +200,6 @@ def _upsert_object_instance(
     actor: str,
     lineage: Optional[Dict[str, Any]] = None,
 ) -> models.ObjectInstance:
-    # An optional argument left unset used to be written through as `None`, into a
-    # property this module's own ontology declares as `string`. Nothing rejected it,
-    # because nothing on this path validated. The property language has `required`
-    # and no `nullable`, so absence *is* how it says "no value" -- and a task with
-    # no assignee is the ordinary case, not an error. Dropping the key here says
-    # that in the vocabulary the ontology actually has.
-    properties = {key: value for key, value in (properties or {}).items() if value is not None}
-
     existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == id).first()
     if existing:
         existing.object_type_id = object_type_id
