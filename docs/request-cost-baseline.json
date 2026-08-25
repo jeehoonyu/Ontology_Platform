@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-08-19T01:50:27Z",
-    "migration_head": "0042_stream_outer_joins",
-    "stale_after": "migration head"
+    "recorded_at": "2026-08-25T06:14:25Z",
+    "stale_after": "migration head",
+    "migration_head": "0043_drop_orphaned_value_types"
   },
   "note": "Per-request database round-trips. Written by oms/audit_request_cost.py --write-baseline.",
   "repeat_ceiling": 6,
@@ -740,11 +740,6 @@
     "/ui-state/worker-fleet": {
       "distinct_shapes": 2,
       "queries": 2,
-      "worst_repeat": 0
-    },
-    "/value-types": {
-      "distinct_shapes": 1,
-      "queries": 1,
       "worst_repeat": 0
     },
     "/vertex/graphs": {

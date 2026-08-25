@@ -81,6 +81,59 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
 
+## Moving the head found the staleness gate running nowhere
+
+The first revision past R14 immediately invalidated four head-bound baselines, which is
+correct — their measurements describe a schema that no longer exists.
+`audit_iteration_state` said so and **exited 1**. Nothing noticed.
+
+Its cadence is `every suite run` and its suite home is
+`oms/test_iteration_state_audit.py`, which applied five of the audit's six readings to the
+live tree — unparsed documents, unrecorded conditions, cadence gaps, undated baselines, and
+the gate's own baseline — and tested the sixth only against synthetic reports. The sixth is
+`overdue`, and it can fire only when a head-bound baseline records a head that is no longer
+current, which was **unreachable until R14**: nobody could add a revision while twenty-seven
+scripts pinned the head. The check was untestable in practice, so its home inspected the
+report instead of judging it, and that read as covered.
+
+That is `test_check_homes.py`'s own thesis one level further down — *it matters that they
+are executed here rather than inspected*. The live gate is now applied whole; re-staling one
+baseline fails the suite.
+
+All four were then re-earned by measuring, not by re-stamping:
+
+| Baseline | How it was re-earned |
+| --- | --- |
+| `query-bounds` | static AST scan, re-run |
+| `request-cost` | 150 routes re-measured against a scratch database |
+| `suite-cost` | a real census — 3,579 requests over 688 route+method pairs, which also dropped the stale `/value-types` rows |
+| `browser-evidence` | a real Playwright run, 4 viewports |
+
+### The browser matrix passes here
+
+Running it took four attempts, and the first three failures were worth more than the run.
+`playwright.config.ts` and `evaluator.spec.ts` both defaulted to `python`, which is not a
+command on this machine — the **third and fourth** instances of the assumption R1 fixed in
+the hook, one of which surfaced as `spawnSync python ENOENT`, a test reporting a missing
+interpreter as a product failure. Four more failures were mine: I ran `npm run build`
+instead of `measure_browser_evidence.py --build`, so the bundle carried no provenance.
+
+And one was a defect this repository cannot currently catch: my first fix to
+`evaluator.spec.ts` shipped a `ReferenceError` because **`frontend/tsconfig.json` includes
+only `src`**, so `npm run build`'s `tsc --noEmit` never typechecks the Playwright specs. A
+type error in a test is found only by running it.
+
+The result: **134 passed, 0 failures, 2 flaky**, 136 skips all attributable. `audit_tier_a`
+reports *"browser matrix passes with attributable skips: now met"* — the single `unmet` that
+had blocked Tier A since 2026-08-18.
+
+The Tier A baseline is deliberately **not** re-recorded. The same run reports `backend suite
+passes sequentially` as unmet, because the sequential run carries the six R12 host failures.
+Those six pass on the machine the tier was last measured on, so writing this host's answer
+into the tier's record would turn a portability gap into a permanent regression. It is
+reported here instead: Tier A on this machine is 5 met, 1 unmet, 2 unavailable, and the
+unmet one is R12.
+
 ## The first revision past R14
 
 `ontology_value_types` is gone: 765 lines, two tables, seven routes, a constraint engine

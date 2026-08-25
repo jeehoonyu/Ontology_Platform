@@ -1,12 +1,12 @@
 {
   "provenance": {
-    "migration_head": "0042_stream_outer_joins",
-    "bundle_source_hash": "33fb8fb77478008de8dc38d23aa800cde13cc534ae6f54b297dedc80b490881e",
+    "migration_head": "0043_drop_orphaned_value_types",
+    "bundle_source_hash": "6b0734291475e5b48ebe010a8ced65935493db01427a94db69c828297a93ddf7",
     "dependencies": {
-      "digest": "a727fd9a41cfa7b6",
-      "closure": 45
+      "digest": "3b46328dc32aa64f",
+      "closure": 43
     },
-    "recorded_at": "2026-08-20T19:33:07Z",
+    "recorded_at": "2026-08-25T06:39:56Z",
     "stale_after": "migration head"
   },
   "known_failing": {
@@ -15,9 +15,9 @@
   "note": "One outcome per viewport per test from a full browser run. A test that ran here may not become skipped; new tests and deletions are reported, not gated.",
   "viewports": {
     "desktop-1280": {
-      "failed": 1,
-      "flaky": 0,
-      "ran": 62,
+      "failed": 0,
+      "flaky": 2,
+      "ran": 61,
       "skipped": 5
     },
     "mobile-375": {
@@ -89,7 +89,7 @@
     "desktop-1280 :: ontology schema registry publishes a revision and downloads source and an installable package": "ran",
     "desktop-1280 :: ops is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: pipeline creates a graph and accepts a dragged node": "ran",
-    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "failed",
+    "desktop-1280 :: pipeline deploys an immutable snapshot through visible partition-worker controls": "ran",
     "desktop-1280 :: pipeline is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: pipeline ontology output previews and persists contract evidence": "ran",
     "desktop-1280 :: pipeline preview runs through durable worker evidence": "ran",

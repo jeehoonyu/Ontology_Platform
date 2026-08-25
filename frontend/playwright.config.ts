@@ -1,6 +1,21 @@
 import { defineConfig } from "@playwright/test";
 
-const python = process.env.PYTHON_BIN || "python";
+// `python` is not a command on a stock macOS or a modern Linux, and this default
+// sent the browser suite into "command not found" on every developer machine that
+// is not the one it was written on. CI works only because the workflow sets
+// PYTHON_BIN explicitly. Same defect as the pre-push hook's, third instance.
+// The repository venv comes first: it is the only interpreter carrying the pins.
+import { existsSync } from "node:fs";
+
+const pythonCandidates = [
+  process.env.PYTHON_BIN,
+  "../oms/venv/bin/python",
+  "../.venv/bin/python",
+].filter((candidate): candidate is string => Boolean(candidate));
+
+const python =
+  pythonCandidates.find((candidate) => candidate === process.env.PYTHON_BIN || existsSync(candidate)) ??
+  "python3";
 
 export default defineConfig({
   testDir: "./tests",

@@ -1,7 +1,7 @@
 {
   "provenance": {
-    "migration_head": "0042_stream_outer_joins",
-    "recorded_at": "2026-08-20T02:14:54Z",
+    "migration_head": "0043_drop_orphaned_value_types",
+    "recorded_at": "2026-08-25T06:26:34Z",
     "stale_after": "migration head"
   },
   "repeat_ceiling": 6,
@@ -175,7 +175,7 @@
     "GET /api/v1/dataset-snapshots/{snapshot_id}/rows": {
       "worst_repeat": 0,
       "queries": 3,
-      "calls": 6
+      "calls": 3
     },
     "GET /api/v1/datasets/{asset_id}/snapshots": {
       "worst_repeat": 0,
@@ -265,22 +265,12 @@
     "GET /api/v1/plugins/catalog": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 4
+      "calls": 2
     },
     "GET /api/v1/plugins/executions/{execution_id}": {
       "worst_repeat": 0,
       "queries": 1,
       "calls": 3
-    },
-    "GET /api/v1/plugins/{version_id}/executions": {
-      "worst_repeat": 0,
-      "queries": 2,
-      "calls": 1
-    },
-    "GET /api/v1/snapshot-cache/summary": {
-      "worst_repeat": 0,
-      "queries": 0,
-      "calls": 2
     },
     "GET /api/v1/streams/processing/summary": {
       "worst_repeat": 2,
@@ -410,7 +400,7 @@
     "GET /audit-logs/search": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 5
+      "calls": 4
     },
     "GET /auth/session": {
       "worst_repeat": 0,
@@ -679,7 +669,7 @@
     },
     "GET /health/ready": {
       "worst_repeat": 11,
-      "queries": 400,
+      "queries": 398,
       "calls": 13
     },
     "GET /imports/jobs": {
@@ -1098,8 +1088,8 @@
       "calls": 5
     },
     "GET /ontology/validate": {
-      "worst_repeat": 0,
-      "queries": 16,
+      "worst_repeat": 3,
+      "queries": 20,
       "calls": 5
     },
     "GET /ops/alert-rules": {
@@ -1200,11 +1190,11 @@
     "GET /project/export": {
       "worst_repeat": 10,
       "queries": 266,
-      "calls": 35
+      "calls": 34
     },
     "GET /project/readiness": {
-      "worst_repeat": 33,
-      "queries": 1140,
+      "worst_repeat": 22,
+      "queries": 1136,
       "calls": 57
     },
     "GET /project/validate": {
@@ -1259,7 +1249,7 @@
     },
     "GET /runtime/observability/summary": {
       "worst_repeat": 20,
-      "queries": 87,
+      "queries": 103,
       "calls": 15
     },
     "GET /runtime/pilot-evidence": {
@@ -1349,12 +1339,12 @@
     },
     "GET /system/migrations": {
       "worst_repeat": 11,
-      "queries": 404,
+      "queries": 402,
       "calls": 7
     },
     "GET /system/schema-health": {
       "worst_repeat": 11,
-      "queries": 398,
+      "queries": 396,
       "calls": 6
     },
     "GET /temporal/objects/{object_type_id}/{object_id}/diff": {
@@ -1454,7 +1444,7 @@
     },
     "GET /ui-state/validation": {
       "worst_repeat": 11,
-      "queries": 569,
+      "queries": 567,
       "calls": 6
     },
     "GET /ui-state/worker-fleet": {
@@ -1466,11 +1456,6 @@
       "worst_repeat": 0,
       "queries": 0,
       "calls": 1
-    },
-    "GET /value-types": {
-      "worst_repeat": 0,
-      "queries": 1,
-      "calls": 4
     },
     "GET /vertex/graphs": {
       "worst_repeat": 0,
@@ -1578,8 +1563,8 @@
       "calls": 23
     },
     "POST /actions/execute": {
-      "worst_repeat": 2,
-      "queries": 39,
+      "worst_repeat": 3,
+      "queries": 44,
       "calls": 16
     },
     "POST /admin/access-check": {
@@ -1815,7 +1800,7 @@
     "POST /api/v1/dataset-snapshots/{snapshot_id}/query": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 16
+      "calls": 4
     },
     "POST /api/v1/datasets/{asset_id}/snapshots": {
       "worst_repeat": 0,
@@ -1825,7 +1810,7 @@
     "POST /api/v1/datasets/{asset_id}/snapshots/register": {
       "worst_repeat": 0,
       "queries": 12,
-      "calls": 11
+      "calls": 5
     },
     "POST /api/v1/event-stream-bindings": {
       "worst_repeat": 2,
@@ -1864,7 +1849,7 @@
     },
     "POST /api/v1/industrial/workflows/asset-reliability/onboard": {
       "worst_repeat": 12,
-      "queries": 191,
+      "queries": 198,
       "calls": 18
     },
     "POST /api/v1/industrial/workflows/asset-reliability/triage": {
@@ -1920,27 +1905,22 @@
     "POST /api/v1/pipeline-plans/{plan_id}/execute": {
       "worst_repeat": 5,
       "queries": 65,
-      "calls": 29
+      "calls": 24
     },
     "POST /api/v1/pipelines/{graph_id}/plans": {
       "worst_repeat": 6,
       "queries": 17,
-      "calls": 22
+      "calls": 18
     },
     "POST /api/v1/plugins/register": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 9
+      "calls": 8
     },
     "POST /api/v1/plugins/trust-keys": {
       "worst_repeat": 2,
       "queries": 8,
       "calls": 2
-    },
-    "POST /api/v1/plugins/trust-keys/{key_id}/revoke": {
-      "worst_repeat": 2,
-      "queries": 9,
-      "calls": 1
     },
     "POST /api/v1/plugins/workers/complete": {
       "worst_repeat": 2,
@@ -1960,22 +1940,17 @@
     "POST /api/v1/plugins/{version_id}/activate": {
       "worst_repeat": 2,
       "queries": 9,
-      "calls": 3
+      "calls": 2
     },
     "POST /api/v1/plugins/{version_id}/invoke": {
       "worst_repeat": 2,
       "queries": 16,
-      "calls": 11
+      "calls": 6
     },
     "POST /api/v1/plugins/{version_id}/invoke-async": {
       "worst_repeat": 2,
       "queries": 16,
       "calls": 4
-    },
-    "POST /api/v1/snapshot-cache/prune": {
-      "worst_repeat": 0,
-      "queries": 0,
-      "calls": 3
     },
     "POST /api/v1/streams/processors": {
       "worst_repeat": 3,
@@ -2038,8 +2013,8 @@
       "calls": 2
     },
     "POST /apps/slate/{app_id}/event": {
-      "worst_repeat": 2,
-      "queries": 21,
+      "worst_repeat": 3,
+      "queries": 26,
       "calls": 1
     },
     "POST /apps/slate/{app_id}/render": {
@@ -2064,7 +2039,7 @@
     },
     "POST /apps/workshop/{module_id}/event": {
       "worst_repeat": 5,
-      "queries": 31,
+      "queries": 34,
       "calls": 6
     },
     "POST /apps/workshop/{module_id}/publish": {
@@ -2300,7 +2275,7 @@
     "POST /data-assets": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 80
+      "calls": 79
     },
     "POST /data-assets/{asset_id}/expectations/run": {
       "worst_repeat": 2,
@@ -2369,7 +2344,7 @@
     },
     "POST /entity-resolution/candidates/{candidate_id}/accept": {
       "worst_repeat": 4,
-      "queries": 17,
+      "queries": 16,
       "calls": 1
     },
     "POST /entity-resolution/candidates/{candidate_id}/reject": {
@@ -2579,7 +2554,7 @@
     },
     "POST /jobs/claim": {
       "worst_repeat": 13,
-      "queries": 66,
+      "queries": 56,
       "calls": 47
     },
     "POST /jobs/{job_id}/cancel": {
@@ -2609,7 +2584,7 @@
     },
     "POST /link-types": {
       "worst_repeat": 10,
-      "queries": 43,
+      "queries": 41,
       "calls": 6
     },
     "POST /links": {
@@ -2879,7 +2854,7 @@
     },
     "POST /objects": {
       "worst_repeat": 3,
-      "queries": 23,
+      "queries": 26,
       "calls": 107
     },
     "POST /observability/checks/freshness": {
@@ -2979,7 +2954,7 @@
     },
     "POST /ontology/action-types/{action_type_id}/execute": {
       "worst_repeat": 4,
-      "queries": 13,
+      "queries": 23,
       "calls": 10
     },
     "POST /ontology/branches": {
@@ -3145,11 +3120,11 @@
     "POST /pipeline-builder/graphs": {
       "worst_repeat": 0,
       "queries": 5,
-      "calls": 39
+      "calls": 35
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver": {
-      "worst_repeat": 5,
-      "queries": 87,
+      "worst_repeat": 8,
+      "queries": 94,
       "calls": 16
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver/async": {
@@ -3193,9 +3168,9 @@
       "calls": 7
     },
     "POST /pipeline-builder/workers/run-next": {
-      "worst_repeat": 1002,
-      "queries": 3200,
-      "calls": 44
+      "worst_repeat": 2006,
+      "queries": 5206,
+      "calls": 39
     },
     "POST /pipelines": {
       "worst_repeat": 2,
@@ -3204,7 +3179,7 @@
     },
     "POST /pipelines/{pipeline_id}/run": {
       "worst_repeat": 4,
-      "queries": 60,
+      "queries": 68,
       "calls": 5
     },
     "POST /policies": {
@@ -3224,23 +3199,23 @@
     },
     "POST /project/demo/bootstrap": {
       "worst_repeat": 52,
-      "queries": 841,
+      "queries": 889,
       "calls": 4
     },
     "POST /project/demo/reset": {
       "worst_repeat": 49,
-      "queries": 778,
+      "queries": 833,
       "calls": 1
     },
     "POST /project/import": {
-      "worst_repeat": 85,
-      "queries": 281,
-      "calls": 18
+      "worst_repeat": 94,
+      "queries": 299,
+      "calls": 17
     },
     "POST /project/import/validate": {
       "worst_repeat": 0,
       "queries": 2,
-      "calls": 15
+      "calls": 14
     },
     "POST /projects": {
       "worst_repeat": 0,
@@ -3334,7 +3309,7 @@
     },
     "POST /scenarios/asset-reliability/bootstrap": {
       "worst_repeat": 44,
-      "queries": 697,
+      "queries": 748,
       "calls": 4
     },
     "POST /scenarios/asset-reliability/run-triage": {
@@ -3436,16 +3411,6 @@
       "worst_repeat": 2,
       "queries": 5,
       "calls": 35
-    },
-    "POST /value-types": {
-      "worst_repeat": 0,
-      "queries": 8,
-      "calls": 1
-    },
-    "POST /value-types/{value_type_id}/validate": {
-      "worst_repeat": 0,
-      "queries": 1,
-      "calls": 2
     },
     "PUT /aip/agents/{agent_id}/tools": {
       "worst_repeat": 0,

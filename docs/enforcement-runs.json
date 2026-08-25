@@ -1,128 +1,128 @@
 {
   "audit_auth_coverage": {
-    "at": 1787638321,
+    "at": 1787643651,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_browser_evidence": {
-    "at": 1787254387,
+    "at": 1787639996,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_check_coverage": {
-    "at": 1787638316,
+    "at": 1787643646,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_dependency_provenance": {
-    "at": 1787581208,
+    "at": 1787640067,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_drag_affordances": {
-    "at": 1787553831,
+    "at": 1787640074,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_evidence_corpus": {
-    "at": 1787638316,
+    "at": 1787643646,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_extensibility": {
-    "at": 1787638322,
+    "at": 1787643652,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_iteration_state": {
-    "at": 1787630987,
+    "at": 1787640067,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_latency_observations": {
-    "at": 1787638322,
+    "at": 1787643652,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_object_writes": {
-    "at": 1787638319,
+    "at": 1787643649,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1787638318,
+    "at": 1787643648,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_request_cost": {
-    "at": 1787637610,
+    "at": 1787638465,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_route_cost": {
-    "at": 1787553831,
+    "at": 1787640074,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_route_coverage": {
-    "at": 1787638324,
+    "at": 1787643654,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_route_payload": {
-    "at": 1787553831,
+    "at": 1787640074,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_snapshot_scope": {
-    "at": 1787638326,
+    "at": 1787643655,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_style_scope": {
-    "at": 1787553831,
+    "at": 1787640074,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_suite_cost": {
-    "at": 1787637610,
+    "at": 1787639205,
+    "environment": "local",
+    "migration_head": "0043_drop_orphaned_value_types",
+    "verdict": "PASS"
+  },
+  "audit_tier_a": {
+    "at": 1787643606,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "FAIL"
   },
-  "audit_tier_a": {
-    "at": 1787554514,
-    "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
-    "verdict": "FAIL"
-  },
   "audit_ui_primitives": {
-    "at": 1787553831,
+    "at": 1787640074,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "audit_ui_states": {
-    "at": 1787553831,
+    "at": 1787640074,
     "environment": "local",
-    "migration_head": "0042_stream_outer_joins",
+    "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "check_coverage": {
@@ -132,25 +132,25 @@
     "verdict": "PASS"
   },
   "validate_docs_conformance": {
-    "at": 1787638253,
+    "at": 1787643605,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1787637843,
+    "at": 1787640275,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "validate_schema_freeze": {
-    "at": 1787638326,
+    "at": 1787643656,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1787637732,
+    "at": 1787640163,
     "environment": "local",
     "migration_head": "0043_drop_orphaned_value_types",
     "verdict": "FAIL"

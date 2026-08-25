@@ -151,6 +151,24 @@ check(recorded["unrecorded_ceiling"] == 0, recorded)
 check(recorded["undated_baselines_ceiling"] == 0, recorded)
 check(recorded.get("provenance", {}).get("recorded_at"), recorded)
 
+# The whole gate, applied to the live tree -- not a subset of it.
+#
+# Everything above checks one of the audit's readings at a time, and between them
+# they covered five of the six: unparsed documents, unrecorded conditions, cadence
+# gaps, undated baselines, and the gate's own baseline. The sixth -- a baseline
+# past the shelf life it declares -- was tested against synthetic reports and never
+# against this repository.
+#
+# That gap had a shape. `overdue` fires only when a head-bound baseline records a
+# migration head that is no longer current, so it is unreachable until someone adds
+# a revision, and until R14 nobody could: twenty-seven scripts pinned the head. The
+# first revision past that lock left four baselines stale, `audit_iteration_state`
+# exited 1 saying so, and nothing noticed -- the audit declares `every suite run`,
+# this is its suite home, and its home inspected the report instead of judging it.
+live_ok, live_failures, _live_notes = audit.compare(
+    counts_of(live), json.loads(audit.BASELINE.read_text(encoding="utf-8")))
+check(live_ok, f"the gate holds against this tree: {live_failures}")
+
 open_now = [c for c in live.conditions if c.state in (OPEN, BLOCKED)]
 print(f"Iteration state gate verified: {checks} assertions passed "
       f"({len(live.conditions)} conditions, {len(open_now)} open or blocked, "

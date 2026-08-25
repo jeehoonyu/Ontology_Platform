@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -990,7 +990,19 @@ test("pipeline deploys an immutable snapshot through visible partition-worker co
   mkdirSync(snapshotRoot, { recursive: true });
   const fixture = mkdtempSync(join(snapshotRoot, "browser-partitions-"));
   try {
-    const python = process.env.PYTHON_BIN || "python";
+    // Fourth place this repository assumed `python` is a command. It is not, on a
+    // stock macOS or a modern Linux, and this one surfaced as `spawnSync python
+    // ENOENT` -- a test reporting a missing interpreter as a product failure. The
+    // repository venv is preferred because it is the only one carrying the pins.
+    const pythonCandidates = [
+      process.env.PYTHON_BIN,
+      "../oms/venv/bin/python",
+      "../.venv/bin/python",
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    const python =
+      pythonCandidates.find(
+        (candidate) => candidate === process.env.PYTHON_BIN || existsSync(candidate),
+      ) ?? "python3";
     execFileSync(python, ["-c", [
       "import pathlib, sys",
       "import pyarrow as pa",
