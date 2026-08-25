@@ -170,7 +170,13 @@ def handle(request):
 """
         tls_allowed, tls_sandbox, _ = execute(args.sandbox_image, tls_source, tls_manifest, ["network"])
         tls_result = parsed(tls_allowed)
-        assert tls_allowed.returncode == 0 and tls_result.get("ok") is True, (tls_allowed.stdout, tls_allowed.stderr)
+        # The proxy's logs, the way the HTTP assertion above already carries them.
+        # Without them a denial arrives as bare "403 Forbidden" and says nothing
+        # about which check produced it -- which is exactly how this failed on a
+        # GitHub runner while passing on the author's machine, leaving nothing to
+        # diagnose from.
+        assert tls_allowed.returncode == 0 and tls_result.get("ok") is True, (
+            tls_allowed.stdout, tls_allowed.stderr, docker("logs", proxy, check=False).stdout)
         assert tls_result["output"]["status"] == 200 and tls_result["output"]["custom_ca"] is True
         _, tls_metadata = validated_ca_bundle(tls_manifest)
         assert tls_sandbox["tls_trust"] == tls_metadata and ca_pem not in json.dumps(tls_sandbox)
