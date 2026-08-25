@@ -357,8 +357,14 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npm run build
           npx playwright install --with-deps chrome
+      # Built through the harness, not with `npm run build` directly. The bundle
+      # has to carry build-provenance.json or served-shell.spec.ts cannot say what
+      # source the served bundle came from -- which is the whole point of that
+      # check, and it failed on all four viewports the first time this job ever
+      # ran. The harness runs the same vite build and records the provenance.
+      - name: Build the bundle and record its provenance
+        run: python oms/measure_browser_evidence.py --build
       - name: Run browser acceptance
         working-directory: frontend
         env:
