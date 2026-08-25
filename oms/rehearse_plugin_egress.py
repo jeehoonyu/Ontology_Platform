@@ -84,6 +84,14 @@ def write_tls_fixture(hostname: str, directory: Path) -> str:
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
+    # Readable by the container's user. tempfile.TemporaryDirectory creates 0700
+    # and the TLS mock inherits USER 65534 from the proxy image, so on Linux it
+    # cannot traverse into /tls -- the server dies on load_cert_chain, the
+    # container exits, and the proxy then fails to resolve its name. That surfaced
+    # three steps later as a bare 403 on a CONNECT. macOS Docker Desktop does not
+    # enforce these bits, which is why it only ever failed on a runner.
+    # These are ephemeral fixtures: a one-day certificate for a throwaway hostname.
+    directory.chmod(0o755)
     directory.joinpath("server.pem").write_bytes(server_certificate.public_bytes(serialization.Encoding.PEM))
     directory.joinpath("server.key").write_bytes(server_key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption(),
@@ -139,6 +147,16 @@ def main() -> int:
         )
         docker("network", "connect", uplink, proxy)
         time.sleep(1)
+
+        # Fixtures are started with --detach and were never checked. A container
+        # that exits leaves its name unresolvable, and the first thing that notices
+        # is a request three steps later failing for a reason that describes DNS
+        # rather than the fixture. Ask directly, and carry the container's own logs.
+        for fixture in (mock, tls_mock, proxy):
+            state = docker("inspect", "--format", "{{.State.Running}}", fixture, check=False).stdout.strip()
+            assert state == "true", (
+                f"fixture container {fixture} is not running ({state or 'absent'}); "
+                f"logs: {docker('logs', fixture, check=False).stdout[-400:]}")
 
         manifest = {
             "limits": {"memory_mb": 128, "timeout_seconds": 15},
