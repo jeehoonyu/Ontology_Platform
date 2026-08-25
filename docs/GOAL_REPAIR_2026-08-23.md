@@ -94,7 +94,7 @@ Every one was a host assumption, and three of them were hiding a check that had 
 | `test_plugin_executor_production_rehearsal` | `import yaml`, and PyYAML was undeclared — the same defect `requirements.txt` already records for httpx, found the same way. |
 | `test_partitioned_snapshot_pipeline` | `removeprefix("file:///")` leaves `C:/…` on Windows and a *relative* `var/…` on POSIX. It now calls `data_plane._file_uri_path`, the product's own helper, instead of keeping a second copy of the rule. |
 
-## Tier A: 7 met, 0 unmet
+## Tier A: 8 met, 0 unmet, 0 unavailable — met
 
 | Sub-condition | 2026-08-18 | now |
 | --- | --- | --- |
@@ -102,15 +102,25 @@ Every one was a host assumption, and three of them were hiding a check that had 
 | documentation conformance | met | met |
 | backend suite passes sequentially | met | **met** — 243 of 243 |
 | alembic twice on postgres, with downgrade | unavailable | **met** |
-| production compose renders and images build | unavailable | unavailable — *compose renders*; the image build needs a running Docker engine |
+| production compose renders and images build | unavailable | **met** — the model renders and all three images build: application, plugin executor, egress proxy |
 | browser matrix, attributable skips | **unmet** | **met** — 0 failures, 136 attributable skips |
 | alembic twice on sqlite | met | met |
 | frontend typechecks, builds, audits clean | met | met |
 
-The single `unmet` is gone. What remains is one sub-condition needing a Docker daemon, and
-`unavailable` is still not a pass — the tier is not claimed. PostgreSQL was installed here to
-earn its row; it runs on port 5433 and is not registered as a login service, so it stops
-with `pg_ctl -D /opt/homebrew/var/postgresql@16 stop`.
+**Tier A is met**, and recorded as such in its own contract,
+[`GOAL_2026-08-03.md`](GOAL_2026-08-03.md). Nothing about the product's features changed to
+get there. What changed is that the suite could finally run somewhere else (R12), and that
+PostgreSQL and Docker were present for the first time.
+
+One last thing the run exposed. `audit_tier_a`'s verdict was a single unconditional line —
+*"Tier A is not claimable while {n} of 8 are unmet or unavailable"* — formatted with the
+count. So a complete run printed **"not claimable while 0 of 8 are unmet or unavailable"**:
+the gate built to compute the tier could not report the one answer it existed to find. That
+is the shape of the two constant checkers R7 replaced, surviving in the sentence that
+reports them. It can say it now.
+
+PostgreSQL was installed here to earn its row. It runs on port 5433 and is not registered as
+a login service, so it stops with `pg_ctl -D /opt/homebrew/var/postgresql@16 stop`.
 
 ## Moving the head found the staleness gate running nowhere
 

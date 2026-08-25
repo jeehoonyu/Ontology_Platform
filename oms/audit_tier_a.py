@@ -379,8 +379,19 @@ def main() -> int:
         for failure in failures:
             print(f"  {failure}")
         return 1
-    print(f"\nNo sub-condition regressed. Tier A is not claimable while {unmet + unavailable} "
-          f"of {len(results)} are unmet or unavailable.")
+    outstanding = unmet + unavailable
+    if outstanding:
+        print(f"\nNo sub-condition regressed. Tier A is not claimable while {outstanding} "
+              f"of {len(results)} are unmet or unavailable.")
+    else:
+        # This sentence could not be printed before. The verdict was a single
+        # unconditional line saying the tier was not claimable, formatted with the
+        # count -- so a complete run read "not claimable while 0 of 8 are unmet or
+        # unavailable", and the gate that exists to compute the tier could not
+        # report the one answer it was built to find. The same shape as the two
+        # constant checkers R7 replaced, in the sentence that reports them.
+        print(f"\nAll {len(results)} sub-conditions are met on this machine, none "
+              f"unavailable. Tier A is claimable against this run.")
     return 0
 
 

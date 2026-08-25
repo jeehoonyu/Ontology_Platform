@@ -1,7 +1,7 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-08-25T09:16:09Z"
+    "recorded_at": "2026-08-25T10:49:46Z"
   },
   "note": "Per sub-condition state of Tier A. A sub-condition recorded met may not become unmet. `unavailable` is not a pass.",
   "sub_conditions": {
@@ -9,7 +9,7 @@
     "documentation conformance passes": "met",
     "backend suite passes sequentially": "met",
     "alembic applies twice on postgres, with downgrade": "met",
-    "production compose renders and images build": "unavailable",
+    "production compose renders and images build": "met",
     "browser matrix passes with attributable skips": "met",
     "alembic applies twice on sqlite": "met",
     "frontend typechecks, builds, and audits clean": "met"
