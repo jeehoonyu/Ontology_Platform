@@ -5,6 +5,12 @@ on:
   push:
     branches:
       - master
+  # On demand, from any branch. R2 of GOAL_REPAIR_2026-08-23 asks for a run that
+  # provisions a runner and executes one step, and until now there was no way to
+  # ask for one: the triggers above fire on master and on pull requests, so work
+  # on a branch produced no run at all and the question "is a runner available
+  # today?" could only be answered by merging something.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
