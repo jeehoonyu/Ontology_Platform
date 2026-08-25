@@ -51,6 +51,11 @@ DECLARED: Dict[str, Dict[str, str]] = {
                    "and leave no history, so it is absent from every as-of read",
         "runs_in": "suite",
     },
+    "audit_auth_coverage": {
+        "purpose": "a mutating route with no permission of its own is gated only by "
+                   "a middleware that returns early outside AUTH_MODE=oidc",
+        "runs_in": "suite",
+    },
     "audit_query_bounds": {
         "purpose": "no read materializes an object type before filtering it",
         "runs_in": "suite",

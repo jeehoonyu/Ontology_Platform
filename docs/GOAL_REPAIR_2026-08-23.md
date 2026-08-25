@@ -71,7 +71,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Met** — 6 of 6, plus the two halves that made the fix inert: `base_type` is read where `type` is absent, and an archived property is no longer enforced. `oms/test_property_constraints.py`, 41 assertions |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
-| **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet exists | **Open** — ratchet before fix |
+| **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet existed | **Open** — measured and ratcheted: 1,012 non-public handlers, 282 mutating ones unauthorized, now **262**. `oms/audit_auth_coverage.py` fails the build when the count rises; `oms/test_auth_coverage.py`, 574 assertions |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
 | **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named: `action_outbox`, `AgentStudio.py`, `ontology_value_types`, `system_migration_records`, the shadowed interface check, `POST /schedules/{id}/trigger` | **Open** |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
@@ -79,6 +79,36 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## Authorization, counted before it is closed
+
+The census counts **handlers, not routes**, because `api_v1_compat` clones every eligible
+legacy route into `/api/v1` reusing the same endpoint object -- counting routes would report
+a surface twice its real size and halve the apparent severity of every gap. It takes its
+public paths from `production_auth.PUBLIC_PREFIXES`, which is now a module constant used by
+the middleware itself, so the audit cannot judge a route the gate exempts.
+
+| | |
+| --- | --- |
+| non-public handlers | 1,012 |
+| authorized | 535 → **568** |
+| unauthorized | 477 → 444 |
+| **unauthorized and mutating** (the gate) | 282 → **262** |
+
+Mutating handlers are gated; unauthorized reads are reported and not gated, because several
+are deliberately public and the rest are a larger argument than one ratchet should try to
+win. A handler counts as authorized only when **every** route reaching it authorizes -- one
+gated on its legacy path and open on its generated twin is an open handler, and the
+optimistic reading would have called it covered.
+
+The first twenty closed are `admin_auth` and `admin_directory`, mounted with
+`administer` at the include site rather than on twenty signatures. That mechanism was
+available all along: nothing in this codebase used `APIRouter(dependencies=...)` or
+`include_router(..., dependencies=...)`, so it was unused rather than unsuitable.
+
+**This closes authorization, not tenancy.** Several of these tables carry no `project_id` at
+all, so a gated route can still read across tenants. That is a separate condition and must
+not be mistaken for finished here.
 
 ## Valid time: implemented rather than withdrawn
 

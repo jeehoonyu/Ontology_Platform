@@ -42,7 +42,7 @@ foreach ($hook in Get-ChildItem -LiteralPath $source -File) {
 
 if (-not $Uninstall) {
     Write-Host ""
-    Write-Host "pre-push now runs the ten static enforcement checks (about 10 seconds)."
+    Write-Host "pre-push now runs the eleven static enforcement checks (about 10 seconds)."
     Write-Host "The PostgreSQL, broker and object-store checks stay MANUAL; see"
     Write-Host "oms/check_registry.py for what each needs and how often it should run."
 }

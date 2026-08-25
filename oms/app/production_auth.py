@@ -210,6 +210,14 @@ def current_principal(request: Request, db: Session = Depends(get_db)) -> Princi
     return principal
 
 
+# The paths that answer without a principal. Module-level so that anything asking
+# "which routes are allowed to be unauthenticated?" reads the same list the
+# middleware enforces -- audit_auth_coverage does, and a second copy of this
+# tuple would let the audit and the gate drift apart while both looked right.
+PUBLIC_PREFIXES = ("/auth/", "/health/", "/workspace", "/react/", "/ui/",
+                   "/docs", "/redoc", "/openapi.json")
+
+
 def require_permission(permission: str):
     def dependency(principal: Principal = Depends(current_principal)) -> Principal:
         if not principal.allows(permission):
@@ -465,8 +473,7 @@ class ProductionAuthorizationMiddleware(BaseHTTPMiddleware):
         if auth_mode() != "oidc":
             return await call_next(request)
         path = request.url.path
-        public_prefixes = ("/auth/", "/health/", "/workspace", "/react/", "/ui/", "/docs", "/redoc", "/openapi.json")
-        if path == "/" or path.startswith(public_prefixes):
+        if path == "/" or path.startswith(PUBLIC_PREFIXES):
             return await call_next(request)
         db = SessionLocal()
         try:

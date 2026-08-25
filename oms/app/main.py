@@ -176,6 +176,30 @@ if FRONTEND_DIST_DIR.exists():
     app.mount("/react", StaticFiles(directory=str(FRONTEND_DIST_DIR)), name="react-assets")
 
 # Mount the new Foundry tool-equivalent routers. Each module exposes `router`.
+# Modules whose whole surface is administrative, mounted with the permission they
+# require. R6 of GOAL_REPAIR_2026-08-23.
+#
+# Every route in these two mutates identity: POST /admin/tokens issues an API
+# token with caller-chosen scopes, POST /admin/users creates a user, and
+# POST /admin/roles/grant grants a role. None of them declared a permission, so
+# the only gate was ProductionAuthorizationMiddleware, which returns early
+# whenever AUTH_MODE is not oidc -- and the default is local, where every caller
+# resolves to permissions=["*"].
+#
+# Mounting it here rather than on twenty signatures is deliberate and was
+# available all along: nothing in this codebase used APIRouter(dependencies=...)
+# or include_router(..., dependencies=...), so the mechanism was unused rather
+# than unsuitable. `administer` is held by the administrator and admin roles,
+# which map to "*" in ROLE_PERMISSIONS.
+#
+# This closes authorization, not tenancy. Several of these tables carry no
+# project_id at all, so a gated route can still read across tenants; that is
+# tracked separately and must not be mistaken for finished here.
+ROUTER_PERMISSIONS = {
+    "admin_auth": [Depends(production_auth.require_permission("administer"))],
+    "admin_directory": [Depends(production_auth.require_permission("administer"))],
+}
+
 for _ext_module in (
     ontology_interfaces,
     ontology_value_types,
@@ -268,7 +292,10 @@ for _ext_module in (
     event_outbox,
     industrial_workflow,
 ):
-    app.include_router(_ext_module.router)
+    app.include_router(
+        _ext_module.router,
+        dependencies=ROUTER_PERMISSIONS.get(_ext_module.__name__.rsplit(".", 1)[-1], []),
+    )
 
 
 def _not_found(resource: str, resource_id: str):
