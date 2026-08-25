@@ -29,7 +29,7 @@ Legend: ✅ implemented · 🟡 partial · ❌ missing (to implement)
 | Ontology validation | ✅ | `/ontology/validate` |
 | **Interfaces** | ❌→✅ | **new** `/interfaces` (polymorphic) |
 | **Shared property types** | ❌→✅ | **new** `/shared-property-types` |
-| **Value types & structs** | ❌→✅ | **new** `/value-types` (+ constraint validation) |
+| **Value types & structs** | ❌ | removed 2026-08-24: the tables existed, no property spec could reference one. Property constraints are enforced on write instead — `oms/test_property_constraints.py` |
 | **Functions on Objects** | ❌→✅ | **new** `/ontology-functions` (typed, deterministic) |
 | **Ontology Manager (branches/proposals)** | ❌→✅ | **new** `/ontology/branches`, `/ontology/proposals` |
 
@@ -253,7 +253,7 @@ Every tool was validated against its doc **sub-pages and screenshots/diagrams** 
 
 **Wave 2 — remaining backend depth (9 areas, all green):**
 - **Cipher** (`cipher.py`) — three **license types** (operational_user / data_manager / admin) governing which ops a caller may perform; **channel-level required justification** on decrypt (audited; backward-compatible flag); SHA-256/512 **hash** op; canonical `CIPHER::<rid>::<value>::CIPHER` wrapper; algorithm stored per channel. `test_cipher.py` (**35**).
-- **Value types** (`ontology_value_types.py`) — constraint **families** (rid/uuid/array-uniqueness/nested/struct-element), wider base types, and **immutable versioning** with breaking-vs-non-breaking detection + consumer listing. `test_ontology_value_types.py`.
+- **Value types** — removed. The subsystem shipped a constraint engine, immutable versioning and a consumer scan, and nothing could reach any of it: no route, migration, frontend file or SDK ever wrote the `value_type_id` its property specs would have had to carry, so the consumer scan could only return empty. Constraints declared on a property are now enforced where objects are written (`oms/app/object_writes.py`, `oms/test_property_constraints.py`).
 - **Shared properties** (`ontology_interfaces.py`) — **inheritance**: apply a shared property type to an object-type property (propagate + lock metadata), detach, and list consumers. `test_ontology_interfaces_inheritance.py` (**30**).
 - **Security/data** (`security_data.py`) — **checkpoints** now require a **justification** and write an audit row on pass; **retention enforcement** sweep that expires resources past TTL. `test_security_data.py` (**46**).
 - **Automate fidelity** (`automate_ops.py`) — the action effect now performs **real object mutations** via `runtime.apply_action_mutations`, recording real `mutated_object_ids`. `test_automate_action_effect.py` (**38**).

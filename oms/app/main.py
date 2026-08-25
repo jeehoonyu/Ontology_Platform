@@ -12,7 +12,6 @@ from . import models, models_action, object_writes, schemas
 # Importing them here registers their tables on the shared Base before create_all().
 from . import (
     ontology_interfaces,
-    ontology_value_types,
     ontology_versioning,
     ontology_functions,
     connectivity,
@@ -202,7 +201,6 @@ ROUTER_PERMISSIONS = {
 
 for _ext_module in (
     ontology_interfaces,
-    ontology_value_types,
     ontology_versioning,
     ontology_functions,
     connectivity,

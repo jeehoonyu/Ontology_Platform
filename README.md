@@ -342,7 +342,6 @@ To complete the public Foundry tool surface, the platform adds 18 self-contained
 
 **Ontology depth**
 - `ontology_interfaces.py` — Interfaces (polymorphic contracts) & shared property types: `/interfaces`, `/interfaces/{id}/implementers`, `/interfaces/{id}/check-object-type`, `/shared-property-types`.
-- `ontology_value_types.py` — Value types & structs with constraint validation: `/value-types`, `/value-types/{id}/validate`.
 - `ontology_versioning.py` — Ontology Manager branches & proposals: `/ontology/branches`, `/ontology/proposals`, `.../submit`, `.../decision`, `.../merge`.
 - `ontology_functions.py` — Typed Functions on Objects: `/ontology-functions`, `/ontology-functions/{id}/run`.
 

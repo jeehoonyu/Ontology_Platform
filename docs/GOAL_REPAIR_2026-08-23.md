@@ -73,13 +73,37 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
 | **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet existed | **Open** — measured and ratcheted: 1,012 non-public handlers, 282 mutating ones unauthorized, now **262**. `oms/audit_auth_coverage.py` fails the build when the count rises; `oms/test_auth_coverage.py`, 574 assertions |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
-| **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named | **Open** — 1 of 6 removed (`AgentStudio.py`). The premise was wrong about the other five, and the investigation below says why: one has a dispatcher written in JSON rather than Python, three are blocked by R14, and one costs more to delete than to wire |
+| **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named | **Open** — 2 of 6 removed (`AgentStudio.py`, `ontology_value_types`). Of the remaining four, one has a dispatcher written in JSON, one is a design decision about a P0 witness, one is cheaper to wire than to delete, and one has an honest replacement that is redder than the fabrication |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## The first revision past R14
+
+`ontology_value_types` is gone: 765 lines, two tables, seven routes, a constraint engine
+covering nine families, and an immutable version-snapshot classifier — none of it reachable.
+Its one integration point was a `value_type_id` on a property spec, and no route, migration,
+frontend file, script or SDK ever wrote one, so its own consumer scan could only return
+empty.
+
+`0043_drop_orphaned_value_types` is the first revision added since R14 removed the head
+pins. It applies twice idempotently and survives a downgrade/upgrade round trip, and it
+deliberately does not name `ix_value_types_id` or `ix_value_type_versions_id`:
+`0041_drop_redundant_pk_indexes` derives redundant primary-key indexes from the live schema
+and has already taken them, so naming them would fail on any database at that head.
+
+One number is worth stating rather than passing quietly. `test_api_v1_route_coverage.py`
+floors the generated alias count at 890; it was 897 before this and is **exactly 890** now.
+That is coincidence — the floor happened to carry seven of margin and this removed seven
+routes — not a designed boundary. The next legitimate removal will need the floor lowered
+deliberately, with the reason recorded, which is the normal way a ratchet moves.
+
+Reported drift, not gated: `docs/suite-cost-baseline.json` still names the `/value-types`
+routes. `audit_suite_cost` is declared `manual: needs a full suite census (~20 min)` and was
+not re-run here, so the next census is expected to drop them.
 
 ## R14: the schema could not move
 

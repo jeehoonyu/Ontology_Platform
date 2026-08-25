@@ -60,9 +60,6 @@ chk = ok(client.post("/interfaces/geolocatable/check-object-type", json={"object
 assert chk["conforms"] is True, chk
 
 # ----------------------------------------------------------- 2. value types
-ok(client.post("/value-types", json={"id": "pct", "display_name": "Percent", "base_type": "double", "constraints": {"min": 0, "max": 100}}), "value-type create")
-assert ok(client.post("/value-types/pct/validate", json={"value": 50}), "value validate ok")["valid"] is True
-assert ok(client.post("/value-types/pct/validate", json={"value": 150}), "value validate fail")["valid"] is False
 
 # -------------------------------------------------- 3. ontology manager
 ok(client.post("/ontology/branches", json={"id": "b1", "display_name": "Branch 1"}), "branch create")

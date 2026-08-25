@@ -11,11 +11,11 @@ day after it is written.
 | Population | Handlers | Meaning |
 | --- | --- | --- |
 | Dual-registered | 35 | Typed route exists; the plain path is compatibility and is retirable once callers move |
-| Generated same-handler aliases | 897 | The assembly-time adapter adds typed `/api/v1` paths backed by the exact legacy endpoint and dependencies |
+| Generated same-handler aliases | 890 | The assembly-time adapter adds typed `/api/v1` paths backed by the exact legacy endpoint and dependencies |
 | Explicit v1 successors | 4 | An explicit v1 route owns the same method/shape; generation correctly defers to it |
 | `/api/v1` only | 76 | Already typed; nothing owed |
 | Deliberately unversioned | 11 | Browser, authentication, probe, documentation, or deployment surfaces excluded from product API versioning |
-| **Total handlers** | **1023** | |
+| **Total handlers** | **1016** | |
 
 Generated aliases are real FastAPI `APIRoute` contracts, not HTTP forwarding:
 request validation, response models, dependencies, status codes, and endpoint
@@ -132,7 +132,7 @@ identity are cloned while explicit v1 route-shape collisions remain authoritativ
 
 ## Generated same-handler compatibility aliases
 
-897 handlers receive additive typed aliases from
+890 handlers receive additive typed aliases from
 `oms/app/api_v1_compat.py` after application assembly. The source path remains
 available during migration and an explicit v1 implementation always wins a
 method/route-shape collision.
@@ -766,13 +766,6 @@ method/route-shape collision.
 - `ontology_registry.py:list_registry_packages`: `GET /ontology/registry/{entry_id}/packages`
 - `ontology_registry.py:ontology_registry_ui_state`: `GET /ui-state/ontology/registry`
 - `ontology_registry.py:publish_registry_entry`: `POST /ontology/registry/publish`
-- `ontology_value_types.py:create_value_type`: `POST /value-types`
-- `ontology_value_types.py:create_value_type_version`: `POST /value-types/{value_type_id}/versions`
-- `ontology_value_types.py:diff_value_type_versions`: `POST /value-types/{value_type_id}/version-diff`
-- `ontology_value_types.py:get_value_type`: `GET /value-types/{value_type_id}`
-- `ontology_value_types.py:list_value_type_versions`: `GET /value-types/{value_type_id}/versions`
-- `ontology_value_types.py:list_value_types`: `GET /value-types`
-- `ontology_value_types.py:validate_value`: `POST /value-types/{value_type_id}/validate`
 - `ontology_versioning.py:capture_ontology_revision`: `POST /ontology/revisions/capture`
 - `ontology_versioning.py:create_branch`: `POST /ontology/branches`
 - `ontology_versioning.py:create_proposal`: `POST /ontology/proposals`
