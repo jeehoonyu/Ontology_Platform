@@ -1049,9 +1049,20 @@ test("pipeline deploys an immutable snapshot through visible partition-worker co
 
     const jobId = (await execution.locator("dt", { hasText: "job id" }).locator("xpath=following-sibling::dd").textContent())?.trim();
     expect(jobId).toBeTruthy();
-    const jobResponse = await page.request.get(`/jobs/${jobId}`);
-    expect(jobResponse.ok()).toBeTruthy();
-    const job = await jobResponse.json() as { result: { row_count: number; output_snapshot: { id: string } } };
+    // Ask the job, rather than infer it from the panel. The panel reporting
+    // SUCCEEDED means the partition jobs finished; it does not mean the job record
+    // queried here has. complete_job writes status and result in one transaction,
+    // so SUCCEEDED does imply a readable result -- the faulty step was this test
+    // reading the record before it reached that state, on the strength of what the
+    // UI said about something else. Flaky on macOS, and it failed both attempts on
+    // a slower CI runner, which is the same race arriving reliably.
+    let job!: { status: string; result: { row_count: number; output_snapshot: { id: string } } };
+    await expect.poll(async () => {
+      const response = await page.request.get(`/jobs/${jobId}`);
+      if (!response.ok()) return "unreadable";
+      job = await response.json();
+      return job.status;
+    }, { timeout: 30_000 }).toBe("SUCCEEDED");
     expect(job.result.row_count).toBe(4);
     const outputRows = await page.request.post(`/api/v1/dataset-snapshots/${job.result.output_snapshot.id}/query`, { data: {
       fields: ["asset_id", "score"], order_by: "asset_id", limit: 20
