@@ -6,6 +6,7 @@ import tempfile
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from tier_b_evidence import current_head
 
 
 tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -33,7 +34,7 @@ with engine.connect() as connection:
 
 command.upgrade(config, "head")
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
 
 engine.dispose()
 tmpdir.cleanup()

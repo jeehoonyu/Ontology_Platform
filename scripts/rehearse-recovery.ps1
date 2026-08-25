@@ -32,7 +32,15 @@ try {
     }
     if (-not $ready) { throw "Rehearsal Postgres did not become ready." }
 
-    $seedSql = "CREATE TABLE alembic_version(version_num varchar(32) primary key); INSERT INTO alembic_version VALUES ('0042_stream_outer_joins'); CREATE TABLE recovery_probe(id integer primary key, value text); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
+    # Read the head rather than pin it. The seeded value is only meaningful as
+    # "whatever this repository's migrations currently declare" -- the rehearsal
+    # proves backup and restore preserve the schema version, not that the version
+    # is any particular string. Pinned here, every alembic revision silently made
+    # this rehearsal seed a stale schema and test_recovery_scripts.py assert a
+    # literal that had moved.
+    $migrationHead = & python -c "import sys; sys.path.insert(0, sys.argv[1]); from tier_b_evidence import current_head; print(current_head())" (Join-Path (Split-Path -Parent $PSScriptRoot) "oms")
+    if ($LASTEXITCODE -ne 0 -or -not $migrationHead) { throw "Could not read the migration head from oms/tier_b_evidence.py." }
+    $seedSql = "CREATE TABLE alembic_version(version_num varchar(32) primary key); INSERT INTO alembic_version VALUES ('$migrationHead'); CREATE TABLE recovery_probe(id integer primary key, value text); INSERT INTO recovery_probe VALUES (1, 'before-backup');"
     Invoke-RehearsalCompose @("exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1", "-U", "ontology", "-d", "ontology", "-c", $seedSql) "Could not seed recovery probe."
 
     $backupPath = & (Join-Path $PSScriptRoot "backup.ps1") `

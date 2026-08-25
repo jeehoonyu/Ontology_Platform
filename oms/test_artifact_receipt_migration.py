@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from tier_b_evidence import current_head
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -67,7 +68,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             "SELECT * FROM platform_artifact_command_receipts ORDER BY command_scope"
         ).fetchall()
 
-    assert version == "0042_stream_outer_joins", version
+    assert version == current_head(), version
     assert len(receipts) == 2, [dict(row) for row in receipts]
     builder, collaboration = receipts
     assert builder["command_scope"] == "builder" and builder["project_id"] == "legacy-project"

@@ -9,8 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pilot_postgres_recovery as driver  # noqa: E402
+from tier_b_evidence import current_head
 
-HEAD = "0042_stream_outer_joins"
+HEAD = current_head()
 passed = 0
 
 

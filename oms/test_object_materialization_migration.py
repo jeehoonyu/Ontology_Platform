@@ -5,6 +5,7 @@ import tempfile
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from tier_b_evidence import current_head
 
 
 temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -34,7 +35,7 @@ with engine.begin() as connection:
 
 command.upgrade(config, "head")
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
     columns = {column["name"] for column in inspect(connection).get_columns("object_instances")}
     assert {"materialization_id", "is_active", "retired_at"} <= columns
     assert connection.execute(text("SELECT is_active FROM object_instances WHERE id = 'asset-1'")).scalar_one() in (1, True)
@@ -50,7 +51,7 @@ with engine.connect() as connection:
 command.upgrade(config, "head")
 with engine.connect() as connection:
     assert connection.execute(text("SELECT is_active FROM object_instances WHERE id = 'asset-1'")).scalar_one() in (1, True)
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
 
 engine.dispose()
 temporary.cleanup()

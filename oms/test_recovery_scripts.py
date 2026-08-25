@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -15,7 +16,14 @@ output_dir = root / output_name
 log_path = work / "docker-calls.jsonl"
 passed = 0
 
-assert "varchar(32)" in rehearsal_source and "0042_stream_outer_joins" in rehearsal_source
+# The rehearsal seeds a synthetic alembic_version row so backup and restore can be
+# shown to preserve the schema version. It used to seed a pinned literal, which
+# made every migration silently stale it and made this assertion a tripwire on the
+# head rather than a statement about the rehearsal. R14.
+assert "varchar(32)" in rehearsal_source
+assert "current_head()" in rehearsal_source, "the rehearsal must read the head, not pin it"
+assert not re.search(r"'00\d\d_[a-z_]+'", rehearsal_source), \
+    "no migration head literal may be pinned in the rehearsal script"
 passed += 1
 
 fake = work / "fake_docker.py"

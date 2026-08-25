@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from tier_b_evidence import current_head
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -58,7 +59,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             "SELECT * FROM platform_job_idempotency_receipts ORDER BY created_at"
         ).fetchall()
 
-    assert version == "0042_stream_outer_joins", version
+    assert version == current_head(), version
     assert len(receipts) == 1, [dict(row) for row in receipts]
     receipt = receipts[0]
     assert receipt["job_id"] == "legacy-job-first" and receipt["project_id"] == "legacy-project"

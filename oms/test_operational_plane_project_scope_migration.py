@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from tier_b_evidence import current_head
 
 
 TABLES = (
@@ -64,6 +65,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             assert project_id == expected, (table_name, project_id)
             assert f"ix_{table_name}_project_id" in indexes, (table_name, indexes)
 
-    assert version == "0042_stream_outer_joins", version
+    assert version == current_head(), version
 
 print("\nOperational plane project migration verified for 21 legacy tables.")

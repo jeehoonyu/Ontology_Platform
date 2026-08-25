@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
+from tier_b_evidence import current_head
 
 tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 database = Path(tmpdir.name) / "ontology_release_migration.db"
@@ -33,7 +34,7 @@ assert {"ontology_revisions", "ontology_change_sets", "ontology_environments"} <
 assert "project_id" in {column["name"] for column in inspector.get_columns("ontology_branches")}
 assert "project_id" in {column["name"] for column in inspector.get_columns("ontology_proposals")}
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
     assert connection.execute(text("SELECT project_id FROM ontology_branches WHERE id='legacy_branch'")).scalar_one() == "default"
     assert connection.execute(text("SELECT project_id FROM ontology_proposals WHERE id='legacy_proposal'")).scalar_one() == "default"
 

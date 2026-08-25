@@ -7,9 +7,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import audit_evidence_corpus as audit  # noqa: E402
 from audit_evidence_corpus import CURRENT, STALE, UNPROVENANCED, head_of  # noqa: E402
+from tier_b_evidence import current_head
 
 passed = 0
-HEAD = "0042_stream_outer_joins"
+HEAD = current_head()
 
 
 def check(condition, label, payload=None):

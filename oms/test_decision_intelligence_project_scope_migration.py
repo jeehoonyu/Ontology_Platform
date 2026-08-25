@@ -5,6 +5,7 @@ import tempfile
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from tier_b_evidence import current_head
 
 
 temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -27,7 +28,7 @@ for _ in range(2):
     command.upgrade(config, "head")
 
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
     for table in ("decision_rules", "decision_scorecards", "decision_runs", "object_snapshots", "entity_resolution_jobs", "entity_candidates", "decision_scenarios"):
         assert "project_id" in {column["name"] for column in inspect(connection).get_columns(table)}, table
         assert f"ix_{table}_project_id" in {index["name"] for index in inspect(connection).get_indexes(table)}, table
@@ -48,7 +49,7 @@ with engine.connect() as connection:
 command.upgrade(config, "head")
 with engine.connect() as connection:
     assert connection.execute(text("SELECT project_id FROM decision_rules WHERE id = 'alpha-rule'")).scalar_one() == "alpha"
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
 
 engine.dispose()
 temporary.cleanup()

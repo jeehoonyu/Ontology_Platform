@@ -77,9 +77,47 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
-| **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 assert `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide carry the string | **Open** — blocks every migration-requiring change, R8 included |
+| **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## R14: the schema could not move
+
+Twenty-seven suite scripts asserted the head as a literal immediately after `upgrade head`,
+and `scripts/rehearse-recovery.ps1` seeded a synthetic `alembic_version` row with the same
+string. The effect was not a safety net but a lock: **any new revision reddened
+twenty-seven scripts at once**, none of them for a reason connected to what the revision
+did — and that lock was quietly blocking three of the five items under R8, two of which
+need a table dropped.
+
+No new helper was needed. `tier_b_evidence.current_head()` already reads the chain and
+returns the single head, and `audit_evidence_corpus` already used it. The 24 mechanical
+sites now call it.
+
+Three sites were not mechanical, and the distinction between them is the rule worth keeping:
+
+- **`scripts/rehearse-recovery.ps1`** seeded a pinned head into a fake database. The value is
+  only meaningful as *whatever this repository currently declares* — the rehearsal proves
+  backup and restore preserve the schema version, not that the version is any particular
+  string. It now reads the head. *Unverified on this machine: there is no PowerShell here,
+  and the test that guards it is one of the six R12 host failures.*
+- **`test_pipeline_worker_recovery_contract.py`** compared a committed evidence file's head
+  to the literal. Staleness already has an owner that treats it as a reported ratchet rather
+  than a broken build — `audit_evidence_corpus` reads every `docs/*evidence*.json` and
+  reports CURRENT / STALE. The test now asserts the head's *shape* and that the declared
+  head equals the observed one, which is the thing no staleness report would catch.
+- **`test_external_evaluator_evidence.py`** built a synthetic bundle; it now describes the
+  tree it is tested against.
+
+The gate forbids only the **head**, and the first draft got that wrong — forbidding every
+revision id reported 60 offenders, all of them correct. A migration test seeds a database at
+an older revision on purpose; `0003_platform_job_leases` is the starting point of the
+upgrade being tested and will never move. The head is the one id that changes whenever
+anyone adds a revision, so it is the only one a literal can go stale against.
+
+**Proven rather than asserted.** A throwaway `0043` revision was added, the whole suite and
+every static audit re-run against the moved head, and the revision removed: 6 failures of
+243, the same six as at `0042`.
 
 ## R8: five of the six were not deletable, and finding that out was the work
 

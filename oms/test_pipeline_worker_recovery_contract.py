@@ -1,5 +1,6 @@
 """Protect the real worker-loss rehearsal, evidence, and CI gate."""
 import json
+import re
 from pathlib import Path
 
 
@@ -21,7 +22,19 @@ assert "Rehearse worker-process loss with independent S3 caches" in workflow
 assert "rehearse_pipeline_worker_recovery.py" in workflow
 
 assert evidence["status"] == "PASS"
-assert evidence["provenance"]["migration_head"] == "0042_stream_outer_joins"
+
+# The head is asserted for shape and internal consistency, not for currency. R14:
+# comparing it to a pinned literal made this a tripwire on the migration chain --
+# every revision failed it, and the evidence being stale is not the same defect as
+# the evidence being malformed. Staleness already has an owner that treats it as a
+# reported ratchet rather than a broken build: audit_evidence_corpus.py reads every
+# docs/*evidence*.json and reports CURRENT / STALE / UNPROVENANCED against the
+# current head. What must hold here is that the file names a head at all, and that
+# the head it declares is the one it says it observed -- a mismatch there means the
+# harness measured a different database than it claims, which no staleness report
+# would catch.
+assert re.fullmatch(r"\d{4}_[a-z0-9_]+", evidence["provenance"]["migration_head"] or ""), \
+    evidence["provenance"]["migration_head"]
 assert evidence["provenance"]["observed_migration_head"] == evidence["provenance"]["migration_head"]
 assert evidence["database"] == "postgresql"
 assert evidence["storage"] == "s3-compatible"

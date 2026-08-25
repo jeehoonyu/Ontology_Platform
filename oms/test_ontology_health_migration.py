@@ -17,13 +17,14 @@ os.environ["DATABASE_URL"] = database_url
 os.environ["SKIP_CREATE_ALL"] = "1"
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
+from tier_b_evidence import current_head
 
 config = Config(os.path.join(os.path.dirname(__file__), "alembic.ini"))
 command.upgrade(config, "head")
 
 engine = create_engine(database_url)
 with engine.connect() as connection:
-    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+    assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
     columns = {column["name"] for column in inspect(connection).get_columns("ontology_health_runs")}
     assert {"id", "project_id", "object_type_id", "status", "score", "summary", "metrics", "findings", "created_by", "created_at"} <= columns
 engine.dispose()

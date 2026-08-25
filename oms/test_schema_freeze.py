@@ -12,8 +12,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from validate_schema_freeze import evaluate, load_freeze  # noqa: E402
+from tier_b_evidence import current_head
 
-HEAD = "0042_stream_outer_joins"
+HEAD = current_head()
 NOW = 1_800_000_000
 passed = 0
 

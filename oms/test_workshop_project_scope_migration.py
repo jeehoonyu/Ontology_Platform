@@ -5,6 +5,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from tier_b_evidence import current_head
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -49,7 +50,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         project_id = connection.execute("SELECT project_id FROM workshop_modules WHERE id='legacy-workshop'").fetchone()[0]
         indexes = {row[1] for row in connection.execute("PRAGMA index_list('workshop_modules')").fetchall()}
 
-    assert version == "0042_stream_outer_joins", version
+    assert version == current_head(), version
     assert project_id == "default", project_id
     assert "ix_workshop_modules_project_id" in indexes, indexes
 

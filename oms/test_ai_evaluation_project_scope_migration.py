@@ -5,6 +5,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from tier_b_evidence import current_head
 
 
 TABLES = ("model_endpoints", "eval_suites", "eval_runs", "aip_eval_runs")
@@ -49,6 +50,6 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             assert project_id == "default", (table_name, project_id)
             assert f"ix_{table_name}_project_id" in indexes, (table_name, indexes)
 
-    assert version == "0042_stream_outer_joins", version
+    assert version == current_head(), version
 
 print("\nAI evaluation project-scope migration verified for four legacy tables.")

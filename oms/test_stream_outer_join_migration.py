@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 from sqlalchemy import create_engine, inspect, text
+from tier_b_evidence import current_head
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
@@ -38,7 +39,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         assert "outer_joins_emitted" in {row["name"] for row in inspector.get_columns("stream_processing_runs")}
         indexes = {row["name"] for row in inspector.get_indexes("stream_join_outer_receipts")}
         assert "ix_stream_join_outer_receipts_finalized" in indexes
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
 
     alembic("downgrade", "0041_drop_redundant_pk_indexes")
     with engine.connect() as connection:
@@ -49,7 +50,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
 
     alembic("upgrade", "head")
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0042_stream_outer_joins"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == current_head()
     engine.dispose()
 
 print("Stream outer join migration verified.")

@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from evaluator_evidence import KIND, SCHEMA_VERSION, load_bundles, seal_bundle, sha256_json, validate_bundle, validate_corpus
+from tier_b_evidence import current_head
 
 
 passed = 0
@@ -24,7 +25,7 @@ def valid_bundle(team: str, organization: str, deployment: str, identity_seed: s
         "schema_version": SCHEMA_VERSION,
         "kind": KIND,
         "generated_at": 1_786_500_000,
-        "migration_head": "0042_stream_outer_joins",
+        "migration_head": current_head(),
         "release_commit": "a" * 40,
         "authentication_mode": "oidc",
         "project": {"id": f"project-{team}", "object_count": 3},
