@@ -102,7 +102,12 @@ jobs:
         # build permanently red and train everyone to ignore it.
         continue-on-error: true
         run: python oms/validate_tier_b_evidence.py
+      # Records an observation; does not gate. See the mixed-workload step: the
+      # harness exits non-zero until REQUIRED_OBSERVATIONS (6) exist at the current
+      # head, and a single CI run can never satisfy that. The measurements are
+      # written either way, which is the point of running it here.
       - name: Benchmark snapshot-native pipeline execution
+        continue-on-error: true
         env:
           PIPELINE_SCALE_PROFILE: smoke
           PIPELINE_SCALE_SAMPLES: "3"
@@ -260,7 +265,12 @@ jobs:
           assert evidence['recovery']['output_snapshot_count'] == 1
           assert evidence['recovery']['execution_fenced'] is True
           PY
+      # Records an observation; does not gate. See the mixed-workload step: the
+      # harness exits non-zero until REQUIRED_OBSERVATIONS (6) exist at the current
+      # head, and a single CI run can never satisfy that. The measurements are
+      # written either way, which is the point of running it here.
       - name: Benchmark PostgreSQL ontology query plans
+        continue-on-error: true
         env:
           ONTOLOGY_SCALE_PROFILE: smoke
           ONTOLOGY_SCALE_SAMPLES: "10"
@@ -288,7 +298,12 @@ jobs:
         run: python oms/verify_cross_stream_outer_postgres.py
       - name: Rehearse PostgreSQL artifact review serialization
         run: python oms/verify_artifact_review_postgres.py
+      # Records an observation; does not gate. See the mixed-workload step: the
+      # harness exits non-zero until REQUIRED_OBSERVATIONS (6) exist at the current
+      # head, and a single CI run can never satisfy that. The measurements are
+      # written either way, which is the point of running it here.
       - name: Rehearse PostgreSQL collaboration scale
+        continue-on-error: true
         run: python oms/verify_collaboration_scale_postgres.py
       - name: Rehearse collaboration WebSocket replica loss and cursor recovery
         run: python oms/verify_collaboration_websocket_chaos_postgres.py
