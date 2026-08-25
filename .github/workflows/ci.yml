@@ -34,6 +34,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # The suite asserts that /workspace/* serves the React shell, which exists
+      # only once the bundle is built. Node was already set up in this job for
+      # evidently this reason and nothing used it, so the assertion could never
+      # hold here.
+      - name: Build the frontend the suite asserts is served
+        working-directory: frontend
+        run: npm ci && npm run build
       - name: Install backend dependencies
         run: python -m pip install -r oms/requirements.txt
       - name: Verify dependency installation
@@ -184,7 +191,11 @@ jobs:
           with engine.connect() as connection:
               revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
               tables = inspect(connection).get_table_names()
-          assert revision == "0042_stream_outer_joins", revision
+          import sys
+          sys.path.insert(0, "oms")
+          from tier_b_evidence import current_head
+
+          assert revision == current_head(), (revision, current_head())
           assert len(tables) >= 100, len(tables)
           print(f"PostgreSQL schema ready at {revision} with {len(tables)} tables")
           PY

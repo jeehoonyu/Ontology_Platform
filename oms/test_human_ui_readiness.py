@@ -5,6 +5,7 @@ Run: python test_human_ui_readiness.py
 """
 import os
 import tempfile
+from pathlib import Path
 
 tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'human_ui.db')}"
@@ -68,9 +69,21 @@ readiness = ok(client.get("/project/readiness"), "project readiness")
 assert readiness["status"] in {"READY", "NEEDS_ATTENTION"}, readiness
 assert readiness["checks"], readiness
 
+# These routes serve the React shell when a bundle exists and the legacy shell
+# when it does not, so this loop is a statement about the build as much as about
+# the routes. It used to assert and print 300 characters of whichever shell came
+# back, which says nothing about why -- the first CI run this repository ever
+# completed failed here, on a job that sets up Node and never builds.
+bundle = Path(__file__).resolve().parents[1] / "frontend" / "dist" / "index.html"
+assert bundle.exists(), (
+    f"no React bundle at {bundle}. These routes serve the legacy shell without one, "
+    f"so this check cannot see what it is for. Build it first: "
+    f"cd frontend && npm ci && npm run build")
+
 for route in ["/workspace/command-center", "/workspace/imports", "/workspace/ontology", "/workspace/pipeline", "/workspace/object-explorer", "/workspace/map", "/workspace/models", "/workspace/decision", "/workspace/ops", "/workspace/graph", "/workspace/validation"]:
     html = client.get(route).text
-    assert "id=\"root\"" in html or "/react/assets/" in html, html[:300]
+    assert "id=\"root\"" in html or "/react/assets/" in html, (
+        f"{route} served a shell with no React root. {html[:200]}")
     passed += 1
 
 print(f"\nHuman UI readiness verified: {passed} assertions passed.")

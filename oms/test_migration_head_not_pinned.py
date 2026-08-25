@@ -60,8 +60,13 @@ check(re.fullmatch(r"\d{4}_[a-z0-9_]+", head), "the head is readable from the ch
 check(HEAD_LITERAL.fullmatch(f'"{head}"'), "and the pattern catches it as a literal", head)
 
 scanned, offenders = 0, []
+# The workflows are in scope, and were not on the first pass. CI pinned the head
+# in an inline assertion inside the PostgreSQL job, and the very first run this
+# repository ever completed failed on it -- a gate written to stop head pins,
+# missing the pin in the file that runs the gates.
 targets = sorted(REPO_ROOT.glob("oms/test_*.py")) + \
-    sorted(REPO_ROOT.glob("scripts/*.ps1")) + sorted(REPO_ROOT.glob("scripts/*.sh"))
+    sorted(REPO_ROOT.glob("scripts/*.ps1")) + sorted(REPO_ROOT.glob("scripts/*.sh")) + \
+    sorted(REPO_ROOT.glob(".github/workflows/*.yml"))
 for path in targets:
     if any(str(path).startswith(str(exempt)) for exempt in EXEMPT):
         continue
