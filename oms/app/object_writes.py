@@ -174,6 +174,7 @@ def create_object(
     lineage: Optional[Dict[str, Any]] = None,
     evidence: Optional[Dict[str, Any]] = None,
     now: Optional[int] = None,
+    valid_from: Optional[int] = None,
     object_type: Optional[models.ObjectType] = None,
     materialization_id: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -217,7 +218,8 @@ def create_object(
     )
     db.add(instance)
     _record(db, instance, before_state={}, event_type=event_type, actor=actor,
-            source_type=source_type, source_id=source_id, evidence=evidence)
+            source_type=source_type, source_id=source_id, evidence=evidence,
+            valid_from=valid_from)
     return instance
 
 
@@ -233,6 +235,7 @@ def update_object(
     lineage: Optional[Dict[str, Any]] = None,
     evidence: Optional[Dict[str, Any]] = None,
     now: Optional[int] = None,
+    valid_from: Optional[int] = None,
     merge: bool = True,
 ) -> Tuple[models.ObjectInstance, Dict[str, Any]]:
     """Apply a property change, validated, with its history. Returns the before-state.
@@ -259,13 +262,15 @@ def update_object(
     instance.updated_at = stamp
 
     _record(db, instance, before_state=before, event_type=event_type, actor=actor,
-            source_type=source_type, source_id=source_id, evidence=evidence)
+            source_type=source_type, source_id=source_id, evidence=evidence,
+            valid_from=valid_from)
     return instance, before
 
 
 def _record(db: Session, instance: models.ObjectInstance, *, before_state: Dict[str, Any],
             event_type: str, actor: str, source_type: str,
-            source_id: Optional[str], evidence: Optional[Dict[str, Any]]) -> None:
+            source_id: Optional[str], evidence: Optional[Dict[str, Any]],
+            valid_from: Optional[int] = None) -> None:
     """Append the change event, and the snapshot the decision plane reads.
 
     Both are best-effort against a partial schema, the way the change recorder
@@ -283,6 +288,11 @@ def _record(db: Session, instance: models.ObjectInstance, *, before_state: Dict[
         source_type=source_type,
         source_id=source_id,
         evidence=evidence or {},
+        # When a caller knows the business time a change took effect, the record
+        # carries it. Absent one, the recorder stamps the transaction time, which
+        # is what every caller did implicitly before there was a way to say
+        # otherwise.
+        valid_from=valid_from,
     )
     try:
         from . import decision_intelligence

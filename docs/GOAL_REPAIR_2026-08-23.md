@@ -70,7 +70,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R2** | A CI run provisions a runner and executes at least one step | ≥ 1 completed run | 0 of 69 | **Blocked** — inherits C1 of `GOAL_2026-08-13`; account billing, or a public repository, or a self-hosted runner. A decision, not work |
 | **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Met** — 6 of 6, plus the two halves that made the fix inert: `base_type` is read where `type` is absent, and an archived property is no longer enforced. `oms/test_property_constraints.py`, 41 assertions |
-| **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Open** — after R3 |
+| **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
 | **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet exists | **Open** — ratchet before fix |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
 | **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named: `action_outbox`, `AgentStudio.py`, `ontology_value_types`, `system_migration_records`, the shadowed interface check, `POST /schedules/{id}/trigger` | **Open** |
@@ -79,6 +79,32 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## Valid time: implemented rather than withdrawn
+
+The plan offered both, and said retraction was smaller. Reading the code changed the
+answer. `_query_source` has always filtered `valid_from <= t AND (valid_to IS NULL OR
+valid_to > t)` -- the correct half-open predicate, written correctly, the whole time. The
+read side was finished. Only the write side was missing, in two ways:
+
+- **No caller ever supplied a business time.** `valid_from=` appeared once in the whole
+  backend, as the recorder's own default of `now`. Every event had
+  `valid_from == transaction_time`, so the axes moved together and `as_of_valid_time`
+  could not answer anything `as_of_transaction_time` did not answer identically.
+- **No interval was ever closed.** `valid_to` was written as `None` at the only write site
+  and set to a non-NULL value nowhere, so the predicate's second half was dead code.
+
+Withdrawing would have meant deleting a working query planner to match a missing parameter.
+Both gaps are now closed at the chokepoint, and the claim is testable: an object is silver
+in January and gold from June; an auditor in December records that it was really bronze all
+along. *What we believe now about March* is bronze; *what we believed in June about March*
+is silver. One object, one question, two answers, one per axis.
+
+What is deliberately not implemented is interval splitting. A correction effective before an
+existing interval supersedes rather than divides it, and `_close_prior_interval` says so in
+its docstring rather than implying more. The cost is bounded too: the close is skipped
+entirely at version 1, so a bulk hydrate of new objects pays nothing for it and the numbers
+below still hold.
 
 ## What history costs on a bulk hydrate
 

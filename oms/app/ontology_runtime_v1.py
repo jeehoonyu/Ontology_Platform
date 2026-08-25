@@ -1088,6 +1088,46 @@ def materialize_semantic_definitions(
     return {"status": "COMPILED", "project_id": project_id, "revision_id": revision_id, "counts": counts, "checksum": checksum}
 
 
+def _close_prior_interval(db: Session, project_id: str, object_id: str, boundary: int) -> int:
+    """Close the valid-time interval this event supersedes.
+
+    The read side has always been ready for this. `_query_source` filters
+    `valid_from <= t AND (valid_to IS NULL OR valid_to > t)`, which is the
+    half-open interval predicate, and it was correct the whole time -- it just
+    never had a closed interval to find, because `valid_to` was written as None
+    at the only write site and set to non-NULL nowhere in the codebase. Every
+    interval was open, so the predicate collapsed to `valid_from <= t`,
+    `as_of_valid_time` and `as_of_transaction_time` returned the same rows, and a
+    retroactive correction could not be expressed.
+
+    Both stores have to be closed. Sessions here are `autoflush=False`, so an
+    UPDATE cannot see an event added earlier in the same transaction -- the same
+    fact `_next_change_version` was built around.
+
+    What this implements is the ordinary case: a new version supersedes the open
+    one from `boundary` onward. It does not split an interval around an
+    out-of-order correction, and it says so rather than pretending: an event
+    whose `valid_from` precedes an already-closed interval leaves that interval
+    alone.
+    """
+    closed = 0
+    for pending in list(db.new):
+        if (isinstance(pending, ObjectChangeEvent)
+                and pending.project_id == project_id
+                and pending.object_id == object_id
+                and pending.valid_to is None
+                and pending.valid_from <= boundary):
+            pending.valid_to = boundary
+            closed += 1
+    closed += db.query(ObjectChangeEvent).filter(
+        ObjectChangeEvent.project_id == project_id,
+        ObjectChangeEvent.object_id == object_id,
+        ObjectChangeEvent.valid_to.is_(None),
+        ObjectChangeEvent.valid_from <= boundary,
+    ).update({"valid_to": boundary}, synchronize_session=False)
+    return closed
+
+
 def record_object_change(
     db: Session,
     object_instance: models.ObjectInstance,
@@ -1110,6 +1150,16 @@ def record_object_change(
     version = _next_change_version(db, object_instance.project_id, object_instance.id)
     changed_fields = sorted(key for key in set(before) | set(after) if before.get(key) != after.get(key))
     now = _now()
+    effective_from = valid_from or now
+    if version > 1:
+        # Version 1 is the object's first event, so there is nothing open to
+        # close. Skipping it keeps a bulk hydrate of new objects at the cost
+        # measured in docs/object-write-cost-evidence.json -- the close is an
+        # UPDATE per object, and paying it for rows that cannot have a
+        # predecessor would undo prime_change_versions.
+        _close_prior_interval(db, object_instance.project_id, object_instance.id,
+                              effective_from)
+
     row = ObjectChangeEvent(
         id=f"object_event_{uuid.uuid4().hex}",
         project_id=object_instance.project_id,
@@ -1125,7 +1175,7 @@ def record_object_change(
         changed_fields=changed_fields,
         evidence=dict(evidence or {}),
         ontology_revision_id=_active_revision_id(db, object_instance.project_id),
-        valid_from=valid_from or now,
+        valid_from=effective_from,
         valid_to=None,
         transaction_time=now,
     )
