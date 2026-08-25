@@ -49,7 +49,7 @@ Legend: ✅ implemented · 🟡 partial · ❌ missing (to implement)
 ## Developer toolchain
 | Tool | Status | Local equivalent |
 |---|---|---|
-| Platform APIs & SDKs | ✅ | the FastAPI surface + `AgentStudio.py` |
+| Platform APIs & SDKs | ✅ | the FastAPI surface + `/ontology/registry/{id}/sdk/{language}` + `oms/ontology_cli.py` |
 | **Ontology SDK (OSDK) generator** | ❌→✅ | **new** `/osdk/generate` (emit typed descriptor) |
 | **Compute Modules** | ❌→✅ | **new** `/compute-modules` (register/invoke) |
 | **Code Repositories** | ❌→✅ | **new** `/code-repositories` (branches, files, commits, checks, merge) |

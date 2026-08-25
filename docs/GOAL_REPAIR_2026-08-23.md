@@ -73,12 +73,64 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
 | **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet existed | **Open** — measured and ratcheted: 1,012 non-public handlers, 282 mutating ones unauthorized, now **262**. `oms/audit_auth_coverage.py` fails the build when the count rises; `oms/test_auth_coverage.py`, 574 assertions |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
-| **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named: `action_outbox`, `AgentStudio.py`, `ontology_value_types`, `system_migration_records`, the shadowed interface check, `POST /schedules/{id}/trigger` | **Open** |
+| **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named | **Open** — 1 of 6 removed (`AgentStudio.py`). The premise was wrong about the other five, and the investigation below says why: one has a dispatcher written in JSON rather than Python, three are blocked by R14, and one costs more to delete than to wire |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
+| **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 assert `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide carry the string | **Open** — blocks every migration-requiring change, R8 included |
 | **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## R8: five of the six were not deletable, and finding that out was the work
+
+Twelve agents traced every consumer of the six candidates and then tried to refute each
+verdict. **Four of six verdicts were overturned by the refutation pass**, which is the
+justification for having run it: every one of those four would have been a broken build.
+
+**`AgentStudio.py` — removed.** Inert as claimed: no importer, no test, no CI step. But not
+free-standing — `oms/Dockerfile:20` copied it into the production image, so deleting the
+file alone would have broken the container build, `docker compose up --build`, the CI
+container job, the production-acceptance rehearsal, *and* the `check_images` checker written
+two commits earlier for R7. The Dockerfile line went with it, along with four documentation
+claims that told readers to run it. Its replacement text was checked against the running
+app rather than written from memory — the first draft named a response key
+(`staged_actions`) and an agent id (`maintenance_copilot`) that do not exist, which is
+exactly the defect being repaired.
+
+**`action_outbox` — do not delete.** The premise said rows are written and never read. That
+is false twice over. Ten application call sites read the table as the ledger of the last
+executed action — `asset_reliability_scenario` and `industrial_workflow` build workflow
+state, proof reports and the Command Center's execution-evidence panel from it, and
+`outbox_event_id` is the only execution handle `POST /actions/execute` returns to a client.
+And the dispatcher does exist; it is simply not written in Python.
+`debezium-connector.json:13` captures `public.action_outbox`, and `docker-compose.yml:106`
+runs the connector. What is missing is not the consumer but the status transition.
+
+**`ontology_value_types` — blocked by R14.** Genuinely unwired: nothing writes the linking
+key through any route. But dropping two tables needs a revision past `0042`, and 27 test
+scripts assert that literal head immediately after `upgrade head`.
+
+**`system_migration_records` — blocked, and the honest version is redder.** Twelve
+consumers, including `/project/validate`, `/project/readiness`, `/ui-state/validation` and
+the React Validation workspace, plus two whole test files. The refutation's finding is the
+one that matters: a truthful `/system/migrations` returns no head on every SQLite
+`create_all` fixture in this repo, so replacing the fabrication turns three green tests red.
+The fabrication is worth removing and it is not a deletion.
+
+**The shadowed interface check — one assertion away.**
+`oms/test_api_v1_route_coverage.py:22` asserts `len(authoritative) >= 4`, and the count is
+exactly 4. The shallow handler is authoritative *only because* it claimed the `/api/v1`
+shape first; removing it drops the count to 3 and fails the build. Worse, the other three
+entries are the `/automations` duplicates — fixing all four the same way drives the bucket
+to 0 and leaves a **P0** row in `VALIDATION_MATRIX.md` with no witness. That is a design
+decision about what evidence the P0 claim rests on, not a deletion.
+
+**The schedule endpoints — cheaper to wire than to delete.** Inert as described, with no
+consumer anywhere including the vanilla UI. But bare deletion strands `GET /builds` and
+`GET /schedules/{id}/metrics`, and dropping the table needs a revision — R14 again. One
+correction to the premise: `POST /project/import` also writes `builds` rows, so fabricated
+`success` rows propagate through snapshot export/import and survive either fix until they
+are purged.
 
 ## Authorization, counted before it is closed
 

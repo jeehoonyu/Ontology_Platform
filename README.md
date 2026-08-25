@@ -51,7 +51,7 @@ Based on modern ontology-driven principles, this backend separates the data plan
   - `oms/app/main.py`: Rest API Endpoints.
   - `oms/app/models.py` & `models_action.py`: Database tables, runtime graph, pipelines, agents, evals, outbox, approvals, and audit abstractions.
   - `oms/app/runtime.py`: Validation, object sets, data health, pipeline execution, ontology hydration, action mutation, context packing, and eval scoring logic.
-  - `oms/AgentStudio.py`: Pydantic structured SDK Tools for LLM-to-Ontology mapping.
+  - `oms/ontology_cli.py`: generates typed Python and npm SDK artifacts from a published ontology revision (`GET /ontology/registry/{entry_id}/sdk/{language}`).
   - `oms/test_aip_runtime.py`: End-to-end local scenario covering pipeline hydration, agent proposal, approval, action execution, idempotency, and evals.
   - `oms/test_gis_runtime.py`: Spatial scenario covering GeoJSON hydration, radius search, bbox filtering, FeatureCollection export, and geofence evaluation.
   - `oms/test_foundry_gis_features.py`: Foundry-style scenario covering MGRS, saved object sets, map layers, and object profiles.
@@ -128,10 +128,12 @@ For signed connector, transform, widget, ontology-package, and model-provider ex
    ```
 
 6. **Test the Agentic Tooling**
-   Simulates LLM function-calling workflows triggering the Human-In-The-Loop mechanism:
+   Exercises the durable agent path: scoped invocation, staged action proposals, and the
+   approval gate that stands between a proposal and a mutation.
    ```bash
    cd oms
-   python AgentStudio.py
+   python test_aip_agent_async_execution.py
+   python test_agent_task_graph.py
    ```
 
 ## Sample Examples
@@ -239,20 +241,28 @@ print(response2.json())
 # Output: {'status': 'SUCCESS_CACHED', 'message': 'Action previously executed.', 'outbox_event_id': '...'}
 ```
 
-### 3. Agent Tool Execution (LLM SDK)
-Simulating an LLM reading Context Packs and proposing a mutation.
+### 3. Agent Tool Execution (HTTP)
+A scoped agent retrieves governed ontology context and answers from it. Actions are
+proposed, never executed inline — a tool bound to an action with `requires_approval` or a
+high `risk_level` stages an `ApprovalRequest` and returns it unexecuted.
 ```python
-from AgentStudio import ObjectQueryTool, ActionTool
+import requests
 
-# 1. LLM reads structured relational graph context (Ontology-Aware Generation)
-query_tool = ObjectQueryTool()
-context_pack = query_tool.execute("employee", {"role": "Engineer"})
+requests.post("http://127.0.0.1:8000/domains/maintenance/bootstrap", json={})
+invoke = requests.post(
+    "http://127.0.0.1:8000/aip/agents/maintenance_ops_agent/invoke",
+    json={"prompt": "which work orders are overdue?", "limit": 5},
+).json()
 
-# 2. LLM proposes a kinetic mutation, caught by Human-In-The-Loop (HITL)
-action_tool = ActionTool()
-result = action_tool.execute("promote_employee", {"employee_id": "obj_1"})
-print(result)
-# Output: {'status': 'REQUIRES_HUMAN_APPROVAL', 'message': "Action 'promote_employee' staged for HITL review dashboard."}
+print(sorted(invoke))
+# ['agent_id', 'answer', 'created_at', 'execution_job_id', 'idempotent_replay',
+#  'policy_summary', 'prompt', 'proposed_actions', 'retrieval', 'run_id', 'tool_calls']
+
+print(invoke["proposed_actions"])
+# [] — the bootstrap agent has no action tool bound, so it proposes nothing.
+# With one bound, each entry carries action_type_id, parameters, requires_approval,
+# policy_decision, approval_request_id and executed=False. `oms/test_aip_runtime.py`
+# is the worked example, from proposal through approval to execution.
 ```
 
 ## AIP-Style API Surface
