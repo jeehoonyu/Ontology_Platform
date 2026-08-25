@@ -67,7 +67,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | # | Condition | Threshold | Baseline 2026-08-23 | State |
 | --- | --- | --- | --- | --- |
 | **R1** | The enforcement hook executes on a clone that is not Windows | 9 of 9 checks run | 9 of 9, tracked mode `100755` | **Met** — `oms/test_hook_installable.py`, 43 assertions; reverting the mode fails it |
-| **R2** | A CI run provisions a runner and executes at least one step | ≥ 1 completed run | 0 of 69 | **Blocked** — inherits C1 of `GOAL_2026-08-13`; account billing, or a public repository, or a self-hosted runner. A decision, not work |
+| **R2** | A CI run provisions a runner and executes at least one step | >= 1 completed run | 0 of 69 | **Met** — 2026-08-25. Runners provision; jobs execute 9 to 25 steps against 0 for all 69 runs before. The repository was made public, so hosted runners are free and unmetered |
 | **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Met** — 6 of 6, plus the two halves that made the fix inert: `base_type` is read where `type` is absent, and an archived property is no longer enforced. `oms/test_property_constraints.py`, 41 assertions |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
@@ -80,6 +80,53 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
 | **R12** | The suite passes on a host that is not the one it was written on | 243 of 243 | 237 of 243; six encoded Windows or x86 assumptions, one of them a product defect | **Met** — **243 of 243**, `verify.py` 21 of 21 in 12.0 min. Tier A went from 5 met / 1 unmet to **7 met / 0 unmet** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## R2: the first CI run in this repository's history
+
+The block was exactly what `GOAL_2026-08-13` diagnosed, still, five days later and on a
+fresh dispatch: *"The job was not started because recent account payments have failed or
+your spending limit needs to be increased."* Every job, 0 steps.
+
+Two smaller things had to move first. The workflow triggered only on `push` to `master` and
+on `pull_request`, so eighteen commits on a branch produced no run at all and *"is a runner
+available today?"* could only be answered by merging something; `workflow_dispatch` answers
+it without merging. And the repository went public, which makes hosted runners free and
+unmetered — chosen over paid minutes and over a self-hosted runner on a laptop.
+
+Before the switch, `foundry-docs-full/`, `foundary-images/`, `foundry-docs/README.md` and
+the ten topic directories were removed from the working tree **and from all 288 commits**:
+118 files of notes derived from Palantir's documentation, in Palantir's palette under
+`PALANTIR · FOUNDRY` headers, plus five screenshots of the Foundry product UI showing a real
+object catalog. This project's own analysis stayed — `VALIDATION_MATRIX.md`,
+`VALIDATION_REPORT.md`, `COVERAGE.md`. No credential appears in any of the 3,795 objects
+scanned beforehand.
+
+### What running it found
+
+Runners provision and steps execute — 9 to 25 per job. The frontend job passes. The rest is
+the first honest look at steps that had only ever been typed by hand:
+
+| Job | First run | Second run |
+| --- | --- | --- |
+| Frontend type, build, dependency audit | **success** | **success** |
+| PostgreSQL migration chain | failed on a pinned head | failed later, at the mixed-workload benchmark |
+| Backend, conformance, SQLite migrations | failed on a UI readiness assertion | **cancelled at the 20-minute job budget** |
+| Production container and Compose | plugin egress `403 Forbidden` | same |
+
+Two were ours and are fixed. **`ci.yml` pinned the migration head** in an inline assertion —
+R14's exact defect, in the one file my gate did not scan, so the file that runs the gates
+carried what the gates exist to stop. The gate scans `.github/workflows/` now.
+And `test_human_ui_readiness` asserted `/workspace/*` serves the React shell, which is true
+only once the bundle is built; the backend job set up Node and never used it, so the
+assertion could not hold there and passed locally only because someone had built for another
+reason.
+
+Three remain, and all three are the same kind of discovery: **a budget or an environment
+that has never been exercised.** The backend job's `timeout-minutes: 20` was written without
+a run to size it against and the suite does not fit. The mixed-workload benchmark and the
+egress rehearsal have never executed anywhere but their author's machine. None of these is a
+regression; each is a number or an assumption meeting reality for the first time, which is
+what C1 was opened to make possible.
 
 ## R12: the six, and what each was really hiding
 
