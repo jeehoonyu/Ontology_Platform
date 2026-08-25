@@ -69,7 +69,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R1** | The enforcement hook executes on a clone that is not Windows | 9 of 9 checks run | 9 of 9, tracked mode `100755` | **Met** — `oms/test_hook_installable.py`, 43 assertions; reverting the mode fails it |
 | **R2** | A CI run provisions a runner and executes at least one step | ≥ 1 completed run | 0 of 69 | **Blocked** — inherits C1 of `GOAL_2026-08-13`; account billing, or a public repository, or a self-hosted runner. A decision, not work |
 | **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
-| **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Open** — after R3 |
+| **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Met** — 6 of 6, plus the two halves that made the fix inert: `base_type` is read where `type` is absent, and an archived property is no longer enforced. `oms/test_property_constraints.py`, 41 assertions |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Open** — after R3 |
 | **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet exists | **Open** — ratchet before fix |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
@@ -157,11 +157,18 @@ validated.
 
 The property language has `required` and no `nullable`, so absence is how it says "no
 value" -- which makes dropping unset keys the fix in the vocabulary the ontology actually
-has. But the gap is worth recording on its own: **the type system cannot express an optional
-typed property**, only a required one and an absent one. Ten arguments in that module alone
-are `Optional`. That belongs to R4, and R4 should settle it before enforcing the remaining
-constraint kinds, or the first `enum` on an optional property will produce the same
-surprise.
+has. Two more writers produced the same `None` afterwards, so the rule moved to the
+chokepoint as `drop_unrepresentable_nulls`, narrow enough that a `json` property keeps a
+null that was meant. An optional typed property is now expressible, which is what R4 was
+waiting on.
+
+R4 then found two halves that would have made it inert. The type key is spelled `type` in
+the object type's column and `base_type` in the profile, and `_schema_type` read only the
+first -- so pointing validation at the live schema, which R3 did, validated *nothing* for
+exactly the types that had been edited. And a property retired with `status: "archived"`
+kept its `required` flag, so retiring one made every later write fail against a schema
+nobody meant to apply. Enforcing the six constraints without those two would have been more
+validation and less checking.
 
 ## Non-completion rule
 

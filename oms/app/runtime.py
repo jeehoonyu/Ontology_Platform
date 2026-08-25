@@ -45,15 +45,96 @@ def create_audit_log(
 
 
 def _schema_type(definition: Any) -> Optional[str]:
+    """The runtime type of a property, however the store spells it.
+
+    Two stores, two spellings. `ObjectType.properties` carries `type`;
+    `ObjectTypeProfile.properties` carries `base_type` and deliberately omits
+    `type` (`ontology_core._stored_property_spec` sets it only when the spec is
+    not profile-backed). Reading `type` alone therefore returned None for every
+    profile-backed property, and `_matches_type(value, None)` is True -- so
+    routing validation at the live schema, which R3 did, would have quietly
+    validated nothing at all for exactly the types that had been edited.
+    """
     if isinstance(definition, dict):
-        return definition.get("type")
+        declared = definition.get("type")
+        if declared:
+            return declared
+        base_type = definition.get("base_type")
+        if base_type:
+            from .ontology_core import _runtime_schema_type
+
+            return _runtime_schema_type(str(base_type))
+        return None
     if isinstance(definition, str):
         return definition
     return None
 
 
+def _schema_active(definition: Any) -> bool:
+    """An archived property is a property being retired, not one being enforced."""
+    if not isinstance(definition, dict):
+        return True
+    return str(definition.get("status", "active")).lower() == "active"
+
+
 def _schema_required(definition: Any) -> bool:
-    return bool(isinstance(definition, dict) and definition.get("required"))
+    return bool(isinstance(definition, dict)
+                and definition.get("required")
+                and _schema_active(definition))
+
+
+def _constraint_errors(field: str, value: Any, definition: Any) -> List[str]:
+    """The declared constraints, applied.
+
+    `ontology_core.ObjectTypePropertyCreate` accepts minimum, maximum,
+    min_length, max_length, pattern and enum; `_validate_property_constraints`
+    checks they are mutually consistent -- that minimum does not exceed maximum --
+    and then nothing ever compared a value against any of them. An
+    enum-constrained property accepted any string for as long as the field has
+    existed.
+    """
+    if not isinstance(definition, dict) or not _schema_active(definition):
+        return []
+
+    errors: List[str] = []
+
+    enum_values = definition.get("enum") or []
+    if enum_values and value not in enum_values:
+        allowed = ", ".join(repr(candidate) for candidate in enum_values[:6])
+        if len(enum_values) > 6:
+            allowed += ", ..."
+        errors.append(f"Property '{field}' must be one of [{allowed}], got {value!r}")
+
+    pattern = definition.get("pattern")
+    if pattern and isinstance(value, str):
+        try:
+            if re.search(str(pattern), value) is None:
+                errors.append(f"Property '{field}' does not match pattern {pattern!r}")
+        except re.error:
+            # An unusable pattern is a defect in the schema, not in the row, and
+            # failing the write would blame the wrong author. `/ontology/validate`
+            # is where a bad declaration should surface.
+            pass
+
+    # bool is an int in Python, and `True >= minimum` is a comparison nobody
+    # declared. Numeric bounds apply to numbers.
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = definition.get("minimum")
+        maximum = definition.get("maximum")
+        if minimum is not None and value < minimum:
+            errors.append(f"Property '{field}' is below the minimum of {minimum}")
+        if maximum is not None and value > maximum:
+            errors.append(f"Property '{field}' is above the maximum of {maximum}")
+
+    if isinstance(value, (str, list)):
+        min_length = definition.get("min_length")
+        max_length = definition.get("max_length")
+        if min_length is not None and len(value) < min_length:
+            errors.append(f"Property '{field}' is shorter than the minimum length of {min_length}")
+        if max_length is not None and len(value) > max_length:
+            errors.append(f"Property '{field}' is longer than the maximum length of {max_length}")
+
+    return errors
 
 
 def _matches_type(value: Any, declared_type: Optional[str]) -> bool:
@@ -99,9 +180,15 @@ def validate_object_properties(object_type: models.ObjectType, properties: Dict[
     for field, value in properties.items():
         if field not in schema:
             continue
-        declared_type = _schema_type(schema[field])
+        definition = schema[field]
+        declared_type = _schema_type(definition)
         if not _matches_type(value, declared_type):
             errors.append(f"Property '{field}' expected {declared_type}, got {type(value).__name__}")
+            # A value of the wrong type cannot meaningfully be range- or
+            # length-checked, and reporting both would bury the cause under its
+            # consequence.
+            continue
+        errors.extend(_constraint_errors(field, value, definition))
 
     return errors
 
