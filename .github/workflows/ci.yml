@@ -23,13 +23,13 @@ jobs:
   backend:
     name: Backend, conformance, and SQLite migrations
     runs-on: ubuntu-latest
-    # 20 was written before any run existed to size it against, and the first run
-    # that reached this job was cancelled at 20m13s partway through the suite. The
-    # suite takes ~12 minutes on an M-series laptop and a hosted runner is slower,
-    # so this is deliberately generous: the point is to let one run finish and
-    # report a real duration, then set this from that number rather than from a
-    # guess a second time.
-    timeout-minutes: 45
+    # Sized from a run, not a guess. 20 was written before any run existed to
+    # measure -- the first run that reached this job was cancelled at 20m13s. Given
+    # 45 to let one finish, it completed in 22m58s: 243 suite scripts, the frontend
+    # build, the pipeline benchmark and the latency-injected MinIO benchmark. 35
+    # leaves half again on top of the observed time, which is headroom for a slow
+    # runner without hiding a suite that has started to crawl.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
