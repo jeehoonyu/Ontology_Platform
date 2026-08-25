@@ -83,7 +83,15 @@ source = """
 def handle(request):
     operation = request['operation']
     if operation == 'read_outside':
-        open('C:/Windows/System32/drivers/etc/hosts', 'r').read()
+        # A path that exists on THIS host, so the sandbox is what stops the read.
+        # This was hardcoded to 'C:/Windows/System32/drivers/etc/hosts', which
+        # exists only on Windows. Everywhere else the open failed with
+        # FileNotFoundError before the sandbox was ever consulted -- so the
+        # filesystem-escape denial, the thing this case exists to prove, was
+        # never exercised off Windows and the failure looked like a host quirk.
+        import os as _os
+        outside = 'C:/Windows/System32/drivers/etc/hosts' if _os.name == 'nt' else '/etc/hosts'
+        open(outside, 'r').read()
     if operation == 'network_probe':
         import socket
         socket.create_connection(('127.0.0.1', 9), timeout=0.1)

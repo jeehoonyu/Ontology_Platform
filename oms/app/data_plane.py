@@ -1046,6 +1046,15 @@ def _parquet_manifest_metadata(base: Path, files: List[Path], *, partitioned: bo
         import pyarrow.parquet as parquet  # type: ignore
     except ImportError as exc:
         raise HTTPException(status_code=503, detail="Parquet registration requires pyarrow") from exc
+    # Both sides resolved before any comparison. On macOS `/var` is a symlink to
+    # `/private/var`, so a caller holding an unresolved base while the file list
+    # came back resolved made `relative_to` raise ValueError -- and the bare
+    # `except Exception` below reported that as "Registered snapshot is not valid
+    # Parquet", naming a file that was perfectly valid. Every host whose temporary
+    # directory traverses a symlink hits it, which is most of them.
+    base = base.resolve()
+    files = [path.resolve() for path in files]
+
     arrow_schema = None
     row_count = 0
     byte_size = 0
@@ -1056,6 +1065,14 @@ def _parquet_manifest_metadata(base: Path, files: List[Path], *, partitioned: bo
     entries = []
     try:
         for path in files:
+            if not path.is_relative_to(base):
+                # Said plainly, because the generic handler below would call this
+                # a Parquet defect and send the reader to the wrong file.
+                raise HTTPException(
+                    status_code=422,
+                    detail=(f"Snapshot file '{path}' is outside the snapshot directory "
+                            f"'{base}'"),
+                )
             parquet_file = parquet.ParquetFile(path)
             candidate_schema = parquet_file.schema_arrow
             if arrow_schema is None:

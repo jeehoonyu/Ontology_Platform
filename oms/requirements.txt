@@ -30,3 +30,17 @@ httpx==0.28.1  # required by starlette.testclient, which every
                     # a clean install from this file could not import the suite,
                     # and it only ever worked here because an unrelated project
                     # had installed httpx into the shared interpreter.
+PyYAML==6.0.3  # required by oms/test_plugin_executor_production_rehearsal.py, which
+               # parses the rehearsal Compose model. Undeclared until 2026-08-25:
+               # a clean install from this file could not run that script, and it
+               # only ever worked where PyYAML arrived some other way. The same
+               # defect this file records for httpx, found the same way -- by
+               # installing from it on a machine that had nothing else.
+greenlet==3.5.5  # SQLAlchemy declares greenlet only for platform_machine in
+               # {aarch64, ppc64le, x86_64, amd64, AMD64, win32, WIN32}. Apple
+               # Silicon reports arm64, which is in none of them, so the exact
+               # pins above resolved to a *different closure* per platform and
+               # test_dependency_provenance -- the file whose whole subject is
+               # that a measurement names the code that produced it -- failed on
+               # the closure it was asserting. Declared here so the closure is the
+               # same everywhere, which is what D1 asks for.

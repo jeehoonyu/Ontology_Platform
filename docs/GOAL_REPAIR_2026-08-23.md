@@ -78,8 +78,39 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
-| **R12** | The suite passes on a host that is not the one it was written on | 240 of 240 | 234 of 240; six encode Windows or x86 assumptions, one of them a product defect | **Open** |
+| **R12** | The suite passes on a host that is not the one it was written on | 243 of 243 | 237 of 243; six encoded Windows or x86 assumptions, one of them a product defect | **Met** — **243 of 243**, `verify.py` 21 of 21 in 12.0 min. Tier A went from 5 met / 1 unmet to **7 met / 0 unmet** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## R12: the six, and what each was really hiding
+
+Every one was a host assumption, and three of them were hiding a check that had never run.
+
+| Was | Really |
+| --- | --- |
+| `test_s3_snapshot_pipeline` | **A product defect.** `_parquet_manifest_metadata` compared an unresolved base against resolved children, so on macOS — where `/var` is a symlink to `/private/var` — it rejected the Parquet file it had just written. Worse, the bare `except Exception` reported a path bug as *"Registered snapshot is not valid Parquet"*, naming a file that was perfectly valid. Both sides are resolved now, and a file genuinely outside the directory says so in its own words. |
+| `test_signed_plugin_runtime` | **A sandbox check that never ran off Windows.** The escape attempt opened `C:/Windows/System32/drivers/etc/hosts`. On Windows that path exists, so the sandbox denies it and the case proves something. Everywhere else the open failed with `FileNotFoundError` *before the sandbox was consulted*. It now opens a path that exists on the host, and the denial is real: `PermissionError: Plugin filesystem access is outside the sandbox`. |
+| `test_recovery_scripts` | **Two shims, one platform.** It invoked `powershell.exe`, which exists only on Windows, and stubbed docker with a `docker.cmd` batch file that POSIX `PATH` lookup can never resolve as `docker` — so the scripts found the *real* docker and tried to reach a daemon. It resolves `pwsh` now and writes an executable POSIX shim beside the `.cmd`. |
+| `test_dependency_provenance` | SQLAlchemy declares `greenlet` for `platform_machine` in `{aarch64, …}`; Apple Silicon reports `arm64`, so the *exact* pins resolved to a different closure per platform — inside the file whose entire subject is that a measurement names the code that produced it. Declared explicitly. |
+| `test_plugin_executor_production_rehearsal` | `import yaml`, and PyYAML was undeclared — the same defect `requirements.txt` already records for httpx, found the same way. |
+| `test_partitioned_snapshot_pipeline` | `removeprefix("file:///")` leaves `C:/…` on Windows and a *relative* `var/…` on POSIX. It now calls `data_plane._file_uri_path`, the product's own helper, instead of keeping a second copy of the rule. |
+
+## Tier A: 7 met, 0 unmet
+
+| Sub-condition | 2026-08-18 | now |
+| --- | --- | --- |
+| validation matrix | met | met |
+| documentation conformance | met | met |
+| backend suite passes sequentially | met | **met** — 243 of 243 |
+| alembic twice on postgres, with downgrade | unavailable | **met** |
+| production compose renders and images build | unavailable | unavailable — *compose renders*; the image build needs a running Docker engine |
+| browser matrix, attributable skips | **unmet** | **met** — 0 failures, 136 attributable skips |
+| alembic twice on sqlite | met | met |
+| frontend typechecks, builds, audits clean | met | met |
+
+The single `unmet` is gone. What remains is one sub-condition needing a Docker daemon, and
+`unavailable` is still not a pass — the tier is not claimed. PostgreSQL was installed here to
+earn its row; it runs on port 5433 and is not registered as a login service, so it stops
+with `pg_ctl -D /opt/homebrew/var/postgresql@16 stop`.
 
 ## Moving the head found the staleness gate running nowhere
 

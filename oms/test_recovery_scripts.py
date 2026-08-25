@@ -49,16 +49,45 @@ sys.exit(0)
 """,
     encoding="utf-8",
 )
+# Two shims, because PATH lookup differs. Windows resolves `docker` to
+# `docker.cmd` via PATHEXT; POSIX resolves it only to a file named exactly
+# `docker` with the executable bit. Only the .cmd existed, so on every other host
+# the scripts found the *real* docker on PATH and tried to talk to a daemon --
+# reporting "Cannot connect to the Docker daemon" as a failing backup procedure.
 (work / "docker.cmd").write_text(f'@echo off\r\n"{os.sys.executable}" "{fake}" %*\r\n', encoding="ascii")
+posix_shim = work / "docker"
+posix_shim.write_text(f'#!/bin/sh\nexec "{os.sys.executable}" "{fake}" "$@"\n', encoding="ascii")
+posix_shim.chmod(0o755)
 
 env = os.environ.copy()
 env["PATH"] = f"{work}{os.pathsep}{env['PATH']}"
 env["FAKE_DOCKER_LOG"] = str(log_path)
 
 
+def powershell() -> str:
+    """Whichever PowerShell this host has.
+
+    `powershell.exe` is Windows PowerShell and exists nowhere else, so this file
+    raised FileNotFoundError on every other host -- reporting a missing shell as a
+    failing recovery procedure. `pwsh` is PowerShell 7, which runs on macOS and
+    Linux and is what the scripts are written against anyway: they use no
+    Windows-only cmdlet, and the docker calls are stubbed by fake_docker.py.
+    """
+    for candidate in ("pwsh", "powershell.exe", "powershell"):
+        found = shutil.which(candidate)
+        if found:
+            return found
+    raise AssertionError(
+        "no PowerShell found. Install PowerShell 7 (`brew install powershell`, "
+        "`apt install powershell`) to exercise the recovery scripts on this host.")
+
+
+POWERSHELL = powershell()
+
+
 def run_ps(script: str, *args: str, fail: bool = False, extra_env=None):
     global passed
-    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "scripts" / script), *args]
+    command = [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "scripts" / script), *args]
     result = subprocess.run(command, cwd=root, env={**env, **(extra_env or {})}, text=True, capture_output=True, timeout=60)
     assert (result.returncode != 0) if fail else (result.returncode == 0), f"{script}: {result.returncode}\n{result.stdout}\n{result.stderr}"
     passed += 1

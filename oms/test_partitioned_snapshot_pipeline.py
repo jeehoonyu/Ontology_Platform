@@ -18,6 +18,7 @@ os.environ["DATA_SNAPSHOT_VERIFY_HASH"] = "true"
 import pyarrow as pa  # noqa: E402
 import pyarrow.parquet as parquet  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from app.data_plane import _file_uri_path  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -135,7 +136,12 @@ assert output_snapshot["partition_spec"]["fields"] == ["region"]
 assert output_snapshot["partition_spec"]["hive_partitioning"] is True
 assert output_snapshot["partition_spec"]["_manifest"]["file_count"] == 2
 assert output_snapshot["lineage"]["file_count"] == 2
-assert Path(output_snapshot["storage_uri"].removeprefix("file:///")).is_dir()
+# Through the product's own helper rather than a second copy of the rule. This
+# line reimplemented it with the Windows form -- stripping "file:///" leaves
+# "C:/..." there and a *relative* "var/folders/..." on POSIX, so the directory was
+# looked for under the working directory and never found. _file_uri_path strips
+# "file://" off Windows, keeping the leading slash.
+assert _file_uri_path(output_snapshot["storage_uri"]).is_dir()
 
 output_query = checked(client.post(
     f"/api/v1/dataset-snapshots/{output_snapshot['id']}/query",
