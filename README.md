@@ -373,7 +373,7 @@ To complete the public Foundry tool surface, the platform adds 18 self-contained
 - `dev_toolchain.py` — Code Repositories, Workspaces, Workbook: `/code-repositories` (branches, files, commits, `.../checks/run`, `.../merge`), `/code-workspaces(.../status)`, `/code-workbooks(.../run)`.
 - `notepad.py` — Notepad documents & reports with live ontology embeds: `/notepad/documents`, `.../blocks`, `.../render`, `.../export`.
 
-> With these two modules added, **every tool documented in `foundry-docs-full/` has a working local equivalent** (100% breadth). The app now exposes **~796 routes** across **~209 tables**, verified by **70 test files (all green)** — see `foundry-docs/COVERAGE.md` for the full pass-by-pass ledger.
+> With these two modules added, **every Foundry tool surveyed during this work has a working local equivalent** (100% breadth). The app now exposes **~796 routes** across **~209 tables**, verified by **70 test files (all green)** — see `foundry-docs/COVERAGE.md` for the full pass-by-pass ledger.
 
 ## Enhancements — query pagination, real file upload, operator UI
 

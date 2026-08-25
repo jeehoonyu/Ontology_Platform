@@ -104,7 +104,7 @@ Legend: ✅ implemented · 🟡 partial · ❌ missing (to implement)
 Fully built as `admin_directory.py` + `admin_auth.py` + `admin_usage.py` (see Pass 12 below). Enrollments, organizations, spaces, users, groups, memberships, scope-level roles, authentication providers, API tokens/service accounts/OAuth clients, and resource/usage quotas.
 
 ---
-**Summary:** every tool documented in `foundry-docs-full/` now has a working local equivalent. ~28 tools were implemented originally; **~29 new local equivalents** were added across **20 self-contained modules** (18 in the first pass + `dev_toolchain` and `notepad`), bringing the platform to **100% breadth coverage** of the documented Foundry tool surface. The app exposes **248 routes** across **75 tables**, verified by `oms/test_foundry_tools.py` (**95 endpoint assertions**) plus the 7 existing scenario tests — all green. All implementations are deterministic, local approximations — not Palantir's proprietary APIs.
+**Summary:** every Foundry tool surveyed during this work now has a working local equivalent. ~28 tools were implemented originally; **~29 new local equivalents** were added across **20 self-contained modules** (18 in the first pass + `dev_toolchain` and `notepad`), bringing the platform to **100% breadth coverage** of the documented Foundry tool surface. The app exposes **248 routes** across **75 tables**, verified by `oms/test_foundry_tools.py` (**95 endpoint assertions**) plus the 7 existing scenario tests — all green. All implementations are deterministic, local approximations — not Palantir's proprietary APIs.
 
 ---
 

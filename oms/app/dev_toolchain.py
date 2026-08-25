@@ -1,7 +1,7 @@
 """
 Developer toolchain local equivalents: Code Repositories, Code Workspaces, and
 Code Workbook. These complete the Foundry dev-toolchain surface documented in
-foundry-docs-full/dev-toolchain/. All logic is deterministic and local — no real
+the public Foundry dev-toolchain documentation. All logic is deterministic and local — no real
 git server, IDE, or Spark execution is performed.
 """
 import time

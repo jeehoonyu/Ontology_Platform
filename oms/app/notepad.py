@@ -2,7 +2,7 @@
 Notepad & Reports local equivalent. A Notepad document combines formatted text
 with LIVE embedded artifacts (object references, object tables, metric cards) that
 resolve against the ontology at render time — mirroring Foundry Notepad as
-documented in foundry-docs-full/analytics/notepad.md. Deterministic and local.
+documented in the public Foundry documentation. Deterministic and local.
 """
 import time
 import uuid
