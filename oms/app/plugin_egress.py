@@ -206,6 +206,16 @@ class EgressProxyHandler(BaseHTTPRequestHandler):
     config: ProxyConfig
 
     def _deny(self, status: int, message: str) -> None:
+        # Logged as well as returned. On a CONNECT the client sees only the status
+        # line -- urllib reports "Tunnel connection failed: 403 Forbidden" and
+        # discards the body -- so writing the reason into the response alone puts
+        # it exactly where nobody can read it, on the one path where a denial is
+        # hardest to diagnose. An egress proxy that refuses without saying why is
+        # difficult to operate anywhere, and it cost a CI failure that carried no
+        # diagnosis at all.
+        print(json.dumps({"event": "plugin.egress.denied", "client": self.client_address[0],
+                          "target": self.path, "status": status, "reason": message},
+                         separators=(",", ":")), flush=True)
         raw = json.dumps({"error": message}, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
