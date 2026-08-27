@@ -296,6 +296,53 @@ ok(client.get("/listeners/nope"), "missing listener 404", 404)
 ok(client.post("/listeners/nope/events", json={}), "missing listener event 404", 404)
 
 
+# --- T4: silence must not create an open write endpoint ----------------------
+#
+# ListenerCreate.auth_type defaulted to "none", create_listener permitted it, and
+# _check_listener_auth returns True unconditionally for that value -- so a caller
+# who said nothing about authentication got a listener accepting anything from
+# anyone, appending it to a project's DataAsset. Two things now stand in the way:
+# saying nothing is an error, and saying "none" costs `administer`.
+
+ok(client.post("/listeners", json={"id": "ln_silent", "display_name": "Silent"}),
+   "a listener with no auth_type is refused rather than opened", 422)
+passed += 1
+
+from fastapi import HTTPException                     # noqa: E402
+from app import production_auth                       # noqa: E402
+
+editor = production_auth.Principal(
+    id="editor-1", display_name="Editor", email=None, roles=["editor"],
+    permissions=["view", "edit"], project_ids=["default"],
+)
+assert not editor.allows("administer"), "fixture principal must not hold administer"
+with SessionLocal() as _db:
+    try:
+        M.create_listener(
+            M.ListenerCreate(id="ln_open", display_name="Open", auth_type="none"),
+            _db, editor,
+        )
+        raise AssertionError("an editor created an unauthenticated listener")
+    except HTTPException as exc:
+        assert exc.status_code == 403, exc.status_code
+        assert "administer" in str(exc.detail), exc.detail
+passed += 1
+print("  ok: an editor cannot stand up an unauthenticated listener (403)")
+
+admin = production_auth.Principal(
+    id="admin-1", display_name="Admin", email=None, roles=["administrator"],
+    permissions=["*"], project_ids=["*"],
+)
+with SessionLocal() as _db:
+    created = M.create_listener(
+        M.ListenerCreate(id="ln_open_admin", display_name="Open", auth_type="none"),
+        _db, admin,
+    )
+    _db.commit()
+    assert created.auth_type == "none"
+passed += 1
+print("  ok: an administrator still can, deliberately")
+
 print(f"\nWEBHOOKS verified: {passed} assertions passed.")
 engine.dispose()
 _tmp.cleanup()

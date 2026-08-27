@@ -237,7 +237,13 @@ class ListenerCreate(BaseModel):
     id: Optional[str] = None
     project_id: str = "default"
     display_name: str
-    auth_type: str = "none"
+    # Required, with no default. It was `= "none"`, so a caller who said nothing
+    # about authentication got a listener that accepts anything from anyone --
+    # `_check_listener_auth` returns True unconditionally for "none" -- and the
+    # receiver appends whatever arrives to a project's DataAsset. Silence now
+    # produces a 422 instead of an open endpoint. "none" is still available and
+    # must be typed. T4 of GOAL_TENANCY_2026-08-27.
+    auth_type: str
     auth_secret: Optional[str] = None
     target_asset_id: Optional[str] = None
     # accepts either a list of required keys or a dict key->spec
@@ -829,6 +835,15 @@ def create_listener(body: ListenerCreate, db: Session = Depends(get_db), princip
     if body.auth_type != "none" and not body.auth_secret:
         raise HTTPException(status_code=422,
                             detail=f"auth_secret is required for auth_type '{body.auth_type}'")
+    if body.auth_type == "none" and not principal.allows("administer"):
+        # An unauthenticated listener is a public write endpoint into a project's
+        # data. It stays possible -- some senders genuinely cannot sign -- but it
+        # is not something an editor should be able to stand up as a side effect
+        # of ordinary work.
+        raise HTTPException(
+            status_code=403,
+            detail=("auth_type 'none' creates a listener that accepts unauthenticated "
+                    "writes into this project and requires the 'administer' permission"))
     if body.target_asset_id:
         asset = semantic_scope.asset_for(db, principal, body.target_asset_id, "edit")
         if asset.project_id != body.project_id:

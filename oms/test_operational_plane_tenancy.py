@@ -97,6 +97,7 @@ check(client.post("/investigations", json={
 }), "cross-project incident rejected", 422)
 check(client.post("/listeners", json={
     "id": "cross-listener", "project_id": "beta", "display_name": "cross",
+    "auth_type": "bearer", "auth_secret": "cross-secret",
     "target_asset_id": "alpha-asset",
 }), "cross-project listener asset rejected", 403)
 

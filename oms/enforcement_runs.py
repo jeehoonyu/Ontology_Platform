@@ -56,6 +56,11 @@ DECLARED: Dict[str, Dict[str, str]] = {
                    "a middleware that returns early outside AUTH_MODE=oidc",
         "runs_in": "suite",
     },
+    "audit_tenancy_scope": {
+        "purpose": "a permission is a tier, not a tenancy check; a read that names "
+                   "no project returns another tenant's rows to a correct-looking caller",
+        "runs_in": "suite",
+    },
     "audit_query_bounds": {
         "purpose": "no read materializes an object type before filtering it",
         "runs_in": "suite",

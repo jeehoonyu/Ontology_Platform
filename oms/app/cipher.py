@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
-from . import models_action
+from . import models_action, production_auth
 from .database import Base, get_db
 
 router = APIRouter(tags=["cipher"])
@@ -357,8 +357,35 @@ def hash_value(body: HashRequest, db: Session = Depends(get_db)):
     return HashResponse(algorithm=body.algorithm, digest=digest)
 
 
+def _decrypting_principal(principal, named: str | None) -> str:
+    """Whose decrypt licence is checked -- the caller's, not the body's.
+
+    Both decrypt paths looked up a `CipherLicense` whose `principal` column equals
+    a string taken from the request body, so the caller named themselves and the
+    check asked only whether *somebody* held a licence. Anyone who knew a
+    licensed principal's name could decrypt with it.
+
+    The caller's own identity is the answer. Naming a different principal is
+    delegation, which stays possible for `administer` because operational
+    recovery needs it, and is refused for everyone else. T3 of
+    GOAL_TENANCY_2026-08-27.
+    """
+    if not named or named == principal.id:
+        return principal.id
+    if principal.allows("administer"):
+        return named
+    from fastapi import HTTPException
+
+    raise HTTPException(
+        status_code=403,
+        detail=("decrypt is authorized for the calling principal; naming a different "
+                "principal requires the 'administer' permission"))
+
+
 @router.post("/cipher/decrypt", response_model=DecryptResponse)
-def decrypt_value(body: DecryptRequest, db: Session = Depends(get_db)):
+def decrypt_value(body: DecryptRequest, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(
+                      production_auth.require_permission("execute"))):
     channel = _get_channel_or_404(body.channel_id, db)
     if channel.mode != "encrypt":
         raise HTTPException(status_code=422, detail="Channel mode is not 'encrypt'")
@@ -373,7 +400,7 @@ def decrypt_value(body: DecryptRequest, db: Session = Depends(get_db)):
         db.query(CipherLicense)
         .filter(
             CipherLicense.channel_id == body.channel_id,
-            CipherLicense.principal == body.principal,
+            CipherLicense.principal == _decrypting_principal(principal, body.principal),
             CipherLicense.can_decrypt.is_(True),
         )
         .first()

@@ -165,4 +165,41 @@ check(tok["token"].startswith("tok_"), "token format preserved")
 ok(client.post("/cipher/encrypt", json={"channel_id": "ch_tok", "value": "x"}),
    "encrypt wrong mode -> 422", expect=422)
 
+# --- T3: decrypt authorizes the caller, not a name in the body ----------------
+#
+# The licence lookup filtered CipherLicense.principal == body.principal, so the
+# caller named themselves and the check asked only whether *somebody* held a
+# licence. Anyone who knew a licensed principal's name could decrypt with it.
+
+from fastapi import HTTPException                      # noqa: E402
+from app import production_auth                        # noqa: E402
+
+_editor = production_auth.Principal(
+    id="not-u1", display_name="Editor", email=None, roles=["editor"],
+    permissions=["view", "edit", "execute"], project_ids=["default"],
+)
+assert not _editor.allows("administer")
+
+check = M._decrypting_principal
+assert check(_editor, None) == "not-u1", "no name given falls back to the caller"
+passed += 1
+assert check(_editor, "not-u1") == "not-u1", "naming yourself is naming the caller"
+passed += 1
+try:
+    check(_editor, "u1")
+    raise AssertionError("an editor decrypted under another principal's licence")
+except HTTPException as exc:
+    assert exc.status_code == 403, exc.status_code
+    assert "administer" in str(exc.detail), exc.detail
+passed += 1
+print("  ok: an editor cannot decrypt under another principal's licence (403)")
+
+_admin = production_auth.Principal(
+    id="admin-1", display_name="Admin", email=None, roles=["administrator"],
+    permissions=["*"], project_ids=["*"],
+)
+assert check(_admin, "u1") == "u1", "delegation stays available to administer"
+passed += 1
+print("  ok: an administrator may still decrypt on another principal's behalf")
+
 print(f"{passed} assertions passed")

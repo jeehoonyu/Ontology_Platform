@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, Field
 
 from .database import Base, get_db
-from . import models_action, cipher as _cipher
+from . import cipher as _cipher, models_action, production_auth
 
 router = APIRouter(tags=["cipher_ops"])
 
@@ -104,9 +104,14 @@ def list_keys(channel_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/cipher/bulk-transform")
-def bulk_transform(body: BulkTransformRequest, db: Session = Depends(get_db)):
+def bulk_transform(body: BulkTransformRequest, db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(
+                       production_auth.require_permission("execute"))):
     _require_channel(db, body.channel_id)
-    if body.mode == "decrypt" and not _can_decrypt(db, body.channel_id, body.principal or ""):
+    # Bulk decryption is the single-value route in a loop, so it answers to the
+    # same rule: the caller's licence, not one named in the body.
+    if body.mode == "decrypt" and not _can_decrypt(
+            db, body.channel_id, _cipher._decrypting_principal(principal, body.principal)):
         raise HTTPException(status_code=403, detail="principal lacks a decrypt license for this channel")
 
     out: List[Dict[str, Any]] = []
