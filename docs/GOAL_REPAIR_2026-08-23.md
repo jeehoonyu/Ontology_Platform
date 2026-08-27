@@ -71,15 +71,75 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Met** — 6 of 6, plus the two halves that made the fix inert: `base_type` is read where `type` is absent, and an archived property is no longer enforced. `oms/test_property_constraints.py`, 41 assertions |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
-| **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet existed | **Open** — measured and ratcheted: 1,012 non-public handlers, 282 mutating ones unauthorized, now **262**. `oms/audit_auth_coverage.py` fails the build when the count rises; `oms/test_auth_coverage.py`, 574 assertions |
+| **R6** | Authorization coverage is measured, ratcheted, and falling | ceiling recorded, then lowered | 42 modules with zero `require_permission`, holding 388 routes; no ratchet existed | **Open** — 282 -> **75**. 34 routers mounted, `main`'s 23 handlers gated per-route. Eight modules deferred as genuinely per-route, one excluded on purpose |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
 | **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named | **Open** — 2 of 6 removed (`AgentStudio.py`, `ontology_value_types`). Of the remaining four, one has a dispatcher written in JSON, one is a design decision about a P0 witness, one is cheaper to wire than to delete, and one has an honest replacement that is redder than the fabrication |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
+| **R15** | No route grants a privilege the role model withholds, or authorizes from its own request body | 0 | 6 found while classifying R6 | **Open** — see below |
 | **R12** | The suite passes on a host that is not the one it was written on | 243 of 243 | 237 of 243; six encoded Windows or x86 assumptions, one of them a product defect | **Met** — **243 of 243**, `verify.py` 21 of 21 in 12.0 min. Tier A went from 5 met / 1 unmet to **7 met / 0 unmet** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+
+## R6: 258 to 75, and what choosing the permission turned up
+
+Ten agents read the 42 ungated routers and proposed a permission for each; one more attacked the
+mapping looking only for permissions set **too low**, on the argument that an under-permissioned
+router is worse than an ungated one because it looks addressed. That second pass changed four
+answers and stopped one module being broken outright, which is what paid for it.
+
+**Mounted (34 routers).** `administer` for the security plane — `security_data`,
+`security_access`, `security_propagation`, `classification_ops`, `cipher_ops`, `mcp_tools`.
+`deploy` for the marketplace pair. `edit` for the twelve authoring modules. `execute` for the six
+that run something. `view` for the six that only compute. Plus `main`'s own 23 handlers, gated
+per-route: thirteen at `view`, nine at `edit`, one — `POST /automations/{id}/run` — at `execute`.
+
+Seven of those thirteen `view` handlers do write, but only a `create_audit_log` row: the record
+that the query happened, not domain state. A viewer running AIP Assist should leave an audit
+trail, and requiring `edit` to ask a question would be the wrong reading.
+
+**Not mounted, on purpose.** `webhooks_ops` is left out entirely. Fifteen of its sixteen routes
+already carry their own permission; the sixteenth is `POST /listeners/{id}/events`, the inbound
+receiver, which authenticates the *sender* by HMAC or bearer secret because an external system
+has no platform principal to present. A router-level dependency would 401 every real delivery and
+silently drop inbound data.
+
+**Deferred as genuinely per-route (8).** `dev_toolchain`, `platform_core`, `cipher`,
+`ontology_core`, `apps`, `lineage_ops`, plus `slate_runtime` and `automate_ops` which the
+challenge moved here, plus `object_views_ops` — mounting its `publish` tier would make the
+object-detail read path unreachable for viewers, which fails closed but breaks the product.
+
+### Six findings a permission mount does not fix
+
+Choosing a tier meant reading what each route actually does, and that surfaced defects the tier
+cannot close:
+
+- **`webhooks_ops`**: `ListenerCreate.auth_type` defaults to `"none"`, `create_listener` permits
+  it, and `_check_listener_auth` returns `True` unconditionally for that value. An editor can
+  stand up a permanently unauthenticated endpoint that appends caller-controlled records into a
+  project's `DataAsset`.
+- **`slate_runtime`**: `POST /apps/slate/{id}/event` mutates objects through
+  `apply_action_mutations` without the project check and approval staging its own sibling
+  `workshop_runtime` performs, and hardcodes `actor="slate"` so the trail never names the caller.
+- **`automate_ops`**: `_run_action_effect` skips the approval gate `POST /actions/execute`
+  enforces. `approve` is a permission the role model deliberately withholds from operators, so
+  mounting `execute` would hand it to them anyway.
+- **`ontology_core`**: `PUT`/`DELETE /ontology/object-types/{id}` are the only object-type
+  mutate and destroy path, they call neither `assert_project` nor `object_type_for`, and they
+  audit as actor `"system"`. `properties["__manager"]["project_id"]` is an authorization *input*
+  elsewhere, so an editor can re-home another project's object type.
+- **`cipher`**: `POST /cipher/decrypt` authorizes off a principal named in the request body, and
+  `/cipher/encrypt` and `/cipher/hash` skip their licence check entirely when the caller supplies
+  neither `license_id` nor `principal`.
+- **`security_propagation`**: `DELETE /security/resource-markings/{id}` strips a mandatory access
+  marking, and its only check is opt-in on a caller-supplied query parameter.
+
+**And the systemic one.** A router permission is a *tier*, not a tenancy check. `fusion_ops`,
+`datasets_ext`, `ontology_core`, `quiver_runtime`, `osdk_ops`, `analytics` and others reach
+across projects because none of them calls `semantic_scope`. This batch closes privilege. It does
+not close tenancy, and saying otherwise would be the same mistake as mounting `view` on a router
+that deletes.
 
 ## R2: the first CI run in this repository's history
 

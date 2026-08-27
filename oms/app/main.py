@@ -195,8 +195,46 @@ if FRONTEND_DIST_DIR.exists():
 # project_id at all, so a gated route can still read across tenants; that is
 # tracked separately and must not be mistaken for finished here.
 ROUTER_PERMISSIONS = {
+    # --- administer ------------------------------------------------------------
     "admin_auth": [Depends(production_auth.require_permission("administer"))],
     "admin_directory": [Depends(production_auth.require_permission("administer"))],
+    # --- administer --------------------------------------------------------
+    "cipher_ops": [Depends(production_auth.require_permission("administer"))],
+    "classification_ops": [Depends(production_auth.require_permission("administer"))],
+    "mcp_tools": [Depends(production_auth.require_permission("administer"))],
+    "security_access": [Depends(production_auth.require_permission("administer"))],
+    "security_data": [Depends(production_auth.require_permission("administer"))],
+    "security_propagation": [Depends(production_auth.require_permission("administer"))],
+    # --- deploy ------------------------------------------------------------
+    "marketplace": [Depends(production_auth.require_permission("deploy"))],
+    "marketplace_ops": [Depends(production_auth.require_permission("deploy"))],
+    # --- edit --------------------------------------------------------------
+    "aip_content_sources": [Depends(production_auth.require_permission("edit"))],
+    "autopilot_ops": [Depends(production_auth.require_permission("edit"))],
+    "datasets_ext": [Depends(production_auth.require_permission("edit"))],
+    "fusion_ops": [Depends(production_auth.require_permission("edit"))],
+    "gis_ops": [Depends(production_auth.require_permission("edit"))],
+    "media_ops": [Depends(production_auth.require_permission("edit"))],
+    "media_sets": [Depends(production_auth.require_permission("edit"))],
+    "notepad": [Depends(production_auth.require_permission("edit"))],
+    "observability": [Depends(production_auth.require_permission("edit"))],
+    "ontology_interfaces": [Depends(production_auth.require_permission("edit"))],
+    "ontology_interfaces_ops": [Depends(production_auth.require_permission("edit"))],
+    "vertex_ops": [Depends(production_auth.require_permission("edit"))],
+    # --- execute -----------------------------------------------------------
+    "aip_document": [Depends(production_auth.require_permission("execute"))],
+    "aip_extras": [Depends(production_auth.require_permission("execute"))],
+    "analytics": [Depends(production_auth.require_permission("execute"))],
+    "compute_ops": [Depends(production_auth.require_permission("execute"))],
+    "ontology_functions": [Depends(production_auth.require_permission("execute"))],
+    "reliability_ops": [Depends(production_auth.require_permission("execute"))],
+    # --- view --------------------------------------------------------------
+    "contour_ops": [Depends(production_auth.require_permission("view"))],
+    "modeling_metrics": [Depends(production_auth.require_permission("view"))],
+    "notepad_ops": [Depends(production_auth.require_permission("view"))],
+    "observability_checks": [Depends(production_auth.require_permission("view"))],
+    "osdk_ops": [Depends(production_auth.require_permission("view"))],
+    "quiver_runtime": [Depends(production_auth.require_permission("view"))],
 }
 
 for _ext_module in (
@@ -1034,7 +1072,7 @@ def evaluate_gis_geofence(request: schemas.GISGeofenceRequest,
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-@app.post("/gis/mgrs/encode", response_model=schemas.MGRSCoordinateResponse)
+@app.post("/gis/mgrs/encode", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.MGRSCoordinateResponse)
 def encode_gis_mgrs(request: schemas.MGRSEncodeRequest):
     try:
         return encode_mgrs(request.latitude, request.longitude, precision=request.precision)
@@ -1042,7 +1080,7 @@ def encode_gis_mgrs(request: schemas.MGRSEncodeRequest):
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-@app.post("/gis/mgrs/decode", response_model=schemas.MGRSCoordinateResponse)
+@app.post("/gis/mgrs/decode", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.MGRSCoordinateResponse)
 def decode_gis_mgrs(request: schemas.MGRSDecodeRequest):
     try:
         return decode_mgrs(request.mgrs, center=request.center)
@@ -1834,7 +1872,7 @@ def get_mcp_context(db: Session = Depends(get_db)):
     return build_mcp_context(db)
 
 
-@app.post("/aip/assist/query", response_model=schemas.AssistResponse)
+@app.post("/aip/assist/query", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.AssistResponse)
 def query_assist(request: schemas.AssistRequest, db: Session = Depends(get_db)):
     result = answer_assist_query(
         db,
@@ -1854,7 +1892,7 @@ def query_assist(request: schemas.AssistRequest, db: Session = Depends(get_db)):
     return result
 
 
-@app.post("/aip/pipeline-builder/generate", response_model=schemas.PipelineAssistResponse)
+@app.post("/aip/pipeline-builder/generate", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.PipelineAssistResponse)
 def generate_pipeline_assist(request: schemas.PipelineAssistRequest, db: Session = Depends(get_db)):
     result = suggest_pipeline_from_prompt(request.prompt, request.sample_fields)
     create_audit_log(
@@ -1869,7 +1907,7 @@ def generate_pipeline_assist(request: schemas.PipelineAssistRequest, db: Session
     return result
 
 
-@app.post("/aip/document-intelligence/extract", response_model=schemas.DocumentExtractionResponse)
+@app.post("/aip/document-intelligence/extract", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.DocumentExtractionResponse)
 def extract_document(request: schemas.DocumentExtractionRequest, db: Session = Depends(get_db)):
     result = extract_document_intelligence(request.text, request.extraction_schema)
     create_audit_log(
@@ -1884,7 +1922,7 @@ def extract_document(request: schemas.DocumentExtractionRequest, db: Session = D
     return result
 
 
-@app.post("/aip/notepad/transform", response_model=schemas.NotepadTransformResponse)
+@app.post("/aip/notepad/transform", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.NotepadTransformResponse)
 def transform_notepad(request: schemas.NotepadTransformRequest, db: Session = Depends(get_db)):
     result = transform_notepad_text(
         text=request.text,
@@ -1904,14 +1942,14 @@ def transform_notepad(request: schemas.NotepadTransformRequest, db: Session = De
     return result
 
 
-@app.post("/scheduler/generate-cron", response_model=schemas.SchedulerResponse)
+@app.post("/scheduler/generate-cron", dependencies=[Depends(production_auth.require_permission("view"))], response_model=schemas.SchedulerResponse)
 def generate_scheduler_cron(request: schemas.SchedulerRequest):
     return generate_cron_from_prompt(request.prompt)
 
 
 # --- Maintenance Operations Copilot Domain ---
 
-@app.post("/domains/maintenance/bootstrap", response_model=schemas.DomainBootstrapResponse)
+@app.post("/domains/maintenance/bootstrap", dependencies=[Depends(production_auth.require_permission("edit"))], response_model=schemas.DomainBootstrapResponse)
 def bootstrap_maintenance_domain(
     request: schemas.DomainBootstrapRequest,
     db: Session = Depends(get_db),
@@ -1948,7 +1986,7 @@ def get_maintenance_summary(db: Session = Depends(get_db)):
 
 # --- Sentinel Operations Graph Domain ---
 
-@app.post("/domains/sentinel/bootstrap", response_model=schemas.SentinelBootstrapResponse)
+@app.post("/domains/sentinel/bootstrap", dependencies=[Depends(production_auth.require_permission("edit"))], response_model=schemas.SentinelBootstrapResponse)
 def bootstrap_sentinel_domain(
     request: schemas.SentinelBootstrapRequest,
     db: Session = Depends(get_db),
@@ -1961,7 +1999,7 @@ def get_sentinel_summary(db: Session = Depends(get_db)):
     return sentinel_summary(db)
 
 
-@app.post("/cases")
+@app.post("/cases", dependencies=[Depends(production_auth.require_permission("edit"))])
 def create_sentinel_case(request: schemas.SentinelCaseCreate, db: Session = Depends(get_db)):
     return create_case(
         db,
@@ -1993,7 +2031,7 @@ def get_sentinel_case(case_id: str, db: Session = Depends(get_db)):
     return case
 
 
-@app.post("/cases/{case_id}/evidence")
+@app.post("/cases/{case_id}/evidence", dependencies=[Depends(production_auth.require_permission("edit"))])
 def ingest_sentinel_evidence(
     case_id: str,
     request: schemas.SentinelEvidenceIngestRequest,
@@ -2016,7 +2054,7 @@ def ingest_sentinel_evidence(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post("/cases/{case_id}/tasks")
+@app.post("/cases/{case_id}/tasks", dependencies=[Depends(production_auth.require_permission("edit"))])
 def create_sentinel_task(
     case_id: str,
     request: schemas.SentinelTaskCreate,
@@ -2035,7 +2073,7 @@ def create_sentinel_task(
     )
 
 
-@app.post("/cases/{case_id}/findings")
+@app.post("/cases/{case_id}/findings", dependencies=[Depends(production_auth.require_permission("edit"))])
 def create_sentinel_finding(
     case_id: str,
     request: schemas.SentinelFindingCreate,
@@ -2068,7 +2106,7 @@ def get_case_provenance(case_id: str, db: Session = Depends(get_db)):
     return case_provenance(db, case_id=case_id)
 
 
-@app.post("/cases/{case_id}/agent/summarize")
+@app.post("/cases/{case_id}/agent/summarize", dependencies=[Depends(production_auth.require_permission("view"))])
 def summarize_sentinel_case(
     case_id: str,
     request: schemas.SentinelCopilotRequest,
@@ -2090,7 +2128,7 @@ def summarize_sentinel_case(
     return result
 
 
-@app.post("/cases/{case_id}/agent/missing-evidence")
+@app.post("/cases/{case_id}/agent/missing-evidence", dependencies=[Depends(production_auth.require_permission("view"))])
 def get_missing_sentinel_evidence(
     case_id: str,
     request: schemas.SentinelCopilotRequest,
@@ -2109,7 +2147,7 @@ def get_missing_sentinel_evidence(
     return result
 
 
-@app.post("/cases/{case_id}/agent/suggest-next-steps")
+@app.post("/cases/{case_id}/agent/suggest-next-steps", dependencies=[Depends(production_auth.require_permission("view"))])
 def suggest_sentinel_next_steps(
     case_id: str,
     request: schemas.SentinelCopilotRequest,
@@ -2128,7 +2166,7 @@ def suggest_sentinel_next_steps(
     return result
 
 
-@app.post("/cases/{case_id}/agent/draft-report")
+@app.post("/cases/{case_id}/agent/draft-report", dependencies=[Depends(production_auth.require_permission("view"))])
 def draft_sentinel_report(
     case_id: str,
     request: schemas.SentinelCopilotRequest,
@@ -2140,12 +2178,12 @@ def draft_sentinel_report(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@app.post("/graph/neighbors")
+@app.post("/graph/neighbors", dependencies=[Depends(production_auth.require_permission("view"))])
 def get_graph_neighbors(request: schemas.SentinelGraphQuery, db: Session = Depends(get_db)):
     return graph_neighbors(db, object_id=request.object_id, depth=request.depth)
 
 
-@app.post("/graph/shortest-path")
+@app.post("/graph/shortest-path", dependencies=[Depends(production_auth.require_permission("view"))])
 def get_graph_shortest_path(request: schemas.SentinelPathQuery, db: Session = Depends(get_db)):
     return shortest_path(
         db,
@@ -2155,7 +2193,7 @@ def get_graph_shortest_path(request: schemas.SentinelPathQuery, db: Session = De
     )
 
 
-@app.post("/threads", response_model=schemas.AIPThread)
+@app.post("/threads", dependencies=[Depends(production_auth.require_permission("edit"))], response_model=schemas.AIPThread)
 def create_thread(request: schemas.ThreadCreate, db: Session = Depends(get_db)):
     thread_id = str(uuid.uuid4())
     now = now_ts()
@@ -2195,7 +2233,7 @@ def get_thread(thread_id: str, db: Session = Depends(get_db)):
     return thread
 
 
-@app.post("/threads/{thread_id}/messages", response_model=schemas.AIPThread)
+@app.post("/threads/{thread_id}/messages", dependencies=[Depends(production_auth.require_permission("edit"))], response_model=schemas.AIPThread)
 def add_thread_message(
     thread_id: str,
     request: schemas.ThreadMessageCreate,
@@ -2344,7 +2382,7 @@ def run_logic_function(
         return db_model
 
 
-@app.post("/automations", response_model=schemas.AutomationDefinition, include_in_schema=False)
+@app.post("/automations", dependencies=[Depends(production_auth.require_permission("edit"))], response_model=schemas.AutomationDefinition, include_in_schema=False)
 def create_automation(automation: schemas.AutomationDefinitionCreate, db: Session = Depends(get_db)):
     existing = db.query(models.AutomationDefinition).filter(models.AutomationDefinition.id == automation.id).first()
     if existing:
@@ -2371,7 +2409,7 @@ def list_automations(db: Session = Depends(get_db)):
 
 
 @app.post(
-    "/automations/{automation_id}/run",
+    "/automations/{automation_id}/run", dependencies=[Depends(production_auth.require_permission("execute"))],
     response_model=schemas.AutomationRun,
     include_in_schema=False,
 )
