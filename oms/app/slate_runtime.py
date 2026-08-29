@@ -11,6 +11,7 @@ local, this implements a safe **function DSL** (filter/pluck/aggregate/format/co
 arithmetic) rather than executing arbitrary JS — consistent with the platform's
 "deterministic local approximation" design.
 """
+import uuid
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import models, runtime, apps
+from . import models, models_action, production_auth, runtime, apps, semantic_scope
 
 router = APIRouter(tags=["slate_runtime"])
 
@@ -295,7 +296,9 @@ def render_app(app_id: str, body: StateRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/apps/slate/{app_id}/event")
-def fire_events(app_id: str, body: EventRequest, db: Session = Depends(get_db)):
+def fire_events(app_id: str, body: EventRequest, db: Session = Depends(get_db),
+                principal: production_auth.Principal = Depends(
+                    production_auth.require_permission("execute"))):
     app_ = _get_app(db, app_id)
     state = dict(body.state)
     effects: List[Dict[str, Any]] = []
@@ -315,14 +318,52 @@ def fire_events(app_id: str, body: EventRequest, db: Session = Depends(get_db)):
             state[event.get("target", event.get("function"))] = _eval_function(spec, ctx) if spec else None
             effects.append({"type": etype, "status": "applied" if spec else "error"})
         elif etype == "apply_action":
-            action = db.get(models.ActionType, event.get("action_type_id"))
+            # Three things this did not do, all of which its sibling
+            # workshop_runtime._apply_event has always done. It loaded any
+            # ActionType by id, so a caller could drive another project's action;
+            # it mutated immediately, skipping the approval gate that
+            # POST /actions/execute enforces for the identical call; and it wrote
+            # actor="slate", so the trail never named who asked. T5 of
+            # GOAL_TENANCY_2026-08-27.
+            try:
+                action = semantic_scope.owned_row(
+                    db, principal, models.ActionType, str(event.get("action_type_id") or ""),
+                    "execute", "ActionType")
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                action = None
             if not action:
                 effects.append({"type": etype, "status": "error", "detail": "action not found"})
             else:
                 params = {k: (state.get(v[1:]) if isinstance(v, str) and v.startswith("$") else v)
                           for k, v in (event.get("parameters") or {}).items()}
-                mutated = runtime.apply_action_mutations(db, action_type=action, parameters=params, actor="slate")
-                effects.append({"type": etype, "status": "applied", "action_type_id": action.id, "mutated_object_ids": mutated})
+                rules = action.rules or {}
+                requires_approval = bool(
+                    rules.get("requires_approval")
+                    or rules.get("approval_required")
+                    or str(rules.get("risk_level", "")).lower() in {"high", "critical"}
+                )
+                if requires_approval:
+                    approval_id = str(uuid.uuid4())
+                    db.add(models_action.ApprovalRequest(
+                        id=approval_id,
+                        project_id=action.project_id,
+                        action_type_id=action.id,
+                        requester=principal.id,
+                        parameters=params,
+                        status=models_action.ApprovalStatus.PENDING.value,
+                    ))
+                    effects.append({
+                        "type": etype, "status": "pending_approval",
+                        "action_type_id": action.id, "approval_request_id": approval_id,
+                        "mutated_object_ids": [],
+                    })
+                else:
+                    mutated = runtime.apply_action_mutations(
+                        db, action_type=action, parameters=params, actor=principal.id)
+                    effects.append({"type": etype, "status": "applied",
+                                    "action_type_id": action.id, "mutated_object_ids": mutated})
         else:
             effects.append({"type": etype, "status": "ignored"})
     db.commit()

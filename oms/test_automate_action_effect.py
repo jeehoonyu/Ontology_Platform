@@ -213,4 +213,57 @@ check(mby[ef]["status"] == "FAILED", "unknown action type effect FAILED graceful
 check("error" in mby[ef]["result"], "unknown action type result carries an error message")
 
 
+# ===========================================================================
+# 5. A high-risk action staged for approval instead of mutating (T5)
+# ===========================================================================
+#
+# _run_action_effect called apply_action_mutations unconditionally, so an
+# automation was a route to run a high-risk action without the approval an
+# interactive caller needs. `approve` is a permission the role model withholds
+# from operators, so gating this router at `execute` would have handed it to
+# them anyway.
+db = SessionLocal()
+db.add(models.ObjectInstance(
+    id="t9", project_id="default", object_type_id="ticket",
+    properties={"priority": "low"}, source_asset_id=None, lineage={},
+    created_at=NOW, updated_at=NOW))
+db.add(models.ActionType(
+    id="escalate_risky", display_name="Escalate (high risk)", description="",
+    parameters={},
+    rules={"risk_level": "high",
+           "object_mutations": [
+               {"object_type_id": "ticket", "object_id": "t9",
+                "set": {"priority": "critical"}}]},
+))
+db.commit()
+db.close()
+
+a9 = mk_automation("risky-auto")
+ok(client.post(f"/automations/{a9}/conditions",
+               json={"condition_type": "run_on_all", "config": {"object_type_id": "ticket"}}),
+   "add run_on_all condition")
+ok(client.post(f"/automations/{a9}/effects",
+               json={"effect_type": "action", "execution_order": 0,
+                     "config": {"action_type_id": "escalate_risky"}}),
+   "add high-risk action effect")
+
+r = ok(client.post(f"/automations/{a9}/run", json={"manual": True}), "run risky-auto")
+res = r["effect_results"][0]["result"]
+check(res.get("status") == "pending_approval",
+      "a high-risk action effect stages an approval instead of running")
+check(res.get("approval_request_id"), "and returns the approval request id")
+check(res.get("mutated_object_ids") == [], "and mutates nothing")
+
+db = SessionLocal()
+t9 = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == "t9").first()
+check(t9.properties.get("priority") == "low", "the object is untouched until someone approves")
+pending = db.query(models_action.ApprovalRequest).filter(
+    models_action.ApprovalRequest.action_type_id == "escalate_risky").first()
+check(pending is not None, "an ApprovalRequest exists")
+check(pending.requester == f"automation:{a9}",
+      "and names the automation as requester -- nobody typed this")
+check(pending.status == models_action.ApprovalStatus.PENDING.value, "and is PENDING")
+db.close()
+
+
 print(f"\n>= 12 assertions passed: {PASSED} assertions passed")

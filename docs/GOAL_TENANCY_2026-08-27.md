@@ -74,10 +74,21 @@ route, whatever permission they carry.
 | **T2** | The five worst modules name a project on every scoped read | 134 sites closed | `runtime` 39, `asset_reliability_scenario` 28, `system_hardening` 26, `platform_runtime` 22, `stream_processing` 19 | **Open** |
 | **T3** | No route authorises from a value in its own request body | 0 | 2: `POST /cipher/decrypt` read `principal` from the body; `cipher_ops` bulk transform did the same | **Met** — both authorise the calling principal. Naming a different one is delegation and now costs `administer`. `oms/test_cipher.py` asserts an editor is refused and an administrator is not |
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
-| **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` does; `slate_runtime` and `automate_ops._run_action_effect` do not | **Open** |
+| **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
 | **T6** | Object-type mutation is project-scoped and names its actor | 2 routes | `PUT`/`DELETE /ontology/object-types/{id}` call neither `assert_project` nor `object_type_for`, and audit as `"system"` | **Open** |
 | **T7** | The nine modules R6 deferred as per-route are gated | 9 of 9 | 0 of 9; 75 mutating handlers remain | **Open** |
 | **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Open** — the R3 question, asked of tenancy |
+
+## What T5 could not close
+
+`slate_runtime` now resolves its ActionType through `semantic_scope.owned_row`, so a slate app
+can no longer drive another project's action. `automate_ops` cannot do the same, and the
+reason is worth recording rather than working around: **`AtmAutomation` carries no
+`project_id`**, exactly like `SlateApp`. There is no project to scope the lookup to.
+
+So the approval gate is closed in both and the scope is closed in one. Adding the column is a
+migration and belongs to T2, where the same shape will come up again — a table that holds
+tenant work without recording which tenant.
 
 ## Non-completion rule
 

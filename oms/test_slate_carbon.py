@@ -115,6 +115,55 @@ assert any(w["name"] == "tbl" for w in osl["rendered"]["widgets"]), osl["rendere
 # opening a module not in the workspace -> 404
 ok(client.post("/apps/carbon/hub/open/not_a_module", json={"state": {}}), "carbon open invalid", expect=404)
 
+# --- T5: a slate apply_action stages a high-risk action, and names who asked ---
+#
+# fire_events loaded any ActionType by id, mutated immediately, and wrote
+# actor="slate". Its sibling workshop_runtime has always performed the project
+# check, staged an ApprovalRequest for a high-risk action, and recorded
+# principal.id. The gap meant a slate app was a way around the approval gate
+# POST /actions/execute enforces for the identical call.
+from app import models, models_action  # noqa: E402
+from app.database import SessionLocal  # noqa: E402
+
+with SessionLocal() as _db:
+    _db.add(models.ObjectInstance(
+        id="slate_t1", project_id="default", object_type_id="slate_ticket",
+        properties={"priority": "low"}, source_asset_id=None, lineage={},
+        created_at=0, updated_at=0))
+    _db.add(models.ObjectType(
+        id="slate_ticket", display_name="Slate Ticket", description="",
+        properties={"priority": {"type": "string"}}, project_id="default",
+        created_at=0, updated_at=0))
+    _db.add(models.ActionType(
+        id="slate_risky", display_name="Risky", description="", parameters={},
+        project_id="default",
+        rules={"risk_level": "critical",
+               "object_mutations": [{"object_type_id": "slate_ticket",
+                                     "object_id": "slate_t1",
+                                     "set": {"priority": "critical"}}]}))
+    _db.commit()
+
+risky = ok(client.post("/apps/slate/sales_app/event", json={
+    "state": {}, "events": [{"type": "apply_action", "action_type_id": "slate_risky"}],
+}), "slate high-risk apply_action")
+effect = risky["effects"][0]
+assert effect["status"] == "pending_approval", effect
+passed += 1
+assert effect["mutated_object_ids"] == [], effect
+passed += 1
+print("  ok: a high-risk slate action stages an approval instead of mutating")
+
+with SessionLocal() as _db:
+    row = _db.query(models.ObjectInstance).filter(
+        models.ObjectInstance.id == "slate_t1").first()
+    assert row.properties.get("priority") == "low", row.properties
+    pending = _db.query(models_action.ApprovalRequest).filter(
+        models_action.ApprovalRequest.action_type_id == "slate_risky").first()
+    assert pending is not None and pending.status == models_action.ApprovalStatus.PENDING.value
+    assert pending.requester != "slate", "the requester must name the caller, not the runtime"
+passed += 2
+print("  ok: the object is untouched and the request names the caller, not \"slate\"")
+
 print(f"\nSlate + Carbon faithful runtimes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

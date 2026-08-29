@@ -20,6 +20,8 @@ CRITIC CORRECTIONS honored:
 """
 
 from .database import Base, get_db
+import uuid
+
 from . import models, models_action
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
@@ -504,6 +506,43 @@ def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
     parameters.setdefault("_triggered_object_ids", list(triggered_ids))
     if triggered_ids and "_object_id" not in parameters:
         parameters["_object_id"] = triggered_ids[0]
+
+    # The approval gate POST /actions/execute enforces for the identical call.
+    # Without it, an automation was a way to run a high-risk action without the
+    # approval an interactive caller would need -- and `approve` is a permission
+    # the role model deliberately withholds from operators, so gating this router
+    # at `execute` would have handed it to them anyway. T5 of
+    # GOAL_TENANCY_2026-08-27.
+    #
+    # The requester is the automation, which is the honest answer: nobody typed
+    # this. What is NOT fixed here is scope -- AtmAutomation carries no
+    # project_id, so the ActionType lookup above still cannot be constrained to
+    # the automation's own project. That needs a column and a migration and
+    # belongs to T2, not to this gate.
+    rules = action_type.rules or {}
+    requires_approval = bool(
+        rules.get("requires_approval")
+        or rules.get("approval_required")
+        or str(rules.get("risk_level", "")).lower() in {"high", "critical"}
+    )
+    if requires_approval:
+        approval_id = uuid.uuid4().hex
+        db.add(models_action.ApprovalRequest(
+            id=approval_id,
+            project_id=action_type.project_id,
+            action_type_id=action_type.id,
+            requester=f"automation:{automation.id}",
+            parameters=parameters,
+            status=models_action.ApprovalStatus.PENDING.value,
+        ))
+        return {
+            "type": "action",
+            "action_type_id": action_type_id,
+            "objects": list(triggered_ids),
+            "mutated_object_ids": [],
+            "status": "pending_approval",
+            "approval_request_id": approval_id,
+        }
 
     mutated_object_ids = apply_action_mutations(
         db,
