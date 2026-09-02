@@ -80,6 +80,33 @@ route, whatever permission they carry.
 | **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Met** — `oms/app/semantic_scope.py`. It already existed, with typed accessors for the six models the reads concentrate in, at 118 call sites. The question was not what to build but why 396 reads bypass it, and the census now answers that per site |
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 63 reads with no caller to authorize and no rule that replaces one | **Open** — `semantic_scope` cannot serve these: its accessors authorize a principal and a worker loop has none. Every model reached from one carries `project_id`, so the scope exists and only the filter is missing |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
+| **T11** | An object type's project is recorded in one place | one spelling | two: the `ObjectType.project_id` column, read by 14 modules, and `properties.__manager.project_id`, read by 11, with 6 modules reading both | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, so neither can be used to scope a read until they are reconciled |
+
+## What stopped T2 going further, and why T11 exists
+
+Threading the project through `_logic_object_rows` looked like the next mechanical step:
+the parameter exists, `workshop_runtime._resolve_one` and `_render_widget` already take a
+`project_id`, and they simply were not passing it on. Doing so broke
+`test_workshop_tenancy`, and the break was correct.
+
+`workshop_runtime` guards each read with `_assert_object_type_project`, which reads the
+type's project from `properties.__manager.project_id`. The filter added underneath it read
+`ObjectInstance.project_id`, a column. In that suite's fixture the type's `__manager` says
+`alpha-workshop` while its own `project_id` column says `default`, so the guard passed and
+the filter matched nothing: a console rendering one row rendered none.
+
+Neither value is wrong. They are two recordings of the same fact that nothing keeps in
+agreement, and which one governs depends on which module reaches the row first. Scoping a
+read means choosing one, and choosing wrongly hides a tenant's own data as readily as
+leaving the read unscoped exposes another's. `POST /objects` shows what agreement looks
+like -- it calls `assert_project` and then refuses with a 409 when the type's project
+differs from the object's -- but it compares columns, and the modules reading `__manager`
+never see that check.
+
+`render_workshop_module` in `apps.py` was fixed rather than reverted because it compares
+two columns and never consults `__manager`, so this ambiguity does not reach it. The
+changes to `workshop_runtime` and `runtime` were reverted. T2 cannot honestly close the
+`for_each`, `object_query` and `object_aggregate` blocks until T11 does.
 
 ## What T2 could not close, and why T10 exists
 
