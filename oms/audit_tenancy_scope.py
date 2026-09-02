@@ -38,6 +38,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -102,26 +103,41 @@ def _queried_class(node: ast.Call, scoped: set) -> str | None:
 # caller to authorize at all; its question is containment, not permission, and every
 # model reached from one here carries `project_id`, so the scope exists and only the
 # filter is missing.
-AUTHORIZED = "authorized"   # enclosing function has a principal: swap in the accessor
+UNAUTHORIZED = "unauthorized"  # holds a principal, authorizes nothing: swap in the accessor
+TRANSITIVE = "transitive"      # authorized something first: probably already scoped
 HELPER = "helper"           # routed module, but no principal here: thread one through
 WORKER = "worker"           # no request surface: contain by the job's own project
 
 
-def _principal_bearing_ranges(tree: ast.AST) -> List[range]:
-    """Line ranges of functions that declare a principal of their own."""
-    out: List[range] = []
+# A function that resolved an id through one of these has already proved the row is the
+# caller's, and a later read filtered by that same id inherits the proof. Counting those
+# as unscoped overstated the work by a fifth, and "fixing" one would add a redundant
+# predicate rather than close anything. They are reported separately, not cleared: the
+# inheritance holds only if the later read really is keyed on the authorized id, and that
+# still takes a person to confirm.
+AUTHORIZING = re.compile(r"\b(semantic_scope\.\w+|owned_row|assert_project|accessible_query"
+                         r"|_artifact_for|_locked_artifact_for|_project_for|require_project)\s*\(")
+
+
+def _principal_bearing(tree: ast.AST, lines: List[str]) -> List[tuple]:
+    """(range, authorizes) for each function that declares a principal of its own."""
+    out: List[tuple] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         names = [a.arg for a in node.args.args + node.args.kwonlyargs]
-        if "principal" in names:
-            out.append(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        if "principal" not in names:
+            continue
+        end = node.end_lineno or node.lineno
+        body = "\n".join(lines[node.lineno - 1:end])
+        out.append((range(node.lineno, end + 1), bool(AUTHORIZING.search(body))))
     return out
 
 
-def _site_kind(line: int, routed: bool, bearing: List[range]) -> str:
-    if any(line in r for r in bearing):
-        return AUTHORIZED
+def _site_kind(line: int, routed: bool, bearing: List[tuple]) -> str:
+    for span, authorizes in bearing:
+        if line in span:
+            return TRANSITIVE if authorizes else UNAUTHORIZED
     return HELPER if routed else WORKER
 
 
@@ -146,7 +162,7 @@ def read() -> Dict[str, Any]:
             if not cls:
                 continue
             reads += 1
-            bearing = bearing if bearing is not None else _principal_bearing_ranges(tree)
+            bearing = bearing if bearing is not None else _principal_bearing(tree, lines)
             window = "\n".join(lines[max(0, node.lineno - 1):node.lineno + PROXIMITY_LINES])
             if "project_id" not in window:
                 sites.append({"module": path.name, "line": node.lineno,
@@ -158,7 +174,8 @@ def read() -> Dict[str, Any]:
         modules[site["module"]] = modules.get(site["module"], 0) + 1
 
     return {
-        "authorized": sum(1 for s in sites if s["kind"] == AUTHORIZED),
+        "unauthorized": sum(1 for s in sites if s["kind"] == UNAUTHORIZED),
+        "transitive": sum(1 for s in sites if s["kind"] == TRANSITIVE),
         "helper": sum(1 for s in sites if s["kind"] == HELPER),
         "worker": sum(1 for s in sites if s["kind"] == WORKER),
         "scoped_models": len(scoped),
@@ -180,8 +197,10 @@ def main() -> int:
           f"({reading['scoped_models']} such models); "
           f"{reading['unscoped_reads']} name no project within "
           f"{PROXIMITY_LINES} lines")
-    print(f"    {reading['authorized']:>4}  in a function holding a principal "
+    print(f"    {reading['unauthorized']:>4}  hold a principal but authorize nothing "
           f"(swap in the accessor)")
+    print(f"    {reading['transitive']:>4}  authorized an id first, and read by it "
+          f"(inherited, still needs a reader)")
     print(f"    {reading['helper']:>4}  in a helper below one (thread a principal down)")
     print(f"    {reading['worker']:>4}  with no caller to authorize (contain by job project)")
     for module, count in list(reading["modules"].items())[:12]:
@@ -202,7 +221,8 @@ def main() -> int:
                      "and that a new unscoped read cannot arrive unnoticed."),
             "unscoped_reads_ceiling": reading["unscoped_reads"],
             "scoped_reads_reference": reading["scoped_reads"],
-            "authorized_reference": reading["authorized"],
+            "unauthorized_reference": reading["unauthorized"],
+            "transitive_reference": reading["transitive"],
             "helper_reference": reading["helper"],
             "worker_reference": reading["worker"],
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -1,0 +1,10 @@
+{
+  "provenance": {
+    "recorded_at": "2026-09-02T05:39:24Z",
+    "stale_after": "recomputed each run"
+  },
+  "note": "Ratchet. Tables holding tenant work that record no tenant, directly or through any parent. A read of one cannot be scoped and no accessor can be written for it, so this is the cause the unscoped-read census measures the symptom of. The substrate split is a judgement recorded in docs/tenancy-substrate.json, not a derivation.",
+  "substrate_reference": 34,
+  "tables_reference": 271,
+  "tenant_orphan_ceiling": 52
+}

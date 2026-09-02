@@ -609,6 +609,13 @@ def render_workshop_module(
     - other widgets: pass through with empty resolved dict
     """
     obj = _get_workshop_module_or_404(db, module_id, principal, "view")
+    # Every id below is read out of the module's own widget definitions, not supplied by
+    # the caller, so authorizing the module says nothing about what those ids name. A
+    # widget pointing at another project's object type returned that project's instance
+    # ids and row counts to anyone who could view this module. Resolution is confined to
+    # the module's own project; a widget naming a type outside it now resolves to nothing,
+    # which is the true answer for this tenant. T2 of GOAL_TENANCY_2026-08-27.
+    scope = obj.project_id
 
     resolved_widgets: List[Dict[str, Any]] = []
     for raw_widget in obj.widgets or []:
@@ -622,13 +629,15 @@ def render_workshop_module(
         if ot_id:
             instances = (
                 db.query(models.ObjectInstance)
-                .filter(models.ObjectInstance.object_type_id == ot_id)
+                .filter(models.ObjectInstance.object_type_id == ot_id,
+                        models.ObjectInstance.project_id == scope)
                 .limit(_PREVIEW_LIMIT)
                 .all()
             )
             total = (
                 db.query(models.ObjectInstance)
-                .filter(models.ObjectInstance.object_type_id == ot_id)
+                .filter(models.ObjectInstance.object_type_id == ot_id,
+                        models.ObjectInstance.project_id == scope)
                 .count()
             )
             resolved = {
@@ -639,13 +648,15 @@ def render_workshop_module(
         elif sos_id:
             saved = (
                 db.query(models.SavedObjectSet)
-                .filter(models.SavedObjectSet.id == sos_id)
+                .filter(models.SavedObjectSet.id == sos_id,
+                        models.SavedObjectSet.project_id == scope)
                 .first()
             )
             if saved:
                 count = (
                     db.query(models.ObjectInstance)
-                    .filter(models.ObjectInstance.object_type_id == saved.object_type_id)
+                    .filter(models.ObjectInstance.object_type_id == saved.object_type_id,
+                            models.ObjectInstance.project_id == scope)
                     .count()
                 )
                 resolved = {
@@ -659,7 +670,8 @@ def render_workshop_module(
         elif at_id:
             action = (
                 db.query(models.ActionType)
-                .filter(models.ActionType.id == at_id)
+                .filter(models.ActionType.id == at_id,
+                        models.ActionType.project_id == scope)
                 .first()
             )
             resolved = {

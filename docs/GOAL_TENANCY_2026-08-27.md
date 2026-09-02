@@ -79,6 +79,27 @@ route, whatever permission they carry.
 | **T7** | The nine modules R6 deferred as per-route are gated | 9 of 9 | 0 of 9; 75 mutating handlers remain | **Open** |
 | **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Met** — `oms/app/semantic_scope.py`. It already existed, with typed accessors for the six models the reads concentrate in, at 118 call sites. The question was not what to build but why 396 reads bypass it, and the census now answers that per site |
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 63 reads with no caller to authorize and no rule that replaces one | **Open** — `semantic_scope` cannot serve these: its accessors authorize a principal and a worker loop has none. Every model reached from one carries `project_id`, so the scope exists and only the filter is missing |
+| **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
+
+## What T2 could not close, and why T10 exists
+
+`render_workshop_module` resolved each widget's `object_type_id` across every project, so
+anyone who could view a module received another tenant's instance ids and row counts. The
+ids come from the module definition rather than from the caller, so authorizing the module
+proved nothing about what they named. That one was repairable in an afternoon, because
+`WorkshopModule` carries a `project_id` to confine the resolution to.
+
+The identical defect in `render_document` is not repairable at all. `NotepadDocument`
+records no project, and neither does anything it reaches, so there is no value to filter
+on. The fixture written for the workshop fix exposed it by accident: a row seeded in
+`tenant-b` appeared in the notepad render's `sample_ids` two hundred lines away.
+
+That is the same shape T5 recorded for `SlateApp` and `AtmAutomation`, and counting it
+properly turned up 52 tables carrying 189 route handlers between them. It is not a backlog
+item behind T2 — it is underneath it.
+A read cannot be scoped to a project the row never named, no accessor can be written for
+such a table, and `_logic_object_rows` already demonstrates how far that reaches: it grew
+a `project_id` parameter, and four of its twenty-one call sites pass one.
 
 ## What T5 could not close
 

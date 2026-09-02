@@ -211,6 +211,37 @@ assert any(b.get("row_count") == 2 for b in rendered["blocks"]), rendered
 exp = ok(client.post("/notepad/documents/doc1/export", json={"format": "pdf"}), "notepad export")
 assert exp["status"] == "generated", exp
 
+# ---------------------------------------------------------------------------
+# Cross-project resolution of ids that came from a stored definition
+#
+# Seeded last on purpose: it adds a row to an object type earlier assertions count,
+# and those counts are part of what they check.
+#
+# A workshop widget names an object type by id, and that id comes from the module
+# definition rather than from the caller, so authorizing the module proves nothing
+# about what the id points at. Rendering resolved it across every project, handing
+# another tenant's instance ids and row counts to anyone who could view the module.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+from app.database import SessionLocal as _SL  # noqa: E402
+from app import models as _m  # noqa: E402
+import time as _time  # noqa: E402
+
+_before = ok(client.get("/apps/workshop/wks1/render"), "workshop render before")
+_db = _SL()
+_db.add(_m.ObjectInstance(id="foreign_widget", object_type_id="tool_widget",
+                          project_id="tenant-b", properties={"score": 99},
+                          lineage={}, created_at=int(_time.time()), updated_at=int(_time.time())))
+_db.commit()
+_db.close()
+
+_after = ok(client.get("/apps/workshop/wks1/render"), "workshop render stays in project")
+_w = _after["widgets"][0]["resolved"]
+assert _w["total_count"] == _before["widgets"][0]["resolved"]["total_count"], _w
+assert "foreign_widget" not in _w["preview_ids"], _w
+passed += 2
+
+
 print(f"\nAll Foundry tool modules verified: {passed} endpoint assertions passed.")
 
 from app.database import engine as _engine  # noqa: E402
