@@ -209,6 +209,14 @@ ROUTER_PERMISSIONS = {
     "marketplace": [Depends(production_auth.require_permission("deploy"))],
     "marketplace_ops": [Depends(production_auth.require_permission("deploy"))],
     # --- edit --------------------------------------------------------------
+    # Four routers reached the mount loop with no entry here and so with
+    # `dependencies=[]`: 47 of the 71 mutating handlers the auth census still counts.
+    # `dev_toolchain` alone serves 32 routes -- create a repository, commit, merge -- and
+    # does not import `production_auth` at all. T7 of GOAL_TENANCY_2026-08-27.
+    "automate_ops": [Depends(production_auth.require_permission("execute"))],
+    "dev_toolchain": [Depends(production_auth.require_permission("edit"))],
+    "lineage_ops": [Depends(production_auth.require_permission("edit"))],
+    "object_views_ops": [Depends(production_auth.require_permission("edit"))],
     "aip_content_sources": [Depends(production_auth.require_permission("edit"))],
     "autopilot_ops": [Depends(production_auth.require_permission("edit"))],
     "datasets_ext": [Depends(production_auth.require_permission("edit"))],

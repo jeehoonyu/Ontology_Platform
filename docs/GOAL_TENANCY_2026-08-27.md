@@ -76,7 +76,7 @@ route, whatever permission they carry.
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
 | **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
 | **T6** | Object-type mutation is project-scoped and names its actor | 2 routes | `PUT`/`DELETE /ontology/object-types/{id}` called neither `assert_project` nor `object_type_for`, and audited as `"system"` | **Met** — both resolve through `semantic_scope.object_type_for` and audit the caller; `PUT` additionally refuses to change `__manager.project_id`, which three modules read as the owning project. `oms/test_ontology_core.py` asserts all three |
-| **T7** | The nine modules R6 deferred as per-route are gated | 9 of 9 | 0 of 9; 71 mutating handlers remain, in ten modules led by `dev_toolchain` 16, `automate_ops` 15 and `object_views_ops` 12 | **Open** |
+| **T7** | The nine modules R6 deferred as per-route are gated | 9 of 9 | 24 mutating handlers remain across six modules | **Open** — four routers reached the mount loop with no `ROUTER_PERMISSIONS` entry and so with `dependencies=[]`, which was 47 of the 71: `dev_toolchain` (32 routes, no `production_auth` import at all), `automate_ops`, `object_views_ops`, `lineage_ops`. The 24 left are per-route gaps in routers that gate most routes individually, and each needs a tier chosen rather than a router named |
 | **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Met** — `oms/app/semantic_scope.py`. It already existed, with typed accessors for the six models the reads concentrate in, at 118 call sites. The question was not what to build but why 396 reads bypass it, and the census now answers that per site |
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 0 such reads; the 63 this condition was opened on were misclassified | **Met** — vacuously, and the honest reading is that the condition should not have been opened. `runtime.py` was called a worker because it carries no `@router.` line, and it is called from thirty modules that do. The census now classifies by reachability from a routed module rather than by where the decorators live, and this application has no module nothing routed can reach. The 63 were helpers all along and are counted with them |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
@@ -164,6 +164,28 @@ result -- and like the six-line proximity rule it will be wrong about individual
 Being wrong about which sites is survivable. Setting a target nobody can reach is not: it
 converts a goal into a permanent source of work that cannot be finished, which is the
 failure mode `docs/GOAL_CONTINUOUS.md` exists to catch.
+
+## Four routers that were never mounted with a gate
+
+R6 gave 34 routers the permission their strongest route needs. Four never got an entry, and
+`ROUTER_PERMISSIONS.get(name, [])` gave them the empty list rather than an error, so they
+mounted ungated and looked exactly like the ones that had been considered.
+
+`dev_toolchain` is the one to sit with. It serves 32 routes -- create a repository, write a
+file, commit, run checks, merge -- and does not import `production_auth` at all, so there
+was nothing to notice missing in the file itself. `automate_ops` (which runs automations),
+`object_views_ops` and `lineage_ops` were the others. Between them, 47 of the 71 mutating
+handlers the census still counted.
+
+They are gated now by the same rule R6 used: `execute` for `automate_ops` because
+`POST /automations/{id}/run` is its strongest route, `edit` for the other three. The census
+falls 71 -> 24, and the 24 that remain are a different kind of work -- routers that gate
+most of their routes individually and missed some, where the question is which tier a
+particular route needs rather than which router was forgotten.
+
+A default that silently means "no permission" is worth noting on its own. `.get(name, [])`
+turns a missing entry into an ungated router, and the only place that shows up is a census
+nobody had to run.
 
 ## A condition opened on a miscount
 
