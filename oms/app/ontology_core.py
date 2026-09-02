@@ -1889,10 +1889,16 @@ def delete_object_type(object_type_id: str, db: Session = Depends(get_db),
 # Primary-key validation against existing ObjectInstances
 # ---------------------------------------------------------------------------
 @router.post("/ontology/object-types/{object_type_id}/validate-primary-key")
-def validate_primary_key(object_type_id: str, body: ValidatePrimaryKeyRequest, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def validate_primary_key(object_type_id: str, body: ValidatePrimaryKeyRequest,
+                         db: Session = Depends(get_db),
+                         principal: production_auth.Principal = Depends(
+                             production_auth.require_permission("view"))):
+    # This answers "does this primary-key value already exist", and returns the ids of the
+    # instances that match. Unauthorized, that is an existence oracle over every project:
+    # ask about someone else's object type and the reply names their rows. Resolving the
+    # type through `semantic_scope` means a caller can only ask about types they may see.
+    # T7 of GOAL_TENANCY_2026-08-27.
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "view")
     profile = db.get(ObjectTypeProfile, object_type_id)
     if not profile or not profile.primary_key:
         raise HTTPException(status_code=404,
@@ -1903,6 +1909,9 @@ def validate_primary_key(object_type_id: str, body: ValidatePrimaryKeyRequest, d
                             detail={"errors": [f"primary_key '{pk}' is missing from supplied properties"]})
     pk_value = body.properties[pk]
 
+    # The scan itself stays across projects, for the reason `delete_object_type`'s count
+    # does: this is a uniqueness check, and narrowing it would report "unique" for a value
+    # already taken rather than scope anything.
     duplicates: List[str] = []
     for inst in db.query(models.ObjectInstance).filter(
             models.ObjectInstance.object_type_id == object_type_id).all():

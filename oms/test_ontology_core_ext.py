@@ -291,6 +291,44 @@ db.close()
 passed += 1
 
 
+
+
+# ---------------------------------------------------------------------------
+# (9) PRIMARY-KEY VALIDATION IS NOT AN EXISTENCE ORACLE
+#
+# The route answers "is this primary-key value taken" and names the instances that match.
+# Unauthorized, that reads across every project: ask about someone else's object type and
+# the reply names their rows. T7 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+from app import production_auth as _auth  # noqa: E402
+
+db = SessionLocal()
+db.add(models.ObjectType(id="their_type", project_id="tenant-b", display_name="Theirs",
+                         description="", properties={"acctNo": {"type": "string"}},
+                         created_at=_now(), updated_at=_now()))
+db.add(M.ObjectTypeProfile(object_type_id="their_type", api_name="Theirs", primary_key="acctNo",
+                           title_key="acctNo", icon=None, color=None, plural_name="Theirs",
+                           groups=[], properties={}, created_at=_now(), updated_at=_now()))
+db.add(models.ObjectInstance(id="their_row", object_type_id="their_type", project_id="tenant-b",
+                             properties={"acctNo": "SECRET-1"}, lineage={},
+                             created_at=_now(), updated_at=_now()))
+db.commit()
+db.close()
+
+_outsider = _auth.Principal("outsider", "Outsider", None, ["viewer"], ["view"],
+                            organization_id="org", project_ids=["default"])
+api.dependency_overrides[_auth.current_principal] = lambda: _outsider
+ok(client.post("/ontology/object-types/their_type/validate-primary-key",
+               json={"properties": {"acctNo": "SECRET-1"}}),
+   "a caller cannot probe another project's primary keys", expect=403)
+api.dependency_overrides.pop(_auth.current_principal, None)
+
+# And the route still works for a type the caller can see.
+same = ok(client.post("/ontology/object-types/account/validate-primary-key",
+                      json={"properties": {"acctNo": "A-999"}}), "own type still validates")
+assert same["unique"] is True, same
+passed += 1
+
 print(f"\nontology_core extensions verified: {passed} assertions passed.")
 engine.dispose()
 _t.cleanup()

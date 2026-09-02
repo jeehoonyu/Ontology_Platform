@@ -1,9 +1,9 @@
 {
   "provenance": {
-    "recorded_at": "2026-09-02T09:22:53Z",
+    "recorded_at": "2026-09-02T09:46:34Z",
     "stale_after": "recomputed each run"
   },
   "note": "Ratchet. Mutating handlers with no permission dependency of their own, falling back to a middleware that disables itself outside AUTH_MODE=oidc. This count may fall and must never rise. Unauthorized reads are reported, not gated.",
-  "unauthorized_mutating_ceiling": 24,
+  "unauthorized_mutating_ceiling": 23,
   "unauthorized_read_reference": 42
 }
