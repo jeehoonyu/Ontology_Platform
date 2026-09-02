@@ -714,7 +714,8 @@ def _graph_overview(db: Session, limit: int, principal: Optional[production_auth
 
 
 @router.post("/events/publish")
-def publish_event(body: EventPublishRequest, db: Session = Depends(get_db)):
+def publish_event(body: EventPublishRequest, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     _ensure_tables(db)
     event = ops_control.record_ops_event(
         db,
@@ -781,7 +782,8 @@ def events_summary(db: Session = Depends(get_db)):
 
 
 @router.post("/events/subscriptions", status_code=201)
-def create_event_subscription(body: EventSubscriptionCreate, db: Session = Depends(get_db)):
+def create_event_subscription(body: EventSubscriptionCreate, db: Session = Depends(get_db),
+                              principal: production_auth.Principal = Depends(production_auth.require_permission("edit"))):
     _ensure_tables(db)
     sub_id = body.id or _new_id("event_sub")
     if db.get(EventSubscription, sub_id):
@@ -811,7 +813,9 @@ def list_event_subscriptions(db: Session = Depends(get_db)):
 
 
 @router.post("/events/subscriptions/{subscription_id}/evaluate")
-def evaluate_event_subscription(subscription_id: str, limit: int = Query(100, ge=1, le=1000), db: Session = Depends(get_db)):
+def evaluate_event_subscription(subscription_id: str, limit: int = Query(100, ge=1, le=1000),
+                                db: Session = Depends(get_db),
+                                principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
     sub = db.get(EventSubscription, subscription_id)
     if not sub:
@@ -852,7 +856,8 @@ def search_commands():
 
 
 @router.post("/policies", status_code=201)
-def create_policy(body: PolicyRuleCreate, db: Session = Depends(get_db)):
+def create_policy(body: PolicyRuleCreate, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
     _ensure_tables(db)
     effect = body.effect.upper()
     if effect not in POLICY_EFFECTS:
@@ -899,7 +904,8 @@ def list_policies(active: Optional[bool] = None, db: Session = Depends(get_db)):
 
 
 @router.patch("/policies/{policy_id}")
-def patch_policy(policy_id: str, body: PolicyRulePatch, db: Session = Depends(get_db)):
+def patch_policy(policy_id: str, body: PolicyRulePatch, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
     _ensure_tables(db)
     row = db.get(PolicyRule, policy_id)
     if not row:
@@ -918,7 +924,8 @@ def patch_policy(policy_id: str, body: PolicyRulePatch, db: Session = Depends(ge
 
 
 @router.post("/policies/evaluate")
-def evaluate_policy(body: PolicyEvaluateRequest, db: Session = Depends(get_db)):
+def evaluate_policy(body: PolicyEvaluateRequest, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
     rules = db.query(PolicyRule).filter(PolicyRule.active == True).all()  # noqa: E712
     result = _evaluate_policy_rules(rules, body)
@@ -928,7 +935,8 @@ def evaluate_policy(body: PolicyEvaluateRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/policies/simulate")
-def simulate_policy(body: PolicySimulationRequest, db: Session = Depends(get_db)):
+def simulate_policy(body: PolicySimulationRequest, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
     existing = db.query(PolicyRule).filter(PolicyRule.active == True).all()  # noqa: E712
     now = _now()
