@@ -61,6 +61,11 @@ DECLARED: Dict[str, Dict[str, str]] = {
                    "no project returns another tenant's rows to a correct-looking caller",
         "runs_in": "suite",
     },
+    "audit_frontier": {
+        "purpose": "a ratchet recorded and unowned is a number nobody is answerable "
+                   "for; the backlog running dry looks like having nothing left to do",
+        "runs_in": "suite",
+    },
     "audit_query_bounds": {
         "purpose": "no read materializes an object type before filtering it",
         "runs_in": "suite",

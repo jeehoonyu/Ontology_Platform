@@ -32,8 +32,14 @@ HOOK = REPO_ROOT / "scripts" / "hooks" / "pre-push"
 POSIX_INSTALLER = REPO_ROOT / "scripts" / "install-hooks.sh"
 WINDOWS_INSTALLER = REPO_ROOT / "scripts" / "install-hooks.ps1"
 
+# Far enough ahead that adding a check is one edit, not two. The map stopped at
+# twelve and the thirteenth check failed this assertion rather than the thing it
+# guards -- a test that breaks on its own vocabulary teaches people to edit the
+# test, which is the opposite of what it is for.
 WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
-         "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+         "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+         "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+         "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20}
 
 passed = 0
 

@@ -65,7 +65,7 @@ done
 
 if [ "$uninstall" -eq 0 ]; then
     echo
-    echo "pre-push now runs the twelve static enforcement checks (about 10 seconds)."
+    echo "pre-push now runs the thirteen static enforcement checks (about 10 seconds)."
     echo "Two of them import the application, so they need the pinned requirements:"
     echo "  python3 -m venv oms/venv && oms/venv/bin/pip install -r oms/requirements.txt"
     echo "The PostgreSQL, broker and object-store checks stay MANUAL; see"

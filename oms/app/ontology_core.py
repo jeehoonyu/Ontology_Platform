@@ -1796,19 +1796,42 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
 # ---------------------------------------------------------------------------
 # Object-type EDIT / DELETE
 # ---------------------------------------------------------------------------
+def _owning_project(properties) -> str:
+    """The project a `__manager` blob names, read the way its consumers read it."""
+    manager = (properties or {}).get("__manager")
+    manager = manager if isinstance(manager, dict) else {}
+    return str(manager.get("project_id") or "default")
+
+
 @router.put("/ontology/object-types/{object_type_id}")
-def update_object_type(object_type_id: str, body: ObjectTypeUpdate, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def update_object_type(object_type_id: str, body: ObjectTypeUpdate, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(
+                           production_auth.require_permission("edit"))):
+    # These two routes are the only path that mutates or destroys an object type,
+    # and neither resolved it through semantic_scope, so a caller edited any
+    # project's schema; both audited as actor "system", so the trail never named
+    # them. T6 of GOAL_TENANCY_2026-08-27.
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     if body.display_name is not None:
         obj_type.display_name = body.display_name
     if body.description is not None:
         obj_type.description = body.description
     if body.properties is not None:
+        # `properties["__manager"]["project_id"]` is not decoration: aip_agents,
+        # apps and main all read it to decide which project owns this type, and
+        # main uses it to refuse cross-project automation references. Replacing
+        # `properties` wholesale could therefore re-home a type and defeat a check
+        # in another module, which scoping the read alone does not prevent.
+        before = _owning_project(obj_type.properties)
+        after = _owning_project(body.properties)
+        if after != before:
+            raise HTTPException(
+                status_code=403,
+                detail=(f"an object type's owning project is not editable here "
+                        f"('{before}' -> '{after}'); it decides who may reference it"))
         obj_type.properties = body.properties
     obj_type.updated_at = _now()
-    _audit(db, "system", "ontology.object_type.updated", "object_type", object_type_id,
+    _audit(db, principal.id, "ontology.object_type.updated", "object_type", object_type_id,
            {"display_name": obj_type.display_name})
     db.commit(); db.refresh(obj_type)
     return {
@@ -1819,10 +1842,10 @@ def update_object_type(object_type_id: str, body: ObjectTypeUpdate, db: Session 
 
 
 @router.delete("/ontology/object-types/{object_type_id}")
-def delete_object_type(object_type_id: str, db: Session = Depends(get_db)):
-    obj_type = db.get(models.ObjectType, object_type_id)
-    if not obj_type:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+def delete_object_type(object_type_id: str, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(
+                           production_auth.require_permission("edit"))):
+    obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     instance_count = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.object_type_id == object_type_id).count()
     if instance_count:
@@ -1832,7 +1855,7 @@ def delete_object_type(object_type_id: str, db: Session = Depends(get_db)):
     if profile:
         db.delete(profile)
     db.delete(obj_type)
-    _audit(db, "system", "ontology.object_type.deleted", "object_type", object_type_id, {})
+    _audit(db, principal.id, "ontology.object_type.deleted", "object_type", object_type_id, {})
     db.commit()
     return {"id": object_type_id, "deleted": True}
 

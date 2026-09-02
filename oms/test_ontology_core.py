@@ -128,6 +128,47 @@ ok(client.post("/action-types", json={
 ok(client.post("/ontology/action-types/purge_account/execute", json={"parameters": {"account_id": "acct2"}}), "execute delete")
 ok(client.get("/objects/account/acct2"), "acct2 gone", expect=404)
 
+# --- T6: an object type's owning project is not editable through its properties ---
+#
+# PUT replaces `properties` wholesale, and `properties["__manager"]["project_id"]`
+# is what aip_agents, apps and main all read to decide which project owns this
+# type -- main uses it to refuse cross-project automation references. So the
+# wholesale replace could re-home a type and defeat a check in another module.
+# Scoping the read does not prevent that; this does.
+
+from app.database import SessionLocal as _SL  # noqa: E402
+from app import models as _m  # noqa: E402
+
+with _SL() as _db:
+    _props = dict((_db.get(_m.ObjectType, "asset").properties) or {})
+
+rehome = client.put("/ontology/object-types/asset", json={
+    "properties": {**_props, "__manager": {"project_id": "somebody-else"}},
+})
+assert rehome.status_code == 403, (rehome.status_code, rehome.text[:200])
+assert "owning project" in rehome.text, rehome.text[:200]
+passed += 1
+print("  ok: re-homing an object type through its properties is refused (403)")
+
+same = client.put("/ontology/object-types/asset", json={
+    "properties": {**_props, "note": {"type": "string"}},
+})
+assert same.status_code == 200, (same.status_code, same.text[:200])
+passed += 1
+print("  ok: an ordinary property edit still works")
+
+# The audit names the caller, not "system".
+from app import models_action  # noqa: E402
+
+with _SL() as _db:
+    entry = _db.query(models_action.AuditLog).filter(
+        models_action.AuditLog.event_type == "ontology.object_type.updated"
+    ).order_by(models_action.AuditLog.id.desc()).first()
+    assert entry is not None, "the update wrote no audit entry"
+    assert entry.actor != "system", f"the trail still says {entry.actor!r}"
+passed += 1
+print("  ok: the audit entry names the caller rather than \"system\"")
+
 print(f"\nOntology-core faithful behaviors verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()
