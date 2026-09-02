@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, ontology_core, tenancy
+from . import models, models_action, ontology_core, semantic_scope, tenancy
 from .database import Base, get_db
 from .production_auth import Principal, require_permission
 
@@ -285,11 +285,16 @@ def create_package_version(package_id: str, body: PackageVersionCreate, principa
 
 @router.post("/ontology-packages/{package_id}/versions/capture", status_code=201)
 def capture_package_version(package_id: str, body: PackageCaptureRequest, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    # Every id here arrives in the request body, and capture copies whatever it resolves --
+    # properties, primary key, the whole profile, and each action's rules -- into a manifest
+    # the caller then owns. Resolved with a bare `db.get`, that let a caller holding `edit`
+    # on their own project name another project's object type and receive its schema. The
+    # other reads repaired under T2 took their ids from a stored definition, where the reach
+    # depended on what someone had already configured; this one let the caller choose.
+    # T2 of GOAL_TENANCY_2026-08-27.
     object_types = []
     for object_type_id in body.object_type_ids:
-        row = db.get(models.ObjectType, object_type_id)
-        if not row:
-            raise HTTPException(status_code=404, detail=f"Object type '{object_type_id}' not found")
+        row = semantic_scope.object_type_for(db, principal, object_type_id, "view")
         properties = {name: value for name, value in (row.properties or {}).items() if not name.startswith("__")}
         manager = (row.properties or {}).get("__manager") or {}
         profile = db.get(ontology_core.ObjectTypeProfile, row.id)
@@ -304,9 +309,8 @@ def capture_package_version(package_id: str, body: PackageCaptureRequest, princi
     link_types = [{"id": row.id, "display_name": row.display_name, "description": row.description, "source_object_type_id": row.source_object_type_id, "target_object_type_id": row.target_object_type_id, "cardinality": row.cardinality} for row in links]
     action_types = []
     for action_type_id in body.action_type_ids:
-        row = db.get(models.ActionType, action_type_id)
-        if not row:
-            raise HTTPException(status_code=404, detail=f"Action type '{action_type_id}' not found")
+        row = semantic_scope.owned_row(db, principal, models.ActionType, action_type_id,
+                                       "view", "ActionType")
         action_types.append({"id": row.id, "display_name": row.display_name, "description": row.description, "parameters": row.parameters or {}, "rules": row.rules or {}})
     return create_package_version(package_id, PackageVersionCreate(version=body.version, manifest={"schema_version": 1, "package_id": package_id, "object_types": object_types, "link_types": link_types, "action_types": action_types, "dependencies": body.dependencies}), principal, db)
 

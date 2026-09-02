@@ -825,6 +825,24 @@ def get_agent_task(
     return _agent_task_or_404(task_id, principal, db)
 
 
+def _child_job(db: Session, job_id: Any, project_id: str):
+    """A job named by a task graph, but only from the task's own project.
+
+    These ids come out of the parent task's stored `agent_task_graph`, not from the caller,
+    so authorizing the parent proves nothing about what they name. `cancel_job` and
+    `retry_job` each authorize a child before touching it, so nothing foreign was ever
+    mutated -- but the status read deciding whether to call them did not, and a graph
+    naming another project's job answered with that job's status. T2 of
+    GOAL_TENANCY_2026-08-27.
+    """
+    if not job_id:
+        return None
+    return (db.query(platform_runtime.PlatformJob)
+            .filter(platform_runtime.PlatformJob.id == str(job_id),
+                    platform_runtime.PlatformJob.project_id == project_id)
+            .first())
+
+
 @router.post("/api/v1/agents/tasks/{task_id}/cancel")
 def cancel_agent_task(
     task_id: str,
@@ -837,7 +855,7 @@ def cancel_agent_task(
     for child_id in [*(graph.get("tool_job_ids") or []), graph.get("context_job_id")]:
         if not child_id:
             continue
-        child = db.get(platform_runtime.PlatformJob, str(child_id))
+        child = _child_job(db, child_id, str(task.get("project_id") or "default"))
         if child and child.status not in {"SUCCEEDED", "FAILED", "CANCELLED", "DEAD_LETTER"}:
             platform_runtime.cancel_job(str(child_id), principal, db)
     return cancelled
@@ -854,11 +872,11 @@ def retry_agent_task(
     context_id = graph.get("context_job_id")
     tool_ids = list(graph.get("tool_job_ids") or [])
     if context_id:
-        context = db.get(platform_runtime.PlatformJob, str(context_id))
+        context = _child_job(db, context_id, str(task.get("project_id") or "default"))
         if context and context.status in {"FAILED", "CANCELLED"}:
             platform_runtime.retry_job(str(context_id), principal, db)
     for child_id in tool_ids:
-        child = db.get(platform_runtime.PlatformJob, str(child_id))
+        child = _child_job(db, child_id, str(task.get("project_id") or "default"))
         if child and child.status in {"FAILED", "CANCELLED"}:
             platform_runtime.retry_job(str(child_id), principal, db)
     return platform_runtime.retry_job(task_id, principal, db)

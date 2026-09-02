@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import models, apps, workshop_runtime, slate_runtime
+from . import models, apps, semantic_scope, workshop_runtime, slate_runtime
 from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["carbon_runtime"])
@@ -35,10 +35,19 @@ def _resolve_module(db: Session, module_id: str, principal: Principal) -> Dict[s
     sa = db.get(apps.SlateApp, module_id)
     if sa:
         return {"module_id": module_id, "kind": "slate", "display_name": sa.display_name, "exists": True}
-    ss = db.get(models.SavedObjectSet, module_id)
+    # The workspace's `module_ids` decide what is looked up here, not the caller, so the
+    # ids are as trustworthy as whoever last edited the workspace. The workshop branch
+    # above authorizes; these two did not, and returned another project's saved set or map
+    # layer by display name to anyone who could open the workspace. `CarbonWorkspace`
+    # records no project of its own (T10), so there is no workspace scope to compare
+    # against -- but there is a principal, and the projects it can see are the right bound.
+    # T2 of GOAL_TENANCY_2026-08-27.
+    ss = (semantic_scope.accessible_query(db, principal, models.SavedObjectSet, "view")
+          .filter(models.SavedObjectSet.id == module_id).first())
     if ss:
         return {"module_id": module_id, "kind": "object_set", "display_name": ss.display_name, "exists": True}
-    ml = db.get(models.MapLayerDefinition, module_id)
+    ml = (semantic_scope.accessible_query(db, principal, models.MapLayerDefinition, "view")
+          .filter(models.MapLayerDefinition.id == module_id).first())
     if ml:
         return {"module_id": module_id, "kind": "map_layer", "display_name": ml.display_name, "exists": True}
     return {"module_id": module_id, "kind": "unknown", "display_name": None, "exists": False}

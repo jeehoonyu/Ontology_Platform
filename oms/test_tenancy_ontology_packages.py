@@ -45,10 +45,11 @@ with SessionLocal() as db:
     ):
         db.add(tenancy.ProjectMembership(id=f"member_{project_id}_{principal_id}", project_id=project_id, principal_id=principal_id, role=role, permissions=["restore"] if principal_id == "alice" else [], created_at=now, updated_at=now))
     db.add_all([
-        models.ObjectType(id="asset", display_name="Asset", description="Operational asset", properties={"asset_id": {"type": "string", "required": True}, "status": {"type": "string"}, "__manager": {"primary_key": "asset_id"}}, created_at=now, updated_at=now),
-        models.ObjectType(id="facility", display_name="Facility", description="Operating facility", properties={"facility_id": {"type": "string", "required": True}}, created_at=now, updated_at=now),
-        models.LinkType(id="located_at", display_name="Located at", description=None, source_object_type_id="asset", target_object_type_id="facility", cardinality="MANY_TO_ONE"),
-        models.ActionType(id="inspect_asset", display_name="Inspect asset", description="Request inspection", parameters={"asset_id": {"type": "string"}}, rules={"requires_approval": True}),
+        models.ObjectType(id="asset", project_id="ontology_source", display_name="Asset", description="Operational asset", properties={"asset_id": {"type": "string", "required": True}, "status": {"type": "string"}, "__manager": {"primary_key": "asset_id"}}, created_at=now, updated_at=now),
+        models.ObjectType(id="facility", project_id="ontology_source", display_name="Facility", description="Operating facility", properties={"facility_id": {"type": "string", "required": True}}, created_at=now, updated_at=now),
+        models.LinkType(id="located_at", project_id="ontology_source", display_name="Located at", description=None, source_object_type_id="asset", target_object_type_id="facility", cardinality="MANY_TO_ONE"),
+        models.ActionType(id="inspect_asset", project_id="ontology_source", display_name="Inspect asset", description="Request inspection", parameters={"asset_id": {"type": "string"}}, rules={"requires_approval": True}),
+        models.ObjectType(id="private_asset", project_id="private_project", display_name="Private asset", description=None, properties={"secret": {"type": "string"}}, created_at=now, updated_at=now),
         ontology_core.ObjectTypeProfile(object_type_id="asset", api_name="Asset", primary_key="asset_id", title_key="asset_id", icon="wrench", color="#176b8f", plural_name="Assets", groups=["Reliability"], properties={"asset_id": {"base_type": "string", "required": True}}, created_at=now, updated_at=now),
     ])
     db.commit()
@@ -66,6 +67,9 @@ version1 = ok(client.post("/ontology-packages/asset_reliability/versions/capture
     "version": "1.0.0", "object_type_ids": ["asset", "facility"], "action_type_ids": ["inspect_asset"],
 }), "capture package resources", 201)
 assert version1["validation"]["status"] == "PASS" and len(version1["checksum"]) == 64
+ok(client.post("/ontology-packages/asset_reliability/versions/capture", json={
+    "version": "9.9.9", "object_type_ids": ["private_asset"], "action_type_ids": [],
+}), "capture refuses an object type the caller cannot see", 403)
 ok(client.post("/ontology-packages/asset_reliability/versions/1.0.0/publish", json={"expected_checksum": version1["checksum"]}), "publish package")
 
 bad_checksum = client.post("/ontology-packages/asset_reliability/versions/1.0.0/install", json={"target_project_id": "operations_target", "namespace": "reliability", "expected_checksum": "0" * 64})

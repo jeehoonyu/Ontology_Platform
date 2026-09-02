@@ -128,8 +128,32 @@ AUTHORIZING = re.compile(r"\b(semantic_scope\.\w+|owned_row|assert_project|acces
                          r"|_artifact_for|_locked_artifact_for|_project_for|require_project)\s*\(")
 
 
+def _authorized_names(fn: ast.AST) -> set:
+    """Variables holding a row that some call was handed the principal to fetch.
+
+    The named-helper list above never keeps up: every module grows its own
+    `_processor(db, id, principal, "execute")` or `_agent_task_or_404(id, principal, db)`,
+    and a read filtering by `row.id` straight afterwards inherits that proof. Matching the
+    shape rather than the name catches those without a list to maintain -- and the shape is
+    specific, because handing a function the principal is what delegating the check looks
+    like. Merely mentioning `principal` is not: nearly every handler passes `principal.id`
+    to an audit-log call, and treating that as authorization cleared all 83 sites at once
+    when it was tried, which is how the rule was found to be worthless.
+    """
+    out = set()
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        arguments = list(node.value.args) + [word.value for word in node.value.keywords]
+        if any(isinstance(item, ast.Name) and item.id == "principal" for item in arguments):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out.add(target.id)
+    return out
+
+
 def _principal_bearing(tree: ast.AST, lines: List[str]) -> List[tuple]:
-    """(range, authorizes) for each function that declares a principal of its own."""
+    """(range, authorizes, authorized_names) for each function declaring its own principal."""
     out: List[tuple] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -139,14 +163,17 @@ def _principal_bearing(tree: ast.AST, lines: List[str]) -> List[tuple]:
             continue
         end = node.end_lineno or node.lineno
         body = "\n".join(lines[node.lineno - 1:end])
-        out.append((range(node.lineno, end + 1), bool(AUTHORIZING.search(body))))
+        out.append((range(node.lineno, end + 1), bool(AUTHORIZING.search(body)),
+                    _authorized_names(node)))
     return out
 
 
-def _site_kind(line: int, routed: bool, bearing: List[tuple]) -> str:
-    for span, authorizes in bearing:
+def _site_kind(line: int, routed: bool, bearing: List[tuple], window: str) -> str:
+    for span, authorizes, names in bearing:
         if line in span:
-            return TRANSITIVE if authorizes else UNAUTHORIZED
+            if authorizes or any(f"{name}." in window for name in names):
+                return TRANSITIVE
+            return UNAUTHORIZED
     return HELPER if routed else WORKER
 
 
@@ -222,7 +249,7 @@ def read() -> Dict[str, Any]:
                 owner = _enclosing(functions, node.lineno)
                 sites.append({"module": path.name, "line": node.lineno,
                               "model": cls,
-                              "kind": _site_kind(node.lineno, routed, bearing),
+                              "kind": _site_kind(node.lineno, routed, bearing, window),
                               "uses_row": _uses_row(owner, node.lineno) if owner else True})
 
     modules: Dict[str, int] = {}

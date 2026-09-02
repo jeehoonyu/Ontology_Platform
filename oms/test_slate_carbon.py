@@ -164,6 +164,48 @@ with SessionLocal() as _db:
 passed += 2
 print("  ok: the object is untouched and the request names the caller, not \"slate\"")
 
+
+# ---------------------------------------------------------------------------
+# Carbon resolves module ids only within the caller's reach
+#
+# A workspace's `module_ids` decide what gets looked up, and they are as trustworthy as
+# whoever last edited the workspace -- not as the caller. The workshop branch authorized;
+# the saved-object-set and map-layer branches did not, and answered with another project's
+# display name for anyone who could open the workspace. `CarbonWorkspace` records no
+# project of its own (T10 of GOAL_TENANCY_2026-08-27), so the bound is what the principal
+# can see, not what the workspace claims. T2 of the same document.
+# ---------------------------------------------------------------------------
+from app import carbon_runtime as _carbon  # noqa: E402
+from app import models as _m, production_auth as _auth  # noqa: E402
+from app.database import SessionLocal as _SL  # noqa: E402
+
+ok(client.post("/tenancy/organizations", json={"id": "carbon-org", "display_name": "Carbon Org"}),
+   "organization for the foreign project", 201)
+ok(client.post("/tenancy/projects", json={"id": "tenant-b", "organization_id": "carbon-org",
+                                          "display_name": "Tenant B"}), "foreign project", 201)
+
+with _SL() as _db:
+    _db.add(_m.SavedObjectSet(id="foreign-set", project_id="tenant-b",
+                              display_name="Another tenant's set", object_type_id="deal",
+                              filters={}, owner="someone-else", created_at=1, updated_at=1))
+    _db.add(_m.SavedObjectSet(id="own-set", project_id="default",
+                              display_name="Our own set", object_type_id="deal",
+                              filters={}, owner="us", created_at=1, updated_at=1))
+    _db.commit()
+
+    _outsider = _auth.Principal("outsider", "Outsider", None, ["viewer"], ["view"],
+                                organization_id="org", project_ids=["default"])
+    hidden = _carbon._resolve_module(_db, "foreign-set", _outsider)
+    assert hidden["exists"] is False, hidden
+    assert hidden["display_name"] is None, hidden
+
+    # The same principal still resolves a set it can reach, so the filter is scoping the
+    # lookup rather than emptying it -- a fix that hid everything would pass the check above.
+    shown = _carbon._resolve_module(_db, "own-set", _outsider)
+    assert shown["exists"] is True and shown["kind"] == "object_set", shown
+passed += 3
+
+
 print(f"\nSlate + Carbon faithful runtimes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

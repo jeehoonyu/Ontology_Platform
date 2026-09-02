@@ -158,6 +158,39 @@ bad_run = ok(client.post("/aip/agents/workers/run-next", json={
 }), "fail missing-agent invocation")
 assert bad_run["job"]["status"] == "FAILED" and bad_run["job"]["attempt"] == 1, bad_run
 
+
+# ---------------------------------------------------------------------------
+# Cancelling a task does not reach a job in another project
+#
+# The child ids come out of the parent task's stored `agent_task_graph`, not from the
+# caller, so authorizing the parent proves nothing about what they name. `cancel_job`
+# authorizes each child before touching it, so nothing foreign was mutated -- but the
+# status read that decided whether to call it did not, and a graph naming another
+# project's job answered with that job's status. T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+from app import platform_runtime as _pr  # noqa: E402
+from app import aip_agents as _aip  # noqa: E402
+
+_now_ts = int(__import__("time").time())
+with SessionLocal() as _db:
+    _db.add(_pr.PlatformJob(
+        id="foreign-child", project_id="tenant-b", job_type="aip.agent.tool",
+        status="RUNNING", actor="someone-else", subject_type="agent", subject_id="x",
+        payload={}, attempt=0, created_at=_now_ts, updated_at=_now_ts,
+    ))
+    _db.commit()
+
+    # The parent's project is "default"; the graph names a job that is not.
+    reached = _aip._child_job(_db, "foreign-child", "default")
+    assert reached is None, reached
+    # And the same lookup from the job's own project still finds it.
+    own = _aip._child_job(_db, "foreign-child", "tenant-b")
+    assert own is not None and own.status == "RUNNING", own
+    still = _db.get(_pr.PlatformJob, "foreign-child")
+    assert still.status == "RUNNING", still.status
+passed += 3
+
+
 print(f"\nAsynchronous AIP agent execution verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()
