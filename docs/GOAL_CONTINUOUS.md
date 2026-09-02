@@ -69,6 +69,26 @@ sense of newly created; all four are old measurements that had never been claime
 | **K5** | No UI surface couples to a concrete ontology type | `ontology_type_coupling_ceiling` at 0 | 1 — `frontend/src/workspaces/OntologyManager.tsx` | **Open** |
 | **K6** | No ratchet sits at a ceiling nobody has ever lowered | `unmoved_ceiling` at 0 | 2 of 17: `ontology_type_coupling_ceiling` recorded five times and never fell, `raw_empty_ceiling` twice | **Open** — measured now rather than asserted. `oms/audit_ratchet_motion.py` reads each ceiling at every commit that touched its baseline and asks whether it ever fell; `oms/test_ratchet_motion.py`; fifteenth check in the pre-push hook |
 | **K7** | A completing goal's last condition names its successor | the frontier is consulted before a goal is closed | done by hand today, and only because someone remembered | **Open** |
+| **K8** | No ratchet's ceiling stands above what it currently measures | every ceiling equals its measurement | not measured; `unauthorized_mutating_ceiling` stood at 75 while the count had been 71 since before the branch that found it | **Open** — 5 of 27 audits announce an unlocked improvement and 22 say nothing, so the uniform check needs every audit to report its current value in one shape first |
+
+## The slack K6 does not catch
+
+K6 asks whether a ceiling has ever fallen. It does not ask whether it has fallen *far
+enough*, and the difference is a gate that is looser than it reads.
+
+`unauthorized_mutating_ceiling` was recorded at 75. The measurement was 71, and had been 71
+since before the branch that noticed. Every run in between printed "Ratchet held" and passed,
+while quietly permitting four mutating handlers to lose their permission again with nothing
+to show for it. The ratchet was not broken and not ignored; it was simply four higher than
+the truth, because improving a number and re-recording it are two actions and only the first
+is interesting.
+
+That is K8, and it is deliberately not implemented yet. Five audits already print "Ratchet
+held, and improved" when they find slack, and the hook could grep for that line tomorrow --
+but 22 others say nothing at all, and a gate covering a fifth of the ratchets while reading
+like it covers all of them is worse than the gap it papers over. The prerequisite is a
+common way for an audit to state what it measured, not a regex over prose that five of them
+happen to share.
 
 ## Non-completion rule
 
