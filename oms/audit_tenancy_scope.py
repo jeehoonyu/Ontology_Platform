@@ -90,6 +90,41 @@ def _queried_class(node: ast.Call, scoped: set) -> str | None:
     return None
 
 
+# Where a read sits decides what repairing it costs, so the count is split three ways
+# rather than reported as one number that hides the difference.
+#
+# `semantic_scope`'s accessors authorize a caller, so they need one in hand. A handler
+# that declares `principal` has it: the repair is a mechanical swap of the raw read for
+# the typed accessor. A private helper in the same module does not -- it took `db` and
+# an id from its caller -- so repairing it means threading a principal down, or lifting
+# the read up to the handler. That is a real change to a call graph, not a swap, and
+# counting it with the swaps overstated how much of this is mechanical. A worker has no
+# caller to authorize at all; its question is containment, not permission, and every
+# model reached from one here carries `project_id`, so the scope exists and only the
+# filter is missing.
+AUTHORIZED = "authorized"   # enclosing function has a principal: swap in the accessor
+HELPER = "helper"           # routed module, but no principal here: thread one through
+WORKER = "worker"           # no request surface: contain by the job's own project
+
+
+def _principal_bearing_ranges(tree: ast.AST) -> List[range]:
+    """Line ranges of functions that declare a principal of their own."""
+    out: List[range] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = [a.arg for a in node.args.args + node.args.kwonlyargs]
+        if "principal" in names:
+            out.append(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return out
+
+
+def _site_kind(line: int, routed: bool, bearing: List[range]) -> str:
+    if any(line in r for r in bearing):
+        return AUTHORIZED
+    return HELPER if routed else WORKER
+
+
 def read() -> Dict[str, Any]:
     scoped = scoped_classes()
     reads = 0
@@ -98,10 +133,12 @@ def read() -> Dict[str, Any]:
     for path in sorted(APP.glob("*.py")):
         text = path.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
+        routed = "@router." in text or "@app." in text
         try:
             tree = ast.parse(text)
         except SyntaxError:
             continue
+        bearing = None
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -109,15 +146,21 @@ def read() -> Dict[str, Any]:
             if not cls:
                 continue
             reads += 1
+            bearing = bearing if bearing is not None else _principal_bearing_ranges(tree)
             window = "\n".join(lines[max(0, node.lineno - 1):node.lineno + PROXIMITY_LINES])
             if "project_id" not in window:
-                sites.append({"module": path.name, "line": node.lineno, "model": cls})
+                sites.append({"module": path.name, "line": node.lineno,
+                              "model": cls,
+                              "kind": _site_kind(node.lineno, routed, bearing)})
 
     modules: Dict[str, int] = {}
     for site in sites:
         modules[site["module"]] = modules.get(site["module"], 0) + 1
 
     return {
+        "authorized": sum(1 for s in sites if s["kind"] == AUTHORIZED),
+        "helper": sum(1 for s in sites if s["kind"] == HELPER),
+        "worker": sum(1 for s in sites if s["kind"] == WORKER),
         "scoped_models": len(scoped),
         "scoped_reads": reads,
         "unscoped_reads": len(sites),
@@ -137,6 +180,10 @@ def main() -> int:
           f"({reading['scoped_models']} such models); "
           f"{reading['unscoped_reads']} name no project within "
           f"{PROXIMITY_LINES} lines")
+    print(f"    {reading['authorized']:>4}  in a function holding a principal "
+          f"(swap in the accessor)")
+    print(f"    {reading['helper']:>4}  in a helper below one (thread a principal down)")
+    print(f"    {reading['worker']:>4}  with no caller to authorize (contain by job project)")
     for module, count in list(reading["modules"].items())[:12]:
         print(f"    {count:>4}  {module}")
     if args.verbose:
@@ -155,6 +202,9 @@ def main() -> int:
                      "and that a new unscoped read cannot arrive unnoticed."),
             "unscoped_reads_ceiling": reading["unscoped_reads"],
             "scoped_reads_reference": reading["scoped_reads"],
+            "authorized_reference": reading["authorized"],
+            "helper_reference": reading["helper"],
+            "worker_reference": reading["worker"],
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"\nBaseline set: ceiling {reading['unscoped_reads']}.")
         return 0

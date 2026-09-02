@@ -70,14 +70,15 @@ route, whatever permission they carry.
 
 | # | Condition | Threshold | Baseline 2026-08-27 | State |
 | --- | --- | --- | --- | --- |
-| **T1** | The unscoped-read census exists, is ratcheted, and runs on every push | exists and gates | did not exist | **Met** — `oms/audit_tenancy_scope.py`, ceiling 401; `oms/test_tenancy_scope.py`, 18 assertions; twelfth check in the pre-push hook |
-| **T2** | The five worst modules name a project on every scoped read | `unscoped_reads_ceiling` at 0 | `unscoped_reads_ceiling` 401 (tenancy-scope): `runtime` 39, `asset_reliability_scenario` 28, `system_hardening` 26, `platform_runtime` 22, `stream_processing` 19 | **Open** |
+| **T1** | The unscoped-read census exists, is ratcheted, and runs on every push | exists and gates | did not exist | **Met** — `oms/audit_tenancy_scope.py`, ceiling 396; `oms/test_tenancy_scope.py`, 18 assertions; twelfth check in the pre-push hook |
+| **T2** | Every unscoped read that has a principal in hand uses the accessor | `authorized_reference` at 0 | `unscoped_reads_ceiling` 396, of which `authorized_reference` is 103, after `ontology_core`'s undo went from 5 to 2 | **Open** — the census now separates the three repairs (103 swap, 230 thread, 63 contain, the last of them T9) instead of quoting one number that hid them |
 | **T3** | No route authorises from a value in its own request body | 0 | 2: `POST /cipher/decrypt` read `principal` from the body; `cipher_ops` bulk transform did the same | **Met** — both authorise the calling principal. Naming a different one is delegation and now costs `administer`. `oms/test_cipher.py` asserts an editor is refused and an administrator is not |
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
 | **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
 | **T6** | Object-type mutation is project-scoped and names its actor | 2 routes | `PUT`/`DELETE /ontology/object-types/{id}` called neither `assert_project` nor `object_type_for`, and audited as `"system"` | **Met** — both resolve through `semantic_scope.object_type_for` and audit the caller; `PUT` additionally refuses to change `__manager.project_id`, which three modules read as the owning project. `oms/test_ontology_core.py` asserts all three |
 | **T7** | The nine modules R6 deferred as per-route are gated | 9 of 9 | 0 of 9; 75 mutating handlers remain | **Open** |
-| **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Open** — the R3 question, asked of tenancy |
+| **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Met** — `oms/app/semantic_scope.py`. It already existed, with typed accessors for the six models the reads concentrate in, at 118 call sites. The question was not what to build but why 396 reads bypass it, and the census now answers that per site |
+| **T9** | A worker reads only the project of the work it was handed | one named mechanism | 63 reads with no caller to authorize and no rule that replaces one | **Open** — `semantic_scope` cannot serve these: its accessors authorize a principal and a worker loop has none. Every model reached from one carries `project_id`, so the scope exists and only the filter is missing |
 
 ## What T5 could not close
 
@@ -100,10 +101,32 @@ the count rises — not against the census having been written.
 
 ## The ordering that binds
 
-**T8 before T2.** Closing 134 sites one query at a time, and then deciding tenancy belongs at
-a chokepoint, throws the 134 away. R3 learned this on the write path: seven scattered sites
-became one door, and the three findings it closed were all the same fact seen three times. The
-same question is open here and should be answered before the grind starts, not after.
+**T8 came first, and the answer was already in the tree.** `oms/app/semantic_scope.py` has
+carried typed accessors for the six project-scoped models these reads concentrate in —
+`object_for`, `object_type_for`, `asset_for`, `link_for`, `link_type_for`, `pipeline_for` —
+plus `owned_row`, `accessible_query` and `assert_project`, and 118 call sites already use
+them. There was no chokepoint to design. The open question was never *where* tenancy is
+enforced; it was why 396 reads do not go through the door that exists.
 
-T3, T4, T5 and T6 are independent of that ordering and independent of each other. Each is a
-specific hole with a named route, and none is large.
+The census answers that now, and the answer is three different repairs, not one grind:
+
+- **103 sites** sit in a function that already declares a `principal`. Swapping the raw read
+  for the typed accessor is mechanical and local.
+- **230 sites** sit in a private helper below such a function. The helper took `db` and an id
+  from its caller and has nobody to authorize, so repairing one means threading a principal
+  down or lifting the read up — a change to a call graph, not a swap.
+- **63 sites** are in modules with no request surface at all, and those are T9. There is no
+  caller to authorize, so the question stops being permission and becomes containment.
+
+Reporting these as one number of 401 was itself the defect this document warns about
+elsewhere: a measure that claims more than it checks. The first module opened under the new
+split showed why. Five of `ontology_core`'s reads looked identical, and they were not — three
+resolved an id out of a reversal payload and then wrote through it, which let a log in one
+project rewrite another project's object under a permission that looked correct, while two
+were existence checks on a primary key before an insert, where adding a project filter would
+have turned a skipped restore into a duplicate-key error. The three are fixed and
+`oms/test_ontology_core_ext.py` fails without the fix; the two are commented so the next
+reader does not "fix" them.
+
+T3, T4, T5 and T6 were independent of that ordering and independent of each other. Each was a
+specific hole with a named route, and none was large.

@@ -237,6 +237,60 @@ prof = ok(client.get("/ontology/object-types/account/profile"), "profile preserv
 assert prof["primary_key"] == "acctNo", prof
 
 
+# ---------------------------------------------------------------------------
+# (8) UNDO STAYS INSIDE THE LOG'S PROJECT
+#
+# The reversal payload names bare object ids, and the caller is authorized against
+# the log, not against the rows the payload happens to name. Undo resolved them with
+# `db.get`, so a log in one project whose reversal named another project's object
+# rewrote that object's properties under a permission that looked entirely correct.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+db = SessionLocal()
+db.add(models.ObjectInstance(id="victim1", object_type_id="account", project_id="tenant-b",
+                             properties={"balance": 999, "status": "OPEN"},
+                             lineage={}, created_at=_now(), updated_at=_now()))
+db.add(M.ActionLog(id="cross-log", project_id="default", action_type_id="adjust_account",
+                   actor="mallory", parameters={}, mutated_object_ids=["victim1"],
+                   reversal=[{"op": "modify-object", "object_id": "victim1",
+                              "before": {"balance": 0, "status": "DRAINED"},
+                              "before_present": {"balance": True, "status": True}}],
+                   undone=0, created_at=_now()))
+db.commit()
+db.close()
+
+crossed = ok(client.post("/ontology/action-log/cross-log/undo"), "undo across projects")
+assert "victim1" not in crossed["restored_object_ids"], crossed
+
+db = SessionLocal()
+victim = db.get(models.ObjectInstance, "victim1")
+assert victim.properties["balance"] == 999, victim.properties
+assert victim.properties["status"] == "OPEN", victim.properties
+db.close()
+passed += 2
+
+# The same undo still reverses rows that *are* in its project.
+db = SessionLocal()
+db.add(models.ObjectInstance(id="mine1", object_type_id="account", project_id="default",
+                             properties={"balance": 7, "status": "OPEN"},
+                             lineage={}, created_at=_now(), updated_at=_now()))
+db.add(M.ActionLog(id="own-log", project_id="default", action_type_id="adjust_account",
+                   actor="ada", parameters={}, mutated_object_ids=["mine1"],
+                   reversal=[{"op": "modify-object", "object_id": "mine1",
+                              "before": {"balance": 3},
+                              "before_present": {"balance": True}}],
+                   undone=0, created_at=_now()))
+db.commit()
+db.close()
+
+mine = ok(client.post("/ontology/action-log/own-log/undo"), "undo within project")
+assert "mine1" in mine["restored_object_ids"], mine
+db = SessionLocal()
+assert db.get(models.ObjectInstance, "mine1").properties["balance"] == 3
+db.close()
+passed += 1
+
+
 print(f"\nontology_core extensions verified: {passed} assertions passed.")
 engine.dispose()
 _t.cleanup()

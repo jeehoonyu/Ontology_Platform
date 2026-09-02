@@ -1725,6 +1725,26 @@ def get_action_log(log_id: str, db: Session = Depends(get_db),
     return row
 
 
+def _reversal_row(db: Session, model, row_id, project_id):
+    """A row named by a reversal entry, but only from the log's own project.
+
+    The reversal payload carries bare ids, so resolving one with `db.get` trusts the
+    payload to name a row inside the project the caller was authorized for. It is the
+    payload, not the caller, that decides which id is read, and an entry naming an id
+    outside that project made undo modify or delete another tenant's row under a
+    permission that looked correct. T2 of GOAL_TENANCY_2026-08-27.
+
+    Existence checks before an insert are deliberately *not* routed through here: object
+    and link ids are primary keys, so a row in another project still occupies the id, and
+    scoping that check would turn a skipped restore into a duplicate-key insert.
+    """
+    if not row_id:
+        return None
+    return (db.query(model)
+            .filter(model.id == str(row_id), model.project_id == project_id)
+            .first())
+
+
 @router.post("/ontology/action-log/{log_id}/undo")
 def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(get_db),
                     principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
@@ -1738,7 +1758,7 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
     for entry in reversed(row.reversal or []):
         op = entry.get("op")
         if op == "modify-object":
-            inst = db.get(models.ObjectInstance, entry.get("object_id"))
+            inst = _reversal_row(db, models.ObjectInstance, entry.get("object_id"), row.project_id)
             if inst is None:
                 continue
             props = dict(inst.properties or {})
@@ -1758,11 +1778,12 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
             )
             restored.append(inst.id)
         elif op == "create-object":
-            inst = db.get(models.ObjectInstance, entry.get("object_id"))
+            inst = _reversal_row(db, models.ObjectInstance, entry.get("object_id"), row.project_id)
             if inst is not None:
                 db.delete(inst)
                 restored.append(entry.get("object_id"))
         elif op == "delete-object":
+            # Global on purpose: the id is a primary key. See _reversal_row.
             if db.get(models.ObjectInstance, entry.get("object_id")) is None:
                 object_writes.create_object(
                     db, object_id=entry.get("object_id"), object_type_id=entry.get("object_type_id"),
@@ -1774,10 +1795,11 @@ def undo_action_log(log_id: str, actor: str = "system", db: Session = Depends(ge
                 )
                 restored.append(entry.get("object_id"))
         elif op == "add-link":
-            link = db.get(models.LinkInstance, entry.get("link_id"))
+            link = _reversal_row(db, models.LinkInstance, entry.get("link_id"), row.project_id)
             if link is not None:
                 db.delete(link)
         elif op == "remove-link":
+            # Global on purpose: the id is a primary key. See _reversal_row.
             if db.get(models.LinkInstance, entry.get("link_id")) is None:
                 db.add(models.LinkInstance(
                     id=entry.get("link_id"), project_id=row.project_id, link_type_id=entry.get("link_type_id"),
@@ -1846,6 +1868,9 @@ def delete_object_type(object_type_id: str, db: Session = Depends(get_db),
                        principal: production_auth.Principal = Depends(
                            production_auth.require_permission("edit"))):
     obj_type = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
+    # Counted across every project on purpose. This is a refusal guard, and narrowing it
+    # to the caller's project would let a delete proceed while instances of the type
+    # survive elsewhere -- a filter here would weaken the check, not scope it.
     instance_count = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.object_type_id == object_type_id).count()
     if instance_count:
