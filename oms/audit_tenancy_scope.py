@@ -115,7 +115,7 @@ def _queried_class(node: ast.Call, scoped: set) -> str | None:
 UNAUTHORIZED = "unauthorized"  # holds a principal, authorizes nothing: swap in the accessor
 TRANSITIVE = "transitive"      # authorized something first: probably already scoped
 HELPER = "helper"           # routed module, but no principal here: thread one through
-WORKER = "worker"           # no request surface: contain by the job's own project
+WORKER = "worker"           # nothing routed can reach it: contain by the job's own project
 
 
 # A function that resolved an id through one of these has already proved the row is the
@@ -126,6 +126,36 @@ WORKER = "worker"           # no request surface: contain by the job's own proje
 # still takes a person to confirm.
 AUTHORIZING = re.compile(r"\b(semantic_scope\.\w+|owned_row|assert_project|accessible_query"
                          r"|_artifact_for|_locked_artifact_for|_project_for|require_project)\s*\(")
+
+
+def _reachable_from_routes() -> set:
+    """Modules a routed module can call into, directly or through another such module.
+
+    Declaring a module a worker because it defines no routes was wrong, and the count
+    published under it was wrong with it. `runtime.py` has no `@router.` line and is called
+    from thirty modules that do; its reads have a caller, and that caller has a principal.
+    The distinction that matters is reachability, not whether the decorators happen to live
+    in the same file -- so this walks the imports. A module nothing routed can reach is a
+    worker, and this application currently has none.
+    """
+    sources = {path.stem: path.read_text(encoding="utf-8", errors="replace")
+               for path in APP.glob("*.py")}
+    routed = {name for name, text in sources.items()
+              if "@router." in text or "@app." in text}
+    reachable = set(routed)
+    changed = True
+    while changed:
+        changed = False
+        for name, text in sources.items():
+            if name in reachable:
+                continue
+            for holder in list(reachable):
+                if re.search(rf"\b(from \.{name} import|from \. import [^\n]*\b{name}\b|\b{name}\.)",
+                             sources[holder]):
+                    reachable.add(name)
+                    changed = True
+                    break
+    return reachable
 
 
 def _authorized_names(fn: ast.AST) -> set:
@@ -175,13 +205,13 @@ def _principal_bearing(tree: ast.AST, lines: List[str]) -> List[tuple]:
     return out
 
 
-def _site_kind(line: int, routed: bool, bearing: List[tuple], window: str) -> str:
+def _site_kind(line: int, reachable: bool, bearing: List[tuple], window: str) -> str:
     for span, authorizes, names in bearing:
         if line in span:
             if authorizes or any(f"{name}.id" in window for name in names):
                 return TRANSITIVE
             return UNAUTHORIZED
-    return HELPER if routed else WORKER
+    return HELPER if reachable else WORKER
 
 
 # Whether the read's result is ever *used*, or only tested for presence. The distinction
@@ -229,13 +259,14 @@ def _enclosing(functions: List[Any], line: int):
 
 def read() -> Dict[str, Any]:
     scoped = scoped_classes()
+    reachable_modules = _reachable_from_routes()
     reads = 0
     sites: List[Dict[str, Any]] = []
 
     for path in sorted(APP.glob("*.py")):
         text = path.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
-        routed = "@router." in text or "@app." in text
+        reachable = path.stem in reachable_modules
         try:
             tree = ast.parse(text)
         except SyntaxError:
@@ -256,7 +287,7 @@ def read() -> Dict[str, Any]:
                 owner = _enclosing(functions, node.lineno)
                 sites.append({"module": path.name, "line": node.lineno,
                               "model": cls,
-                              "kind": _site_kind(node.lineno, routed, bearing, window),
+                              "kind": _site_kind(node.lineno, reachable, bearing, window),
                               "uses_row": _uses_row(owner, node.lineno) if owner else True})
 
     modules: Dict[str, int] = {}

@@ -78,7 +78,7 @@ route, whatever permission they carry.
 | **T6** | Object-type mutation is project-scoped and names its actor | 2 routes | `PUT`/`DELETE /ontology/object-types/{id}` called neither `assert_project` nor `object_type_for`, and audited as `"system"` | **Met** — both resolve through `semantic_scope.object_type_for` and audit the caller; `PUT` additionally refuses to change `__manager.project_id`, which three modules read as the owning project. `oms/test_ontology_core.py` asserts all three |
 | **T7** | The nine modules R6 deferred as per-route are gated | 9 of 9 | 0 of 9; 75 mutating handlers remain | **Open** |
 | **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Met** — `oms/app/semantic_scope.py`. It already existed, with typed accessors for the six models the reads concentrate in, at 118 call sites. The question was not what to build but why 396 reads bypass it, and the census now answers that per site |
-| **T9** | A worker reads only the project of the work it was handed | one named mechanism | 63 reads with no caller to authorize and no rule that replaces one | **Open** — `semantic_scope` cannot serve these: its accessors authorize a principal and a worker loop has none. Every model reached from one carries `project_id`, so the scope exists and only the filter is missing |
+| **T9** | A worker reads only the project of the work it was handed | one named mechanism | 0 such reads; the 63 this condition was opened on were misclassified | **Met** — vacuously, and the honest reading is that the condition should not have been opened. `runtime.py` was called a worker because it carries no `@router.` line, and it is called from thirty modules that do. The census now classifies by reachability from a routed module rather than by where the decorators live, and this application has no module nothing routed can reach. The 63 were helpers all along and are counted with them |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
 | **T11** | An object type's project is recorded in one place | one spelling | two: the `ObjectType.project_id` column, read by 14 modules, and `properties.__manager.project_id`, read by 11, with 6 modules reading both | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, so neither can be used to scope a read until they are reconciled |
 
@@ -165,12 +165,28 @@ Being wrong about which sites is survivable. Setting a target nobody can reach i
 converts a goal into a permanent source of work that cannot be finished, which is the
 failure mode `docs/GOAL_CONTINUOUS.md` exists to catch.
 
+## A condition opened on a miscount
+
+T9 asked for a mechanism to contain reads that have no caller to authorize, on the strength
+of 63 such reads. There are none, and there never were. The census decided "worker" by
+asking whether a module declares routes of its own, which is a fact about where decorators
+are written rather than about who can reach the code: `runtime.py` declares none and is
+called from thirty modules that do, and `domain_sentinel`, `domain_maintenance` and
+`object_writes` are each reached from `main`. Every read in this application sits below a
+request, and so below a principal.
+
+The condition is closed as met, which it is, vacuously -- and the vacancy is the finding.
+Its 63 reads were never a separate problem needing a second mechanism; they are helpers
+below handlers, the same 230 that were already there, and they are counted with them now.
+A gate answering a question nobody should have asked is worth less than no gate, because it
+reports progress on a population that does not exist.
+
 ## What the residual is made of
 
 Twenty-seven sites remain in the sharpened count, and reading all of them showed the
 residual is mostly the proximity rule's blind spots rather than work:
 
-- Thirteen are worker loops re-reading the row they themselves just leased.
+- Thirteen are worker-endpoint handlers (`run_next_...`) re-reading the row they themselves just leased. They are request handlers like any other; "worker" here names what calls them, not a module the census cannot reach.
 - `invoke_webhook` filters `WhExecution` by the `webhook_id` it just authorized.
 - `get_ontology_contract_quarantine` already refuses when the asset's project differs from
   the graph's; the check simply sits further than six lines from the read.
@@ -182,7 +198,7 @@ rediscover that these thirteen are fine, and the count does not fall by declarin
 
 ## Two refinements the census refused
 
-Thirteen of the remaining sites are worker loops re-reading the row they themselves just
+Thirteen of the remaining sites are worker-endpoint handlers re-reading the row they just
 leased -- `run_next_outbox_event`, `run_next_agent_job`, `run_next_pipeline_job`. Teaching
 the census to clear them is easy: let a name inherit authorization from a value pulled out
 of an already-authorized row, and ten of the thirteen go quiet.
@@ -281,8 +297,11 @@ The census answers that now, and the answer is three different repairs, not one 
 - **230 sites** sit in a private helper below such a function. The helper took `db` and an id
   from its caller and has nobody to authorize, so repairing one means threading a principal
   down or lifting the read up — a change to a call graph, not a swap.
-- **63 sites** are in modules with no request surface at all, and those are T9. There is no
-  caller to authorize, so the question stops being permission and becomes containment.
+- **63 sites** were called workers with no caller to authorize. That was wrong, and it is
+  worth being precise about how: the test was whether the module itself declares routes,
+  and `runtime.py` does not while thirty routed modules call into it. Classifying by
+  reachability instead leaves no such module in this application, so those 63 join the
+  helpers above and T9 closes without anyone doing anything.
 
 Reporting these as one number of 401 was itself the defect this document warns about
 elsewhere: a measure that claims more than it checks. The first module opened under the new
