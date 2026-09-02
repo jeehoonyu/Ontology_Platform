@@ -845,7 +845,14 @@ def merge_proposal(proposal_id: str, principal: Principal = Depends(require_perm
             detail=f"Proposal must be 'approved' before merging (current: {proposal.status})",
         )
 
-    branch = db.query(OntologyBranch).filter(OntologyBranch.id == proposal.branch_id).first()
+    # `branch_id` is a pointer out of the proposal, not the id the caller was authorized
+    # against, so the permission check above says nothing about it. Merging set the status
+    # of whatever it named, and a proposal pointing at another project's branch closed that
+    # branch. T2 of GOAL_TENANCY_2026-08-27.
+    branch = db.query(OntologyBranch).filter(
+        OntologyBranch.id == proposal.branch_id,
+        OntologyBranch.project_id == proposal.project_id,
+    ).first()
     if not branch:
         _branch_not_found(proposal.branch_id)
 

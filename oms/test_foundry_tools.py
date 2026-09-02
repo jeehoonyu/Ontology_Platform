@@ -242,6 +242,58 @@ assert "foreign_widget" not in _w["preview_ids"], _w
 passed += 2
 
 
+
+# ---------------------------------------------------------------------------
+# Merging a proposal does not close a branch in another project
+#
+# The permission check is against the proposal's project. `branch_id` is a pointer out of
+# the proposal, not the id the caller was authorized against, so merging set the status of
+# whatever it named. T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+from app import ontology_versioning as _ov  # noqa: E402
+
+_ts = int(_time.time())
+_db = _SL()
+_db.add(_ov.OntologyBranch(id="foreign-branch", project_id="tenant-b", display_name="Theirs",
+                           base_branch="main", status="open", created_at=_ts))
+_db.add(_ov.OntologyProposal(id="crossing", project_id="default", branch_id="foreign-branch",
+                             title="Points elsewhere", description=None, changes=[],
+                             status="approved", reviewer="us", created_at=_ts))
+_db.commit()
+_db.close()
+
+ok(client.post("/ontology/proposals/crossing/merge"), "merge cannot reach another project's branch", 404)
+_db = _SL()
+assert _db.get(_ov.OntologyBranch, "foreign-branch").status == "open"
+_db.close()
+passed += 2
+
+
+
+# ---------------------------------------------------------------------------
+# Archiving cannot write into another project's dataset
+#
+# `target_asset_id` comes from the request body and the permission check is about the
+# stream, so an unscoped lookup let a caller copy their stream's payloads into another
+# project's asset. The only defect of this shape that writes rather than discloses.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+_ts2 = int(_time.time())
+_db = _SL()
+_db.add(_m.DataAsset(id="foreign_target", project_id="tenant-b", display_name="Theirs",
+                     description=None, kind="dataset", asset_schema={}, records=[],
+                     created_at=_ts2, updated_at=_ts2))
+_db.commit()
+_db.close()
+
+ok(client.post("/streams/st1/archive", json={"target_asset_id": "foreign_target"}),
+   "archive cannot target another project's dataset", 404)
+_db = _SL()
+assert _db.get(_m.DataAsset, "foreign_target").records in (None, []), "their dataset stays empty"
+_db.close()
+passed += 2
+
+
 print(f"\nAll Foundry tool modules verified: {passed} endpoint assertions passed.")
 
 from app.database import engine as _engine  # noqa: E402

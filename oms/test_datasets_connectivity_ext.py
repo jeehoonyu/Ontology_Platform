@@ -177,6 +177,36 @@ assert d3["rows"] == 0 and d3["delta_records"] == [], d3
 cp = ok(client.get("/connections/exports/ex1/checkpoint"), "checkpoint final")
 assert cp["last_exported_count"] == 5 and cp["runs"] == 3, cp
 
+
+# =====================================================================
+# (5) An export cannot name an asset from another project
+#
+# `create_export` checks the caller against the export's own project, which says nothing
+# about the asset it points at, and `run_export` reads `asset.records` and ships them to
+# the destination. Together that was a two-step, caller-chosen export of another project's
+# rows. T2 of GOAL_TENANCY_2026-08-27.
+# =====================================================================
+_now = int(__import__("time").time())
+_db = SessionLocal()
+try:
+    _db.add(models.DataAsset(id="foreign_src", project_id="tenant-b", display_name="Theirs",
+                             description=None, kind="dataset", asset_schema={},
+                             records=[{"secret": "theirs"}], created_at=_now, updated_at=_now))
+    _db.commit()
+finally:
+    _db.close()
+
+refused = client.post("/connections/exports", json={
+    "id": "ex_cross", "source_asset_id": "foreign_src",
+    "destination": "s3://bucket/out", "format": "json"})
+assert refused.status_code in (403, 409), f"expected a refusal, got {refused.status_code}: {refused.text[:300]}"
+passed += 1
+
+# The rows never leave: no export row was created to run.
+assert client.post("/connections/exports/ex_cross/run").status_code == 404
+passed += 1
+
+
 print(f"\nDatasets + Connectivity extension behaviors verified: {passed} assertions passed.")
 
 from app.database import engine as _engine  # noqa: E402

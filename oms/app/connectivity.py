@@ -11,7 +11,7 @@ from sqlalchemy import String, Integer, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session, relationship
 
 from .database import Base, get_db
-from . import imports_ops, models, models_action, ops_control, tenancy
+from . import imports_ops, models, models_action, ops_control, semantic_scope, tenancy
 from .production_auth import Principal, require_permission
 
 # ---------------------------------------------------------------------------
@@ -626,6 +626,18 @@ def validate_sync(sync_id: str, body: SyncValidateRequest = SyncValidateRequest(
 @router.post("/connections/exports", response_model=ConnectionExportRead)
 def create_export(body: ConnectionExportCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
     tenancy.assert_project_permission(db, principal, body.project_id, "edit")
+    # The permission above is about the export's own project and says nothing about the
+    # asset it names. Without this, a caller holding `edit` on their own project could
+    # point an export at another project's asset and then run it, and `run_export` reads
+    # `asset.records` and ships them to the destination -- a two-step, caller-chosen
+    # exfiltration of row data. T2 of GOAL_TENANCY_2026-08-27.
+    source = semantic_scope.asset_for(db, principal, body.source_asset_id, "view")
+    if source.project_id != body.project_id:
+        raise HTTPException(status_code=409, detail={
+            "message": "Source dataset belongs to another project",
+            "project_id": body.project_id,
+            "source_asset_id": body.source_asset_id,
+        })
     row = ConnectionExport(
         id=body.id or uuid.uuid4().hex,
         project_id=body.project_id,
@@ -676,7 +688,13 @@ def run_export(
         raise HTTPException(status_code=404, detail="Export not found")
     tenancy.assert_project_permission(db, principal, export.project_id, "execute")
 
-    asset = db.query(models.DataAsset).filter(models.DataAsset.id == export.source_asset_id).first()
+    # Scoped as well as validated at creation: exports recorded before that check exists
+    # still name whatever they name, and this is the read that turns a stored id into rows
+    # leaving the system.
+    asset = db.query(models.DataAsset).filter(
+        models.DataAsset.id == export.source_asset_id,
+        models.DataAsset.project_id == export.project_id,
+    ).first()
     all_records = list(asset.records) if asset and asset.records else []
     total_rows = len(all_records)
 

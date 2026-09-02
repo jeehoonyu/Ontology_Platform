@@ -296,9 +296,17 @@ def archive_stream(
     principal: Principal = Depends(require_permission("execute")),
     db: Session = Depends(get_db),
 ):
-    _get_stream_or_404(stream_id, db, principal, "execute")
+    stream = _get_stream_or_404(stream_id, db, principal, "execute")
 
-    asset = db.query(models.DataAsset).filter(models.DataAsset.id == body.target_asset_id).first()
+    # `target_asset_id` comes from the request body, and the permission above is about the
+    # stream. Archiving copies this stream's payloads *into* the asset it names, so an
+    # unscoped lookup let a caller write their records into another project's dataset --
+    # the one defect of this shape that writes rather than discloses.
+    # T2 of GOAL_TENANCY_2026-08-27.
+    asset = db.query(models.DataAsset).filter(
+        models.DataAsset.id == body.target_asset_id,
+        models.DataAsset.project_id == stream.project_id,
+    ).first()
     if not asset:
         raise HTTPException(
             status_code=404,

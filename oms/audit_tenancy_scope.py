@@ -139,6 +139,13 @@ def _authorized_names(fn: ast.AST) -> set:
     like. Merely mentioning `principal` is not: nearly every handler passes `principal.id`
     to an audit-log call, and treating that as authorization cleared all 83 sites at once
     when it was tried, which is how the rule was found to be worthless.
+
+    Only `<name>.id` counts, never any attribute of the row. Inheriting from
+    `row.child_id` would be inheriting from a *payload* -- an id the authorized row happens
+    to carry -- and that is precisely the confusion this whole condition is about. Every
+    defect T2 turned up was an id taken out of something already authorized: a reversal
+    entry, a widget definition, a task graph, a workspace's module list. A census that
+    cleared those would have reported nothing while the bugs were live.
     """
     out = set()
     for node in ast.walk(fn):
@@ -171,7 +178,7 @@ def _principal_bearing(tree: ast.AST, lines: List[str]) -> List[tuple]:
 def _site_kind(line: int, routed: bool, bearing: List[tuple], window: str) -> str:
     for span, authorizes, names in bearing:
         if line in span:
-            if authorizes or any(f"{name}." in window for name in names):
+            if authorizes or any(f"{name}.id" in window for name in names):
                 return TRANSITIVE
             return UNAUTHORIZED
     return HELPER if routed else WORKER

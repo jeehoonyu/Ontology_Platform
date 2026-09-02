@@ -71,7 +71,7 @@ route, whatever permission they carry.
 | # | Condition | Threshold | Baseline 2026-08-27 | State |
 | --- | --- | --- | --- | --- |
 | **T1** | The unscoped-read census exists, is ratcheted, and runs on every push | exists and gates | did not exist | **Met** — `oms/audit_tenancy_scope.py`, ceiling 396; `oms/test_tenancy_scope.py`, 18 assertions; twelfth check in the pre-push hook |
-| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 207 of `unscoped_reads_ceiling` 384, of which 28 sit in a function that holds a principal and authorizes nothing | **Open** — the target is no longer the ceiling. 177 of the 384 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
+| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 204 of `unscoped_reads_ceiling` 381, of which 27 sit in a function that holds a principal and authorizes nothing | **Open** — the target is no longer the ceiling. 177 of the 384 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
 | **T3** | No route authorises from a value in its own request body | 0 | 2: `POST /cipher/decrypt` read `principal` from the body; `cipher_ops` bulk transform did the same | **Met** — both authorise the calling principal. Naming a different one is delegation and now costs `administer`. `oms/test_cipher.py` asserts an editor is refused and an administrator is not |
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
 | **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
@@ -85,9 +85,10 @@ route, whatever permission they carry.
 ## What the sharpened target found
 
 Narrowing T2 from 401 undifferentiated reads to the ones that fetch a row, hold a principal
-and authorize nothing turned up four defects in four modules, each the same mistake wearing
-different clothes: an id that came from somewhere other than the caller's own authorization,
-resolved with a bare `db.get`.
+and authorize nothing turned up eight defects, each the same mistake wearing different
+clothes: **an id that arrived inside something already authorized is not itself
+authorized.** In every case the permission check was correct and answered a different
+question than the read went on to ask.
 
 - `undo_action_log` took ids from the log's reversal payload and wrote through them, so a
   log in one project rewrote another project's object.
@@ -100,6 +101,23 @@ resolved with a bare `db.get`.
   project's saved sets and map layers by display name. `CarbonWorkspace` records no project
   of its own (T10), so the bound there is what the principal can see, not what the workspace
   claims.
+- `merge_proposal` checks `publish` against the proposal's project and then follows
+  `proposal.branch_id`, which is a pointer out of the row rather than the id that was
+  checked. Merging set the status of whatever it named, so a proposal pointing at another
+  project's branch closed that branch. It is also the site that justifies the tightening
+  above: the looser inheritance rule would have cleared it.
+- `run_export` checks `execute` against the export's project and then follows
+  `export.source_asset_id`, reads `asset.records`, and writes them to the export's
+  destination. `create_export` never checked that the asset it was given belonged to the
+  project it was creating the export in, so the two together were a caller-chosen export of
+  another project's rows -- the only one of these that moves data out of the system rather
+  than returning it. Both ends are closed: creation refuses a mismatch with a 409, and the
+  run is scoped as well, because exports recorded before that check still name whatever
+  they name.
+- `archive_stream` checks `execute` against the stream and then takes `target_asset_id`
+  straight from the request body, copying the stream's payloads *into* whatever it names.
+  Every other defect here disclosed data; this one writes it, putting one tenant's records
+  inside another tenant's dataset.
 
 The fourth is the one worth reading twice. `capture_package_version` takes
 `object_type_ids` and `action_type_ids` **from the request body** and copies whatever they
@@ -125,9 +143,9 @@ scoping all five would have broken restore while fixing the leak.
 
 So the ceiling and the goal have been separated. The ceiling still counts every unscoped
 read, because that is what makes a new one impossible to add unnoticed, and it is not
-expected to reach zero. `row_used_reference` counts the 207 that fetch a row and then use
+expected to reach zero. `row_used_reference` counts the 204 that fetch a row and then use
 it, which is the population where an unscoped read hands over another tenant's data, and
-that is what T2 now aims at. Of those, 28 sit in a function that holds a principal and
+that is what T2 now aims at. Of those, 27 sit in a function that holds a principal and
 authorizes nothing -- the rest either delegate the check to a helper the census can see
 them hand the principal to, or sit below a handler with no principal of their own.
 
@@ -146,6 +164,41 @@ result -- and like the six-line proximity rule it will be wrong about individual
 Being wrong about which sites is survivable. Setting a target nobody can reach is not: it
 converts a goal into a permanent source of work that cannot be finished, which is the
 failure mode `docs/GOAL_CONTINUOUS.md` exists to catch.
+
+## What the residual is made of
+
+Twenty-seven sites remain in the sharpened count, and reading all of them showed the
+residual is mostly the proximity rule's blind spots rather than work:
+
+- Thirteen are worker loops re-reading the row they themselves just leased.
+- `invoke_webhook` filters `WhExecution` by the `webhook_id` it just authorized.
+- `get_ontology_contract_quarantine` already refuses when the asset's project differs from
+  the graph's; the check simply sits further than six lines from the read.
+- `query_objects` in `ontology_interfaces_ops` already bounds instances by the caller's
+  accessible projects, with a comment saying why.
+
+Recording that is the point of a residual. The next person through does not have to
+rediscover that these thirteen are fine, and the count does not fall by declaring them so.
+
+## Two refinements the census refused
+
+Thirteen of the remaining sites are worker loops re-reading the row they themselves just
+leased -- `run_next_outbox_event`, `run_next_agent_job`, `run_next_pipeline_job`. Teaching
+the census to clear them is easy: let a name inherit authorization from a value pulled out
+of an already-authorized row, and ten of the thirteen go quiet.
+
+That rule was written, measured, and thrown away. An id *inside* an authorized row is
+exactly the thing that is not authorized, and every defect this condition turned up was one:
+a reversal entry, a widget definition, a task graph, a workspace's module list, a request
+body. A census carrying that rule would have reported nothing while all five were live. The
+thirteen stay flagged, and the residual is cheaper than the blindness.
+
+The same reasoning tightened a rule already in place. Inheriting from a call handed the
+principal now requires the read to name that row's own `id`, not any of its attributes:
+`filter(X.id == row.id)` is re-reading the row that was authorized, while
+`filter(X.id == row.child_id)` is following a pointer out of it. That put two sites back
+into the count, which is the direction a correction should move when the looser rule was
+wrong.
 
 ## What stopped T2 going further, and why T11 exists
 
