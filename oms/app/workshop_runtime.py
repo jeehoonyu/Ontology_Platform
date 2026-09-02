@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import models, models_action, runtime, apps, ops_control
+from . import apps, models, models_action, ops_control, runtime, semantic_scope
 from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["workshop_runtime"])
@@ -38,7 +38,7 @@ def _object_type_project_id(db: Session, object_type_id: str) -> str:
     object_type = db.get(models.ObjectType, object_type_id)
     if not object_type:
         raise HTTPException(status_code=422, detail=f"Object type '{object_type_id}' not found")
-    return str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+    return semantic_scope.object_type_project(object_type)
 
 
 def _assert_object_type_project(db: Session, object_type_id: Optional[str], project_id: str) -> None:

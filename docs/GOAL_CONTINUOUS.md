@@ -67,7 +67,7 @@ sense of newly created; all four are old measurements that had never been claime
 | **K3** | Every evidence file records the third-party code that produced it | `unrecorded_ceiling` at 0 | 23 of 24 | **Open** |
 | **K4** | Every evidence file records the migration head it was taken at | `unprovenanced_ceiling` at 0 | 10 | **Open** |
 | **K5** | No UI surface couples to a concrete ontology type | `ontology_type_coupling_ceiling` at 0 | 1 — `frontend/src/workspaces/OntologyManager.tsx` | **Open** |
-| **K6** | No ratchet sits at a ceiling nobody has ever lowered | every recorded ceiling has moved once | not measured; a ceiling that never falls is a number wearing a goal's clothes | **Open** |
+| **K6** | No ratchet sits at a ceiling nobody has ever lowered | `unmoved_ceiling` at 0 | 2 of 17: `ontology_type_coupling_ceiling` recorded five times and never fell, `raw_empty_ceiling` twice | **Open** — measured now rather than asserted. `oms/audit_ratchet_motion.py` reads each ceiling at every commit that touched its baseline and asks whether it ever fell; `oms/test_ratchet_motion.py`; fifteenth check in the pre-push hook |
 | **K7** | A completing goal's last condition names its successor | the frontier is consulted before a goal is closed | done by hand today, and only because someone remembered | **Open** |
 
 ## Non-completion rule

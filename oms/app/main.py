@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 import os
 
-from . import models, models_action, object_writes, schemas
+from . import models, models_action, object_writes, schemas, semantic_scope
 # New Foundry tool-equivalent modules (self-contained routers + ORM models).
 # Importing them here registers their tables on the shared Base before create_all().
 from . import (
@@ -342,7 +342,7 @@ def _object_type_project_id(db: Session, object_type_id: str) -> str:
     object_type = db.get(models.ObjectType, object_type_id)
     if not object_type:
         _not_found("ObjectType", object_type_id)
-    return str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+    return semantic_scope.object_type_project(object_type)
 
 
 def _resource_references(value, key: str) -> set[str]:

@@ -54,6 +54,15 @@ BASELINE = REPO_ROOT / "docs" / "tenancy-scope-baseline.json"
 # `db.query(X).filter(...).filter(...).first()` broken over three or four lines.
 PROXIMITY_LINES = 6
 
+# What counts as naming a project near a read. `project_id` is the literal spelling;
+# `object_type_project(` is the accessor that returns one, and it earns its place here by
+# preserving the measure rather than relaxing it. The seven modules it replaced each
+# inlined an expression containing the word `project_id`, so their reads were already
+# counted as scoped -- had this token not been added, folding those copies into one
+# function would have raised the count by one without a single read changing. A ratchet
+# that moves when a refactor deletes a string is measuring the string.
+SCOPING_TOKENS = ("project_id", "object_type_project(")
+
 
 def scoped_classes() -> set:
     """ORM classes whose table carries a project_id column."""
@@ -141,6 +150,49 @@ def _site_kind(line: int, routed: bool, bearing: List[tuple]) -> str:
     return HELPER if routed else WORKER
 
 
+# Whether the read's result is ever *used*, or only tested for presence. The distinction
+# decides whether a site is repairable at all. `existing = db.query(X).filter(X.id == ...)`
+# followed by a 409 is asking whether an id is taken, and ids here are primary keys, so a
+# row in another project still occupies one: adding a project predicate turns a correctly
+# refused insert into a duplicate-key error. `undo_action_log` had both shapes three lines
+# apart -- three reads that wrote through the row, and two that only asked whether an id
+# was free -- and scoping all five would have broken it.
+#
+# So the ceiling is not a debt that can reach zero, and a condition demanding that of it
+# would generate work that makes the code worse. It stays a full-coverage ratchet, which is
+# what stops a new unscoped read arriving unnoticed; `row_used` is the part that can
+# actually be driven down, and it is what T2 aims at.
+
+
+def _uses_row(fn: ast.AST, line: int) -> bool:
+    """Does anything read an attribute off what this query returned?"""
+    target = None
+    for node in ast.walk(fn):
+        if isinstance(node, ast.If) and node.test is not None:
+            for sub in ast.walk(node.test):
+                if isinstance(sub, ast.Call) and sub.lineno <= line <= (sub.end_lineno or sub.lineno):
+                    return False  # the read is the condition itself
+        if isinstance(node, ast.Assign) and node.lineno <= line <= (node.end_lineno or node.lineno):
+            if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                target = node.targets[0].id
+    if target is None:
+        return True  # returned, passed on, or iterated: assume the rows are used
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                and node.value.id == target:
+            return True
+    return False
+
+
+def _enclosing(functions: List[Any], line: int):
+    best = None
+    for fn in functions:
+        if fn.lineno <= line <= (fn.end_lineno or fn.lineno):
+            if best is None or fn.lineno > best.lineno:
+                best = fn
+    return best
+
+
 def read() -> Dict[str, Any]:
     scoped = scoped_classes()
     reads = 0
@@ -155,6 +207,8 @@ def read() -> Dict[str, Any]:
         except SyntaxError:
             continue
         bearing = None
+        functions = [n for n in ast.walk(tree)
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -164,16 +218,20 @@ def read() -> Dict[str, Any]:
             reads += 1
             bearing = bearing if bearing is not None else _principal_bearing(tree, lines)
             window = "\n".join(lines[max(0, node.lineno - 1):node.lineno + PROXIMITY_LINES])
-            if "project_id" not in window:
+            if not any(token in window for token in SCOPING_TOKENS):
+                owner = _enclosing(functions, node.lineno)
                 sites.append({"module": path.name, "line": node.lineno,
                               "model": cls,
-                              "kind": _site_kind(node.lineno, routed, bearing)})
+                              "kind": _site_kind(node.lineno, routed, bearing),
+                              "uses_row": _uses_row(owner, node.lineno) if owner else True})
 
     modules: Dict[str, int] = {}
     for site in sites:
         modules[site["module"]] = modules.get(site["module"], 0) + 1
 
     return {
+        "row_used": sum(1 for s in sites if s["uses_row"]),
+        "existence_only": sum(1 for s in sites if not s["uses_row"]),
         "unauthorized": sum(1 for s in sites if s["kind"] == UNAUTHORIZED),
         "transitive": sum(1 for s in sites if s["kind"] == TRANSITIVE),
         "helper": sum(1 for s in sites if s["kind"] == HELPER),
@@ -197,6 +255,8 @@ def main() -> int:
           f"({reading['scoped_models']} such models); "
           f"{reading['unscoped_reads']} name no project within "
           f"{PROXIMITY_LINES} lines")
+    print(f"    {reading['row_used']:>4}  read a row and then use it -- the part that can reach zero")
+    print(f"    {reading['existence_only']:>4}  only ask whether an id is taken (see _uses_row)")
     print(f"    {reading['unauthorized']:>4}  hold a principal but authorize nothing "
           f"(swap in the accessor)")
     print(f"    {reading['transitive']:>4}  authorized an id first, and read by it "
@@ -221,6 +281,8 @@ def main() -> int:
                      "and that a new unscoped read cannot arrive unnoticed."),
             "unscoped_reads_ceiling": reading["unscoped_reads"],
             "scoped_reads_reference": reading["scoped_reads"],
+            "row_used_reference": reading["row_used"],
+            "existence_only_reference": reading["existence_only"],
             "unauthorized_reference": reading["unauthorized"],
             "transitive_reference": reading["transitive"],
             "helper_reference": reading["helper"],

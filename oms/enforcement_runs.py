@@ -67,6 +67,11 @@ DECLARED: Dict[str, Dict[str, str]] = {
                    "can be written to fix it",
         "runs_in": "suite",
     },
+    "audit_ratchet_motion": {
+        "purpose": "a ceiling that has never fallen is a measurement nobody acted on, and "
+                   "recording one is cheap enough to pass for progress by itself",
+        "runs_in": "suite",
+    },
     "audit_frontier": {
         "purpose": "a ratchet recorded and unowned is a number nobody is answerable "
                    "for; the backlog running dry looks like having nothing left to do",

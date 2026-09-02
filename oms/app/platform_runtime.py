@@ -16,7 +16,7 @@ from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models_action, ops_control, tenancy
+from . import models_action, ops_control, semantic_scope, tenancy
 from .database import Base, SessionLocal, get_db
 from . import production_auth
 from .production_auth import Principal, require_detached_permission, require_permission
@@ -1212,7 +1212,7 @@ def ontology_change_impact(body: OntologyImpactRequest, principal: Principal = D
     object_type = db.get(models.ObjectType, body.object_type_id)
     if not object_type:
         raise HTTPException(status_code=404, detail=f"Object type '{body.object_type_id}' not found")
-    project_id = str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+    project_id = semantic_scope.object_type_project(object_type)
     tenancy.assert_project_permission(db, principal, project_id, "view")
     objects = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == body.object_type_id).count()
     links = db.query(models.LinkType).filter(
@@ -1352,7 +1352,7 @@ def adopt_resource(body: ArtifactAdoptRequest, principal: Principal = Depends(re
         selected = db.get(models.ObjectType, body.resource_id)
         if not selected:
             raise HTTPException(status_code=404, detail="Object type not found")
-        object_project = str(((selected.properties or {}).get("__manager") or {}).get("project_id") or "default")
+        object_project = semantic_scope.object_type_project(selected)
         if object_project != body.project_id:
             raise HTTPException(status_code=403, detail="Object type belongs to another project")
         links = db.query(models.LinkType).filter(

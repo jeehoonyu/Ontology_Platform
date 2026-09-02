@@ -42,6 +42,33 @@ def owned_row(db: Session, principal: Principal, model: Type[T], resource_id: st
     return row
 
 
+def object_type_project(object_type) -> str:
+    """The project owning an object type, from the two places this schema records it.
+
+    `ObjectType.project_id` is a column; `properties["__manager"]["project_id"]` is a blob
+    written by the ontology generator and read as the owning project by seven modules,
+    each with its own copy of the same expression. Nothing keeps the two in agreement, so
+    a row can belong to different projects depending on which module reaches it -- that is
+    T11 of GOAL_TENANCY_2026-08-27, and it is why threading a project into the runtime's
+    object reads made a Workshop console render nothing.
+
+    The column wins where it says anything, because it is what authorization already uses:
+    `owned_row` checks it, and `POST /objects` refuses with a 409 when it disagrees with
+    the object being created. Where the column was never set -- it defaults to "default" --
+    a `__manager` naming a real project is the only record there is, and dropping it would
+    silently move those types into the default project. So the fallback is deliberate and
+    narrow, and it is here rather than in seven modules so that tightening it later is one
+    edit and one decision.
+    """
+    column = str(getattr(object_type, "project_id", "") or "")
+    manager = (getattr(object_type, "properties", None) or {}).get("__manager")
+    manager = manager if isinstance(manager, dict) else {}
+    named = str(manager.get("project_id") or "")
+    if column and column != "default":
+        return column
+    return named or column or "default"
+
+
 def object_type_for(db: Session, principal: Principal, object_type_id: str, permission: str = "view") -> models.ObjectType:
     return owned_row(db, principal, models.ObjectType, object_type_id, permission, "ObjectType")
 

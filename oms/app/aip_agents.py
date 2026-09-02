@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action, ops_control, platform_runtime, runtime, tenancy
+from . import models, models_action, ops_control, platform_runtime, runtime, semantic_scope, tenancy
 from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["aip_agents"])
@@ -49,7 +49,7 @@ def _object_type_project_id(db: Session, object_type_id: str) -> str:
     object_type = db.get(models.ObjectType, object_type_id)
     if not object_type:
         raise HTTPException(status_code=404, detail=f"Object type '{object_type_id}' not found")
-    return str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+    return semantic_scope.object_type_project(object_type)
 
 
 def _assert_tool_resources(db: Session, project_id: str, tools: List[Dict[str, Any]], retrieval: Dict[str, Any]) -> None:

@@ -71,7 +71,7 @@ route, whatever permission they carry.
 | # | Condition | Threshold | Baseline 2026-08-27 | State |
 | --- | --- | --- | --- | --- |
 | **T1** | The unscoped-read census exists, is ratcheted, and runs on every push | exists and gates | did not exist | **Met** — `oms/audit_tenancy_scope.py`, ceiling 396; `oms/test_tenancy_scope.py`, 18 assertions; twelfth check in the pre-push hook |
-| **T2** | Every unscoped read that has a principal in hand uses the accessor | `authorized_reference` at 0 | `unscoped_reads_ceiling` 396, of which `authorized_reference` is 103, after `ontology_core`'s undo went from 5 to 2 | **Open** — the census now separates the three repairs (103 swap, 230 thread, 63 contain, the last of them T9) instead of quoting one number that hid them |
+| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 214 of `unscoped_reads_ceiling` 391, of which 73 sit in a function already holding a principal | **Open** — the target is no longer the ceiling. 177 of the 391 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
 | **T3** | No route authorises from a value in its own request body | 0 | 2: `POST /cipher/decrypt` read `principal` from the body; `cipher_ops` bulk transform did the same | **Met** — both authorise the calling principal. Naming a different one is delegation and now costs `administer`. `oms/test_cipher.py` asserts an editor is refused and an administrator is not |
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
 | **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
@@ -81,6 +81,31 @@ route, whatever permission they carry.
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 63 reads with no caller to authorize and no rule that replaces one | **Open** — `semantic_scope` cannot serve these: its accessors authorize a principal and a worker loop has none. Every model reached from one carries `project_id`, so the scope exists and only the filter is missing |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
 | **T11** | An object type's project is recorded in one place | one spelling | two: the `ObjectType.project_id` column, read by 14 modules, and `properties.__manager.project_id`, read by 11, with 6 modules reading both | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, so neither can be used to scope a read until they are reconciled |
+
+## The target T2 could not have reached
+
+T2 asked for `unscoped_reads_ceiling` at 0. No amount of work could have delivered that,
+and pursuing it would have made the code worse.
+
+177 of the 391 reads never touch what they return. They ask whether an id is already taken
+and then refuse with a 409, and ids in this schema are primary keys, so a row belonging to
+another project still occupies one. Adding a project predicate to those reads does not
+scope them; it blinds them, turning a correctly refused insert into a duplicate-key error
+at commit time. `undo_action_log` carried both shapes three lines apart -- three reads that
+wrote through the row they fetched, and two that only asked whether an id was free -- and
+scoping all five would have broken restore while fixing the leak.
+
+So the ceiling and the goal have been separated. The ceiling still counts every unscoped
+read, because that is what makes a new one impossible to add unnoticed, and it is not
+expected to reach zero. `row_used_reference` counts the 214 that fetch a row and then use
+it, which is the population where an unscoped read hands over another tenant's data, and
+that is what T2 now aims at. Of those, 73 sit in a function that already holds a principal.
+
+Distinguishing the two is a heuristic -- it asks whether any attribute is read off the
+result -- and like the six-line proximity rule it will be wrong about individual sites.
+Being wrong about which sites is survivable. Setting a target nobody can reach is not: it
+converts a goal into a permanent source of work that cannot be finished, which is the
+failure mode `docs/GOAL_CONTINUOUS.md` exists to catch.
 
 ## What stopped T2 going further, and why T11 exists
 

@@ -1,0 +1,9 @@
+{
+  "provenance": {
+    "recorded_at": "2026-09-02T06:27:44Z",
+    "stale_after": "recomputed each run"
+  },
+  "note": "Ratchet over the other ratchets. A ceiling that has never fallen in the history of its own file is a measurement nobody has acted on, and recording one is cheap enough to look like progress on its own. Cost thresholds are excluded: their ceiling is a limit to hold, not a debt to shrink.",
+  "ratchets_reference": 17,
+  "unmoved_ceiling": 2
+}

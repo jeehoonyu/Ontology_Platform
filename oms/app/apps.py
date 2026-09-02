@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, tenancy
+from . import models, models_action, semantic_scope, tenancy
 from .database import Base, get_db
 from .production_auth import Principal, require_permission
 
@@ -340,7 +340,7 @@ def _assert_workshop_object_type_references(
         object_type = db.get(models.ObjectType, object_type_id)
         if not object_type:
             raise HTTPException(status_code=422, detail=f"Object type '{object_type_id}' not found")
-        owning_project = str(((object_type.properties or {}).get("__manager") or {}).get("project_id") or "default")
+        owning_project = semantic_scope.object_type_project(object_type)
         if owning_project != project_id:
             raise HTTPException(status_code=403, detail={
                 "message": "Workshop cannot reference an object type owned by another project",
