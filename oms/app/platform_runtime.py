@@ -947,8 +947,13 @@ def _artifact_dict(
     if lease and lease.expires_at <= _now():
         db.delete(lease)
         lease = None
+    # Keyed on `subject_id`, which `create_job` accepts from the request body inside the
+    # caller's own project -- so without the project filter, a job someone else raised
+    # naming this artifact's id surfaced as its latest job in every artifact response.
+    # T2 of GOAL_TENANCY_2026-08-27.
     last_job = db.query(PlatformJob).filter(
         PlatformJob.subject_type == "artifact", PlatformJob.subject_id == row.id,
+        PlatformJob.project_id == row.project_id,
     ).order_by(PlatformJob.updated_at.desc()).first()
     active_collaborators = db.query(ArtifactCollaborationParticipant).filter(
         ArtifactCollaborationParticipant.artifact_id == row.id,
@@ -1355,11 +1360,20 @@ def adopt_resource(body: ArtifactAdoptRequest, principal: Principal = Depends(re
         object_project = semantic_scope.object_type_project(selected)
         if object_project != body.project_id:
             raise HTTPException(status_code=403, detail="Object type belongs to another project")
+        # The object type above was checked against `body.project_id`; the traversal out of
+        # it was not. A link type in another project naming this type pulled that project's
+        # object types into `type_ids`, and their property names and declared types were
+        # rendered into the adopted artifact's node fields.
+        # T2 of GOAL_TENANCY_2026-08-27.
         links = db.query(models.LinkType).filter(
-            (models.LinkType.source_object_type_id == selected.id) | (models.LinkType.target_object_type_id == selected.id)
+            (models.LinkType.source_object_type_id == selected.id) | (models.LinkType.target_object_type_id == selected.id),
+            models.LinkType.project_id == body.project_id,
         ).all()
         type_ids = {selected.id} | {link.source_object_type_id for link in links} | {link.target_object_type_id for link in links}
-        object_types = [row for row in db.query(models.ObjectType).filter(models.ObjectType.id.in_(type_ids)).all()]
+        object_types = [row for row in db.query(models.ObjectType).filter(
+            models.ObjectType.id.in_(type_ids),
+            models.ObjectType.project_id == body.project_id,
+        ).all()]
         nodes = [{
             "id": row.id,
             "position": {"x": 120 + index * 260, "y": 180 + (index % 2) * 140},

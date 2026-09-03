@@ -71,7 +71,7 @@ route, whatever permission they carry.
 | # | Condition | Threshold | Baseline 2026-08-27 | State |
 | --- | --- | --- | --- | --- |
 | **T1** | The unscoped-read census exists, is ratcheted, and runs on every push | exists and gates | did not exist | **Met** — `oms/audit_tenancy_scope.py`, ceiling 396; `oms/test_tenancy_scope.py`, 18 assertions; twelfth check in the pre-push hook |
-| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 204 of `unscoped_reads_ceiling` 378, of which 27 sit in a function that holds a principal and authorizes nothing | **Open** — the target is no longer the ceiling. 177 of the 384 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
+| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 196 of `unscoped_reads_ceiling` 364, of which 27 sit in a function that holds a principal and authorizes nothing | **Open** — the target is no longer the ceiling. 177 of the 384 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
 | **T3** | No route authorises from a value in its own request body | 0 | 2: `POST /cipher/decrypt` read `principal` from the body; `cipher_ops` bulk transform did the same | **Met** — both authorise the calling principal. Naming a different one is delegation and now costs `administer`. `oms/test_cipher.py` asserts an editor is refused and an administrator is not |
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
 | **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
@@ -81,6 +81,29 @@ route, whatever permission they carry.
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 0 such reads; the 63 this condition was opened on were misclassified | **Met** — vacuously, and the honest reading is that the condition should not have been opened. `runtime.py` was called a worker because it carries no `@router.` line, and it is called from thirty modules that do. The census now classifies by reachability from a routed module rather than by where the decorators live, and this application has no module nothing routed can reach. The 63 were helpers all along and are counted with them |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
 | **T11** | A resource's project is recorded in one place | one spelling per model | two models, two second spellings: `ObjectType` in `properties.__manager.project_id` (read by 11 modules, the column by 14, 6 reading both) and `DataAsset` in `asset_schema["project_id"]` | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, and both second spellings are live: `system_hardening` still normalizes the asset form at the portability boundary. Reconciled on read by `semantic_scope.object_type_project` and `connectivity._asset_project`; the recording is still doubled |
+
+## A project check does not survive a traversal
+
+Three of the defects found by the module-wide audit share a shape the census cannot express,
+and it is worth naming separately because the fix is not "scope this read".
+
+`adopt_resource` checks its object type against `body.project_id` and refuses one from
+elsewhere -- correctly, and the check is right there in the handler. It then follows the link
+types naming that object type *without* the same filter, derives a set of type ids from
+whatever comes back, and renders those object types' property names and declared types into
+the artifact it returns. `propagate_markings` does the same over lineage, building its edge
+graph from every project's pipeline definitions. `_artifact_dict` does a milder version in
+reverse: it matches jobs on `subject_id`, a field `create_job` accepts from the request body,
+so a job raised elsewhere posed as an artifact's latest execution.
+
+The entry point is guarded in each case. What is not guarded is the *second* hop, and the
+read that leaks sits one or two joins away from the id anybody authorized. A six-line
+proximity rule cannot see that, because the read looks unremarkable on its own -- it is
+filtered, just on a value the traversal produced rather than on a project.
+
+The rule that generalizes: an authorization establishes a claim about one row. Every edge
+followed out of that row -- a foreign key, a JSON payload, a name match, a graph walk --
+leaves the region the claim covers, and has to re-establish it or stay inside it.
 
 ## What reading only the flagged sites missed
 

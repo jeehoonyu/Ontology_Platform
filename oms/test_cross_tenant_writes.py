@@ -14,8 +14,16 @@ are worth keeping together.
     *tier* check: `production_auth.require_permission` calls `principal.allows(permission)`
     with no project argument at all. Holding `edit` somewhere is not holding it here.
 
+A convention this file learned the hard way, twice: assert on a **named** field and assert
+the field exists. Two checks here were first written as `response.get("last_job") or {}` and
+`seen.get("implementers", [])`, and both fields are called something else -- so both passed
+whatever the code did, and only reverting the fix and watching the test stay green revealed
+it. A security assertion that cannot fail is worse than no assertion, because it reports
+coverage that does not exist.
+
   python oms/test_cross_tenant_writes.py
 """
+import json
 import os
 import tempfile
 
@@ -288,6 +296,63 @@ reached = [row["dataset_id"] for row in spread["downstream"]]
 assert "beta_out" not in reached, spread
 app.dependency_overrides[production_auth.current_principal] = lambda: alpha_user
 passed += 1
+
+
+
+# ---------------------------------------------------------------------------
+# (9) Another project's job cannot pose as an artifact's latest job
+#
+# `_artifact_dict` matched jobs on `subject_id`, and `create_job` accepts `subject_id` from
+# the request body within the caller's own project -- so a job raised elsewhere naming this
+# artifact's id appeared as its latest job in every artifact response.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+_ts3 = int(__import__("time").time())
+with SessionLocal() as db:
+    db.add(platform_runtime.PlatformJob(
+        id="impostor_job", project_id="beta", job_type="pipeline.run", status="FAILED",
+        actor="someone-else", subject_type="artifact", subject_id="xt-artifact",
+        payload={}, result={"leaked": "beta"}, attempt=1, progress=100,
+        created_at=_ts3 + 999, updated_at=_ts3 + 999,
+    ))
+    db.commit()
+
+view = ok(client.get("/artifacts/xt-artifact"), "read the alpha artifact")
+# The field is "execution", not "last_job". Naming it wrongly made the first version of this
+# assertion pass whatever the code did -- the same way the implementers check did.
+assert "execution" in view, sorted(view)
+assert (view["execution"] or {}).get("id") != "impostor_job", view["execution"]
+assert (view["execution"] or {}).get("project_id") in (None, "alpha"), view["execution"]
+passed += 1
+
+
+
+# ---------------------------------------------------------------------------
+# (10) Adopting an object type does not drag another project's schema in with it
+#
+# `adopt_resource` checks the object type against `body.project_id`, then followed link types
+# naming it without the same filter -- so another project's linked object types were resolved
+# and their property names and declared types rendered into the artifact's node fields.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+with SessionLocal() as db:
+    db.add(models.ObjectType(id="beta_secret_type", project_id="beta", display_name="Beta secret",
+                             description=None, properties={"ssn": {"type": "string"}},
+                             created_at=1, updated_at=1))
+    db.add(models.LinkType(id="beta_link", project_id="beta", display_name="Crosses",
+                           description=None, source_object_type_id="alpha_type",
+                           target_object_type_id="beta_secret_type", cardinality="MANY_TO_ONE"))
+    db.commit()
+
+adopted = ok(client.post("/artifacts/adopt", json={
+    "project_id": "alpha", "resource_type": "object_type", "resource_id": "alpha_type",
+    "display_name": "Adopted alpha type",
+}), "adopt the caller's own object type", 201)
+
+rendered = json.dumps(adopted)
+assert "beta_secret_type" not in rendered, "another project's object type was rendered in"
+assert "ssn" not in rendered, "another project's property names were rendered in"
+passed += 2
 
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
