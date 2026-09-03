@@ -71,6 +71,18 @@ sense of newly created; all four are old measurements that had never been claime
 | **K7** | A completing goal's last condition names its successor | the frontier is consulted before a goal is closed | done by hand today, and only because someone remembered | **Open** |
 | **K8** | No ratchet's ceiling stands above what it currently measures | every ceiling equals its measurement | not measured; `unauthorized_mutating_ceiling` stood at 75 while the count had been 71 since before the branch that found it | **Open** — 5 of 27 audits announce an unlocked improvement and 22 say nothing, so the uniform check needs every audit to report its current value in one shape first |
 
+## K8 caught its author, one commit later
+
+The commit that closed the observability checks lowered the unscoped-read measurement from
+364 to 361 and shipped with the ceiling still recorded at 364. Three counts of slack, created
+by the person who had just written the condition warning about slack, in the very next commit.
+
+Nothing failed. The audit printed "Ratchet held, and improved: 364 -> 361", the hook passed,
+and the gate went on permitting three reads to come back with nothing to show for it. That is
+the whole argument for K8 in one incident: re-recording a lowered ceiling is a second,
+separate action, and it is the boring half of the work, so it is the half that gets skipped.
+It cannot be fixed by remembering harder.
+
 ## The slack K6 does not catch
 
 K6 asks whether a ceiling has ever fallen. It does not ask whether it has fallen *far
