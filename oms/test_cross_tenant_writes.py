@@ -400,6 +400,35 @@ for _mod, _needle in (
         f"found {_src.count('expected_project_id=')}")
 passed += 1
 
+
+
+# ---------------------------------------------------------------------------
+# (12) The observability checks are not a console for every project
+#
+# Each takes a dataset or pipeline id from the caller and answers a question about it:
+# whether it exists, how stale it is, how many rows it holds, and for a build its last run
+# id, status, record count and error text. T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+ok(client.post("/observability/checks/freshness",
+               json={"dataset_id": "beta_out", "max_age_seconds": 60}),
+   "freshness does not answer for another project", 403)
+
+ok(client.post("/observability/checks/row-count",
+               json={"dataset_id": "beta_out", "min": 0}),
+   "row count does not answer for another project", 403)
+
+hidden = ok(client.post("/observability/checks/build-status?pipeline_id=beta_pipe"),
+            "build status reports nothing for a pipeline out of reach")
+assert hidden["status"] == "no_runs", hidden
+assert "last_status" not in hidden, hidden
+
+# The caller's own dataset still answers.
+mine = ok(client.post("/observability/checks/row-count",
+                      json={"dataset_id": "alpha_src_asset", "min": 0}),
+          "the caller's own dataset still answers")
+assert "row_count" in mine, mine
+passed += 2
+
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

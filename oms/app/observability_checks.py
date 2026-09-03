@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import models
+from . import models, production_auth, semantic_scope
 
 router = APIRouter(tags=["observability_checks"])
 
@@ -46,10 +46,15 @@ class MetricAggregateRequest(BaseModel):
 
 
 @router.post("/observability/checks/freshness")
-def check_freshness(body: FreshnessRequest, db: Session = Depends(get_db)):
-    asset = db.get(models.DataAsset, body.dataset_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail=f"Dataset '{body.dataset_id}' not found")
+def check_freshness(body: FreshnessRequest, db: Session = Depends(get_db),
+                    principal: production_auth.Principal = Depends(
+                       production_auth.require_permission("view"))):
+    # These three routes take a dataset or pipeline id from the caller and answer questions
+    # about it: whether it exists, how stale it is, how many rows it holds, and -- for a
+    # build -- its last run id, status, record count and error text. Unauthorized, that is a
+    # monitoring console for every project in the installation.
+    # T2 of GOAL_TENANCY_2026-08-27.
+    asset = semantic_scope.asset_for(db, principal, body.dataset_id, "view")
     age = _now() - int(asset.updated_at or 0)
     ok = age <= body.max_age_seconds
     return {"dataset_id": body.dataset_id, "age_seconds": age, "max_age_seconds": body.max_age_seconds,
@@ -57,10 +62,18 @@ def check_freshness(body: FreshnessRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/observability/checks/build-status")
-def check_build_status(pipeline_id: str, db: Session = Depends(get_db)):
-    run = (db.query(models.PipelineRun)
-           .filter(models.PipelineRun.pipeline_id == pipeline_id)
-           .order_by(models.PipelineRun.created_at.desc()).first())
+def check_build_status(pipeline_id: str, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(
+                       production_auth.require_permission("view"))):
+    # A pipeline the caller cannot see reports "no_runs" rather than 403, so the route does
+    # not become a way to ask which pipeline ids exist elsewhere.
+    pipeline = (semantic_scope.accessible_query(db, principal, models.PipelineDefinition, "view")
+                .filter(models.PipelineDefinition.id == pipeline_id).first())
+    run = None if pipeline is None else (
+        db.query(models.PipelineRun)
+        .filter(models.PipelineRun.pipeline_id == pipeline_id,
+                models.PipelineRun.project_id == pipeline.project_id)
+        .order_by(models.PipelineRun.created_at.desc()).first())
     if not run:
         return {"pipeline_id": pipeline_id, "status": "no_runs"}
     healthy = str(run.status).upper() in {"SUCCESS", "SUCCEEDED", "COMPLETED", "OK"}
@@ -70,10 +83,10 @@ def check_build_status(pipeline_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/observability/checks/row-count")
-def check_row_count(body: RowCountRequest, db: Session = Depends(get_db)):
-    asset = db.get(models.DataAsset, body.dataset_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail=f"Dataset '{body.dataset_id}' not found")
+def check_row_count(body: RowCountRequest, db: Session = Depends(get_db),
+                    principal: production_auth.Principal = Depends(
+                       production_auth.require_permission("view"))):
+    asset = semantic_scope.asset_for(db, principal, body.dataset_id, "view")
     count = len(asset.records or [])
     failures = []
     if body.min is not None and count < body.min:
