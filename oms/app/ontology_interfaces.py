@@ -492,6 +492,8 @@ def get_interface(interface_id: str, db: Session = Depends(get_db)):
 def list_interface_implementers(
     interface_id: str,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(
+        production_auth.require_permission("view")),
 ) -> Dict[str, Any]:
     """Return object_type ids whose 'properties' JSON contains all interface property names."""
     iface = db.query(OntologyInterface).filter(OntologyInterface.id == interface_id).first()
@@ -500,8 +502,11 @@ def list_interface_implementers(
 
     required_names = set((iface.properties or {}).keys())
 
+    # This enumerated every object type in the installation and returned the ids of those
+    # matching the interface -- a directory of other projects' schemas for anyone who could
+    # name an interface. T2 of GOAL_TENANCY_2026-08-27.
     implementers: List[str] = []
-    all_ots = db.query(models.ObjectType).all()
+    all_ots = semantic_scope.accessible_query(db, principal, models.ObjectType, "view").all()
     for ot in all_ots:
         ot_prop_names = set((ot.properties or {}).keys())
         if required_names.issubset(ot_prop_names):
@@ -519,15 +524,17 @@ def check_object_type_conformance(
     interface_id: str,
     body: CheckObjectTypeRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(
+        production_auth.require_permission("view")),
 ):
     """Check whether an object type fully satisfies the interface's required properties."""
     iface = db.query(OntologyInterface).filter(OntologyInterface.id == interface_id).first()
     if not iface:
         raise HTTPException(status_code=404, detail=f"OntologyInterface '{interface_id}' not found")
 
-    ot = db.query(models.ObjectType).filter(models.ObjectType.id == body.object_type_id).first()
-    if not ot:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{body.object_type_id}' not found")
+    # The reply names which properties are missing and what types were declared, so an
+    # unscoped lookup answered "describe this object type" for any project.
+    ot = semantic_scope.object_type_for(db, principal, body.object_type_id, "view")
 
     ot_prop_names = set((ot.properties or {}).keys())
     # Only required properties must be present

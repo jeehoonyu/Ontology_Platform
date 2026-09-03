@@ -227,6 +227,37 @@ with SessionLocal() as db:
     assert db.get(models.DataAsset, "beta_out").records == [{"keep": "me"}], "beta's dataset was written"
 passed += 1
 
+
+
+# ---------------------------------------------------------------------------
+# (7) The interface routes stay inside the caller's projects
+#
+# Three shapes in one module family: a path id (`implement_interface`), a body id
+# (`check_object_type_conformance`), and an unfiltered enumeration
+# (`list_interface_implementers`, which returned every matching object type in the
+# installation). T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+iface = ok(client.post("/interfaces", json={
+    "id": "iface1", "api_name": "Coded", "display_name": "Coded",
+    "properties": {"code": {"base_type": "string"}},
+}), "create an interface")
+
+ok(client.post("/object-types/beta_type/implement-interface",
+               json={"interface_id": "iface1", "property_mappings": {"code": "code"}}),
+   "cannot bind another project's object type to an interface", 403)
+
+ok(client.post("/interfaces/iface1/check-object-type", json={"object_type_id": "beta_type"}),
+   "cannot ask what another project's object type declares", 403)
+
+seen = ok(client.get("/interfaces/iface1/implementers"), "implementers stay in reach")
+# Name the key rather than .get(...) with a default -- a renamed field would otherwise make
+# this assertion vacuous, which is exactly how it read the first time.
+assert "implementer_object_type_ids" in seen, seen
+assert "beta_type" not in seen["implementer_object_type_ids"], seen
+assert "alpha_type" in seen["implementer_object_type_ids"], (
+    "the caller's own matching type must still be listed, or this is passing by emptiness")
+passed += 2
+
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

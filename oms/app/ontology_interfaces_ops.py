@@ -21,7 +21,7 @@ NEW tables (all prefixed Iface/iface_ to avoid Base collisions):
 """
 
 from .database import Base, get_db
-from . import models, models_action, production_auth, tenancy
+from . import models, models_action, production_auth, semantic_scope, tenancy
 from .ontology_interfaces import OntologyInterface, SharedPropertyType, VALID_BASE_TYPES  # noqa: F401  (read-only reuse)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
@@ -459,11 +459,15 @@ def implement_interface(
     object_type_id: str,
     body: ImplementInterfaceRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(
+        production_auth.require_permission("edit")),
 ):
-    # Validate the object type exists.
-    ot = db.query(models.ObjectType).filter(models.ObjectType.id == object_type_id).first()
-    if not ot:
-        raise HTTPException(status_code=404, detail=f"ObjectType '{object_type_id}' not found")
+    # The router's `edit` permission is a tier check with no project argument, so it never
+    # established whose object type this is. Unscoped, a caller could bind another project's
+    # object type to an interface -- the row `query_objects` then walks -- and read its
+    # schema back out of the 422 body, which quotes each declared base type.
+    # T2 of GOAL_TENANCY_2026-08-27.
+    ot = semantic_scope.object_type_for(db, principal, object_type_id, "edit")
     iface = _get_interface(db, body.interface_id)
 
     # Enforce uniqueness on (object_type_id, interface_id).
@@ -521,7 +525,10 @@ def implement_interface(
         if mapped_lt is None:
             unmet.append(f"link:{api_name} (no link_mapping)")
             continue
-        lt = db.query(models.LinkType).filter(models.LinkType.id == mapped_lt).first()
+        # `link_mappings` values are caller-supplied ids, bound to the object type's project.
+        lt = (db.query(models.LinkType)
+              .filter(models.LinkType.id == mapped_lt,
+                      models.LinkType.project_id == ot.project_id).first())
         if not lt:
             unmet.append(f"link:{api_name} -> '{mapped_lt}' (LinkType not found)")
             continue
