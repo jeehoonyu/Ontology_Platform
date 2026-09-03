@@ -25,7 +25,7 @@ os.environ["AUTH_MODE"] = "local"
 os.environ["APP_ENV"] = "test"
 
 from fastapi.testclient import TestClient  # noqa: E402
-from app import models, platform_runtime, production_auth  # noqa: E402
+from app import models, platform_runtime, production_auth, reliability_ops  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.ontology_interfaces import SharedPropertyType, SptApplication  # noqa: E402
@@ -113,6 +113,49 @@ applied = ok(client.post("/shared-property-types/spt1/apply",
                          json={"object_type_id": "alpha_type", "property_name": "code"}),
              "apply still governs the caller's own object type")
 assert applied["object_type_id"] == "alpha_type", applied
+
+
+
+# ---------------------------------------------------------------------------
+# (4) A backfill plan cannot run another project's pipeline
+#
+# `BackfillPlan.pipeline_ids` is a caller-authored JSON list, `reliability_ops` held no
+# principal anywhere, and `_run_pipeline_backfill` compares a pipeline only to its own
+# assets -- so the checks passed and the run overwrote `output_asset.records` in whatever
+# project the pipeline belonged to. T7 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+with SessionLocal() as db:
+    db.add(models.DataAsset(id="beta_in", project_id="beta", display_name="in", description=None,
+                            kind="dataset", asset_schema={}, records=[{"v": 1}],
+                            created_at=1, updated_at=1))
+    db.add(models.DataAsset(id="beta_out", project_id="beta", display_name="out", description=None,
+                            kind="dataset", asset_schema={}, records=[{"keep": "me"}],
+                            created_at=1, updated_at=1))
+    db.add(models.PipelineDefinition(id="beta_pipe", project_id="beta", display_name="Beta pipe",
+                                     description=None, input_asset_id="beta_in",
+                                     output_asset_id="beta_out", mode="batch", schedule=None,
+                                     steps=[], created_at=1, updated_at=1))
+    db.commit()
+
+# Creating a plan over it reads as "not found" rather than 403, so the route cannot be used
+# to probe which pipeline ids exist elsewhere.
+ok(client.post("/reliability/backfills",
+               json={"id": "xt_plan", "display_name": "Crossing", "pipeline_ids": ["beta_pipe"]}),
+   "a plan cannot name another project's pipeline", 404)
+
+# A plan seeded directly, as an already-stored one would be, still must not run it.
+with SessionLocal() as db:
+    db.add(reliability_ops.BackfillPlan(id="seeded_plan", display_name="Seeded", description=None,
+                                        pipeline_ids=["beta_pipe"], asset_ids=[], parameters={},
+                                        status="PENDING", run_results=[], created_at=1, updated_at=1))
+    db.commit()
+
+run = ok(client.post("/reliability/backfills/seeded_plan/run", json={"actor": "alpha-user"}),
+         "running it does not reach the foreign pipeline")
+assert all(r.get("status") == "FAILED" for r in run["run_results"]), run
+with SessionLocal() as db:
+    assert db.get(models.DataAsset, "beta_out").records == [{"keep": "me"}], "beta's output was rewritten"
+passed += 2
 
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402

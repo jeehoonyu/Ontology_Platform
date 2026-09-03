@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from .database import Base, get_db
 from .runtime import execute_pipeline_steps
 
@@ -424,6 +424,24 @@ def analyze_lineage_impact_inline(
     return _impact_dict(run)
 
 
+def _runnable_pipeline(db: Session, principal, pipeline_id: str):
+    """A pipeline the caller may execute, or None.
+
+    `BackfillPlan.pipeline_ids` is a JSON list the caller supplies, and this module holds no
+    principal anywhere, so the ids were resolved with a bare `db.get`. The consistency checks
+    inside `_run_pipeline_backfill` compare a pipeline to *its own* input and output assets,
+    never to the caller, so they passed and the run overwrote `output_asset.records` in
+    whatever project the pipeline belonged to.
+
+    An id outside the caller's reach is reported exactly as a missing one, rather than 403:
+    the plan is caller-authored, so distinguishing the two would answer "does this pipeline
+    id exist somewhere" for anyone willing to write it into a plan.
+    T7 of GOAL_TENANCY_2026-08-27.
+    """
+    return (semantic_scope.accessible_query(db, principal, models.PipelineDefinition, "execute")
+            .filter(models.PipelineDefinition.id == pipeline_id).first())
+
+
 def _run_pipeline_backfill(db: Session, pipeline: models.PipelineDefinition, actor: str) -> Dict[str, Any]:
     input_asset = db.get(models.DataAsset, pipeline.input_asset_id)
     if not input_asset:
@@ -544,13 +562,17 @@ def analyze_lineage_impact(body: LineageImpactRequest, db: Session = Depends(get
 
 
 @router.post("/reliability/backfills")
-def create_backfill(body: BackfillPlanCreate, db: Session = Depends(get_db)):
+def create_backfill(body: BackfillPlanCreate, db: Session = Depends(get_db),
+                    principal: production_auth.Principal = Depends(
+                        production_auth.require_permission("execute"))):
     _ensure_tables(db)
     plan_id = body.id or _new_id("backfill")
     if db.get(BackfillPlan, plan_id):
         raise HTTPException(status_code=400, detail="BackfillPlan already exists")
+    # Same reason as `_runnable_pipeline`: a pipeline the caller cannot execute reads as
+    # absent, so creating a plan cannot be used to probe for ids in other projects.
     for pipeline_id in body.pipeline_ids:
-        if not db.get(models.PipelineDefinition, pipeline_id):
+        if not _runnable_pipeline(db, principal, pipeline_id):
             raise HTTPException(status_code=404, detail=f"PipelineDefinition '{pipeline_id}' not found")
     now = _now()
     plan = BackfillPlan(id=plan_id, status="DRAFT", run_results=[], created_at=now, updated_at=now, **body.model_dump(exclude={"id"}))
@@ -568,13 +590,16 @@ def list_backfills(db: Session = Depends(get_db)):
 
 
 @router.post("/reliability/backfills/{backfill_id}/run")
-def run_backfill(backfill_id: str, body: BackfillRunRequest = BackfillRunRequest(), db: Session = Depends(get_db)):
+def run_backfill(backfill_id: str, body: BackfillRunRequest = BackfillRunRequest(),
+                 db: Session = Depends(get_db),
+                 principal: production_auth.Principal = Depends(
+                     production_auth.require_permission("execute"))):
     plan = db.get(BackfillPlan, backfill_id)
     if not plan:
         raise HTTPException(status_code=404, detail=f"BackfillPlan '{backfill_id}' not found")
     results = []
     for pipeline_id in plan.pipeline_ids or []:
-        pipeline = db.get(models.PipelineDefinition, pipeline_id)
+        pipeline = _runnable_pipeline(db, principal, pipeline_id)
         if pipeline:
             results.append(_run_pipeline_backfill(db, pipeline, body.actor))
         else:
