@@ -70,6 +70,31 @@ sense of newly created; all four are old measurements that had never been claime
 | **K6** | No ratchet sits at a ceiling nobody has ever lowered | `unmoved_ceiling` at 0 | 2 of 17: `ontology_type_coupling_ceiling` recorded five times and never fell, `raw_empty_ceiling` twice | **Open** — measured now rather than asserted. `oms/audit_ratchet_motion.py` reads each ceiling at every commit that touched its baseline and asks whether it ever fell; `oms/test_ratchet_motion.py`; fifteenth check in the pre-push hook |
 | **K7** | A completing goal's last condition names its successor | the frontier is consulted before a goal is closed | done by hand today, and only because someone remembered | **Open** |
 | **K8** | No ratchet's ceiling stands above what it currently measures | every ceiling equals its measurement | not measured; `unauthorized_mutating_ceiling` stood at 75 while the count had been 71 since before the branch that found it | **Open** — 5 of 27 audits announce an unlocked improvement and 22 say nothing, so the uniform check needs every audit to report its current value in one shape first |
+| **K9** | The run ledger records only verdicts a check actually reached | 0 fabricated verdicts | `recording()` maps `SystemExit(2)` to FAIL, so an argparse usage error overwrites the last real result; two manual checks were recorded as failing this way | **Open** — `oms/test_enforcement_runs.py` pins the current mapping, so changing it is a contract change and wants its own commit rather than a merge-eve edit |
+
+## A ledger that records what did not happen
+
+Two entries in `docs/enforcement-runs.json` said `audit_suite_cost` and
+`audit_browser_evidence` had FAILED. Neither had run. Both are `manual` cadence and both take
+a required argument -- a suite census, a browser report -- and a loop written to survey every
+ratchet for K8 invoked all of them with no arguments at all. argparse exited 2, and
+`recording()` maps any non-zero `SystemExit` to FAIL, so two genuine PASS results from
+2026-08-24 were overwritten with verdicts nobody had produced.
+
+The records are restored to their last real values. The mapping is not changed, and that is
+deliberate: `oms/test_enforcement_runs.py` asserts `SystemExit(2)` records FAIL, so this is a
+documented contract rather than an oversight, and rewriting a contract *and* the test pinning
+it, in the commit about to be merged, is the move this document keeps warning about. It is K9.
+
+The distinction K9 has to make is between a check that ran and failed and a check that
+declined to start. The module's own docstring already argues the first case -- "a check that
+crashed is a check that executed and needs looking at" -- and a usage error is the other
+thing entirely: the check rejected its arguments and never looked at the tree. A FAIL verdict
+claims a gate was evaluated. For these two it was not.
+
+Worth noting what the ledger got right on its own: `validate_external_evaluations` is
+recorded FAIL here and PASS on master, and running it in a worktree at master reproduces the
+same failure. The old PASS was the stale claim; this run corrected it.
 
 ## K8 caught its author, one commit later
 
