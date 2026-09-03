@@ -26,6 +26,7 @@ coverage that does not exist.
 import json
 import os
 import tempfile
+from pathlib import Path
 
 _t = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(_t.name, 'cross_tenant.db')}"
@@ -353,6 +354,51 @@ rendered = json.dumps(adopted)
 assert "beta_secret_type" not in rendered, "another project's object type was rendered in"
 assert "ssn" not in rendered, "another project's property names were rendered in"
 passed += 2
+
+
+
+# ---------------------------------------------------------------------------
+# (11) A DuckDB execution plan cannot authorize itself
+#
+# `plan_id` arrives in a job payload, and `create_job` copies the payload verbatim after
+# checking only that the caller may create jobs in their own project. Every check downstream
+# compares the plan to its own graph and its own snapshots -- a consistency check, which any
+# plan passes about itself -- so a job in one project naming another's plan ran it, returned
+# its rows, and in "deliver" mode published a snapshot and emptied a DataAsset over there.
+#
+# The guard is a pure function, so its contract is pinned directly; what a guard like this
+# dies of is not being passed, so the call sites are asserted too.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+from fastapi import HTTPException as _HTTPException  # noqa: E402
+from app import data_plane as _dp  # noqa: E402
+
+
+class _FakePlan:
+    project_id = "beta"
+
+
+try:
+    _dp._plan_within(_FakePlan(), "alpha")
+    raise AssertionError("a plan from another project must be refused")
+except _HTTPException as exc:
+    assert exc.status_code == 404, exc.status_code
+passed += 1
+
+_dp._plan_within(_FakePlan(), "beta")          # same project: allowed
+_dp._plan_within(_FakePlan(), "")              # unknown project: unchanged behaviour
+_dp._plan_within(_FakePlan(), None)
+passed += 1
+
+for _mod, _needle in (
+    ("pipeline_builder_ops.py", 2),
+    ("worker_daemon.py", 2),
+):
+    _src = (Path(__file__).resolve().parent / "app" / _mod).read_text(encoding="utf-8")
+    assert _src.count("expected_project_id=") == _needle, (
+        f"{_mod} must hand the job's project to every DuckDB plan execution; "
+        f"found {_src.count('expected_project_id=')}")
+passed += 1
 
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402

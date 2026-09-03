@@ -1980,6 +1980,7 @@ def execute_duckdb_snapshot_partition(
     partition_index: int,
     partition_count: int,
     actor: str,
+    expected_project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute one manifest subset and publish an immutable intermediate fragment."""
     try:
@@ -1993,6 +1994,7 @@ def execute_duckdb_snapshot_partition(
     plan = db.get(PipelineExecutionPlan, plan_id)
     if not plan or plan.executor != "duckdb":
         raise HTTPException(status_code=404, detail="DuckDB pipeline execution plan not found")
+    _plan_within(plan, expected_project_id)
     graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, plan.graph_id)
     if not graph or graph.project_id != plan.project_id or graph.updated_at != plan.graph_updated_at:
         raise HTTPException(status_code=409, detail="Pipeline changed after this distributed plan was compiled")
@@ -2243,6 +2245,22 @@ def finalize_duckdb_snapshot_partitions(
     }
 
 
+
+def _plan_within(plan, expected_project_id: Optional[str]):
+    """Refuse a plan that belongs to a project other than the job carrying it.
+
+    `plan_id` arrives in a job payload, and `platform_runtime.create_job` copies that payload
+    verbatim after checking only that the caller may create jobs in the job's own project. The
+    checks below this point compare the plan to its own graph and its own snapshots -- the
+    plan authorizes itself -- so a job raised in project A naming project B's plan compiled and
+    ran it, returned its rows in the job result, and in `deliver` mode published a snapshot and
+    emptied a DataAsset inside B. The job's project is the only thing here the caller was
+    actually authorized against. T2 of GOAL_TENANCY_2026-08-27.
+    """
+    if expected_project_id and plan.project_id != expected_project_id:
+        raise HTTPException(status_code=404, detail="DuckDB pipeline execution plan not found")
+
+
 def execute_duckdb_snapshot_plan(
     db: Session,
     plan_id: str,
@@ -2255,6 +2273,7 @@ def execute_duckdb_snapshot_plan(
     execution_job_id: Optional[str] = None,
     execution_fence_job_id: Optional[str] = None,
     execution_lease_token: Optional[str] = None,
+    expected_project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         import duckdb  # type: ignore
@@ -2263,6 +2282,7 @@ def execute_duckdb_snapshot_plan(
     plan = db.get(PipelineExecutionPlan, plan_id)
     if not plan or plan.executor != "duckdb":
         raise HTTPException(status_code=404, detail="DuckDB pipeline execution plan not found")
+    _plan_within(plan, expected_project_id)
     graph = db.get(pipeline_builder_ops.PipelineBuilderGraph, plan.graph_id)
     if not graph or graph.project_id != plan.project_id:
         raise HTTPException(status_code=404, detail="Pipeline graph not found for plan")

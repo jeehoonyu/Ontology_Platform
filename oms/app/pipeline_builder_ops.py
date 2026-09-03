@@ -2216,6 +2216,7 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
                 partition_index=int(payload.get("partition_index") or 0),
                 partition_count=int(payload.get("partition_count") or 0),
                 actor=principal.id,
+                expected_project_id=str(claimed.get("project_id") or ""),
             )
         elif claimed["job_type"] == "pipeline.duckdb.finalize":
             from . import data_plane
@@ -2241,6 +2242,8 @@ def run_next_pipeline_job(body: PipelineWorkerRunRequest = PipelineWorkerRunRequ
                 parameters=dict(payload.get("parameters") or {}), actor=principal.id,
                 execution_job_id=job_id, execution_fence_job_id=job_id,
                 execution_lease_token=lease_token,
+                # The payload names the plan; only the job's own project was authorized.
+                expected_project_id=str(claimed.get("project_id") or ""),
             )
         elif claimed["job_type"] == "pipeline.preview":
             result = preview_graph(graph_id, PipelinePreviewRequest(

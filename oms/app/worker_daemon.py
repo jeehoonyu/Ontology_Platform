@@ -284,6 +284,8 @@ class WorkerDaemon:
                         partition_index=int(payload.get("partition_index") or 0),
                         partition_count=int(payload.get("partition_count") or 0),
                         actor=self.config.worker_name,
+                        # The payload names the plan; the job is what was authorized.
+                        expected_project_id=str(job.get("project_id") or ""),
                     )
                 elif job.get("job_type") == "pipeline.duckdb.finalize":
                     result = finalize_duckdb_snapshot_partitions(
@@ -310,6 +312,7 @@ class WorkerDaemon:
                         execution_job_id=job_id,
                         execution_fence_job_id=job_id,
                         execution_lease_token=lease_token,
+                        expected_project_id=str(job.get("project_id") or ""),
                     )
             completed = self.api.request("POST", f"/jobs/{urllib.parse.quote(job_id, safe='')}/complete", {
                 "lease_token": lease_token,
