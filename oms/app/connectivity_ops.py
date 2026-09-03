@@ -59,7 +59,7 @@ def run_incremental(sync_id: str, body: IncrementalRunRequest, principal: Princi
     new_rows = [r for r in body.batch if cursor_field in r and _gt(r[cursor_field], last)]
     skipped = len(body.batch) - len(new_rows)
 
-    target = db.get(models.DataAsset, sync.target_asset_id)
+    target = _conn._sync_target(db, sync)
     if not target:
         raise HTTPException(status_code=404, detail=f"Target dataset '{sync.target_asset_id}' not found")
     target.records = (target.records or []) + new_rows

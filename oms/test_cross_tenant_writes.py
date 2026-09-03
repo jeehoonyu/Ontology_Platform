@@ -199,6 +199,34 @@ with SessionLocal() as db:
     assert victim.properties == {"code": {"type": "string"}}, victim.properties
 passed += 3
 
+
+
+# ---------------------------------------------------------------------------
+# (6) A sync cannot be pointed at another project's dataset
+#
+# `target_asset_id` is a pointer out of the sync row, so `_sync_or_404` proves nothing about
+# it. Unscoped, `run_sync` and `run_incremental` appended records into whatever it named.
+# T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+source = ok(client.post("/connections/sources", json={
+    "id": "alpha_src", "project_id": "alpha", "display_name": "Alpha source",
+    "source_type": "jdbc", "config": {"url": "jdbc:postgresql://db/x"},
+}), "create a source in alpha")
+
+# 403 when the caller cannot see the target at all, 409 when they can see it but it belongs
+# elsewhere. Either is a refusal; which one fires depends on the caller's reach.
+crossing = client.post("/connections/sources/alpha_src/syncs", json={
+    "id": "crossing_sync", "target_asset_id": "beta_out", "mode": "incremental",
+    "cursor_field": "v", "sample_records": [{"v": 99}],
+})
+assert crossing.status_code in (403, 409), \
+    f"a sync cannot target another project's dataset: {crossing.status_code} {crossing.text[:300]}"
+passed += 1
+
+with SessionLocal() as db:
+    assert db.get(models.DataAsset, "beta_out").records == [{"keep": "me"}], "beta's dataset was written"
+passed += 1
+
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

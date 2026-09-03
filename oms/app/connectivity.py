@@ -494,9 +494,54 @@ def generate_import_job_from_source(source_id: str, body: SourceGenerateImportJo
 
 # --- Syncs ---
 
+def _asset_project(asset) -> str:
+    """The project a dataset belongs to, including the legacy marker some still carry.
+
+    Datasets created before first-class project ownership kept the marker in
+    `asset_schema["project_id"]` rather than the column, and they are live rows rather than
+    history: `system_hardening._scope_snapshot_to_project` still normalizes them at the
+    portability boundary. Reading only the column calls such a dataset "default" and refuses
+    its own project's syncs, which is exactly what a first version of this check did.
+
+    Same shape as `semantic_scope.object_type_project`: the column wins wherever it says
+    anything, and "default" is what it says when nobody set it.
+    """
+    column = str(getattr(asset, "project_id", "") or "")
+    if column and column != "default":
+        return column
+    legacy = str((getattr(asset, "asset_schema", None) or {}).get("project_id") or "")
+    return legacy or column or "default"
+
+
+def _sync_target(db: Session, sync: "ConnectionSync"):
+    """The dataset a sync writes into, but only from the sync's own project.
+
+    `target_asset_id` is a pointer out of the sync row, not the id the caller was authorized
+    against, so `_sync_or_404` says nothing about it. Unscoped, `run_sync` and
+    `run_incremental` appended records into whatever dataset it named, and `validate_sync`
+    reported whether that dataset existed. T2 of GOAL_TENANCY_2026-08-27.
+    """
+    asset = (db.query(models.DataAsset)
+             .filter(models.DataAsset.id == sync.target_asset_id).first())
+    return asset if asset is not None and _asset_project(asset) == sync.project_id else None
+
+
 @router.post("/connections/sources/{source_id}/syncs", response_model=ConnectionSyncRead)
 def create_sync(source_id: str, body: ConnectionSyncCreate, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
     source = _source_or_404(db, source_id, principal, "edit")
+    # The sync inherits the source's project; the target it is given must belong to it too,
+    # or every later run writes across the boundary.
+    target = db.query(models.DataAsset).filter(
+        models.DataAsset.id == body.target_asset_id).first()
+    if target is None:
+        raise HTTPException(status_code=404,
+                            detail=f"DataAsset '{body.target_asset_id}' not found")
+    if _asset_project(target) != source.project_id:
+        raise HTTPException(status_code=409, detail={
+            "message": "Target dataset belongs to another project",
+            "project_id": source.project_id,
+            "target_asset_id": body.target_asset_id,
+        })
     row = ConnectionSync(
         id=body.id or uuid.uuid4().hex,
         project_id=source.project_id,
@@ -533,7 +578,7 @@ def run_sync(sync_id: str, actor: str = Query(default="system"), principal: Prin
     sync = _sync_or_404(db, sync_id, principal, "execute")
 
     # Append sample_records into the target DataAsset
-    asset = db.query(models.DataAsset).filter(models.DataAsset.id == sync.target_asset_id).first()
+    asset = _sync_target(db, sync)
     records_written = 0
     if asset is not None and sync.sample_records:
         current = list(asset.records) if asset.records else []
@@ -582,7 +627,7 @@ def validate_sync(sync_id: str, body: SyncValidateRequest = SyncValidateRequest(
     sync = _sync_or_404(db, sync_id, principal, "execute")
     source = _source_or_404(db, sync.source_id, principal, "execute")
     source_checks = _validate_source_config(source.source_type, source.config or {})
-    target = db.query(models.DataAsset).filter(models.DataAsset.id == sync.target_asset_id).first()
+    target = _sync_target(db, sync)
     records = body.sample_records if body.sample_records is not None else sync.sample_records
     schema = _infer_schema(records or [])
     checks = [

@@ -80,7 +80,7 @@ route, whatever permission they carry.
 | **T8** | Tenancy is enforced somewhere a reviewer can point at | one named mechanism | 401 reads each responsible for their own scoping | **Met** — `oms/app/semantic_scope.py`. It already existed, with typed accessors for the six models the reads concentrate in, at 118 call sites. The question was not what to build but why 396 reads bypass it, and the census now answers that per site |
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 0 such reads; the 63 this condition was opened on were misclassified | **Met** — vacuously, and the honest reading is that the condition should not have been opened. `runtime.py` was called a worker because it carries no `@router.` line, and it is called from thirty modules that do. The census now classifies by reachability from a routed module rather than by where the decorators live, and this application has no module nothing routed can reach. The 63 were helpers all along and are counted with them |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
-| **T11** | An object type's project is recorded in one place | one spelling | two: the `ObjectType.project_id` column, read by 14 modules, and `properties.__manager.project_id`, read by 11, with 6 modules reading both | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, so neither can be used to scope a read until they are reconciled |
+| **T11** | A resource's project is recorded in one place | one spelling per model | two models, two second spellings: `ObjectType` in `properties.__manager.project_id` (read by 11 modules, the column by 14, 6 reading both) and `DataAsset` in `asset_schema["project_id"]` | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, and both second spellings are live: `system_hardening` still normalizes the asset form at the portability boundary. Reconciled on read by `semantic_scope.object_type_project` and `connectivity._asset_project`; the recording is still doubled |
 
 ## What reading only the flagged sites missed
 
@@ -242,6 +242,27 @@ residual is mostly the proximity rule's blind spots rather than work:
 
 Recording that is the point of a residual. The next person through does not have to
 rediscover that these thirteen are fine, and the count does not fall by declaring them so.
+
+## The second spelling is not only object types
+
+T11 was opened on `ObjectType`, whose project lives in a column and again in
+`properties.__manager.project_id`. Fixing the sync and snapshot-import paths turned up the
+same arrangement for `DataAsset`, which carries `asset_schema["project_id"]`, and it cost two
+regressions to learn -- both caught by `test_durable_ingestion_runtime`, both from a scoping
+check that read only the column and so called an "operations" dataset "default".
+
+Neither second spelling is history. `system_hardening._scope_snapshot_to_project` has a
+commented path that deliberately normalizes legacy assets into a scoped snapshot so dependent
+connectors survive a restore, so a check that refuses them blocks the migration that path
+exists to perform. The reconciliation rule is now the same in both places -- the column wins
+wherever it says anything, and "default" is what the column says when nobody set it -- but it
+is written twice, in `semantic_scope.object_type_project` and `connectivity._asset_project`,
+because the two models keep their second spelling in different columns.
+
+The pattern to expect: any model old enough to predate first-class project ownership may
+carry its tenant in a JSON blob, and a scoping check written against the column alone will
+quietly refuse that tenant's own traffic. That failure is loud and safe -- it denies rather
+than leaks -- which is the only reason both were caught rather than shipped.
 
 ## Two refinements the census refused
 
