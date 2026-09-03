@@ -1547,10 +1547,56 @@ def _scope_snapshot(
     return scoped
 
 
+# The project a `POST /project/import` is restoring into, for the duration of that request.
+#
+# `_validate_snapshot_project_scope` checks each snapshot row's *claimed* `project_id`
+# against the target, and `_upsert_model` then found the row to overwrite by id alone,
+# across every project. A caller holding `restore` on project A could post a snapshot whose
+# row claimed project A and whose id belonged to project B: validation passed on the claim,
+# and the upsert `setattr`-ed every field onto B's row, `project_id` included, destroying it
+# and moving it into A. Roughly ninety collections go through this path, object_types and
+# object_instances and project_memberships among them. Rows that omit `project_id` entirely
+# skipped validation and reached the same overwrite.
+#
+# The check that closes both is about the row already in the database, not the claim: an id
+# that resolves to a row in another project refuses the import. Carried on the Session's own
+# `info` dict because `_upsert_model` has 107 call sites and already receives `db`, and
+# because `get_db` builds a session per request -- a context variable would have had to be
+# reset by hand or leak into whatever ran next on the same worker thread.
+# T7 of GOAL_TENANCY_2026-08-27.
+IMPORT_SCOPE_KEY = "system_hardening_import_project_scope"
+
+
+def _refuse_foreign_row(db: Session, model_cls: Any, existing: Any, row_id: str) -> None:
+    scope = db.info.get(IMPORT_SCOPE_KEY)
+    if scope is None or existing is None:
+        return
+    current = getattr(existing, "project_id", None)
+    if current is None or current == scope:
+        return
+    # One row can differ from its column and still belong here. Data assets predating
+    # first-class project ownership carry the marker in `asset_schema["project_id"]`, and
+    # the export above deliberately normalizes those into a scoped snapshot so dependent
+    # connectors survive -- see the `legacy_assets` block in `_scope_snapshot_to_project`.
+    # Refusing them would block the migration that path exists to perform, so ownership is
+    # read the same way here as it is written there.
+    legacy_marker = str((getattr(existing, "asset_schema", None) or {}).get("project_id") or "")
+    if legacy_marker == scope:
+        return
+    raise HTTPException(status_code=409, detail={
+            "message": "Snapshot row collides with a resource owned by another project",
+            "resource_type": getattr(model_cls, "__tablename__", str(model_cls)),
+            "resource_id": row_id,
+            "target_project_id": scope,
+        })
+
+
+
 def _upsert_model(db: Session, model_cls: Any, data: Dict[str, Any], fields: List[str]) -> str:
     if not data.get("id"):
         return "skipped"
     existing = db.query(model_cls).filter(model_cls.id == data["id"]).first()
+    _refuse_foreign_row(db, model_cls, existing, data["id"])
     clean = {field: data.get(field) for field in fields if field in data}
     if existing:
         for key, value in clean.items():
@@ -1564,6 +1610,7 @@ def _upsert_model_by_key(db: Session, model_cls: Any, data: Dict[str, Any], key_
     if not data.get(key_field):
         return "skipped"
     existing = db.query(model_cls).filter(getattr(model_cls, key_field) == data[key_field]).first()
+    _refuse_foreign_row(db, model_cls, existing, str(data[key_field]))
     clean = {field: data.get(field) for field in fields if field in data}
     if existing:
         for key, value in clean.items():
@@ -2509,6 +2556,8 @@ def import_project(
         raise HTTPException(status_code=400, detail={"message": "Snapshot validation failed", **validation})
     if body.dry_run:
         return {"status": "VALIDATED", "mode": body.mode, "validation": validation}
+    # Every upsert below now refuses an id that resolves to another project's row.
+    db.info[IMPORT_SCOPE_KEY] = project_id
     counts = {"created": 0, "updated": 0, "skipped": 0}
 
     def track(result: str) -> None:

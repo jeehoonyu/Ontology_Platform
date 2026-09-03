@@ -157,6 +157,48 @@ with SessionLocal() as db:
     assert db.get(models.DataAsset, "beta_out").records == [{"keep": "me"}], "beta's output was rewritten"
 passed += 2
 
+
+
+# ---------------------------------------------------------------------------
+# (5) A snapshot import cannot adopt a row owned by another project
+#
+# `_validate_snapshot_project_scope` checks each row's *claimed* project against the import
+# target; `_upsert_model` then found the row to overwrite by id alone, across every project.
+# A row claiming "alpha" whose id belongs to "beta" passed validation and was then
+# setattr-ed field by field onto beta's row -- project_id included, moving it into alpha.
+# T7 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+snapshot = ok(client.get("/project/export?project_id=alpha"), "export alpha")
+assert snapshot.get("object_types") is not None, sorted(snapshot)[:12]
+
+# One row, claiming alpha, carrying beta's id.
+snapshot["object_types"] = [dict(row) for row in snapshot["object_types"]] + [{
+    "id": "beta_type", "project_id": "alpha", "display_name": "Hijacked",
+    "description": None, "properties": {"stolen": {"type": "string"}},
+    "created_at": 1, "updated_at": 1,
+}]
+
+# The manifest is self-computed, not signed, so an attacker recomputes it and so does this
+# test -- otherwise the checksum refuses the request and the tenancy hole is never reached.
+from app import system_hardening as _sh  # noqa: E402
+
+counts = {k: len(v) for k, v in snapshot.items() if isinstance(v, list) and k != "rebind_required"}
+snapshot["integrity"] = {"algorithm": "sha256", "checksum": _sh._snapshot_checksum(snapshot),
+                         "counts": counts, "resource_count": sum(counts.values())}
+assert client.post("/project/import/validate", json={"snapshot": snapshot}).json()["status"] == "VALID", \
+    "the doctored snapshot must pass validation, or the test is proving the checksum instead"
+passed += 1
+
+ok(client.post("/project/import", json={"snapshot": snapshot}),
+   "import refuses a row owned by another project", 409)
+
+with SessionLocal() as db:
+    victim = db.get(models.ObjectType, "beta_type")
+    assert victim.project_id == "beta", f"row was moved into {victim.project_id!r}"
+    assert victim.display_name == "Beta type", victim.display_name
+    assert victim.properties == {"code": {"type": "string"}}, victim.properties
+passed += 3
+
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()
