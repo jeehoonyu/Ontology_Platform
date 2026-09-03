@@ -258,6 +258,37 @@ assert "alpha_type" in seen["implementer_object_type_ids"], (
     "the caller's own matching type must still be listed, or this is passing by emptiness")
 passed += 2
 
+
+
+# ---------------------------------------------------------------------------
+# (8) Marking propagation stops at the edge of what the caller administers
+#
+# The route applied ResourceMarking rows -- mandatory controls -- to every dataset reachable
+# through *any* project's pipeline definitions, and returned each one's id and effective
+# markings. T2 of GOAL_TENANCY_2026-08-27.
+# ---------------------------------------------------------------------------
+with SessionLocal() as db:
+    db.add(models.PipelineDefinition(id="beta_lineage", project_id="beta",
+                                     display_name="Beta lineage", description=None,
+                                     input_asset_id="alpha_src_asset", output_asset_id="beta_out",
+                                     mode="batch", schedule=None, steps=[],
+                                     created_at=1, updated_at=1))
+    db.add(models.DataAsset(id="alpha_src_asset", project_id="alpha", display_name="src",
+                            description=None, kind="dataset", asset_schema={}, records=[],
+                            created_at=1, updated_at=1))
+    db.commit()
+
+admin_alpha = production_auth.Principal("alpha-admin", "AlphaAdmin", None, ["administrator"],
+                                        PERMS + ["administer"], organization_id="xt-org",
+                                        project_ids=["alpha"])
+app.dependency_overrides[production_auth.current_principal] = lambda: admin_alpha
+spread = ok(client.post("/security/markings/propagate?dataset_id=alpha_src_asset"),
+            "propagation does not walk into another project")
+reached = [row["dataset_id"] for row in spread["downstream"]]
+assert "beta_out" not in reached, spread
+app.dependency_overrides[production_auth.current_principal] = lambda: alpha_user
+passed += 1
+
 print(f"\nCross-tenant writes verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

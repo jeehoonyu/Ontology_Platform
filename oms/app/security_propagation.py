@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, Field
 
 from .database import Base, get_db
-from . import models, models_action, security_data as _sec
+from . import models, models_action, production_auth, security_data as _sec, semantic_scope
 
 router = APIRouter(tags=["security_propagation"])
 
@@ -132,14 +132,23 @@ def strip_resource_marking(
 
 
 @router.post("/security/markings/propagate")
-def propagate_markings(dataset_id: str, db: Session = Depends(get_db)):
+def propagate_markings(dataset_id: str, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = Depends(
+                           production_auth.require_permission("administer"))):
     """Walk pipeline lineage; downstream output datasets inherit the source markings."""
-    if not db.get(models.DataAsset, dataset_id):
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    # The router's `administer` is a tier check with no project argument, and this route
+    # both writes and reads across the boundary: it applied ResourceMarking rows -- mandatory
+    # controls -- to datasets it reached, and returned each one's id and effective markings,
+    # enumerating other tenants' lineage. The dataset is now resolved against the caller, and
+    # the edge graph is built only from pipelines they can administer, so a legitimate
+    # multi-project propagation still works for someone who holds both and stops at the edge
+    # of what they hold. T2 of GOAL_TENANCY_2026-08-27.
+    semantic_scope.asset_for(db, principal, dataset_id, "administer")
     source_markings = _markings_for(db, dataset_id)
     # build input -> [output] edges from pipeline definitions
     edges: Dict[str, List[str]] = {}
-    for p in db.query(models.PipelineDefinition).all():
+    for p in semantic_scope.accessible_query(
+            db, principal, models.PipelineDefinition, "administer").all():
         if p.input_asset_id and p.output_asset_id:
             edges.setdefault(p.input_asset_id, []).append(p.output_asset_id)
     downstream: List[Dict[str, Any]] = []
