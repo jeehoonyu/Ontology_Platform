@@ -1625,8 +1625,16 @@ def preview_artifact(artifact_id: str, body: ArtifactPreviewRequest, principal: 
             } if row.artifact_type == "aip_logic" else {}),
         } for index, value in enumerate(sample)],
     }
+    # `PlatformJob.project_id` defaults to "default", and this was the only construction in
+    # the codebase that let it. The preview result carries the artifact's sample output, the
+    # caller's inputs, the trace and the metrics, so a preview of a project-A artifact filed
+    # its contents under the default project -- where `list_jobs`, `get_job` and
+    # `_authorized_job` all scope on that stored column, making it readable by anyone with
+    # `view` there and cancellable by anyone with `execute`.
+    # T2 of GOAL_TENANCY_2026-08-27.
     job = PlatformJob(
-        id=_id("job"), job_type=f"{row.artifact_type}.preview", status="SUCCEEDED", actor=principal.id,
+        id=_id("job"), project_id=row.project_id,
+        job_type=f"{row.artifact_type}.preview", status="SUCCEEDED", actor=principal.id,
         subject_type="artifact", subject_id=row.id, payload={"sample_limit": body.sample_limit, "inputs": body.inputs},
         result=result, attempt=1, progress=100, created_at=now, updated_at=now, started_at=now, completed_at=now,
     )

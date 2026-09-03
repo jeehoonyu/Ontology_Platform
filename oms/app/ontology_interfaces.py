@@ -7,7 +7,7 @@ Tables:
 """
 
 from .database import Base, get_db
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
@@ -254,6 +254,8 @@ def apply_shared_property_type(
     spt_id: str,
     body: SptApplyRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(
+        production_auth.require_permission("edit")),
 ):
     """
     Link an object-type property to a shared property type. The shared metadata
@@ -265,14 +267,12 @@ def apply_shared_property_type(
     if not spt:
         raise HTTPException(status_code=404, detail=f"SharedPropertyType '{spt_id}' not found")
 
-    ot = db.query(models.ObjectType).filter(
-        models.ObjectType.id == body.object_type_id
-    ).first()
-    if not ot:
-        raise HTTPException(
-            status_code=404,
-            detail=f"ObjectType '{body.object_type_id}' not found",
-        )
+    # `object_type_id` arrives in the request body. The router's `edit` permission is a
+    # tier check -- `require_permission` calls `principal.allows(...)` with no project
+    # argument -- so it says nothing about whose object type this is. Unscoped, a caller
+    # with `edit` in their own project rewrote another project's property schema and marked
+    # it locked. T2 of GOAL_TENANCY_2026-08-27.
+    ot = semantic_scope.object_type_for(db, principal, body.object_type_id, "edit")
 
     # Reject re-applying to a property that is already locked by another SPT.
     existing = db.query(SptApplication).filter(
@@ -343,6 +343,8 @@ def detach_shared_property_type(
     spt_id: str,
     body: SptApplyRequest,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(
+        production_auth.require_permission("edit")),
 ) -> Dict[str, Any]:
     """
     Remove the inheritance link between a shared property type and an object-type
@@ -367,9 +369,8 @@ def detach_shared_property_type(
             ),
         )
 
-    ot = db.query(models.ObjectType).filter(
-        models.ObjectType.id == body.object_type_id
-    ).first()
+    # Same body-supplied id, and this direction *unlocks* a governed property.
+    ot = semantic_scope.object_type_for(db, principal, body.object_type_id, "edit")
     if ot:
         props = dict(ot.properties or {})
         prop = props.get(body.property_name)

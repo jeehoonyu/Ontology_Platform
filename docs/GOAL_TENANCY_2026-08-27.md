@@ -71,7 +71,7 @@ route, whatever permission they carry.
 | # | Condition | Threshold | Baseline 2026-08-27 | State |
 | --- | --- | --- | --- | --- |
 | **T1** | The unscoped-read census exists, is ratcheted, and runs on every push | exists and gates | did not exist | **Met** — `oms/audit_tenancy_scope.py`, ceiling 396; `oms/test_tenancy_scope.py`, 18 assertions; twelfth check in the pre-push hook |
-| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 204 of `unscoped_reads_ceiling` 381, of which 27 sit in a function that holds a principal and authorizes nothing | **Open** — the target is no longer the ceiling. 177 of the 384 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
+| **T2** | Every unscoped read that returns a row a caller then uses names a project | `row_used_reference` at 0 | `row_used_reference` 204 of `unscoped_reads_ceiling` 378, of which 27 sit in a function that holds a principal and authorizes nothing | **Open** — the target is no longer the ceiling. 177 of the 384 only ask whether an id is taken, and ids here are primary keys, so scoping those turns a refused insert into a duplicate-key error. `unscoped_reads_ceiling` stays a full-coverage ratchet so a new unscoped read cannot arrive unnoticed; it is not a debt that reaches zero |
 | **T3** | No route authorises from a value in its own request body | 0 | 2: `POST /cipher/decrypt` read `principal` from the body; `cipher_ops` bulk transform did the same | **Met** — both authorise the calling principal. Naming a different one is delegation and now costs `administer`. `oms/test_cipher.py` asserts an editor is refused and an administrator is not |
 | **T4** | A listener cannot be created with authentication disabled | 0 | `ListenerCreate.auth_type` defaulted to `"none"`, `create_listener` permitted it, `_check_listener_auth` returned True for it unconditionally | **Met** — `auth_type` is required, so silence is a 422; `"none"` still exists and now costs `administer`. `oms/test_webhooks_ops.py` asserts both, and that an administrator still can |
 | **T5** | Object mutation through an app runtime performs the approval gate | 2 of 2 runtimes | `workshop_runtime` did; `slate_runtime` and `automate_ops._run_action_effect` did not | **Met** — both stage an `ApprovalRequest` for a high-risk action instead of mutating, and name the caller rather than `"slate"` or nobody. `oms/test_slate_carbon.py` and `oms/test_automate_action_effect.py` assert the object is untouched and the request names who asked |
@@ -81,6 +81,31 @@ route, whatever permission they carry.
 | **T9** | A worker reads only the project of the work it was handed | one named mechanism | 0 such reads; the 63 this condition was opened on were misclassified | **Met** — vacuously, and the honest reading is that the condition should not have been opened. `runtime.py` was called a worker because it carries no `@router.` line, and it is called from thirty modules that do. The census now classifies by reachability from a routed module rather than by where the decorators live, and this application has no module nothing routed can reach. The 63 were helpers all along and are counted with them |
 | **T10** | No table holds tenant work without recording which tenant | `tenant_orphan_ceiling` at 0 | 52 of 271 tables reach no project, directly, through a declared foreign key, or through the `<stem>_id` convention this schema mostly uses instead, and 189 route handlers serve them | **Open** — the cause the other conditions measure the symptom of. `oms/audit_tenant_orphans.py`, `oms/test_tenant_orphans.py`, fourteenth check in the pre-push hook |
 | **T11** | An object type's project is recorded in one place | one spelling | two: the `ObjectType.project_id` column, read by 14 modules, and `properties.__manager.project_id`, read by 11, with 6 modules reading both | **Open** — a row whose two spellings disagree belongs to different projects depending on which module reaches it, so neither can be used to scope a read until they are reconciled |
+
+## What reading only the flagged sites missed
+
+The census flags a read within six lines of no `project_id`. Auditing all ninety routed
+modules for the *shape* instead -- an id that arrived inside something already authorized --
+surfaced 146 candidates the census never pointed at, and the confirmed ones include a defect
+with no unauthorized id in it at all.
+
+`preview_artifact` builds its `PlatformJob` without naming a project. The column declares
+`default="default"`, so a preview of a project's artifact filed that artifact's sample
+output, the caller's inputs, the trace and the metrics under the default project -- and
+`list_jobs`, `get_job` and `_authorized_job` all scope on that stored column, so anyone with
+`view` there could read them and anyone with `execute` could cancel or retry them. It was
+the only one of three `PlatformJob` constructions in the codebase that omitted the column.
+No read was unscoped; a write was unlabelled, which no read-side census can see.
+
+`apply_shared_property_type` and `detach_shared_property_type` take `object_type_id` from
+the request body and rewrite `ObjectType.properties`, one of them clearing a `locked` flag on
+a governed property. Their router carries `require_permission("edit")` -- and that is worth
+stating precisely, because it is what the R6 work bought and what it did not:
+`production_auth.require_permission` calls `principal.allows(permission)` with **no project
+argument**. It establishes that the caller holds a tier somewhere. It never establishes
+whose rows they may touch. Every router gated under `ROUTER_PERMISSIONS`, including the four
+added for T7, is closed for authorization and open for tenancy until each handler scopes its
+own reads.
 
 ## What the sharpened target found
 
