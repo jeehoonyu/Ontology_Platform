@@ -91,15 +91,22 @@ export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
   );
 }
 
-/**
- * `specs` is optional, so every existing caller keeps its current rendering.
- * Supplied, cells are drawn by the base type the ontology declares rather than
- * stringified -- the same dispatch `KeyValueGrid` uses, so a table and a detail
- * pane of the same object agree on how its geometry or its timestamp reads.
- */
 export const TABLE_ROW_LIMIT = 40;
 
-export function DataTable({ rows, specs, empty = "No records" }: { rows?: TableRow[]; specs?: Record<string, PropertySpec>; empty?: string }) {
+/**
+ * The product's table: every column any row has, forty rows a page, and a
+ * caption whenever it is showing fewer rows than it was given.
+ *
+ * It took an optional `specs` to draw cells by their declared ontology type, and
+ * none of its seventy-four callers ever passed one -- so the typed rendering was
+ * a capability described in the source that no screen had. N6 of
+ * GOAL_HONEST_UI_2026-09-11 removed it rather than invent a caller. The three
+ * screens that do draw typed values -- Object Explorer's own table, the decision
+ * timeline and the map selection -- do it through `KeyValueGrid` or their own
+ * cells, and keep doing so. The compiler is the guard: `specs=` on a DataTable
+ * no longer type-checks.
+ */
+export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; empty?: string }) {
   const safeRows = rows || [];
   const columns = useMemo(() => {
     // Every row, and every key. This read the first ten rows and took eight
@@ -143,7 +150,7 @@ export function DataTable({ rows, specs, empty = "No records" }: { rows?: TableR
             {shown.map((row, index) => (
               <tr key={first + index}>{columns.map((column) => {
                 const text = formatValue(row[column]);
-                return <td key={column} title={text}>{specs ? renderPropertyValue(row[column], specs[column]) : text}</td>;
+                return <td key={column} title={text}>{text}</td>;
               })}</tr>
             ))}
           </tbody>

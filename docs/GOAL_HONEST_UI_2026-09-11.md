@@ -307,11 +307,29 @@ plan, and it is measured there.
   sweep at four widths green on the same build. `audit_table_truncation` still reads the
   cut as counted, and the inert-control census rose from 318 to 320 controls with none
   inert.
-- **N6 — The typed cells that nothing uses.** **Open** — `DataTable` takes `specs` and no
-  caller passes it, so a timestamp in a table and the same timestamp in a detail pane
-  disagree today. Either the call sites pass it or the parameter goes; a primitive with a
-  feature nobody uses is a claim in the source about a capability the product does not
-  have.
+- **N6 — The typed cells that nothing uses.** **Met** — the parameter went. `DataTable`
+  took an optional `specs` to draw cells by their declared ontology type, and a census of
+  its uses found **74** across 15 files with **none** passing it. The screens that do draw
+  typed values already do it elsewhere and keep doing so: Object Explorer's own table
+  renders each cell by its spec, and `KeyValueGrid`'s `specs` — which, unlike the table's,
+  has three real callers, in the decision timeline, Object Explorer and the map selection —
+  stays exactly as it was.
+
+  Removed rather than wired, because wiring it would have meant inventing a caller: no
+  `DataTable` in the product shows ontology objects whose property declarations are in
+  hand. The docblock that described `specs` also sat above `TABLE_ROW_LIMIT` rather than the
+  component it described, so the capability was misdocumented as well as unused.
+
+  **The compiler is the guard.** The build runs `tsc --noEmit` before bundling, so a caller
+  passing `specs=` fails to build. Negative run: the operations feed's `DataTable` given
+  `specs={{}}` failed with `error TS2322`; restored, the typecheck was clean, and the build,
+  the three table tests, the four truncation-site tests and the operations and control-panel
+  sweeps at four widths passed on it — fifteen tests.
+
+  The `a timestamp in a table and the same timestamp in a detail pane disagree` half of the
+  original finding is not closed by this: a table still stringifies. It is now an honest
+  difference rather than a disguised one, and it belongs to N7's grid, which is where cell
+  renderers for declared types would have a caller.
 - **N7 — The full grid.** **Open** — column visibility, reorder, resize, pin, sort,
   filter, selection, virtualization, rolled out behind the `audit_ui_primitives` user
   count. Not started until N2 through N5 are met.
