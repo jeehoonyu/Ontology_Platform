@@ -93,6 +93,12 @@ export function PipelineBuilder() {
   // different graph starts with nothing to undo.
   const [moves, setMoves] = useState<Array<{ graphId: string; nodeId: string; positions: Record<string, { x: number; y: number }> }>>([]);
   useEffect(() => { setMoves([]); }, [selectedGraphId]);
+  // Node configuration typed and not yet saved, held above the panes. A pane moved
+  // to another slot is a new parent, React remounts what it holds, and the form's
+  // own state went with it: measured, a plain move or `Reset panes` replaced a
+  // typed label with the saved one. Keyed by graph and node, so a draft belongs to
+  // the node it was typed for. V9 of GOAL_MOVEMENT_2026-09-12.
+  const [nodeDrafts, setNodeDrafts] = useState<Record<string, NodeDraft>>({});
   const [quickAddType, setQuickAddType] = useState("filter");
   const canvasRef = useRef<HTMLDivElement | null>(null);
   // "slots", not "free": this one context carries the pane drags as well as the
@@ -554,6 +560,14 @@ export function PipelineBuilder() {
               }} />
               <PipelineNodeConfig
                 details={details}
+                draft={nodeDrafts[`${selectedGraphId}/${details.node_id}`]}
+                onDraft={(draft) => setNodeDrafts((current) => {
+                  const key = `${selectedGraphId}/${details.node_id}`;
+                  const next = { ...current };
+                  if (draft) next[key] = draft;
+                  else delete next[key];
+                  return next;
+                })}
                 onSave={async (label, config) => {
                   if (!selectedGraphId) return;
                   setActionStatus(`Saving ${details.node_id} configuration...`);
@@ -672,20 +686,46 @@ interface ConfigFieldDefinition {
   maximum?: number;
 }
 
-function PipelineNodeConfig({ details, onSave }: { details: PipelineNodeDetails; onSave: (label: string, config: JsonObject) => Promise<void> }) {
+type NodeDraft = { label: string; values: Record<string, string> };
+
+function PipelineNodeConfig({ details, draft, onDraft, onSave }: {
+  details: PipelineNodeDetails;
+  /** What was typed and not saved, kept by the caller so a remount does not lose it. */
+  draft?: NodeDraft;
+  onDraft: (draft: NodeDraft | null) => void;
+  onSave: (label: string, config: JsonObject) => Promise<void>;
+}) {
   const schema = details.metadata.configuration_schema as { fields?: ConfigFieldDefinition[] } | undefined;
   const fields = schema?.fields || [];
   const sourceConfig = (details.metadata.config || {}) as JsonObject;
-  const [label, setLabel] = useState(details.node.label);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [label, setLabel] = useState(draft?.label ?? details.node.label);
+  const [values, setValues] = useState<Record<string, string>>(draft?.values ?? {});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setLabel(details.node.label);
-    setValues(Object.fromEntries(fields.map((field) => [field.name, displayConfigValue(sourceConfig[field.name], field.type)])));
+    // A draft for this node wins over what the server holds: it is what the person
+    // typed, and the server's copy is what they were changing.
+    if (draft) {
+      setLabel(draft.label);
+      setValues(draft.values);
+    } else {
+      setLabel(details.node.label);
+      setValues(Object.fromEntries(fields.map((field) => [field.name, displayConfigValue(sourceConfig[field.name], field.type)])));
+    }
     setError("");
   }, [details.node_id, details.node.label, JSON.stringify(sourceConfig)]);
+
+  function changeLabel(next: string) {
+    setLabel(next);
+    onDraft({ label: next, values });
+  }
+
+  function changeValue(name: string, value: string) {
+    const next = { ...values, [name]: value };
+    setValues(next);
+    onDraft({ label, values: next });
+  }
 
   async function save() {
     setSaving(true);
@@ -698,6 +738,7 @@ function PipelineNodeConfig({ details, onSave }: { details: PipelineNodeDetails;
         config[field.name] = parseConfigValue(raw, field.type);
       }
       await onSave(label, config);
+      onDraft(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -708,17 +749,17 @@ function PipelineNodeConfig({ details, onSave }: { details: PipelineNodeDetails;
   return (
     <form className="pipeline-node-config" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <div className="pipeline-config-heading"><strong>Transform configuration</strong><StatusBadge value={asString((details.metadata.configuration_validation as JsonObject | undefined)?.status || "READY")} /></div>
-      <label>Node label<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label>
+      <label>Node label<input value={label} onChange={(event) => changeLabel(event.target.value)} required /></label>
       {fields.map((field) => (
         <label key={field.name}>
           {field.label}{field.required ? " *" : ""}
           {field.type === "select" ? (
-            <select value={values[field.name] || ""} required={field.required} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}>
+            <select value={values[field.name] || ""} required={field.required} onChange={(event) => changeValue(field.name, event.target.value)}>
               <option value="">Choose...</option>
               {(field.options || []).map((option) => <option value={option} key={option}>{option.replace(/_/g, " ")}</option>)}
             </select>
           ) : field.type === "textarea" || field.type === "key_value" ? (
-            <textarea rows={field.type === "key_value" ? 4 : 3} value={values[field.name] || ""} required={field.required} placeholder={field.type === "key_value" ? "source: target, one per line" : undefined} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))} />
+            <textarea rows={field.type === "key_value" ? 4 : 3} value={values[field.name] || ""} required={field.required} placeholder={field.type === "key_value" ? "source: target, one per line" : undefined} onChange={(event) => changeValue(field.name, event.target.value)} />
           ) : (
             <input
               type={["integer", "number"].includes(field.type) ? "number" : "text"}
@@ -727,7 +768,7 @@ function PipelineNodeConfig({ details, onSave }: { details: PipelineNodeDetails;
               value={values[field.name] || ""}
               required={field.required}
               placeholder={field.type === "field_list" ? "field_a, field_b" : field.type === "field" ? "Choose or enter a field" : undefined}
-              onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}
+              onChange={(event) => changeValue(field.name, event.target.value)}
             />
           )}
         </label>

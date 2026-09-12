@@ -297,9 +297,32 @@ Three things in that table are the defect the research describes:
 
   `.inline-success` is declared shared by one more file, `PlatformGraph.tsx`; the rename
   went through the three specs that press the button, fourteen occurrences.
-- **V9 — Resetting a layout touches only the layout.** **Open** — `Reset layout` leaves the
-  artifact's nodes and any unsent input exactly as they were. The research's fourth
-  scenario; nothing asserts it today.
+- **V9 — Resetting a layout touches only the layout.** **Met** — `Reset panes` leaves the
+  graph's node positions exactly as they were, sends nothing to the server, and keeps
+  anything typed into a pane and not yet saved. Proven by `Reset panes leaves the graph and
+  unsent input exactly as they were`, the research's fourth scenario.
+
+  **It was not true, and the census had no way to see it.** The first run of the test
+  failed on the committed build: a label typed into the selected node's configuration came
+  back as the saved one — `Received: "Input Dataset"`. A pane moved to another slot is a new
+  parent, React remounts what it holds, and the form's own state went with it. So it was
+  not the reset that lost the draft; *any* pane move did, and the reset was only the second
+  way in. The test was strengthened to type first, move the pane, check, then reset and
+  check again. The Execution Policy selects in the same pane survived all along, because
+  their state already lived in `PipelineBuilder` rather than in the pane.
+
+  The fix keeps the node form's draft above the panes, keyed by graph and node, and clears it
+  when a save succeeds; a remount reads it back. It is a fix for the one form a pane on this
+  screen holds, not a guarantee about every future pane's contents — a component with its
+  own unsaved state, placed in a pane, will lose it on a move the same way, and nothing gates
+  that yet. Rendering every pane in one stable container would remove the remount, and
+  would also change the slot droppables, the keyboard slot getter and M2–M4's tests; that is
+  not done here.
+
+  Negative run: a build that never hands the form its draft failed at the move — `moving the
+  pane threw away input that had not been sent` — before it reached the reset. Restored,
+  it passed, with the movement contract and the pipeline workflows green on the same build,
+  sixteen tests.
 - **V10 — Picking a node up on a scrolled canvas does not move it.** **Open** — found while
   V8 was being verified, not by the census. A pipeline node picked up on a canvas already
   scrolled sideways is displaced by that scroll offset before any key is pressed, and the

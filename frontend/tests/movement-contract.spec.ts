@@ -539,3 +539,60 @@ test.describe("every save and reset names the scope it touches", () => {
     await expect.poll(position, { message: "the designer threw the arrangement away on reload" }).toBe(moved);
   });
 });
+
+/**
+ * Resetting the panes touches only the panes. V9 of the goal and the research's
+ * fourth evaluation scenario: move a pane, then reset, and check that the
+ * artifact and anything typed but not yet sent are exactly as they were.
+ */
+test.describe("resetting the panes touches only the panes", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+    await page.goto("/workspace/pipeline");
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    await page.getByRole("button", { name: "New pipeline" }).click();
+    await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+    await page.getByRole("button", { name: "Input Dataset input" }).click();
+    await page.locator(".pipeline-canvas").getByRole("button", { name: /^Add / }).click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(1);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  });
+
+  test("Reset panes leaves the graph and unsent input exactly as they were", async ({ page }) => {
+    const node = page.locator(".pipeline-canvas .pipeline-node").first();
+    await node.click();
+    const label = page.locator(".pipeline-node-config").getByLabel("Node label");
+    await expect(label, "the selected node's configuration is not showing").toBeVisible();
+    const slotOfOutputs = () => page.locator(".pane").filter({ hasText: "Execution Policy" }).first()
+      .evaluate((element) => element.closest(".pane-slot")?.getAttribute("data-slot") || "");
+
+    // Typed first, then the pane moved. Measured before V9: a pane moved to
+    // another slot is a new parent, React remounts what is inside it, and the
+    // node form's local state went with it -- so a plain move lost the draft, and
+    // the reset below was only the second way to lose it.
+    const unsent = `Typed but not saved ${Date.now()}`;
+    await label.fill(unsent);
+    await page.getByLabel("Move Outputs to").selectOption("bottom");
+    await expect.poll(slotOfOutputs).toBe("bottom");
+    await expect(page.locator(".pipeline-node-config").getByLabel("Node label"),
+                 "moving the pane threw away input that had not been sent")
+      .toHaveValue(unsent);
+    const positionBefore = await node.evaluate((element) => `${(element as HTMLElement).style.left},${(element as HTMLElement).style.top}`);
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    });
+
+    await page.getByRole("button", { name: "Reset panes" }).click();
+
+    await expect.poll(slotOfOutputs, { message: "Reset panes did not put the Outputs pane back" })
+      .toBe("right");
+    await expect(page.locator(".pipeline-node-config").getByLabel("Node label"),
+                 "resetting the panes threw away input that had not been sent")
+      .toHaveValue(unsent);
+    expect(await node.evaluate((element) => `${(element as HTMLElement).style.left},${(element as HTMLElement).style.top}`),
+           "resetting the panes moved a node in the graph")
+      .toBe(positionBefore);
+    expect(writes, "resetting the panes sent a write to the server").toEqual([]);
+  });
+});
