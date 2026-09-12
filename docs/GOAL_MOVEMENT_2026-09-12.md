@@ -219,9 +219,24 @@ Three things in that table are the defect the research describes:
   currently believes into the document, so the diff has to be read before it is kept.
 
   `MOVEMENT_CONTRACT.md` falls from **23 gaps to 21**.
-- **V6 — A pipeline node move can be taken back.** **Open** — one Undo reverses one
-  committed move, re-saving the previous positions. A drop that moved nothing records
-  nothing, which the drop handler already guarantees and the test holds.
+- **V6 — A pipeline node move can be taken back.** **Met** — `Undo move` in the pipeline
+  header reverses one committed move by saving the positions from before it back to the
+  server. Each committed drop records the graph, the node and every position before it;
+  the history belongs to the graph it was made on and empties when another is selected; a
+  node deleted since the move is left out of the restore rather than resurrected. Proven by
+  `one Undo takes back a committed pipeline node move`, which moves a node from the keyboard,
+  waits for the server's *Saved … position*, and then asserts three things the screen alone
+  cannot fake: the node is back, the `PATCH …/layout` the Undo sent carries the original
+  position, and nothing further is left to undo.
+
+  Negative runs, two builds. Moves not recorded: `the committed move left nothing to undo`.
+  Undo restoring the screen and not the server — the version that looks right until a
+  reload: `Undo move did not send the restored positions to the server`, zero requests.
+  Restored: both passed. The click guard passed in every build, because a click never
+  activates dnd-kit's 8-pixel sensor and so never reaches the drop handler at all; it is
+  labelled a guard in its title for that reason.
+
+  `MOVEMENT_CONTRACT.md` falls from **21 gaps to 20**.
 - **V7 — The preview lands where the drop does, at every zoom.** **Open** — a pipeline
   node's live transform is divided by the stage's scale, so the preview and the landing
   agree within a pixel at 0.55, 1 and 1.35. Proven by the keyboard measurement above,

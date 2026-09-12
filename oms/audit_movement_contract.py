@@ -94,7 +94,7 @@ SURFACES: Dict[str, Dict[str, Any]] = {
         "moves": "a node around the pipeline canvas",
         "cancel": {"test": "movement-contract.spec.ts::Escape during a pipeline node drag restores "
                            "it and saves nothing"},
-        "recover": {"gap": "the drop saves positions to the server and nothing takes a move back (V6)"},
+        "recover": {"test": "movement-contract.spec.ts::one Undo takes back a committed pipeline node move"},
         "alternative": {"gap": "moves from the keyboard, and not from a single pointer without a drag"},
     },
     "pipeline-palette": {

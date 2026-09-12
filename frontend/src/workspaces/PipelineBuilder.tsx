@@ -87,6 +87,12 @@ export function PipelineBuilder() {
   const [outputs, setOutputs] = useState<PipelineOutputsState | null>(null);
   const [contracts, setContracts] = useState<PipelineOntologyContractState | null>(null);
   const [zoom, setZoom] = useState(0.86);
+  // Committed node moves, newest last, each with every position before it. V6 of
+  // GOAL_MOVEMENT_2026-09-12: a drop saved positions to the server and nothing
+  // could take a move back. A move belongs to the graph it was made on, so a
+  // different graph starts with nothing to undo.
+  const [moves, setMoves] = useState<Array<{ graphId: string; nodeId: string; positions: Record<string, { x: number; y: number }> }>>([]);
+  useEffect(() => { setMoves([]); }, [selectedGraphId]);
   const [quickAddType, setQuickAddType] = useState("filter");
   const canvasRef = useRef<HTMLDivElement | null>(null);
   // "slots", not "free": this one context carries the pane drags as well as the
@@ -300,6 +306,8 @@ export function PipelineBuilder() {
       };
     });
     if (commit && selectedGraphId && canvas) {
+      const previous = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
+      setMoves((current) => [...current, { graphId: selectedGraphId, nodeId, positions: previous }]);
       const positions = Object.fromEntries(canvas.nodes.map((node) => [
         node.id,
         node.id === nodeId ? position : node.position
@@ -312,6 +320,24 @@ export function PipelineBuilder() {
           setRefreshKey((key) => key + 1);
         })
         .catch((error: Error) => setActionStatus(`Could not save layout: ${error.message}`));
+    }
+  }
+
+  /** One Undo, one committed move: the positions before it are saved back. */
+  async function undoMove() {
+    const last = moves[moves.length - 1];
+    if (!last || !canvas || last.graphId !== selectedGraphId) return;
+    setMoves((current) => current.slice(0, -1));
+    // A node deleted since the move has no position to restore.
+    const present = new Set(canvas.nodes.map((node) => node.id));
+    const positions = Object.fromEntries(Object.entries(last.positions).filter(([id]) => present.has(id)));
+    setActionStatus(`Moving ${last.nodeId} back...`);
+    try {
+      setCanvas(await savePipelineLayout(last.graphId, positions));
+      setActionStatus(`Moved ${last.nodeId} back.`);
+      setRefreshKey((key) => key + 1);
+    } catch (error) {
+      setActionStatus(`Could not move ${last.nodeId} back: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -385,6 +411,7 @@ export function PipelineBuilder() {
             actions={<>
               <button onClick={createGraph}>New pipeline</button>
               <button onClick={saveLayout}>Save layout</button>
+              <button onClick={() => void undoMove()} disabled={!moves.length}>Undo move</button>
               <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
               <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>
               <button onClick={() => run("preview")} disabled={!selectedGraphId || Boolean(busyAction)}>Preview</button>

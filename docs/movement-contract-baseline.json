@@ -1,10 +1,10 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-12T22:37:56Z"
+    "recorded_at": "2026-09-12T22:46:17Z"
   },
   "note": "Movement stages not met: cancel, recover, single-pointer alternative. A ceiling, not a floor. A cell listed under na_cells was declared not applicable on purpose; adding one is an edit someone makes here.",
-  "gaps": 21,
+  "gaps": 20,
   "gap_cells": [
     "ontology-field-map.alternative",
     "ontology-field-map.cancel",
@@ -15,7 +15,6 @@
     "ontology-property-order.cancel",
     "ontology-property-order.recover",
     "pipeline-node.alternative",
-    "pipeline-node.recover",
     "pipeline-palette.cancel",
     "pipeline-palette.recover",
     "platform-graph-node.alternative",

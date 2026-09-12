@@ -284,7 +284,7 @@ test.describe("a graph node move is one entry, and Escape takes it back", () => 
     await expect(nodes(page), "the cancelled drag left a history entry behind").toHaveCount(index);
   });
 
-  test("a click on an artifact node records nothing", async ({ page }) => {
+  test("a click on an artifact node records nothing (guard)", async ({ page }) => {
     // A guard, measured true before V4: clicking selects and must not snapshot.
     // Kept because moving the history entry to drag start is exactly the change
     // that would start recording clicks if xyflow began a drag on press.
@@ -292,5 +292,73 @@ test.describe("a graph node move is one entry, and Escape takes it back", () => 
     await nodes(page).nth(index).click();
     await page.getByRole("button", { name: "Undo" }).click();
     await expect(nodes(page), "a click on a node was recorded as an edit").toHaveCount(index);
+  });
+});
+
+/**
+ * A pipeline node, whose drop is saved to the server the moment it lands. V6 of
+ * the goal. Before it, nothing could take a committed move back: the census
+ * recorded the drop saving positions and no control of any kind reversing one.
+ */
+test.describe("a committed pipeline move can be taken back", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+    await page.goto("/workspace/pipeline");
+    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "New pipeline" }).click();
+    await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+    await page.getByRole("button", { name: "Input Dataset input" }).click();
+    await page.locator(".pipeline-canvas").getByRole("button", { name: /^Add / }).click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(1);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  });
+
+  test("one Undo takes back a committed pipeline node move", async ({ page }) => {
+    const node = page.locator(".pipeline-canvas .pipeline-node").first();
+    const left = async () => Number.parseFloat((await node.evaluate((element) => (element as HTMLElement).style.left)) || "0");
+    const before = await left();
+
+    // The keyboard, so the move is a known committed drop with no bounding box
+    // read; `a pipeline node moves with the keyboard` already proves the gesture.
+    await node.focus();
+    const announcement = page.locator("[id^='DndLiveRegion']").filter({ hasText: /node:/ });
+    await page.keyboard.press("Space");
+    await expect(announcement, "the node drag never started").toContainText(/draggable item/i);
+    for (let step = 0; step < 4; step += 1) {
+      await page.keyboard.press("ArrowRight");
+      await page.waitForTimeout(60);
+    }
+    await page.keyboard.press("Space");
+    await expect(page.getByText(/Saved .+ position\./), "the move was not committed").toBeVisible();
+    await expect.poll(left, { message: "the move did not change the node's position" }).toBeGreaterThan(before + 20);
+
+    // The Undo must reach the server, not only the screen: the layout request it
+    // sends carries the position the node had before the move.
+    const restores: Array<{ positions: Record<string, { x: number }> }> = [];
+    page.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().includes("/layout")) restores.push(request.postDataJSON());
+    });
+    const undo = page.getByRole("button", { name: "Undo move" });
+    await expect(undo, "the committed move left nothing to undo").toBeEnabled();
+    await undo.click();
+
+    await expect.poll(left, { message: "Undo move did not put the node back" }).toBe(before);
+    await expect.poll(() => restores.length, { message: "Undo move did not send the restored positions to the server" })
+      .toBeGreaterThan(0);
+    expect(Object.values(restores[0].positions).some((position) => position.x === before),
+           `the undo sent no position matching the node's original x ${before}`)
+      .toBeTruthy();
+    await expect(page.getByRole("button", { name: "Undo move" }),
+                 "one Undo left another move to take back").toBeDisabled();
+  });
+
+  test("a pipeline node that was only clicked leaves nothing to undo (guard)", async ({ page }) => {
+    // A drop that moved nothing records nothing: `endCanvasDrag` returns before
+    // committing when the delta is zero, and this holds that it stays so.
+    const node = page.locator(".pipeline-canvas .pipeline-node").first();
+    await node.scrollIntoViewIfNeeded();
+    await node.click();
+    await expect(page.getByRole("button", { name: "Undo move" }),
+                 "a click on a node was recorded as a move").toBeDisabled();
   });
 });
