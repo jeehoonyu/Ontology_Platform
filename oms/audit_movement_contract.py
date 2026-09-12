@@ -83,12 +83,11 @@ SURFACES: Dict[str, Dict[str, Any]] = {
     "pane-resize": {
         "file": "components/layout/Pane.tsx", "mechanism": "pointer",
         "moves": "the boundary between two slots",
-        "cancel": {"gap": "Escape commits: 220 to 382 during a live resize, 382 after it, and 382 "
-                          "stored (V2)"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during a splitter resize restores the "
+                           "width and writes nothing"},
         "recover": {"na": "a width is a viewing preference; arrow keys, `Home`, `End` and "
                           "`Reset layout` all set it back"},
-        "alternative": {"gap": "drag and arrow keys only; WCAG 2.5.7 asks for a single pointer "
-                               "without a drag, and keyboard support does not satisfy it (V3)"},
+        "alternative": {"test": "movement-contract.spec.ts::a slot resizes with a single pointer and no drag"},
     },
     "pipeline-node": {
         "file": "components/canvas/PipelineCanvas.tsx", "mechanism": "dnd-kit",

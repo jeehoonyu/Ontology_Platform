@@ -143,11 +143,37 @@ Three things in that table are the defect the research describes:
   gate — `na` without the baseline, a met stage turning gap while the total holds, an
   uncovered drag, a stale surface, a test never checked, a blank reason, no total ceiling —
   were each caught by a named assertion.
-- **V2 — Escape cancels a resize.** **Open** — the splitter restores the width it started
-  from and writes nothing, on `Escape` and on `pointercancel`. Proven against a live resize,
-  asserting the mid-drag width moved before asserting it came back.
-- **V3 — A resize without a drag or a key.** **Open** — a single-pointer control for every
-  splitter, proven with clicks only. WCAG 2.5.7, which keyboard support does not satisfy.
+- **V2 — Escape cancels a resize.** **Met** — the splitter restores the width it started
+  from and writes nothing, on `Escape` and on `pointercancel`. Proven by
+  `movement-contract.spec.ts`, three tests: Escape during a live resize, a system
+  `pointercancel` during one, and — the guard on the other side of the change — a released
+  resize still stored and still there after a reload.
+
+  **The fix is a preview, not an undo.** The splitter wrote the layout on every
+  `pointermove`, so by the time Escape could mean anything the width was already in
+  `localStorage`. A live resize now only sets state; release stores it; Escape and
+  `pointercancel` put back the arrangement captured when the pointer went down — the whole
+  layout, so a slot that had no stored width at all goes back to having none. Keyboard
+  steps still store at once, because each is a deliberate change rather than a position a
+  hand passed through.
+
+  Negative runs, three builds, each breaking one half. Cancel wired to commit: Escape and
+  `pointercancel` both `Received: 382`, expected 220. The preview stored on every move:
+  the width came back and `localStorage` did not — `a cancelled resize wrote the layout`,
+  which is the assertion that tells a restore from an undo. Release not stored: only the
+  guard failed, `Received: undefined`. Restored: four passed, with the pane layout and
+  concurrent-drag specs — thirteen more — green on the same build.
+- **V3 — A resize without a drag or a key.** **Met** — a width select for each occupied side
+  slot in the panes bar: Narrow, Default, Wide, Widest, from 160 to 640 pixels. Proven by
+  `a slot resizes with a single pointer and no drag`, which chooses a width and asserts the
+  stored size. Hidden below 700 pixels with the splitter, because stacked slots have no
+  width to choose. WCAG 2.5.7 asks for a single pointer without a drag, which keyboard
+  support does not satisfy, and every *move* in the product already had one; the resize was
+  the only operation that did not. The negative build without the selects failed that test
+  and no other.
+
+  `MOVEMENT_CONTRACT.md` falls from **25 gaps to 23**: `pane-resize` cancel and alternative
+  are met, and its recover stays `na` in the baseline where it was written.
 - **V4 — One move, one undo.** **Open** — a VisualBuilder drag records one history entry
   when it starts, not one per grid step: one Undo returns the node to where the drag began.
   The click-with-no-movement case stays at zero entries and is kept as a guard.

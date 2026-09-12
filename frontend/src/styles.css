@@ -2729,7 +2729,9 @@ pre {
 
   /* Stacked, there is no boundary to drag: slot order is list order and the
      widths the splitter writes mean nothing. */
-  .pane-splitter {
+  .pane-splitter,
+  .pane-width {
+    /* Stacked slots have no width to choose, so neither control is offered. */
     display: none;
   }
 }

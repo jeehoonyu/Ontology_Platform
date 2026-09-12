@@ -46,6 +46,14 @@ export const DEFAULT_SLOT_PX = 220;
 export const MIN_SLOT_PX = 160;
 export const MAX_SLOT_PX = 640;
 
+/** The widths a slot can be given with one choice and no drag. V3 of GOAL_MOVEMENT. */
+export const WIDTH_PRESETS: Array<[string, number]> = [
+  ["Narrow", MIN_SLOT_PX],
+  ["Default", DEFAULT_SLOT_PX],
+  ["Wide", 400],
+  ["Widest", MAX_SLOT_PX],
+];
+
 const KEY_PREFIX = "ontology.panes.";
 
 export function clampSize(px: number): number {

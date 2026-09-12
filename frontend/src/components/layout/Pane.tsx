@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { DragHandle, PANE_PREFIX, SLOT_PREFIX, isPaneDrag, isSlot } from "../dnd/DragKit";
 import {
@@ -6,6 +6,7 @@ import {
   MAX_SLOT_PX,
   MIN_SLOT_PX,
   SLOTS,
+  WIDTH_PRESETS,
   clearLayout,
   loadLayout,
   movePane,
@@ -106,7 +107,7 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
 }
 
 /**
- * The boundary between two slots, and the only way to resize one.
+ * The boundary between two slots.
  *
  * M3 of `GOAL_PANES_2026-09-11.md`. A `role="separator"` with `aria-valuenow`,
  * so a screen reader reads the width it holds, and arrow keys that change it —
@@ -117,11 +118,26 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
  * splitter is not going anywhere: it has no droppable to land on, and modelling
  * it as a drag between containers would be dishonest about what it does. The
  * gate agrees — it counts dnd hooks and contexts, and this is neither.
+ *
+ * **A pointer resize previews until it is released, and Escape takes it back.**
+ * V2 of `GOAL_MOVEMENT_2026-09-12.md`. This listened for `pointermove` and
+ * `pointerup` and nothing else, and wrote the layout on every move, so Escape did
+ * nothing and a width reached by accident was already stored: measured 220 → 382
+ * during a live resize, 382 after Escape, 382 in `localStorage`. The DragKit drags
+ * beside it restore on Escape because dnd-kit does; this is the one control not on
+ * dnd-kit, so it has to do it itself. `pointercancel` is the same cancel arriving
+ * from the system — a touch taken over by a scroll or a gesture — and without it
+ * the splitter kept resizing after the finger had gone.
  */
-function Splitter({ slot, size, onResize }: {
+function Splitter({ slot, size, onResize, onStart, onPreview, onCommit, onCancel }: {
   slot: SlotName;
   size: number;
+  /** A keyboard step: one deliberate change, committed at once. */
   onResize: (px: number) => void;
+  onStart: () => void;
+  onPreview: (px: number) => void;
+  onCommit: () => void;
+  onCancel: () => void;
 }) {
   const [dragging, setDragging] = useState(false);
   // The direction the pointer has to travel to make this slot wider: a right
@@ -135,16 +151,32 @@ function Splitter({ slot, size, onResize }: {
       const host = document.querySelector(`.pane-slot-${slot}`);
       if (!host) return;
       const rect = host.getBoundingClientRect();
-      onResize(sign > 0 ? event.clientX - rect.left : rect.right - event.clientX);
+      onPreview(sign > 0 ? event.clientX - rect.left : rect.right - event.clientX);
     };
-    const stop = () => setDragging(false);
+    const stop = () => {
+      setDragging(false);
+      onCommit();
+    };
+    const cancel = () => {
+      setDragging(false);
+      onCancel();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      cancel();
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", escape);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", escape);
     };
-  }, [dragging, slot, sign, onResize]);
+  }, [dragging, slot, sign, onPreview, onCommit, onCancel]);
 
   return (
     <button
@@ -156,7 +188,10 @@ function Splitter({ slot, size, onResize }: {
       aria-valuenow={size}
       aria-valuemin={MIN_SLOT_PX}
       aria-valuemax={MAX_SLOT_PX}
-      onPointerDown={() => setDragging(true)}
+      onPointerDown={() => {
+        onStart();
+        setDragging(true);
+      }}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 48 : 16;
         if (event.key === "ArrowRight") onResize(size + sign * step);
@@ -217,6 +252,11 @@ export function usePaneLayout(screen: string, panes: PaneSpec[]) {
     saveLayout(screen, next);
   }, [screen]);
 
+  /** Shown, not stored: a live resize that has not been released yet. */
+  const preview = useCallback((next: PaneLayout) => {
+    setLayout(next);
+  }, []);
+
   const reset = useCallback(() => {
     clearLayout(screen);
     setLayout(loadLayout(screen, panes));
@@ -235,7 +275,7 @@ export function usePaneLayout(screen: string, panes: PaneSpec[]) {
     return true;
   }, [layout, update]);
 
-  return { screen, panes, layout, update, reset, handleDragEnd };
+  return { screen, panes, layout, update, preview, reset, handleDragEnd };
 }
 
 export type PaneLayoutState = ReturnType<typeof usePaneLayout>;
@@ -244,10 +284,29 @@ export function PaneHost({ state, render }: {
   state: PaneLayoutState;
   render: (id: string) => ReactNode;
 }) {
-  const { screen, panes, layout, update, reset } = state;
+  const { panes, layout, update, preview, reset } = state;
+  // The arrangement a pointer resize started from, so Escape can put it back
+  // exactly -- including a slot that had no stored width at all.
+  const before = useRef<PaneLayout | null>(null);
   if (!layout) return null;
   const byId = new Map(panes.map((pane) => [pane.id, pane]));
   const hiddenPanes = layout.hidden.map((id) => byId.get(id)).filter(Boolean) as PaneSpec[];
+  const occupied = (slot: SlotName) => layout.slots[slot].some((id) => !layout.hidden.includes(id));
+
+  const splitter = (slot: SlotName) => (
+    <Splitter
+      slot={slot}
+      size={layout.sizes[slot] ?? DEFAULT_SLOT_PX}
+      onResize={(px) => update(setSize(layout, slot, px))}
+      onStart={() => { before.current = layout; }}
+      onPreview={(px) => preview(setSize(layout, slot, px))}
+      onCommit={() => { update(layout); before.current = null; }}
+      onCancel={() => {
+        if (before.current) preview(before.current);
+        before.current = null;
+      }}
+    />
+  );
 
   return (
       <div className="pane-host">
@@ -265,18 +324,33 @@ export function PaneHost({ state, render }: {
               <option key={pane.id} value={pane.id}>Show {pane.title}</option>
             ))}
           </select>
+          {/* V3 of GOAL_MOVEMENT_2026-09-12. The splitter resizes by drag and by
+              arrow keys, and WCAG 2.5.7 asks for a single pointer with no drag,
+              which a keyboard does not satisfy. Every move in the product already
+              had one -- `Move to…`, Up and Down, tap to place -- and the resize was
+              the one operation that did not. */}
+          {(["left", "right"] as SlotName[]).filter(occupied).map((slot) => (
+            <select
+              key={slot}
+              className="pane-width"
+              aria-label={`Width of ${slot} pane`}
+              value=""
+              onChange={(event) => {
+                if (event.target.value) update(setSize(layout, slot, Number(event.target.value)));
+              }}
+            >
+              <option value="">{slot === "left" ? "Left" : "Right"} width…</option>
+              {WIDTH_PRESETS.map(([label, px]) => (
+                <option key={px} value={px}>{label} · {px}px</option>
+              ))}
+            </select>
+          ))}
           <button type="button" onClick={reset}>Reset layout</button>
         </div>
         <div className="pane-host-row">
           {(["left", "center", "right"] as SlotName[]).map((slot) => (
             <Fragment key={slot}>
-            {slot === "right" && layout.slots.right.some((id) => !layout.hidden.includes(id)) ? (
-              <Splitter
-                slot="right"
-                size={layout.sizes.right ?? DEFAULT_SLOT_PX}
-                onResize={(px) => update(setSize(layout, "right", px))}
-              />
-            ) : null}
+            {slot === "right" && occupied("right") ? splitter("right") : null}
             <Slot name={slot} size={layout.sizes[slot]}>
               {layout.slots[slot].filter((id) => !layout.hidden.includes(id)).map((id) => {
                 const spec = byId.get(id);
@@ -295,13 +369,7 @@ export function PaneHost({ state, render }: {
                 );
               })}
             </Slot>
-            {slot === "left" && layout.slots.left.some((id) => !layout.hidden.includes(id)) ? (
-              <Splitter
-                slot="left"
-                size={layout.sizes.left ?? DEFAULT_SLOT_PX}
-                onResize={(px) => update(setSize(layout, "left", px))}
-              />
-            ) : null}
+            {slot === "left" && occupied("left") ? splitter("left") : null}
             </Fragment>
           ))}
         </div>
