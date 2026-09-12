@@ -174,13 +174,51 @@ Three things in that table are the defect the research describes:
 
   `MOVEMENT_CONTRACT.md` falls from **25 gaps to 23**: `pane-resize` cancel and alternative
   are met, and its recover stays `na` in the baseline where it was written.
-- **V4 — One move, one undo.** **Open** — a VisualBuilder drag records one history entry
-  when it starts, not one per grid step: one Undo returns the node to where the drag began.
-  The click-with-no-movement case stays at zero entries and is kept as a guard.
-- **V5 — Escape cancels a graph node drag.** **Open** — VisualBuilder first, which is where
-  a cancelled drag would otherwise be autosaved into a revision; the ontology designer and
-  platform graph follow if the same fix reaches them. Restores positions, records no history,
-  marks nothing dirty.
+- **V4 — One move, one undo.** **Met** — a node drag on the four artifact canvases records
+  one history entry, taken when xyflow reports the drag starting; the position changes it
+  emits while the drag is live are the drag itself, not edits, and the artifact is marked
+  unsaved when the drag stops rather than on every step. A position change with no drag in
+  progress — a node nudged from the keyboard — still records its own entry. Proven by `one
+  drag on an artifact canvas is taken back by one Undo`, which also asserts that the Undo
+  took back only the move and not the node's creation. The click-with-no-movement guard
+  stayed green through every build below.
+- **V5 — Escape cancels a graph node drag.** **Met**, for the artifact canvases — Escape
+  during a live drag puts back the nodes, edges, redo history and unsaved state captured at
+  drag start and removes the drag's history entry. xyflow has no cancel of its own and keeps
+  reporting the drag it still believes in until the pointer is released, so those reports
+  are discarded rather than applied. Proven by `Escape during an artifact canvas drag
+  restores the node and records nothing`, which carries the pointer on after Escape — that
+  one extra move is the part of the test that proves the discard — and then presses Undo,
+  expecting the node's *creation* to be the entry it takes back. The ontology designer and
+  the platform graph run on the same library and are still recorded as unmeasured gaps; the
+  fix is in `VisualBuilder`, not in xyflow, and has not reached them.
+
+  Negative runs, three builds. Every position change recorded again: one Undo left the node
+  at `(192, 128)`, and the cancel test failed too — `Expected: 1, Received: 2` nodes after
+  Undo — because Escape removed one of the drag's many entries and left the rest. Escape
+  wired to nothing: the node finished at `(-240, -240)`, where the pointer carried it after
+  Escape. Reports after Escape applied instead of discarded: the same, which is why the test
+  keeps moving. Restored: three passed, with the visual builder workflow, the two-editor
+  collaboration test and the library and field-list drags green on the same build.
+
+  **The gate's own test file broke on this condition, and not because of the gate.** It had
+  named `visual-node.cancel` as the gap to close in its ratchet assertions and
+  `pane-move.cancel` as the met stage to regress. V5 met the first, so "closing a gap"
+  closed nothing and the assertion failed for a reason about today's census rather than
+  about the rule. It now chooses both cells from the tree. That is the same mistake the
+  inert-controls tests made at N2, made again one goal later.
+
+  **And a second gate misread the fix.** `audit_drag_affordances` matched native drags with
+  `onDragStart=` and no word boundary, and xyflow's `onSelectionDragStart=` — added here so a
+  dragged selection box takes back the same way — ends in exactly that. The fast tier
+  failed with *VisualBuilder starts or receives a native HTML5 drag*, and the reference
+  had already been regenerated to say `native HTML5 | 1` before the diff was read. The rule
+  has word boundaries now, its test holds both halves — the xyflow prop is not native, a bare
+  `onDragStart=` still is — and the regenerated reference is byte-for-byte the committed
+  one. Regenerating a reference to clear a stale-reference failure writes whatever the rule
+  currently believes into the document, so the diff has to be read before it is kept.
+
+  `MOVEMENT_CONTRACT.md` falls from **23 gaps to 21**.
 - **V6 — A pipeline node move can be taken back.** **Open** — one Undo reverses one
   committed move, re-saving the previous positions. A drop that moved nothing records
   nothing, which the drop handler already guarantees and the test holds.

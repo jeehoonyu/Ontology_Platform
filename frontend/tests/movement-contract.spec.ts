@@ -202,3 +202,95 @@ test.describe("a resize can be taken back, and done without a drag", () => {
     expect(JSON.parse((await stored(page)) || "{}").sizes?.left, "the chosen width was not stored").toBe(400);
   });
 });
+
+/**
+ * A node on an artifact canvas -- Workshop, AIP Logic, Investigations, Entity
+ * Resolution -- which moves on xyflow rather than dnd-kit, so neither its history
+ * nor its cancel came with the drag library. V4 and V5 of the goal. Measured
+ * before either: one drag took eight Undo presses to reverse, and Escape left
+ * the node where the pointer had taken it.
+ */
+test.describe("a graph node move is one entry, and Escape takes it back", () => {
+  const nodes = (page: Page) => page.locator(".visual-flow-canvas .react-flow__node");
+  const position = (page: Page, index: number) =>
+    nodes(page).nth(index).evaluate((element) => (element as HTMLElement).style.transform);
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the canvas drag is a desktop pointer gesture.");
+    await page.goto("/workspace/workshop");
+    const draft = page.getByRole("button", { name: "Create draft" });
+    await expect(draft.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await draft.isVisible()) await draft.click();
+    await expect(page.locator(".node-library-list button").first()).toBeVisible();
+  });
+
+  /** Adds a node from the library and returns its index on the canvas. */
+  async function addNode(page: Page) {
+    const before = await nodes(page).count();
+    await page.locator(".node-library-list button").first().click();
+    await expect(nodes(page)).toHaveCount(before + 1);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    return before;
+  }
+
+  /** Picks the node up and carries it, leaving the pointer held. Asserts it is live. */
+  async function carry(page: Page, index: number) {
+    const box = await nodes(page).nth(index).boundingBox();
+    expect(box, "the node has no layout").toBeTruthy();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(50);
+    for (let step = 1; step <= 20; step += 1) {
+      await page.mouse.move(x + step * 8, y + step * 3);
+      await page.waitForTimeout(20);
+    }
+    await expect(nodes(page).nth(index), "the node drag never started").toHaveClass(/\bdragging\b/);
+  }
+
+  test("one drag on an artifact canvas is taken back by one Undo", async ({ page }) => {
+    const index = await addNode(page);
+    const start = await position(page, index);
+
+    await carry(page, index);
+    await page.mouse.up();
+    await expect.poll(() => position(page, index), { message: "the drag did not move the node" }).not.toBe(start);
+
+    await page.getByRole("button", { name: "Undo" }).click();
+
+    await expect.poll(() => position(page, index),
+                      { message: "one Undo did not take back one drag; the move was recorded as many entries" })
+      .toBe(start);
+    await expect(nodes(page), "one Undo took back more than the drag").toHaveCount(index + 1);
+  });
+
+  test("Escape during an artifact canvas drag restores the node and records nothing", async ({ page }) => {
+    const index = await addNode(page);
+    const start = await position(page, index);
+
+    await carry(page, index);
+    await expect.poll(() => position(page, index), { message: "the live drag had not moved the node" }).not.toBe(start);
+    await page.keyboard.press("Escape");
+    // The pointer is still held after Escape, and xyflow still reports the drag;
+    // one more move proves those reports are discarded rather than applied.
+    await page.mouse.move(40, 40);
+    await page.mouse.up();
+
+    await expect.poll(() => position(page, index), { message: "Escape did not restore the node" }).toBe(start);
+    // The most recent entry must still be the add: a cancelled drag that left an
+    // entry behind would make this Undo put the node back instead of removing it.
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(nodes(page), "the cancelled drag left a history entry behind").toHaveCount(index);
+  });
+
+  test("a click on an artifact node records nothing", async ({ page }) => {
+    // A guard, measured true before V4: clicking selects and must not snapshot.
+    // Kept because moving the history entry to drag start is exactly the change
+    // that would start recording clicks if xyflow began a drag on press.
+    const index = await addNode(page);
+    await nodes(page).nth(index).click();
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(nodes(page), "a click on a node was recorded as an edit").toHaveCount(index);
+  });
+});

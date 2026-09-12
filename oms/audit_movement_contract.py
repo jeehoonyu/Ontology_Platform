@@ -136,9 +136,10 @@ SURFACES: Dict[str, Dict[str, Any]] = {
     "visual-node": {
         "file": "workspaces/VisualBuilder.tsx", "mechanism": "xyflow",
         "moves": "a node around a Workshop, AIP Logic, Investigations or Entity Resolution canvas",
-        "cancel": {"gap": "Escape does not cancel: (120, 100) to (192, 128) during a live drag, and it "
-                          "stays (V5)"},
-        "recover": {"gap": "one drag is eight undo entries in a fifty-entry history (V4)"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during an artifact canvas drag restores "
+                           "the node and records nothing"},
+        "recover": {"test": "movement-contract.spec.ts::one drag on an artifact canvas is taken back by "
+                            "one Undo"},
         "alternative": {"gap": "no control places a node without dragging it"},
     },
     "ontology-graph-node": {

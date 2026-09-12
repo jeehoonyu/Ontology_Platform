@@ -75,30 +75,39 @@ ok, failures, _ = compare(found, live_baseline, stale, check_reference=False)
 check(not ok and any("no longer finds there" in f for f in failures),
       f"a surface whose file has no such drag is not refused: {failures}")
 
+# The cells below are chosen from the tree rather than named. The first version
+# named `visual-node.cancel` as a gap to close and `pane-move.cancel` as a met
+# stage to regress -- and V5 then met `visual-node.cancel`, so "closing a gap"
+# closed nothing and the assertion failed for a reason about today's census
+# rather than about the rule. The same mistake the inert-controls tests made at N2.
+GAP_SURFACE, GAP_STAGE = cells_of(SURFACES, "gap")[0].split(".")
+MET_SURFACE, MET_STAGE = cells_of(SURFACES, "test")[0].split(".")
+A_TEST = SURFACES[MET_SURFACE][MET_STAGE]
+
 # --- the evasion path: n/a written instead of a behaviour ------------------------------
 evaded = copy.deepcopy(SURFACES)
-evaded["visual-node"]["cancel"] = {"na": "a graph editor handles its own pointers"}
+evaded[GAP_SURFACE][GAP_STAGE] = {"na": "a graph editor handles its own pointers"}
 ok, failures, notes = compare(found, live_baseline, evaded, check_reference=False)
 check(not ok and any("newly declared not applicable" in f for f in failures),
       "turning a gap into n/a lowers the count and passes -- this is the gate's own evasion path")
 
 # --- the ratchet ----------------------------------------------------------------------
 regressed = copy.deepcopy(SURFACES)
-regressed["pane-move"]["cancel"] = {"gap": "stopped restoring"}
+regressed[MET_SURFACE][MET_STAGE] = {"gap": "stopped working"}
 ok, failures, _ = compare(found, live_baseline, regressed, check_reference=False)
 check(not ok and any("up from" in f for f in failures), f"a rising gap count is not refused: {failures}")
-check(not ok and any("pane-move.cancel is a gap the baseline does not hold" in f for f in failures),
+check(not ok and any(f"{MET_SURFACE}.{MET_STAGE} is a gap the baseline does not hold" in f for f in failures),
       "a met stage becoming a gap is not named")
 
 # A swap that keeps the total level: one gap closed, another stage regressed.
 swapped = copy.deepcopy(regressed)
-swapped["visual-node"]["cancel"] = {"test": "movement-contract.spec.ts::Escape during a pane drag leaves the pane in its slot"}
+swapped[GAP_SURFACE][GAP_STAGE] = dict(A_TEST)
 ok, failures, _ = compare(found, live_baseline, swapped, check_reference=False)
-check(not ok and any("pane-move.cancel" in f for f in failures),
+check(not ok and any(f"{MET_SURFACE}.{MET_STAGE}" in f for f in failures),
       f"closing one gap while opening another passes because the total held: {failures}")
 
 improved = copy.deepcopy(SURFACES)
-improved["visual-node"]["cancel"] = {"test": "movement-contract.spec.ts::Escape during a pane drag leaves the pane in its slot"}
+improved[GAP_SURFACE][GAP_STAGE] = dict(A_TEST)
 ok, failures, notes = compare(found, live_baseline, improved, check_reference=False)
 check(ok and any("->" in n for n in notes), f"closing a gap is refused or unreported: {failures} {notes}")
 

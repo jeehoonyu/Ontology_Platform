@@ -168,6 +168,16 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const clipboard = useRef<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] } | null>(null);
   const dirtyRef = useRef(false);
   const selectionRef = useRef<string[]>([]);
+  // The node drag in progress on the canvas, and everything needed to take it
+  // back: the arrangement before it, the redo history its history entry cleared,
+  // and whether the artifact had unsaved changes. V4 and V5 of GOAL_MOVEMENT.
+  const nodeDrag = useRef<{
+    nodes: Node<ArtifactNodeData>[];
+    edges: Edge[];
+    redo: Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>;
+    dirty: boolean;
+    cancelled: boolean;
+  } | null>(null);
   const catalog = useQuery({
     queryKey: ["builder-catalog", artifactType],
     queryFn: () => getBuilderCatalog(artifactType),
@@ -373,11 +383,66 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     redoStack.current = [];
   }
 
+  /**
+   * A node move is one history entry, taken when the drag starts.
+   *
+   * V4 of `GOAL_MOVEMENT_2026-09-12.md`. This snapshotted on every `position`
+   * change, and xyflow emits one for each grid step a drag crosses, so a single
+   * move measured eight Undo presses to take back -- and six ordinary drags pushed
+   * the oldest real edit out of a fifty-entry history. While a drag is live its
+   * position changes are the drag itself, not edits of their own.
+   *
+   * A position change with no drag in progress -- a node nudged from the
+   * keyboard -- is still an edit, and still records one entry.
+   */
   function changeNodes(changes: NodeChange<Node<ArtifactNodeData>>[]) {
-    const persistent = changes.some((change) => change.type === "add" || change.type === "remove" || change.type === "position");
+    const drag = nodeDrag.current;
+    // After Escape, xyflow keeps reporting the drag it still believes in until
+    // the pointer is released. Those moves are discarded, not applied.
+    const kept = drag?.cancelled ? changes.filter((change) => change.type !== "position") : changes;
+    const persistent = kept.some((change) => change.type === "add" || change.type === "remove"
+      || (change.type === "position" && !drag));
     if (persistent) snapshot();
-    setNodes((current) => applyNodeChanges(changes, current));
+    if (kept.length) setNodes((current) => applyNodeChanges(kept, current));
     if (persistent) setDirty(true);
+  }
+
+  function startNodeDrag() {
+    nodeDrag.current = {
+      nodes: structuredClone(nodes),
+      edges: structuredClone(edges),
+      redo: [...redoStack.current],
+      dirty,
+      cancelled: false
+    };
+    snapshot();
+  }
+
+  function stopNodeDrag() {
+    const drag = nodeDrag.current;
+    nodeDrag.current = null;
+    if (drag && !drag.cancelled) setDirty(true);
+  }
+
+  /**
+   * Escape during a node drag puts everything back and records nothing.
+   *
+   * V5 of `GOAL_MOVEMENT_2026-09-12.md`. xyflow has no cancel of its own: measured
+   * (120, 100) -> (192, 128) during a live drag, and it stayed there after Escape,
+   * where the autosave would have written it into a revision. The canvas is
+   * controlled, so restoring the nodes is enough to move them back; the history
+   * entry the drag took is removed and the redo history it cleared is returned.
+   */
+  function cancelNodeDrag() {
+    const drag = nodeDrag.current;
+    if (!drag || drag.cancelled) return false;
+    drag.cancelled = true;
+    undoStack.current.pop();
+    redoStack.current = drag.redo;
+    setNodes(drag.nodes);
+    setEdges(drag.edges);
+    setDirty(drag.dirty);
+    return true;
   }
 
   function changeEdges(changes: EdgeChange<Edge>[]) {
@@ -513,6 +578,10 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
 
   useEffect(() => {
     function handleKeyboard(event: KeyboardEvent) {
+      if (event.key === "Escape" && cancelNodeDrag()) {
+        event.preventDefault();
+        return;
+      }
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
       const modifier = event.ctrlKey || event.metaKey;
@@ -628,6 +697,10 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
               edges={edges}
               onInit={setInstance}
               onNodesChange={changeNodes}
+              onNodeDragStart={startNodeDrag}
+              onNodeDragStop={stopNodeDrag}
+              onSelectionDragStart={startNodeDrag}
+              onSelectionDragStop={stopNodeDrag}
               onEdgesChange={changeEdges}
               onConnect={connect}
               onNodeClick={(_, node) => setSelectedNodeId(node.id)}

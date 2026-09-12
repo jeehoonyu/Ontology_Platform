@@ -67,7 +67,13 @@ REFERENCE = REPO_ROOT / "docs" / "DRAG_AFFORDANCES.md"
 KIT = "components/dnd/DragKit.tsx"
 
 # Native drag, in both directions.
-_HTML5 = re.compile(r"onDragStart=|onDrop=\{|onDragOver=\{")
+#
+# Word boundaries, because the DOM attributes are exactly these names and a
+# library's props contain them. xyflow's `onSelectionDragStart=` ends in
+# `onDragStart=`, and the first time an artifact canvas used it -- V5 of
+# GOAL_MOVEMENT, to take back a cancelled node drag -- this rule reported
+# VisualBuilder as a native HTML5 drag and the regenerated reference said so.
+_HTML5 = re.compile(r"\bonDragStart=|\bonDrop=\{|\bonDragOver=\{")
 # A drag written by hand on raw pointer or mouse events.
 #
 # The first version of this rule was `setPointerCapture(|onPointerMove={` -- which

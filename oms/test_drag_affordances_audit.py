@@ -98,6 +98,13 @@ check(_HTML5.search('onDrop={() => dropOn(name)}'), "the native rule misses onDr
 context = '<DndContext sensors={sensors} onDragStart={pick} onDragEnd={drop}>'
 check(not _HTML5.search(_CONTEXT.sub("", context)),
       "dnd-kit's own onDragStart reads as a native drag once the context is stripped")
+# ...nor on a graph library's props that end in the same letters. xyflow's
+# `onSelectionDragStart=` contains `onDragStart=`, and the unbounded rule reported
+# VisualBuilder as a native HTML5 drag the first time it used one (GOAL_MOVEMENT V5).
+check(not _HTML5.search('<ReactFlow onSelectionDragStart={startNodeDrag} onNodeDragStart={startNodeDrag}>'),
+      "an xyflow prop ending in DragStart reads as a native HTML5 drag")
+check(_HTML5.search('<div draggable onDragStart={pick}>'),
+      "word boundaries stopped the native rule seeing the attribute it exists for")
 
 # --- every context takes the shared sensors -----------------------------------
 check(found["unshared_context"] == [],
