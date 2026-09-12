@@ -1,11 +1,11 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-11T23:09:38Z"
+    "recorded_at": "2026-09-12T23:48:55Z"
   },
   "note": "Pane regions per screen, and how many a person can move. The movable count is a floor, not a ceiling: it may rise and must never fall.",
-  "regions": 22,
-  "movable": 4,
+  "regions": 23,
+  "movable": 8,
   "screens": {
     "App.tsx": {
       "fixed": [
@@ -90,7 +90,7 @@
         "library",
         "output"
       ],
-      "resizable": false
+      "resizable": true
     },
     "workspaces/PlatformGraph.tsx": {
       "fixed": [
@@ -100,13 +100,14 @@
       "resizable": false
     },
     "workspaces/VisualBuilder.tsx": {
-      "fixed": [
-        "builder-execution-drawer",
-        "node-library-panel",
-        "visual-inspector-panel"
+      "fixed": [],
+      "movable": [
+        "canvas",
+        "drawer",
+        "inspector",
+        "library"
       ],
-      "movable": [],
-      "resizable": false
+      "resizable": true
     }
   }
 }

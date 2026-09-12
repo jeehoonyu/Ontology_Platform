@@ -48,6 +48,12 @@ check("workspaces/VisualBuilder.tsx" in screens, sorted(screens)[:6])
 # could act on, so the primitive's own file is skipped and `<Panel>` usages are
 # never matched -- only literal `<aside>` and `<section>` elements are.
 check(PRIMITIVE not in screens, f"{PRIMITIVE} defines the primitive and is not a screen")
+
+# A screen on `PaneHost` offers splitters, drawn by the host. The scan looked for
+# the splitter in the screen's own file, missed it in the primitive it skips, and
+# reported the pipeline builder as not resizable from M3 to M7.
+check(screens["workspaces/PipelineBuilder.tsx"]["resizable"],
+      "a screen on PaneHost reads as offering no splitter")
 check(not any("<Panel" in name for entry in screens.values() for name in entry["fixed"]),
       "a `<Panel>` usage was counted as a pane region")
 

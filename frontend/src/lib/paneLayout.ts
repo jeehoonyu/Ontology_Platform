@@ -32,6 +32,13 @@ export interface PaneSpec {
   slot: SlotName;
   /** The canvas. It may be resized around, never moved or hidden. */
   anchored?: boolean;
+  /**
+   * Starting width of this pane's side slot, before anyone resizes it. M7: the
+   * artifact canvases' library and inspector were 238 and 310 pixels as fixed
+   * tracks, and dropping them to the 220 default on the way onto `Pane` would
+   * have squeezed the inspector's forms to fit a number chosen for another screen.
+   */
+  width?: number;
 }
 
 export interface PaneLayout {
@@ -62,8 +69,12 @@ export function clampSize(px: number): number {
 
 export function defaultLayout(panes: PaneSpec[]): PaneLayout {
   const slots = { left: [], center: [], right: [], bottom: [] } as Record<SlotName, string[]>;
-  for (const pane of panes) slots[pane.slot].push(pane.id);
-  return { slots, sizes: {}, collapsed: [], hidden: [] };
+  const sizes: Partial<Record<SlotName, number>> = {};
+  for (const pane of panes) {
+    slots[pane.slot].push(pane.id);
+    if (pane.width && sizes[pane.slot] === undefined) sizes[pane.slot] = clampSize(pane.width);
+  }
+  return { slots, sizes, collapsed: [], hidden: [] };
 }
 
 /**
@@ -95,7 +106,8 @@ export function reconcile(stored: Partial<PaneLayout> | null, panes: PaneSpec[])
     if (!placed.has(pane.id)) slots[pane.slot].push(pane.id);
   }
 
-  const sizes: Partial<Record<SlotName, number>> = {};
+  // A stored layout that never resized a slot keeps the screen's declared width.
+  const sizes: Partial<Record<SlotName, number>> = { ...base.sizes };
   for (const slot of SLOTS) {
     const value = stored.sizes?.[slot];
     if (typeof value === "number" && Number.isFinite(value)) sizes[slot] = clampSize(value);

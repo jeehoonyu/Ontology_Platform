@@ -325,6 +325,51 @@ count upward and refuses a new fixed-track pane in a screen already on `Pane`.
 - **M7 — Every builder is on `Pane`, and the count cannot fall.** **Open** — the four
   visual-builder artifact types, then the ontology manager. The rollout is the
   `audit_ui_primitives` user count for `Pane` and the `audit_pane_layout` movable ratchet.
+
+  **The four artifact canvases are on `Pane`.** Workshop, AIP Logic, Investigations and
+  Entity Resolution share one screen component, which was a fixed three-column grid — a
+  238-pixel library, the canvas, a 310-pixel inspector — with the run results under the
+  canvas. It is four panes now: `Node library` left, `Canvas` centre and anchored,
+  `Inspector` right, `Run results` bottom, each artifact type keeping its own arrangement.
+  `PANE_LAYOUT.md` reads **8 of 23** regions movable, up from 4 of 22, and the floor was
+  raised with it. Proven by two tests in `pane-layout.spec.ts` on the same touch viewport as
+  the pipeline's, operated without a drag — the library moved with `Move to…` and still there
+  after a reload; the canvas offering no way to hide or move itself — and by the screens'
+  existing behaviour on the same build: the library tap and field-list touch drags, the
+  canvas undo and Escape tests, the held-by test, the visual builder workflow, the two-editor
+  collaboration test, and the render and accessibility sweep of all four screens at four
+  widths.
+
+  Three things surfaced on the way. **The pane widths were a screen's to choose.** Every side
+  slot started at 220 pixels, which would have squeezed the inspector's forms from the 310
+  they had; a `PaneSpec` can now declare its slot's starting width, which `Reset panes`
+  restores. **A pane named `Preview` collided with the header's `Preview` action**: the pane
+  chrome added `Collapse Preview`, `Hide Preview` and `Reorder Preview`, the workflow test's
+  `/Preview/` resolved to four buttons, and a screen reader would have listed four controls
+  answering to one word. The pane is `Run results`. And **the drawer's `Preview / Validation /
+  Evidence` strip was drawn as tabs and switched nothing** — the same defect N2 removed
+  elsewhere, missed by `audit_inert_controls` because the three were `<strong>` and `<span>`,
+  not buttons. It is gone; the pane header names the drawer.
+
+  **`PANE_LAYOUT.md` had been wrong since M3.** It reported *0 screen(s) offer a splitter*
+  while the pipeline builder had one, because the scan looked for the splitter in each
+  screen's own file and the host draws it in `Pane.tsx`, which is skipped as a primitive. A
+  screen on `PaneHost` counts as resizable now, and `test_pane_layout_audit.py` holds the
+  pipeline builder to it. Negative run for the anchored canvas: a build with `anchored`
+  removed failed at `Hide Canvas`, `Received: 1`.
+
+  **It costs the route ten kilobytes, and the ceiling was raised for that route alone.**
+  `audit_route_payload` failed the first commit attempt: the artifact canvases' route measured
+  672 KB against a 662 KB ceiling, two past its eight-kilobyte tolerance — the pane host,
+  layout model and slot getter, which the pipeline route already carried and this one now
+  loads too. The gate re-records every route when re-baselined, and doing that would also have
+  raised three other ceilings that had crept up inside the tolerance — the ontology manager,
+  the platform graph and the map, by under two kilobytes each — without anyone deciding to.
+  So only `VisualBuilder`'s entry in `route-payload-baseline.json` was changed, to its measured
+  size, and the others still hold their ceilings. `UI_PRIMITIVES.md` now lists `PaneHost` with
+  two users.
+
+  The ontology manager is next; M7 is met when it moves too.
 - **M8 — Floating panes, if the layouts ask for them.** **Open** — last, optional, and
   only on `DragKit` through a portal. Not started until M1–M7 are met.
 

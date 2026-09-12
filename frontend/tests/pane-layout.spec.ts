@@ -164,3 +164,43 @@ test.describe("panes rearrange without a drag", () => {
       .toBe("left");
   });
 });
+
+/**
+ * The artifact canvases on panes. M7 of `GOAL_PANES_2026-09-11.md`: Workshop, AIP
+ * Logic, Investigations and Entity Resolution share one screen component, which
+ * was a fixed three-column grid. Same touch viewport as the rest of this file, and
+ * the same rule: operated without a drag.
+ */
+test.describe("an artifact canvas's panes rearrange without a drag", () => {
+  const LIBRARY_PANE = "Node library";
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280",
+              "Runs once; this file sets its own viewport and touch emulation.");
+    await page.goto("/workspace/workshop");
+    const draft = page.getByRole("button", { name: "Create draft" });
+    await expect(draft.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await draft.isVisible()) await draft.tap();
+    await expect(page.locator(".node-library-list button").first()).toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).tap();
+  });
+
+  test("the node library moves to another slot and is still there after a reload", async ({ page }) => {
+    const slotOf = () => page.locator(".pane").filter({ has: page.getByLabel("Search node library") }).first()
+      .evaluate((el) => el.closest(".pane-slot")?.getAttribute("data-slot") || "");
+    expect(await slotOf(), "the node library does not start on the left").toBe("left");
+
+    await page.getByLabel(`Move ${LIBRARY_PANE} to`).selectOption("right");
+    await expect.poll(slotOf, { message: "choosing a slot did not move the library" }).toBe("right");
+
+    await page.reload();
+    await expect(page.locator(".node-library-list button").first()).toBeVisible();
+    await expect.poll(slotOf, { message: "the artifact canvas layout did not survive a reload" }).toBe("right");
+  });
+
+  test("the artifact canvas is anchored and offers no way to hide itself", async ({ page }) => {
+    await expect(page.locator(".visual-flow-canvas"), "the canvas is not drawn inside its pane").toBeVisible();
+    await expect(page.getByRole("button", { name: "Hide Canvas" })).toHaveCount(0);
+    await expect(page.getByLabel("Move Canvas to")).toHaveCount(0);
+  });
+});

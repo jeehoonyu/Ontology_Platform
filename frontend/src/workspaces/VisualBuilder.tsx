@@ -33,7 +33,9 @@ import {
 } from "lucide-react";
 import { DndContext, closestCenter, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
-import { DragHandle, dropPointOf, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { DragHandle, dropPointOf, slotAwareCollision, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { PaneHost, usePaneLayout } from "../components/layout/Pane";
+import type { PaneSpec } from "../lib/paneLayout";
 import {
   acquireArtifactLease,
   applyArtifactCommands,
@@ -63,6 +65,23 @@ import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../component
 import { ArtifactReviewPanel } from "../components/workbench/ArtifactReviewPanel";
 import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
+
+/**
+ * The artifact canvases' panes. M7 of GOAL_PANES_2026-09-11: Workshop, AIP Logic,
+ * Investigations and Entity Resolution were a fixed three-column grid -- a 238px
+ * library, the canvas, a 310px inspector -- with the preview drawer under the
+ * canvas, and not one region could be moved, resized or hidden. The widths are
+ * the old tracks', so nothing gets narrower by becoming movable.
+ */
+const VISUAL_PANES: PaneSpec[] = [
+  { id: "library", title: "Node library", slot: "left", width: 238 },
+  { id: "canvas", title: "Canvas", slot: "center", anchored: true },
+  { id: "inspector", title: "Inspector", slot: "right", width: 310 },
+  // Not "Preview": the header already has a Preview action, and a pane named the
+  // same gave four buttons that answer to it -- Preview, Collapse Preview, Hide
+  // Preview, Reorder Preview -- which a screen reader lists without telling apart.
+  { id: "drawer", title: "Run results", slot: "bottom" }
+];
 
 interface VisualBuilderProps {
   artifactType: ArtifactType;
@@ -158,7 +177,11 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
-  const sensors = useWorkspaceSensors();
+  // One context for the screen, as the pipeline builder has, because a pane grip
+  // and a library entry now share it; "slots" jumps a pane between slots from the
+  // keyboard and hands every other drag to dnd-kit's own default.
+  const sensors = useWorkspaceSensors("slots");
+  const paneState = usePaneLayout(`visual-${artifactType}`, VISUAL_PANES);
   const [instance, setInstance] = useState<ReactFlowInstance<Node<ArtifactNodeData>, Edge> | null>(null);
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [breakpoint, setBreakpoint] = useState<"desktop" | "tablet" | "mobile">("desktop");
@@ -713,9 +736,15 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           }}>Reload shared revision</button>
         </div>
       ) : null}
-      <div className="visual-builder-grid">
-        <DndContext sensors={sensors} onDragEnd={dropLibraryNode}>
-        <aside className="node-library-panel">
+      <div className="visual-builder-panes">
+        <DndContext sensors={sensors} collisionDetection={slotAwareCollision} onDragEnd={(event) => {
+          // A pane move stops here; anything else is a library node onto the canvas.
+          if (paneState.handleDragEnd(event)) return;
+          dropLibraryNode(event);
+        }}>
+        <PaneHost state={paneState} render={(pane) => {
+          if (pane === "library") return (
+        <div className="visual-library">
           <div className="search-field"><Search size={15} /><input aria-label="Search node library" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tools" /></div>
           <div className="node-library-list">
             {library.map((item) => (
@@ -728,8 +757,9 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
               />
             ))}
           </div>
-        </aside>
-        <div className="visual-builder-center">
+        </div>
+          );
+          if (pane === "canvas") return (
           <BuilderCanvas breakpoint={breakpoint}>
             <ReactFlow<Node<ArtifactNodeData>, Edge>
               nodes={flowNodes}
@@ -757,8 +787,11 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
               <Controls showInteractive />
             </ReactFlow>
           </BuilderCanvas>
-          <section className="builder-execution-drawer" aria-label="Builder preview and validation">
-            <div className="builder-drawer-tabs"><strong>Preview</strong><span>Validation</span><span>Evidence</span></div>
+          );
+          // No "Preview / Validation / Evidence" strip: the three words were drawn
+          // as tabs and switched nothing. The pane's own header names the drawer.
+          if (pane === "drawer") return (
+          <div className="builder-execution-drawer">
             <div className="builder-drawer-content">
               {preview ? (
                 <>
@@ -775,9 +808,10 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
               )}
             </div>
             {artifactType === "aip_logic" ? <AgentRuntimePanel /> : null}
-          </section>
-        </div>
-        <aside className="visual-inspector-panel">
+          </div>
+          );
+          return (
+        <div className="visual-inspector">
           {selectedNode ? (
             <NodeInspector
               node={selectedNode}
@@ -827,7 +861,9 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
             <summary>Evidence</summary>
             {(artifact.evidence_links || []).map((link) => <a className="builder-evidence-link" href={link.href} key={link.href}>{link.label}</a>)}
           </details>
-        </aside>
+        </div>
+          );
+        }} />
         </DndContext>
       </div>
     </section>

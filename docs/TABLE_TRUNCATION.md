@@ -36,5 +36,5 @@ alert taken as a default is not a hidden row.
 | `workspaces/OntologyManager.tsx` | 228 | `OntologyManager` | `drafts.value` (slice) | mapped | no |
 | `workspaces/OpsWorkspace.tsx` | 56 | `IncidentsTab` | `alerts` (slice) | mapped | no |
 | `workspaces/Vertex.tsx` | 295 | `Vertex` | `seedObjects.value` (slice) | mapped | no |
-| `workspaces/VisualBuilder.tsx` | 677 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | no |
-| `workspaces/VisualBuilder.tsx` | 771 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | no |
+| `workspaces/VisualBuilder.tsx` | 700 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | no |
+| `workspaces/VisualBuilder.tsx` | 804 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | no |

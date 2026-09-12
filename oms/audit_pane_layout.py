@@ -101,7 +101,12 @@ def scan() -> Dict[str, Any]:
         screens[label] = {
             "fixed": sorted(fixed),
             "movable": sorted(movable),
-            "resizable": bool(_SPLITTER.search(text)),
+            # A screen on `PaneHost` is resizable because the host draws the
+            # splitters -- in `Pane.tsx`, which is skipped as a primitive. Looking
+            # for the splitter in the screen's own file reported "0 screen(s) offer
+            # a splitter" from M3, when the pipeline builder had one, until M7
+            # noticed the reference contradicting a screen it could see.
+            "resizable": bool(_SPLITTER.search(text) or _HOST.search(text)),
         }
     return screens
 
