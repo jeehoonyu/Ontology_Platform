@@ -11,6 +11,11 @@ import type {
   TableRow
 } from "../../types";
 
+export const ZOOM_MIN = 0.55;
+export const ZOOM_MAX = 1.35;
+export const ZOOM_FIT = 0.86;
+export const ZOOM_STEP = 0.08;
+
 export function PipelineCanvas({
   canvas,
   zoom,
@@ -22,7 +27,8 @@ export function PipelineCanvas({
   onAddFirst,
   quickAddType,
   onContextInsert,
-  onDeleteNode
+  onDeleteNode,
+  onZoom
 }: {
   canvas: PipelineCanvasState | null;
   zoom: number;
@@ -35,6 +41,8 @@ export function PipelineCanvas({
   quickAddType?: string;
   onContextInsert: (nodeType: string) => void;
   onDeleteNode: (nodeId: string) => void;
+  /** Absolute, already clamped by the caller that owns the zoom state. */
+  onZoom: (next: number) => void;
 }) {
   const droppable = useDroppable({ id: "pipeline-canvas" });
   const nodes = canvas?.nodes || [];
@@ -49,10 +57,14 @@ export function PipelineCanvas({
       }}
       className={classNames("pipeline-canvas", droppable.isOver && "drag-active")}
     >
+      {/* These three rendered and did nothing, while a working copy of the same
+          three sat in the document action row beside Deploy and Delete node --
+          so the obvious place to zoom was the dead one. Zoom is a viewport
+          control; it belongs on the viewport. */}
       <div className="canvas-controls">
-        <button title="Zoom in">+</button>
-        <button title="Zoom out">-</button>
-        <button title="Fit to view">Fit</button>
+        <button title="Zoom in" aria-label="Zoom in" onClick={() => onZoom(zoom + ZOOM_STEP)}>+</button>
+        <button title="Zoom out" aria-label="Zoom out" onClick={() => onZoom(zoom - ZOOM_STEP)}>-</button>
+        <button title="Fit to view" aria-label="Fit to view" onClick={() => onZoom(ZOOM_FIT)}>Fit</button>
       </div>
       <div className="canvas-legend">
         {(canvas?.legend || []).map((item) => (

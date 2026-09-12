@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { DndContext, useDraggable, type DragEndEvent } from "@dnd-kit/core";
-import { dropPointOf, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { PaneHost, usePaneLayout } from "../components/layout/Pane";
+import type { PaneSpec } from "../lib/paneLayout";
 import { postJson } from "../api";
 import {
   cancelJob,
@@ -25,7 +27,7 @@ import {
   suggestPipelineNode,
   updatePipelineNode
 } from "../api/workspaceState";
-import { BottomDrawer, PipelineCanvas } from "../components/canvas/PipelineCanvas";
+import { BottomDrawer, PipelineCanvas, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
 import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { Toolbar } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
@@ -52,18 +54,27 @@ import type {
  * One workspace used it and two wrote the same markup by hand, which is what a
  * primitive nobody can trust looks like from the outside.
  */
-function PipelineHeader({ title, tabs, actions }: { title: string; tabs: string[]; actions: ReactNode }) {
+function PipelineHeader({ title, actions }: { title: string; actions: ReactNode }) {
   return (
     <div className="workspace-header">
       <div>
         <strong>{title}</strong>
         <span>Batch</span>
       </div>
-      <nav>{tabs.map((tab) => <button key={tab} className={tab === "Graph" ? "active" : ""}>{tab}</button>)}</nav>
       <div className="button-row">{actions}</div>
     </div>
   );
 }
+
+// The four regions of this screen, and where each starts. The canvas is
+// anchored: it may be resized around and never moved or hidden, because a
+// pipeline builder with the pipeline put away is not a layout, it is a dead end.
+const PIPELINE_PANES: PaneSpec[] = [
+  { id: "library", title: "Add data / transforms", slot: "left" },
+  { id: "canvas", title: "Pipeline", slot: "center", anchored: true },
+  { id: "output", title: "Outputs", slot: "right" },
+  { id: "drawer", title: "Evidence", slot: "bottom" }
+];
 
 export function PipelineBuilder() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -78,7 +89,11 @@ export function PipelineBuilder() {
   const [zoom, setZoom] = useState(0.86);
   const [quickAddType, setQuickAddType] = useState("filter");
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const sensors = useWorkspaceSensors();
+  // "slots", not "free": this one context carries the pane drags as well as the
+  // node and palette drags, and only the pane drags want an arrow key to cross
+  // a slot instead of moving 25px. The getter tells them apart by id prefix.
+  const sensors = useWorkspaceSensors("slots");
+  const paneState = usePaneLayout("pipeline", PIPELINE_PANES);
   const [executionJob, setExecutionJob] = useState<PlatformJob | null>(null);
   const [executionPlan, setExecutionPlan] = useState<PipelineExecutionPlan | null>(null);
   const [executionEngine, setExecutionEngine] = useState<"builder" | "duckdb">("builder");
@@ -367,12 +382,8 @@ export function PipelineBuilder() {
         <section className="builder-main">
           <PipelineHeader
             title={canvas?.graph.display_name || "Pipeline graph"}
-            tabs={["Graph", "Proposals", "History"]}
             actions={<>
               <button onClick={createGraph}>New pipeline</button>
-              <button onClick={() => setZoom((value) => Math.max(0.55, value - 0.08))}>-</button>
-              <button onClick={() => setZoom(0.86)}>Fit</button>
-              <button onClick={() => setZoom((value) => Math.min(1.35, value + 0.08))}>+</button>
               <button onClick={saveLayout}>Save layout</button>
               <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
               <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>
@@ -386,13 +397,16 @@ export function PipelineBuilder() {
             <StatusBadge value={canvas?.validation.status || "loading"} />
             <span>{actionStatus}</span>
           </div>
-          <DndContext sensors={sensors} onDragStart={(event) => {
+          <DndContext sensors={sensors} collisionDetection={slotAwareCollision} onDragStart={(event) => {
             const id = String(event.active.id);
             if (id.startsWith("node:")) setSelectedNodeId(id.slice(5));
-          }} onDragEnd={endCanvasDrag}>
-          <div className="pipeline-body">
-            <aside className="node-library">
-              <h2>Add data / transforms</h2>
+          }} onDragEnd={(event) => {
+            // A pane move stops here; anything else belongs to the canvas.
+            if (paneState.handleDragEnd(event)) return;
+            endCanvasDrag(event);
+          }}>
+          <PaneHost state={paneState} render={(pane) => {
+            if (pane === "library") return (<div className="node-library">
               <p>Drag a node onto the canvas, click a node type to set the edge insert action, or use the selected-node menu.</p>
               {(state.value?.node_library || []).map((item) => (
                 <PaletteEntry
@@ -404,10 +418,13 @@ export function PipelineBuilder() {
                   onArm={() => setQuickAddType(item.type)}
                 />
               ))}
-            </aside>
+            </div>);
+            if (pane === "canvas") return (
+                <div className="pipeline-body">
             <PipelineCanvas
               canvas={canvas}
               zoom={zoom}
+              onZoom={(next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)))}
               selectedNodeId={selectedNodeId}
               details={details}
               onSelect={setSelectedNodeId}
@@ -418,11 +435,9 @@ export function PipelineBuilder() {
               onContextInsert={(nodeType) => insertAfter(nodeType)}
               onDeleteNode={removeNode}
             />
-            <aside className="pipeline-utility-rail" aria-label="Pipeline utility rail">
-              {["R", "S", "L", "B", "C", "D"].map((item) => <button key={item}>{item}</button>)}
-            </aside>
-          </div>
-          </DndContext>
+                </div>
+            );
+            if (pane === "drawer") return (
           <BottomDrawer
             preview={preview}
             selectedNode={canvas?.selected_node || null}
@@ -430,8 +445,8 @@ export function PipelineBuilder() {
             validation={canvas?.validation}
             details={details}
           />
-        </section>
-        <aside className="output-rail">
+            );
+            if (pane === "output") return (<div className="output-rail">
           <Panel title="Execution Policy">
             <div className="pipeline-execution-policy">
               <label>
@@ -579,7 +594,11 @@ export function PipelineBuilder() {
               </button>
             ))}
           </Panel>
-        </aside>
+            </div>);
+            return null;
+          }} />
+          </DndContext>
+        </section>
       </div>
     </section>
   );

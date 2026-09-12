@@ -48,13 +48,19 @@ FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
 REFERENCE = REPO_ROOT / "docs" / "PANE_LAYOUT.md"
 BASELINE = REPO_ROOT / "docs" / "pane-layout-baseline.json"
 
-# The primitive's own definition renders a labelled section; it is the thing
-# panes are made of, not a pane on a screen.
-PRIMITIVE = "components/data/DataDisplay.tsx"
+# The primitives themselves render labelled sections; they are what panes are
+# made of, not panes on a screen. `Pane.tsx` renders `<Pane>` twice inside
+# `PaneHost`, so counting elements rather than declarations made the primitive
+# read as the most rearrangeable screen in the product.
+PRIMITIVES = ("components/data/DataDisplay.tsx", "components/layout/Pane.tsx")
+PRIMITIVE = PRIMITIVES[0]
 
 _ASIDE = re.compile(r"<aside\b([^>]*)>", re.S)
 _SECTION = re.compile(r"<section\b([^>]*)>", re.S)
-_PANE = re.compile(r"<Pane\b([^>]*)>", re.S)
+_HOST = re.compile(r"<PaneHost\b")
+# A screen declares its panes as `PaneSpec` entries, and that declaration is what
+# makes a pane movable -- not the element the host renders from it.
+_SPEC = re.compile(r'id:\s*"([a-z0-9_-]+)"\s*,\s*title:[^}]*?slot:\s*"(?:left|center|right|bottom)"')
 _CLASSNAME = re.compile(r'className=\{?"([^"]*)"')
 _LABEL = re.compile(r'aria-label(?:ledby)?=')
 _DIALOG = re.compile(r'role="dialog"|aria-modal')
@@ -78,7 +84,7 @@ def scan() -> Dict[str, Any]:
 
     for path in sorted(FRONTEND_SRC.rglob("*.tsx")):
         label = str(path.relative_to(FRONTEND_SRC)).replace("\\", "/")
-        if label == PRIMITIVE:
+        if label in PRIMITIVES:
             continue
         text = path.read_text(encoding="utf-8")
 
@@ -88,7 +94,7 @@ def scan() -> Dict[str, Any]:
         for attributes in _SECTION.findall(text):
             if _LABEL.search(attributes) and not _DIALOG.search(attributes):
                 fixed.append(_name_of(attributes))
-        movable = [_name_of(attributes) for attributes in _PANE.findall(text)]
+        movable = sorted(_SPEC.findall(text)) if _HOST.search(text) else []
 
         if not fixed and not movable:
             continue

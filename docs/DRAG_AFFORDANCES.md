@@ -12,6 +12,7 @@ a census reported three mechanisms. Everything below runs through
 | File | Drags | Reachable without a mouse | Proven by |
 | --- | --- | --- | --- |
 | `components/canvas/PipelineCanvas.tsx` | a node around the pipeline canvas, and receives palette drops | the node's position had no non-drag control at all and now moves from the keyboard; the canvas offers `Add <type>` when it is empty | a pipeline node moves with the keyboard |
+| `components/layout/Pane.tsx` | a pane between the left, centre, right and bottom slots of a screen | the `Move <pane> to` select in every pane header, the `Hide` button, and the `Panes` menu that lists what is hidden; the grip is the drag and is never the only way | a pane moves to another slot without a drag |
 | `workspaces/OntologyManager.tsx` | a source dataset field onto a property, and a property row up or down | the `Map <property>` select beside every target, and `Up` and `Down` on every row; both grips are keyboard-operable buttons | a property row reorders without a drag |
 | `workspaces/PipelineBuilder.tsx` | a node type from the palette onto the canvas | tapping the palette entry arms the type, and the empty canvas offers `Add <type>`; once nodes exist the edge insert control does it | a touch user can add the first node to a pipeline |
 | `workspaces/VisualBuilder.tsx` | a node type from the library onto the artifact canvas, and a configuration field up or down in the inspector | the library entry is a button that places the node on tap; the field grip is reachable by touch and by keyboard | a library node reaches the canvas without a drag |
@@ -21,6 +22,7 @@ a census reported three mechanisms. Everything below runs through
 | File | Draggable and droppable ids |
 | --- | --- |
 | `components/canvas/PipelineCanvas.tsx` | `node:`, `pipeline-canvas` |
+| `components/layout/Pane.tsx` | `` |
 | `workspaces/OntologyManager.tsx` | `field:`, `property:` |
 | `workspaces/PipelineBuilder.tsx` | `palette:` |
 | `workspaces/VisualBuilder.tsx` | `library:`, `visual-canvas` |
@@ -30,10 +32,21 @@ a census reported three mechanisms. Everything below runs through
 | Mechanism | Files | Keyboard | Touch |
 | --- | --- | --- | --- |
 | native HTML5 | **0** | never | never |
-| hand-rolled pointer | **0** | never | yes |
-| `@dnd-kit` via `DragKit` | 4 | yes | grips only, by design |
+| hand-rolled pointer | **1** | never | yes |
+| `@dnd-kit` via `DragKit` | 5 | yes | grips only, by design |
 | `@xyflow/react` | 3 | pane only | yes |
 
 A finger on a palette or a long list is scrolling. The shared sensors take no
 touch gesture except on an explicit grip, which is 22px wide and scrolls nothing;
 touch reaches the rest through the control beside the drag.
+
+## Pointer listeners kept on purpose
+
+The rule against hand-rolled pointer drags exists because they cannot be reached from
+a keyboard and because nothing counts them. A file may keep one only if it says why
+**and** names a browser test operating the same control from a keyboard. Without the
+second half this list would be an exemption rather than a trade.
+
+| File | Why | Keyboard proven by |
+| --- | --- | --- |
+| `components/layout/Pane.tsx` | a pane splitter resizes a slot; it has no droppable to land on, so a draggable would model a journey it never makes | a pane resizes from the keyboard and survives a reload |

@@ -106,6 +106,13 @@ SENSOR_BACKED: Dict[str, Dict[str, str]] = {
                      "from the keyboard; the canvas offers `Add <type>` when it is empty",
         "proven_by": "drag-affordances.spec.ts::a pipeline node moves with the keyboard",
     },
+    "components/layout/Pane.tsx": {
+        "moves": "a pane between the left, centre, right and bottom slots of a screen",
+        "reachable": "the `Move <pane> to` select in every pane header, the `Hide` button, "
+                     "and the `Panes` menu that lists what is hidden; the grip is the drag "
+                     "and is never the only way",
+        "proven_by": "pane-layout.spec.ts::a pane moves to another slot without a drag",
+    },
     "workspaces/OntologyManager.tsx": {
         "moves": "a source dataset field onto a property, and a property row up or down",
         "reachable": "the `Map <property>` select beside every target, and `Up` and `Down` "
@@ -124,6 +131,30 @@ SENSOR_BACKED: Dict[str, Dict[str, str]] = {
         "reachable": "the library entry is a button that places the node on tap; the field "
                      "grip is reachable by touch and by keyboard",
         "proven_by": "drag-affordances.spec.ts::a library node reaches the canvas without a drag",
+    },
+}
+
+
+# A pointer listener that is not a drag between containers, and may keep it.
+#
+# This is an escape hatch in a gate written three commits earlier, added for the
+# author's own code, which is the circumstance that most deserves saying out
+# loud. The rule refuses hand-rolled pointer drags because they cannot be reached
+# from a keyboard and because nothing counts them. A pane splitter fails neither
+# test: arrow keys resize it, `Home` and `End` take it to its bounds, and it
+# carries `role="separator"` with a live `aria-valuenow`.
+#
+# What it is not is a drag *between containers*. It has no droppable to land on
+# and nowhere to go, so `useDraggable` would model it as something it is not.
+# The entry below is therefore narrow on purpose: a file may keep a pointer
+# listener only if it says why and names a browser test that operates the same
+# control from a keyboard. Without that second half this is just an exemption.
+POINTER_ALLOWED: Dict[str, Dict[str, str]] = {
+    "components/layout/Pane.tsx": {
+        "why": "a pane splitter resizes a slot; it has no droppable to land on, so a "
+               "draggable would model a journey it never makes",
+        "keyboard_proven_by": "pane-layout.spec.ts::a pane resizes from the keyboard "
+                              "and survives a reload",
     },
 }
 
@@ -224,7 +255,20 @@ def render(found: Dict[str, Any]) -> str:
         "touch gesture except on an explicit grip, which is 22px wide and scrolls nothing;",
         "touch reaches the rest through the control beside the drag.",
         "",
+        "## Pointer listeners kept on purpose",
+        "",
+        "The rule against hand-rolled pointer drags exists because they cannot be reached from",
+        "a keyboard and because nothing counts them. A file may keep one only if it says why",
+        "**and** names a browser test operating the same control from a keyboard. Without the",
+        "second half this list would be an exemption rather than a trade.",
+        "",
+        "| File | Why | Keyboard proven by |",
+        "| --- | --- | --- |",
     ]
+    for file, allowed in sorted(POINTER_ALLOWED.items()):
+        lines.append(f"| `{file}` | {allowed['why']} "
+                     f"| {allowed['keyboard_proven_by'].split('::')[-1]} |")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -241,11 +285,25 @@ def compare(found: Dict[str, Any]) -> Tuple[bool, List[str], List[str]]:
             f"keyboard or from touch, whatever is done in the handler. Use `useDraggable` "
             f"and `useDroppable` with `useWorkspaceSensors` from {KIT}.")
     for file in found["pointer"]:
-        failures.append(
-            f"{file} drags on raw pointer events. This is the mechanism the first census "
-            f"missed entirely -- it is neither a `draggable` attribute nor a sensor "
-            f"library, so nothing counted it, and pipeline node layout was mouse-and-finger "
-            f"only for as long as it existed. Use {KIT}.")
+        allowed = POINTER_ALLOWED.get(file)
+        if allowed is None:
+            failures.append(
+                f"{file} drags on raw pointer events. This is the mechanism the first census "
+                f"missed entirely -- it is neither a `draggable` attribute nor a sensor "
+                f"library, so nothing counted it, and pipeline node layout was "
+                f"mouse-and-finger only for as long as it existed. Use {KIT}.")
+            continue
+        gap = proof_missing({"proven_by": allowed["keyboard_proven_by"]})
+        if gap:
+            failures.append(
+                f"{file} keeps a pointer listener and {gap}. The exemption is only worth "
+                f"anything while a test operates the same control from a keyboard.")
+        else:
+            notes.append(f"{file} keeps a pointer listener: {allowed['why']}")
+    for file in sorted(POINTER_ALLOWED):
+        if file not in found["pointer"]:
+            failures.append(f"{file} is allowed a pointer listener and no longer has one; "
+                            f"delete the exemption rather than leaving a licence lying about")
     for file in found["unshared_context"]:
         failures.append(
             f"{file} builds a DndContext without `sensors`. The shared sensors carry an 8px "

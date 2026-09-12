@@ -1,0 +1,10 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-09-11T23:08:49Z"
+  },
+  "note": "`<button>` and `<a>` elements with no way to act. A ceiling, not a floor: the count may fall and must never rise.",
+  "controls": 318,
+  "inert": 0,
+  "per_file": {}
+}

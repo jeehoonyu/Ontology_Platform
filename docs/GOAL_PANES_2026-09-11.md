@@ -176,19 +176,90 @@ count upward and refuses a new fixed-track pane in a screen already on `Pane`.
   that stopped being movable is a person's layout taken away. Both refusals are asserted
   against synthetic inputs in `test_pane_layout_audit.py`, because a floor that has never
   refused anything is a number printed beside a claim.
-- **M2 — One pane primitive, on the pipeline builder first.** **Open** — `Pane` with grip,
-  "Move to…", collapse and the **Panes** menu, applied to the library, the inspector and
-  the bottom drawer. Proven by `pane-layout.spec.ts::a pane moves to another slot without
-  a drag`, on the 390×844 touch viewport, with `locator.tap()` and never a drag.
-- **M3 — Resize from a keyboard, and keep it.** **Open** — the splitter, arrow keys,
-  persistence under `ontology.panes.<screen>`, and **Reset layout**. Proven by `a pane
-  resizes from the keyboard and survives a reload`, asserting on the stored size and not
-  on a bounding box, for the reason L8 records.
-- **M4 — A pane drag over a node drag over a row drag, and none steals.** **Open** — the
-  nested contexts, grip-only activation, and the `"slots"` sensor kind. Proven by three
-  assertions in one test: a pane drags by its grip, a node under the pane still drags by
-  itself, and a click on a palette entry under a pane grip still adds a node. Shown to
-  fail with the grip-only wiring removed.
+- **M2 — One pane primitive, on the pipeline builder first.** **Met** — `Pane` with grip,
+  "Move to…", collapse and the **Panes** menu, applied to the library, the canvas, the
+  inspector and the bottom drawer. Proven by `pane-layout.spec.ts::a pane moves to another
+  slot without a drag`, on the 390×844 touch viewport, with `locator.tap()` and never a
+  drag. Four of twenty-three regions now move, across seven tests.
+
+  **The palette drag broke silently, and only the full tier found it.** Putting the
+  library and the canvas in separate panes put `useDraggable` and `useDroppable` in
+  separate `DndContext`s, so the drop never fired — with no error, because a draggable
+  whose droppable is in another context simply never reports a target. Nesting cannot fix
+  it: grips and palette entries are intermixed across panes, so whichever context is
+  nearer captures both. One context per screen, owned by `usePaneLayout` and dispatching
+  on the id prefix, is the shape that works.
+
+  That was not sufficient either. A pane slot is a droppable that *contains* the canvas,
+  so a slot won every geometric contest and a palette entry dropped on the canvas reported
+  the slot. `slotAwareCollision` filters candidates by what is moving: a `pane:` drag sees
+  only slots, everything else sees everything except slots. That is M4's "none steals the
+  other's target" arriving early, because M2 could not be finished without it.
+- **M3 — Resize from a keyboard, and keep it.** **Met** — a `role="separator"` splitter
+  with a live `aria-valuenow`, arrow keys (`Shift` for a coarser step, `Home`/`End` for the
+  bounds), pointer dragging, and persistence under `ontology.panes.pipeline`. Two tests
+  assert on the stored size and the reported value, never a bounding box, for the reason
+  L8 records; the resize one was shown to fail with the arrow handler removed. Below 700px
+  the splitter is `display: none`, because stacked panes have no boundary to drag — which
+  is why those two tests open a desktop context of their own rather than using this file's
+  touch viewport.
+
+  **The splitter is the one thing here not on `DragKit`, and the drag gate refused it.**
+  It uses a pointer listener, which is exactly the pattern that gate started refusing two
+  commits ago. Rather than quietly exempt it, `POINTER_ALLOWED` is a list of one that
+  demands both halves of an argument: why the file keeps a listener, and the name of a
+  browser test operating the same control **from a keyboard**. The reason a splitter
+  qualifies is that it is not a drag between containers — it has no droppable to land on,
+  so `useDraggable` would model a journey it never makes — and the reason the exemption is
+  worth anything is the keyboard test, which the gate checks still exists. Adding an escape
+  hatch to one's own gate is the circumstance that most deserves saying out loud.
+- **M4 — A pane drag over a node drag over a row drag, and none steals.** **Met** — the
+  `"slots"` sensor kind, and four assertions in `concurrent-drags.spec.ts`, each shown to
+  fail against a build with the thing it defends removed.
+
+  **Two of the three pieces this condition asked for were already built, and the third
+  premise was wrong.** The nested contexts are gone: M2 found that separate contexts break
+  the palette outright and that nesting cannot fix it, so a screen has one context that
+  dispatches on an id prefix. `slotAwareCollision` arrived with it. What was left was the
+  keyboard, and it is the piece that could not have been seen without a test — dnd-kit's
+  default getter moves a drag 25px a press, so crossing a slot took about forty presses,
+  and nothing anywhere said so.
+
+  **One context means one keyboard sensor, so the coordinate getter has to dispatch too.**
+  Handing the whole context slot-jumping would have broken `a pipeline node moves with the
+  keyboard` in exactly the way L8 records: the wrong getter reaching a draggable it was not
+  written for, silently, with every pointer drag still working. A non-pane drag is handed
+  back to dnd-kit's own default rather than a copy of it. Three things now ask the same
+  question about the same prefix, so `isPaneDrag` is named once in `DragKit` and the other
+  two call it.
+
+  **Grip-only activation does not do what this condition assumed.** The premise was that
+  the grip is what stops a pane stealing a node's pointer. It is not. Spreading the pane's
+  listeners across its whole section and rebuilding left every palette and node test green,
+  because dnd-kit refuses a second activation while one is live and a nested draggable's
+  listener fires before its ancestor's. What the grip actually protects is everything in a
+  pane that is *not* a draggable — prose a person is selecting, a list they are scrolling —
+  and the assertion that catches it drags the pane's own text and requires the pane to stay
+  put. The click-still-clicks assertion is kept as a guard rather than a proof, and says so:
+  it passes with the grip wiring removed, because the 8px activation distance is what makes
+  a click a click.
+
+  **The keyboard test was flaky before it was right, and the flake was the same
+  staleness twice.** The getter first found the slot it was leaving from
+  `currentCoordinates`, which is the pane's top-left at pick-up; page scroll moves that
+  point out from under its own slot, measured as the same drag reporting y=392 in one run
+  and y=329 in another. It reads `context.over` now — the slot `slotAwareCollision` has
+  already chosen, and therefore the one the drop will act on. The remaining flake was in
+  the test: a re-render between the pick-up and the arrow key takes dnd-kit's document
+  listener with it, and the symptom is the coordinate getter never being entered at all.
+  It waits for the screen to settle first, and asserts the mid-drag announcement rather
+  than only the outcome, so a failure says which slot the drag was over when it stopped.
+
+  **A pane was never rendering its drag.** `useDraggable` returned a transform that `Pane`
+  computed and discarded, so a dragged pane faded and sat still under the pointer — shipped
+  that way in M2 and not noticed, because the drop worked. M4 found it from the other end: a
+  keyboard move announced `slot:center` and then committed `slot:left`, because the element
+  was still physically in its old slot and a re-render mid-drag re-measured it there.
 - **M5 — More than one node in one drag.** **Open** — selection, `data: { ids }`, one
   commit. Proven by `three selected nodes move together and commit once`, reading
   committed positions and counting the command batch.

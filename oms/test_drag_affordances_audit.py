@@ -46,9 +46,23 @@ found = scan()
 
 # --- the two mechanisms that were migrated away are gone, and stay gone --------
 check(found["html5"] == [], f"native HTML5 drag is back in: {found['html5']}")
-check(found["pointer"] == [],
-      f"a hand-rolled pointer drag is back in: {found['pointer']}. This is the class no "
+# A pointer listener is refused unless the file is on a short, proof-backed list.
+# The exemption exists for the pane splitter, which resizes a slot and has no
+# droppable to land on -- and it is worth only as much as the keyboard test it
+# names, which is checked below rather than taken on trust.
+from audit_drag_affordances import POINTER_ALLOWED  # noqa: E402
+
+unlicensed = [f for f in found["pointer"] if f not in POINTER_ALLOWED]
+check(not unlicensed,
+      f"a hand-rolled pointer drag is back in: {unlicensed}. This is the class no "
       f"census counted; it is gated because one hid in the pipeline canvas.")
+check(set(POINTER_ALLOWED) <= set(found["pointer"]),
+      f"an exemption is licensing a file that no longer has a pointer listener: "
+      f"{sorted(set(POINTER_ALLOWED) - set(found['pointer']))}")
+for file, allowed in sorted(POINTER_ALLOWED.items()):
+    check(len(allowed["why"]) > 40, f"{file} is exempted without saying why")
+    check(not proof_missing({"proven_by": allowed["keyboard_proven_by"]}),
+          f"{file} is exempted and names no keyboard test that exists")
 check(found["kit"], f"{KIT} is gone; there is no shared mechanism left to be on")
 
 # The rule must be able to see what it claims to see. A file that drags on raw
@@ -91,7 +105,11 @@ check(found["unshared_context"] == [],
       f"distance is what stops a click on a draggable button reading as a zero-length drag.")
 
 # --- every file that drags is declared, and proven ----------------------------
-check(len(found["dnd-kit"]) == 4, sorted(found["dnd-kit"]))
+# A count, not a fixed number: files join this list whenever a screen gains a
+# drag, and the rule worth holding is that each one is declared and proven --
+# which the assertions below check individually. Pinning the total only made the
+# suite fail when `Pane.tsx` arrived, saying nothing about whether it was safe.
+check(len(found["dnd-kit"]) >= 4, sorted(found["dnd-kit"]))
 check("components/canvas/PipelineCanvas.tsx" in found["dnd-kit"],
       "the pipeline canvas is where the uncounted mechanism lived; it must stay declared")
 undeclared = [f for f in found["dnd-kit"] if f not in SENSOR_BACKED]
@@ -108,7 +126,9 @@ for file, declaration in sorted(SENSOR_BACKED.items()):
 # The specs must operate these without a mouse. A spec reaching for `dragTo`
 # would be proving the thing that already worked.
 specs = {declaration["proven_by"].split("::")[0] for declaration in SENSOR_BACKED.values()}
-check(specs == {"drag-affordances.spec.ts", "touch-authoring.spec.ts"}, sorted(specs))
+check(specs <= {"drag-affordances.spec.ts", "touch-authoring.spec.ts",
+                "pane-layout.spec.ts"}, sorted(specs))
+check("drag-affordances.spec.ts" in specs, sorted(specs))
 for name in sorted(specs):
     text = (SPECS / name).read_text(encoding="utf-8")
     check(".tap()" in text, f"{name} proves a touch path without tapping anything")
@@ -132,4 +152,5 @@ check(REFERENCE.read_text(encoding="utf-8") == text,
       "the committed reference is stale; run --write")
 
 print(f"Drag mechanism gate verified: {checks} assertions passed "
-      f"({len(found['dnd-kit'])} files on the shared kit, 0 native, 0 hand-rolled).")
+      f"({len(found['dnd-kit'])} files on the shared kit, 0 native, "
+      f"{len(found['pointer'])} licensed pointer listener(s)).")
