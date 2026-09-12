@@ -113,12 +113,36 @@ Three things in that table are the defect the research describes:
 
 ## Conditions
 
-- **V1 — Count the contract, and make the count a gate.** **Open** —
-  `oms/audit_movement_contract.py` and a generated `MOVEMENT_CONTRACT.md`: every movement
-  surface the drag census knows, against *cancel*, *recover* and *single-pointer
-  alternative*, each either a named browser test that exists or a recorded gap. Gaps are a
-  ceiling; a claim naming a test that does not exist is refused; a new movement surface
-  with no row is refused. Written first, because its number decides the order of the rest.
+- **V1 — Count the contract, and make the count a gate.** **Met** —
+  `oms/audit_movement_contract.py`, [`MOVEMENT_CONTRACT.md`](MOVEMENT_CONTRACT.md) generated
+  from it, a baseline, and `test_movement_contract_audit.py` at 58 assertions.
+  **25 gaps** across 11 surfaces and 3 stages: 6 met by a named browser test, 2 not
+  applicable with a reason. Per stage: cancel 9 gaps, recover 9, alternative 7.
+
+  **A surface is finer than a file.** `Pane.tsx` moves a pane on `DragKit` and resizes a
+  slot on a pointer listener, and the two cancel oppositely, so they are two rows. The drag
+  census supplies every (file, mechanism) pair — eight of them — and each must be covered by
+  a surface; a surface whose mechanism has left its file is refused. Not measured is a gap:
+  eleven of the twenty-five say so, because a stage nobody has operated is not one that
+  works, and the census probe had already shown two drags "restoring" on Escape that had
+  never started.
+
+  **The gate's own evasion path is `na`.** Every other way to lower the count needs a
+  behaviour and a test; declaring a stage not applicable needs a sentence. So an `na` the
+  baseline does not already hold fails the gate. The two in the baseline — a pane's slot
+  and a slot's width have no Undo, because both are viewing preferences with `Move to…`,
+  arrow keys and `Reset layout` to put them back — are written there in the open, where
+  someone disagreeing can see them.
+
+  Two stages were already met and had no test, so V1 wrote them before it could count them:
+  `movement-contract.spec.ts`, Escape during a pane drag and during a pipeline node drag.
+  Each first asserts the state only a live drag has — the transform and the "moved over
+  slot:right" announcement; the `dragging` class — and only then presses Escape. Negative
+  run: a build wiring `onDragCancel` to the drop handlers failed both, `Received: "right"`
+  and `Received: "242.093px"`, and the restored build passed. Seven source mutations of the
+  gate — `na` without the baseline, a met stage turning gap while the total holds, an
+  uncovered drag, a stale surface, a test never checked, a blank reason, no total ceiling —
+  were each caught by a named assertion.
 - **V2 — Escape cancels a resize.** **Open** — the splitter restores the width it started
   from and writes nothing, on `Escape` and on `pointercancel`. Proven against a live resize,
   asserting the mid-drag width moved before asserting it came back.

@@ -141,6 +141,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no table shows part of what it was given without saying how much",
         "runs_in": "suite",
     },
+    "audit_movement_contract": {
+        "purpose": "a move can be cancelled and taken back, or the gap is counted",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

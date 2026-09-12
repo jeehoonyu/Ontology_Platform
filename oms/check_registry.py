@@ -65,6 +65,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_pane_layout": {"gates": "the count of panes a person can move never falls, and no screen mixes a movable pane with a new fixed track", "cadence": "every suite run"},
     "audit_inert_controls": {"gates": "no file gains a control that renders and does nothing, and an empty handler does not count as wired", "cadence": "every suite run"},
     "audit_table_truncation": {"gates": "no table drops rows or columns without rendering the length of what it cut, and a slice at the call site counts", "cadence": "every suite run"},
+    "audit_movement_contract": {"gates": "every movement surface is counted against cancel, recover and a single-pointer alternative; a met stage names a test that exists, and gaps may only fall", "cadence": "every suite run"},
     "audit_route_coverage": {"gates": "compatibility routes have typed equivalents before retirement", "cadence": "every push"},
     "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every suite run"},
     "validate_schema_freeze": {"gates": "no migration lands during a pilot window", "cadence": "every push"},
