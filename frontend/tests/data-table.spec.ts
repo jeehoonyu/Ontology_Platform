@@ -84,7 +84,7 @@ test.describe("a table says what it is not showing", () => {
     // limit, and a limit a person cannot see is a wrong answer.
     await expect(table.locator("caption"),
                  "the table renders fewer rows than it was given and does not say so")
-      .toHaveText(`Showing 40 of ${ROWS} rows`);
+      .toHaveText(`Showing 1–40 of ${ROWS} rows`);
     await expect(table.locator("tbody tr")).toHaveCount(40);
 
     // And the column that only row forty-five could have supplied. Asserting on
@@ -127,5 +127,52 @@ test.describe("a table says what it is not showing", () => {
     await expect(table.locator("caption"),
                  "a complete table is announcing a truncation that did not happen")
       .toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Next rows" }),
+                 "a complete table offers a page that does not exist")
+      .toHaveCount(0);
+  });
+
+  test("every row of a truncated table can be reached", async ({ page }) => {
+    // N5. N3's caption counted the rows past the fortieth, and nothing on the
+    // screen could show one of them: the forty-fifth record's field had a column
+    // and no reachable cell. The same sixty-record fixture, paged.
+    const stamp = Date.now();
+    const assetId = `table_paging_${stamp}`;
+    const name = `Paging fixture ${stamp}`;
+    const records = Array.from({ length: ROWS }, (unused, index) => record(index));
+    records[44][LATE_FIELD] = "only here";
+    const created = await page.request.post("/data-assets", { data: {
+      id: assetId,
+      project_id: "default",
+      display_name: name,
+      kind: "dataset",
+      asset_schema: { id: "string" },
+      records
+    } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+
+    await page.goto("/workspace/data-media");
+    const row = page.getByRole("button", { name });
+    await row.click();
+    await expect(row).toHaveClass(/selected/);
+
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: `Records — ${name}` }) });
+    const table = recordsTable(page, name);
+    await expect(table.locator("caption")).toHaveText(`Showing 1–40 of ${ROWS} rows`);
+    await expect(table.getByRole("cell", { name: "only here" }), "row 45 is on the first page").toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Previous rows" }), "there is a page before the first").toBeDisabled();
+
+    await panel.getByRole("button", { name: "Next rows" }).click();
+
+    await expect(table.locator("caption"), "the second page does not say which rows it shows")
+      .toHaveText(`Showing 41–${ROWS} of ${ROWS} rows`);
+    await expect(table.locator("tbody tr")).toHaveCount(ROWS - 40);
+    await expect(table.getByRole("cell", { name: "only here" }),
+                 "the forty-fifth record's value still cannot be reached")
+      .toHaveCount(1);
+    await expect(panel.getByRole("button", { name: "Next rows" }), "there is a page after the last row").toBeDisabled();
+
+    await panel.getByRole("button", { name: "Previous rows" }).click();
+    await expect(table.locator("tbody tr")).toHaveCount(40);
   });
 });

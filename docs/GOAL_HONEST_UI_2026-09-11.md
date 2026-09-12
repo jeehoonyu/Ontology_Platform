@@ -281,9 +281,32 @@ plan, and it is measured there.
   which is N5 — and a total taken from a different field, which is refused and is the
   stricter of the two errors. The two silent sites are not fixed here; each is a behaviour
   change that needs a fixture to prove, and that is N8.
-- **N5 — Every row reachable.** **Open** — paging past the limit, so the rows the caption
-  now counts can be read. The column half of this was folded into N3, for the reason
-  recorded there.
+- **N5 — Every row reachable.** **Met** — `DataTable` pages its rows forty at a time,
+  with `Previous rows` and `Next rows` beneath the table, and its caption names the rows it
+  is showing: `Showing 41–60 of 60 rows`. A complete table has neither caption nor pager.
+  Proven by `every row of a truncated table can be reached` in `data-table.spec.ts`: the
+  sixty-record fixture, where the forty-fifth record's value had a column since N3 and no
+  cell anyone could see; the second page shows it. The column half of this was folded into
+  N3, for the reason recorded there.
+
+  **The page is clamped, not reset, when the rows change.** Several of the seventy-five
+  callers build `rows` afresh on every render — the operations feed maps its events inline,
+  and it polls — so resetting the page whenever the array changed would throw a reader
+  back to the first page every few seconds. The cost is stated rather than hidden: a table
+  handed a different, shorter dataset keeps the nearest page it still has.
+
+  The pager sits outside the table and its scroll region, so the caption stays one sentence
+  and the controls stay in reach however tall a page of rows is. The caption's wording
+  changed from `Showing 40 of 60 rows` to `Showing 1–40 of 60 rows`, and the three tests that
+  read it — N3's and the two operations-feed tests from N8 — were updated to the new text
+  rather than the component kept saying less than it now knows.
+
+  Negative run: a build whose `Next rows` always showed the first page failed at `the second
+  page does not say which rows it shows`, `Received: "Showing 1–40 of 60 rows"`. Restored,
+  all three table tests passed, with the truncation-site tests and the operations screen's
+  sweep at four widths green on the same build. `audit_table_truncation` still reads the
+  cut as counted, and the inert-control census rose from 318 to 320 controls with none
+  inert.
 - **N6 — The typed cells that nothing uses.** **Open** — `DataTable` takes `specs` and no
   caller passes it, so a timestamp in a table and the same timestamp in a detail pane
   disagree today. Either the call sites pass it or the parameter goes; a primitive with a

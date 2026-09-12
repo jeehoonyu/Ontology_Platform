@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
 import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
@@ -111,34 +111,53 @@ export function DataTable({ rows, specs, empty = "No records" }: { rows?: TableR
     for (const row of safeRows) Object.keys(row || {}).forEach((key) => seen.add(key));
     return Array.from(seen);
   }, [safeRows]);
+  // N5 of GOAL_HONEST_UI: the caption N3 added counted the rows past the fortieth
+  // and nothing could show them. Clamped rather than reset when the rows change,
+  // because several callers build `rows` afresh on every render -- the operations
+  // feed does, and it polls -- and a reset there would throw a reader back to the
+  // first page every few seconds.
+  const [page, setPage] = useState(0);
   if (!safeRows.length) return <div className="empty">{empty}</div>;
-  const shown = safeRows.slice(0, TABLE_ROW_LIMIT);
+  const pages = Math.ceil(safeRows.length / TABLE_ROW_LIMIT);
+  const current = Math.min(page, pages - 1);
+  const first = current * TABLE_ROW_LIMIT;
+  const shown = safeRows.slice(first, first + TABLE_ROW_LIMIT);
   return (
-    <div className="table-wrap" tabIndex={0} role="region" aria-label="Scrollable data table">
-      <table>
-        {/* A limit a person can see is a limit; a limit a person cannot see is
-            a wrong answer. This comes from the component rather than from each
-            of the seventy-five call sites, because a convention seventy-five
-            places have to remember is one that will be wrong in some of them
-            and nobody will know which. */}
-        {shown.length < safeRows.length ? (
-          <caption className="table-truncated">
-            Showing {shown.length.toLocaleString()} of {safeRows.length.toLocaleString()} rows
-          </caption>
-        ) : null}
-        <thead>
-          <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
-        </thead>
-        <tbody>
-          {shown.map((row, index) => (
-            <tr key={index}>{columns.map((column) => {
-              const text = formatValue(row[column]);
-              return <td key={column} title={text}>{specs ? renderPropertyValue(row[column], specs[column]) : text}</td>;
-            })}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="table-wrap" tabIndex={0} role="region" aria-label="Scrollable data table">
+        <table>
+          {/* A limit a person can see is a limit; a limit a person cannot see is
+              a wrong answer. This comes from the component rather than from each
+              of the seventy-five call sites, because a convention seventy-five
+              places have to remember is one that will be wrong in some of them
+              and nobody will know which. */}
+          {shown.length < safeRows.length ? (
+            <caption className="table-truncated">
+              Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {safeRows.length.toLocaleString()} rows
+            </caption>
+          ) : null}
+          <thead>
+            <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
+          </thead>
+          <tbody>
+            {shown.map((row, index) => (
+              <tr key={first + index}>{columns.map((column) => {
+                const text = formatValue(row[column]);
+                return <td key={column} title={text}>{specs ? renderPropertyValue(row[column], specs[column]) : text}</td>;
+              })}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* Outside the table and its scroll region, so the controls stay in reach
+          however tall the page of rows is, and the caption stays one sentence. */}
+      {pages > 1 ? (
+        <div className="table-pager">
+          <button type="button" onClick={() => setPage(current - 1)} disabled={current === 0}>Previous rows</button>
+          <button type="button" onClick={() => setPage(current + 1)} disabled={current >= pages - 1}>Next rows</button>
+        </div>
+      ) : null}
+    </>
   );
 }
 

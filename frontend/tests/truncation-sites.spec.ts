@@ -66,7 +66,7 @@ test.describe("a table the gate found says what it is not showing", () => {
     await expect(panel.locator("tbody tr")).toHaveCount(40);
     await expect(panel.locator("caption"),
                  "the feed cut its events before the table saw them, so the table had nothing to count")
-      .toHaveText(`Showing 40 of ${loaded} rows`);
+      .toHaveText(`Showing 1–40 of ${loaded} rows`);
   });
 
   test("the feed says so when the server holds more events than it loaded", async ({ page }) => {
@@ -80,7 +80,7 @@ test.describe("a table the gate found says what it is not showing", () => {
 
     await page.goto("/workspace/ops");
     const panel = feedTable(page);
-    await expect(panel.locator("caption")).toHaveText("Showing 40 of 250 rows");
+    await expect(panel.locator("caption")).toHaveText("Showing 1–40 of 250 rows");
     await expect(panel.getByRole("note"),
                  "the server holds more events than the feed loaded, and nothing says so")
       .toHaveText(`Loaded the latest 250 of ${held.toLocaleString("en-US")} events`);

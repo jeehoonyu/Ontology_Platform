@@ -15,7 +15,7 @@ so. A count of what was kept does not fix that — only the length of what was c
 
 | File | Line | In | Cuts | How | True count rendered |
 | --- | --- | --- | --- | --- | --- |
-| `components/data/DataDisplay.tsx` | 115 | `DataTable` | `safeRows` (slice) | held as shown | yes |
+| `components/data/DataDisplay.tsx` | 124 | `DataTable` | `safeRows` (slice) | held as shown | yes |
 | `workspaces/ObjectExplorer.tsx` | 160 | `ObjectExplorer` | `query.columns` (slice) | held as columns | yes |
 | `workspaces/PipelineBuilder.tsx` | 672 | `OntologyContractPanel` | `issues` (slice) | passed as rows | yes |
 

@@ -2305,6 +2305,14 @@ h2 {
   border-radius: 7px;
 }
 
+/* N5 of GOAL_HONEST_UI: the rows a truncation caption counts, reachable. */
+.table-pager {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 0 0;
+}
+
 .table-truncated {
   caption-side: top;
   text-align: left;
