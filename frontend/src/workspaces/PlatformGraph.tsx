@@ -61,6 +61,7 @@ export function PlatformGraphWorkspace() {
   const [query, setQuery] = useState("");
   const [visibleKinds, setVisibleKinds] = useState<Set<string>>(new Set());
   const [neighborhoodOnly, setNeighborhoodOnly] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     if (!graph.value) return;
@@ -122,8 +123,21 @@ export function PlatformGraphWorkspace() {
     });
   }
 
+  /**
+   * Keeps node positions in this browser, and says that is all it keeps.
+   *
+   * V8 of `GOAL_MOVEMENT_2026-09-12.md`. This was `Save view`, wrote node positions
+   * and nothing else, and showed nothing: the search text, the type filters and
+   * the Neighbors toggle -- the things a person would call a view -- were not in
+   * it, and a click gave no sign anything had happened at all.
+   */
   function saveView() {
-    localStorage.setItem("ontology.platformGraph.layout", JSON.stringify(Object.fromEntries(nodes.map((node) => [node.id, node.position]))));
+    try {
+      localStorage.setItem("ontology.platformGraph.layout", JSON.stringify(Object.fromEntries(nodes.map((node) => [node.id, node.position]))));
+      setNotice("Node positions saved in this browser. Search text, type filters and Neighbors are not part of it.");
+    } catch {
+      setNotice("Node positions could not be saved in this browser.");
+    }
   }
 
   return (
@@ -134,9 +148,10 @@ export function PlatformGraphWorkspace() {
         <label className="graph-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search nodes" /></label>
         <button onClick={() => setNeighborhoodOnly((value) => !value)} disabled={!selectedId}><Expand size={15} />{neighborhoodOnly ? "Show all" : "Neighbors"}</button>
         <button onClick={autoLayout}><LocateFixed size={15} />Auto layout</button>
-        <button onClick={saveView}><Save size={15} />Save view</button>
+        <button onClick={saveView}><Save size={15} />Save positions on this device</button>
         <span>{visibleNodes.length} nodes / {visibleEdges.length} edges</span>
       </div>
+      {notice ? <div className="inline-success" role="status">{notice}</div> : null}
       <div className="platform-graph-kinds" role="group" aria-label="Resource type filters">
         {Object.entries(graph.value?.summary || {}).map(([kind, count]) => (
           <button key={kind} className={visibleKinds.has(kind) ? "active" : ""} onClick={() => toggleKind(kind)}>

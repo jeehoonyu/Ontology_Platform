@@ -77,7 +77,7 @@ SURFACES: Dict[str, Dict[str, Any]] = {
         "moves": "a pane between the slots of a screen",
         "cancel": {"test": "movement-contract.spec.ts::Escape during a pane drag leaves the pane in its slot"},
         "recover": {"na": "a pane's slot is a viewing preference rather than an edit: `Move to…` "
-                          "puts it back in one choice and `Reset layout` restores every pane"},
+                          "puts it back in one choice and `Reset panes` restores every pane"},
         "alternative": {"test": "pane-layout.spec.ts::a pane moves to another slot without a drag"},
     },
     "pane-resize": {
@@ -86,7 +86,7 @@ SURFACES: Dict[str, Dict[str, Any]] = {
         "cancel": {"test": "movement-contract.spec.ts::Escape during a splitter resize restores the "
                            "width and writes nothing"},
         "recover": {"na": "a width is a viewing preference; arrow keys, `Home`, `End` and "
-                          "`Reset layout` all set it back"},
+                          "`Reset panes` all set it back"},
         "alternative": {"test": "movement-contract.spec.ts::a slot resizes with a single pointer and no drag"},
     },
     "pipeline-node": {
@@ -146,14 +146,16 @@ SURFACES: Dict[str, Dict[str, Any]] = {
         "file": "workspaces/OntologyManager.tsx", "mechanism": "xyflow",
         "moves": "an object type around the relationship designer",
         "cancel": {"gap": "not measured; the same library as the artifact canvases"},
-        "recover": {"gap": "positions live in component state and are discarded on reload (V8)"},
+        "recover": {"gap": "no undo; since V8 an arrangement is kept in this browser rather than "
+                           "discarded on reload"},
         "alternative": {"gap": "no control places a node without dragging it"},
     },
     "platform-graph-node": {
         "file": "workspaces/PlatformGraph.tsx", "mechanism": "xyflow",
         "moves": "a resource around the platform graph",
         "cancel": {"gap": "not measured; the same library as the artifact canvases"},
-        "recover": {"gap": "no undo; `Save view` keeps positions and `Auto layout` replaces them"},
+        "recover": {"gap": "no undo; `Save positions on this device` keeps them and `Auto layout` "
+                           "replaces them"},
         "alternative": {"gap": "no control places a node without dragging it"},
     },
 }

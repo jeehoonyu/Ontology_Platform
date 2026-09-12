@@ -26,7 +26,7 @@ test.describe("panes rearrange without a drag", () => {
     // Each test starts from the declared layout rather than whatever the last
     // one stored, because a layout that survives is the point and would
     // otherwise leak between tests.
-    await page.getByRole("button", { name: "Reset layout" }).tap();
+    await page.getByRole("button", { name: "Reset panes" }).tap();
   });
 
   test("a pane moves to another slot without a drag", async ({ page }) => {
@@ -90,7 +90,7 @@ test.describe("panes rearrange without a drag", () => {
     const page = await context.newPage();
     try {
     await page.goto(SCREEN);
-    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "Reset panes" }).click();
 
     // Asserting on the stored size, not on a bounding box. `GOAL_DRAG` L8 is the
     // reason: a keyboard test there read a node's bounding box, an arrow key
@@ -130,7 +130,7 @@ test.describe("panes rearrange without a drag", () => {
     }
   });
 
-  test("a resized pane is put back by Reset layout", async ({ browser }) => {
+  test("a resized pane is put back by Reset panes", async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await context.newPage();
     try {
@@ -141,26 +141,26 @@ test.describe("panes rearrange without a drag", () => {
       await expect.poll(async () => Number(await splitter.getAttribute("aria-valuenow")))
         .toBeGreaterThan(500);
 
-      await page.getByRole("button", { name: "Reset layout" }).click();
+      await page.getByRole("button", { name: "Reset panes" }).click();
 
       await expect
         .poll(async () => Number(await splitter.getAttribute("aria-valuenow")),
-              { message: "Reset layout left the slot at the width it was dragged to" })
+              { message: "Reset panes left the slot at the width it was dragged to" })
         .toBeLessThan(500);
     } finally {
       await context.close();
     }
   });
 
-  test("Reset layout puts every pane back where it was declared", async ({ page }) => {
+  test("Reset panes puts every pane back where it was declared", async ({ page }) => {
     await page.getByLabel(`Move ${LIBRARY} to`).selectOption("right");
     const slotOf = () => page.locator(".pane").filter({ hasText: LIBRARY }).first()
       .evaluate((el) => el.closest(".pane-slot")?.getAttribute("data-slot") || "");
     await expect.poll(slotOf).toBe("right");
 
-    await page.getByRole("button", { name: "Reset layout" }).tap();
+    await page.getByRole("button", { name: "Reset panes" }).tap();
 
-    await expect.poll(slotOf, { message: "Reset layout left the pane where it was moved" })
+    await expect.poll(slotOf, { message: "Reset panes left the pane where it was moved" })
       .toBe("left");
   });
 });

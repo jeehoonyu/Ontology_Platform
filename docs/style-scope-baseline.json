@@ -1,7 +1,7 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-12T22:02:19Z"
+    "recorded_at": "2026-09-12T22:58:43Z"
   },
   "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
   "single_file_classes": 301,
@@ -75,7 +75,8 @@
       "workspaces/MapWorkspace.tsx",
       "workspaces/ModelOps.tsx",
       "workspaces/ObjectExplorer.tsx",
-      "workspaces/OpsWorkspace.tsx"
+      "workspaces/OpsWorkspace.tsx",
+      "workspaces/PlatformGraph.tsx"
     ],
     "legacy-button": [
       "components/workbench/Workbench.tsx",

@@ -15,10 +15,10 @@ Not measured is a gap. A stage nobody has operated is not a stage that works.
 | Surface | Mechanism | Moves | Stage | State | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | `pane-move` | dnd-kit | a pane between the slots of a screen | cancel | met | `movement-contract.spec.ts` — Escape during a pane drag leaves the pane in its slot |
-| `pane-move` | dnd-kit | a pane between the slots of a screen | recover | n/a | a pane's slot is a viewing preference rather than an edit: `Move to…` puts it back in one choice and `Reset layout` restores every pane |
+| `pane-move` | dnd-kit | a pane between the slots of a screen | recover | n/a | a pane's slot is a viewing preference rather than an edit: `Move to…` puts it back in one choice and `Reset panes` restores every pane |
 | `pane-move` | dnd-kit | a pane between the slots of a screen | alternative | met | `pane-layout.spec.ts` — a pane moves to another slot without a drag |
 | `pane-resize` | pointer | the boundary between two slots | cancel | met | `movement-contract.spec.ts` — Escape during a splitter resize restores the width and writes nothing |
-| `pane-resize` | pointer | the boundary between two slots | recover | n/a | a width is a viewing preference; arrow keys, `Home`, `End` and `Reset layout` all set it back |
+| `pane-resize` | pointer | the boundary between two slots | recover | n/a | a width is a viewing preference; arrow keys, `Home`, `End` and `Reset panes` all set it back |
 | `pane-resize` | pointer | the boundary between two slots | alternative | met | `movement-contract.spec.ts` — a slot resizes with a single pointer and no drag |
 | `pipeline-node` | dnd-kit | a node around the pipeline canvas | cancel | met | `movement-contract.spec.ts` — Escape during a pipeline node drag restores it and saves nothing |
 | `pipeline-node` | dnd-kit | a node around the pipeline canvas | recover | met | `movement-contract.spec.ts` — one Undo takes back a committed pipeline node move |
@@ -42,10 +42,10 @@ Not measured is a gap. A stage nobody has operated is not a stage that works.
 | `visual-node` | xyflow | a node around a Workshop, AIP Logic, Investigations or Entity Resolution canvas | recover | met | `movement-contract.spec.ts` — one drag on an artifact canvas is taken back by one Undo |
 | `visual-node` | xyflow | a node around a Workshop, AIP Logic, Investigations or Entity Resolution canvas | alternative | **gap** | no control places a node without dragging it |
 | `ontology-graph-node` | xyflow | an object type around the relationship designer | cancel | **gap** | not measured; the same library as the artifact canvases |
-| `ontology-graph-node` | xyflow | an object type around the relationship designer | recover | **gap** | positions live in component state and are discarded on reload (V8) |
+| `ontology-graph-node` | xyflow | an object type around the relationship designer | recover | **gap** | no undo; since V8 an arrangement is kept in this browser rather than discarded on reload |
 | `ontology-graph-node` | xyflow | an object type around the relationship designer | alternative | **gap** | no control places a node without dragging it |
 | `platform-graph-node` | xyflow | a resource around the platform graph | cancel | **gap** | not measured; the same library as the artifact canvases |
-| `platform-graph-node` | xyflow | a resource around the platform graph | recover | **gap** | no undo; `Save view` keeps positions and `Auto layout` replaces them |
+| `platform-graph-node` | xyflow | a resource around the platform graph | recover | **gap** | no undo; `Save positions on this device` keeps them and `Auto layout` replaces them |
 | `platform-graph-node` | xyflow | a resource around the platform graph | alternative | **gap** | no control places a node without dragging it |
 
 ## Per stage

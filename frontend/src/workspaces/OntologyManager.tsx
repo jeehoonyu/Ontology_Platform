@@ -610,6 +610,20 @@ interface OntologyLinkType extends TableRow {
   cardinality: string;
 }
 
+// Where each object type sits in the relationship designer, in this browser. A
+// personal arrangement, like a pane layout: never sent to the server, never part
+// of a revision. V8 of GOAL_MOVEMENT_2026-09-12.
+const DESIGNER_LAYOUT_KEY = "ontology.relationshipDesigner.layout";
+
+function readDesignerLayout(): Record<string, { x: number; y: number }> {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(DESIGNER_LAYOUT_KEY) || "{}");
+    return stored && typeof stored === "object" ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
 function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { objectTypes: OntologyObjectSummary[]; selectedObjectTypeId: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [cardinality, setCardinality] = useState("MANY_TO_MANY");
@@ -617,10 +631,18 @@ function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { o
   const links = useAsyncState<OntologyLinkType[]>(() => api<OntologyLinkType[]>("/link-types"), [refreshKey]);
   const [nodes, setNodes] = useState<Node<JsonObject>[]>([]);
 
+  // The panel invites arranging, and every arrangement used to be thrown away:
+  // positions were rebuilt on a grid whenever the object types loaded *and*
+  // whenever a different type was selected, so the designer forgot a person's
+  // arrangement on reload and on every click in the resource list. A node keeps
+  // the position it has, then the one this browser stored, then its grid slot.
   useEffect(() => {
-    setNodes(objectTypes.map((objectType, index) => ({
+    const saved = readDesignerLayout();
+    setNodes((current) => objectTypes.map((objectType, index) => ({
       id: objectType.id,
-      position: { x: (index % 4) * 220, y: Math.floor(index / 4) * 130 },
+      position: current.find((node) => node.id === objectType.id)?.position
+        || saved[objectType.id]
+        || { x: (index % 4) * 220, y: Math.floor(index / 4) * 130 },
       data: {
         label: objectType.display_name,
         property_count: objectType.property_count,
@@ -643,6 +665,16 @@ function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { o
   const onNodesChange = useCallback((changes: NodeChange<Node<JsonObject>>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
   }, []);
+
+  function keepArrangement(_event: unknown, _node: unknown, dragged: Node<JsonObject>[]) {
+    const saved = readDesignerLayout();
+    for (const node of dragged) saved[node.id] = node.position;
+    try {
+      window.localStorage.setItem(DESIGNER_LAYOUT_KEY, JSON.stringify(saved));
+    } catch {
+      /* not being able to remember an arrangement must not break making one */
+    }
+  }
 
   async function createRelationship(connection: Connection) {
     if (!connection.source || !connection.target) return;
@@ -678,7 +710,7 @@ function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { o
         </label>
       )}
     >
-      <p className="panel-description">Drag object types to arrange the ontology. Connect node ports to create a governed link type.</p>
+      <p className="panel-description">Drag object types to arrange the ontology; the arrangement is kept in this browser. Connect node ports to create a governed link type.</p>
       {message ? <div className="workbench-status-strip" role="status">{message}</div> : null}
       <div className="ontology-relationship-canvas" aria-label="Visual ontology relationship designer">
         {nodes.length ? (
@@ -686,6 +718,7 @@ function OntologyRelationshipDesigner({ objectTypes, selectedObjectTypeId }: { o
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
+            onNodeDragStop={keepArrangement}
             onConnect={createRelationship}
             nodesDraggable
             nodesConnectable

@@ -259,13 +259,78 @@ Three things in that table are the defect the research describes:
   build passed all three, with the cancel, undo, keyboard-move and shared-context tests
   green beside them. This condition's negative run is the unfixed build, run before the fix
   rather than after it; the break and the thing it breaks are the same line.
-- **V8 — Every save and reset says which scope it touches.** **Open** — the two
-  Pipeline Builder controls stop sharing a noun; Platform Graph's control says what it
-  keeps and confirms it; the ontology designer either keeps an arrangement as a personal
-  preference or stops inviting one. Each proven by a test that reloads.
+- **V8 — Every save and reset says which scope it touches.** **Met** — three changes, each
+  proven by a test in `movement-contract.spec.ts`:
+
+  - **Pipeline Builder's `Save layout` is gone, and `Reset layout` is `Reset panes`.** Every
+    drop already saves node positions to the graph — V6's test reads the request — so the
+    button re-sent what was stored, and it sat beside a reset of a browser preference under
+    the same noun. The panes' reset now names what it touches. `the pipeline screen has one
+    control per scope`.
+  - **Platform Graph's `Save view` is `Save positions on this device`, and confirms what it
+    kept and what it did not**: *Search text, type filters and Neighbors are not part of it.*
+    `platform graph positions are kept on this device, and it says so` drags a node, saves,
+    reads the confirmation and reloads.
+  - **The ontology designer keeps an arrangement in this browser.** It rebuilt positions on
+    a grid whenever its object types loaded *and* whenever a different type was selected —
+    so it forgot an arrangement on every click in the resource list, not only on reload,
+    which the census had not seen. A node now keeps the position it has, then the one this
+    browser stored, then its grid slot; a drag's end stores it. `the ontology designer keeps
+    an arrangement across a reload`. The selection half is fixed in the same line and is not
+    separately asserted.
+
+  Negative runs, two builds. `Save layout` restored, the confirmation removed and the
+  designer's store removed: all three failed, each at its own assertion — `Received: 1`,
+  `saving gave no sign of what it kept`, and the designer back at `translate(0px, 0px)`
+  after reload. A confirmation that claims a save nobody wrote: the reload failed, the
+  message having passed — which is the case a message-only test would have called met.
+  Restored: 29 of 30 passed across the movement contract, the pane layout, the concurrent
+  drags and both graph workflows. The thirtieth, `one arrow key carries a pane to the next
+  slot`, failed once in that run and passed five of five alone on the same build; it is the
+  timing-sensitive keyboard test M4 already records, and it is named here rather than
+  re-run until green.
+
+  Two test fixes came with this, and one of them found V10. The designer test first
+  dragged thin air — the designer sits below the fold and a mouse moved to off-screen
+  coordinates reaches nothing — and now scrolls the node into view. The other is recorded
+  under V10.
+
+  `.inline-success` is declared shared by one more file, `PlatformGraph.tsx`; the rename
+  went through the three specs that press the button, fourteen occurrences.
 - **V9 — Resetting a layout touches only the layout.** **Open** — `Reset layout` leaves the
   artifact's nodes and any unsent input exactly as they were. The research's fourth
   scenario; nothing asserts it today.
+- **V10 — Picking a node up on a scrolled canvas does not move it.** **Open** — found while
+  V8 was being verified, not by the census. A pipeline node picked up on a canvas already
+  scrolled sideways is displaced by that scroll offset before any key is pressed, and the
+  drop commits the displacement. Measured by a probe recording every scrollable ancestor
+  press by press:
+
+  | Canvas scrolled at pick-up | Transform on pick-up | Four presses right, then drop |
+  | --- | --- | --- |
+  | 0 px, zoom 0.86 | 0 | +116.3 stage px |
+  | 15 px, zoom 0.86 | −17.4 | +98.8 |
+  | 103 px, zoom 0.86 | −119.8 | **−3.5** |
+  | 162 px, zoom 1.35 | −120.0 | **−45.9** |
+
+  The transform on pick-up is exactly the canvas's `scrollLeft` divided by the zoom, so the
+  drag measures the scroll from zero rather than from where it was when the drag began. The
+  pointer probe earlier in this goal already showed it without anyone reading it that way: a
+  120-pixel pointer move produced a 105-pixel transform on a canvas scrolled 15 pixels.
+
+  It matters more than a test fixture: at 1280 pixels wide the pipeline canvas's viewport is
+  **236 pixels** across a 1500-pixel stage, so it is scrolled sideways almost as soon as
+  anyone looks at a node past the first. The preview and the landing still agree, because
+  both carry the displacement — which is why V7's own comparison passed and only its
+  movement floor noticed.
+
+  **How it was found is worth recording.** V6 and V7 went red after V8 removed a header
+  button, because the canvas opened scrolled differently. Three placements were tried —
+  scroll the node into view, centre it, put it at the edge — and each moved the canvas and
+  failed a new way. That was three guesses at a mechanism nobody had measured; the fourth
+  step was a probe, and the probe found the defect. V6 and V7 now start from an unscrolled
+  canvas and say why. Proven, when met, by a pick-up and drop with no movement on a canvas
+  scrolled sideways, which must leave the node where it was.
 
 ## Order and size
 

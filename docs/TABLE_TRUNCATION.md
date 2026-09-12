@@ -17,7 +17,7 @@ so. A count of what was kept does not fix that — only the length of what was c
 | --- | --- | --- | --- | --- | --- |
 | `components/data/DataDisplay.tsx` | 115 | `DataTable` | `safeRows` (slice) | held as shown | yes |
 | `workspaces/ObjectExplorer.tsx` | 160 | `ObjectExplorer` | `query.columns` (slice) | held as columns | yes |
-| `workspaces/PipelineBuilder.tsx` | 662 | `OntologyContractPanel` | `issues` (slice) | passed as rows | yes |
+| `workspaces/PipelineBuilder.tsx` | 658 | `OntologyContractPanel` | `issues` (slice) | passed as rows | yes |
 
 ## Outside a table — reported, not gated
 

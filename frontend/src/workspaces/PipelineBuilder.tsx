@@ -351,13 +351,6 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
-  async function saveLayout() {
-    if (!selectedGraphId || !canvas) return;
-    const positions = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
-    setCanvas(await savePipelineLayout(selectedGraphId, positions));
-    setActionStatus("Layout saved for this graph.");
-  }
-
   function endCanvasDrag(event: DragEndEvent) {
     const id = String(event.active.id);
     if (id.startsWith("node:")) {
@@ -410,7 +403,10 @@ export function PipelineBuilder() {
             title={canvas?.graph.display_name || "Pipeline graph"}
             actions={<>
               <button onClick={createGraph}>New pipeline</button>
-              <button onClick={saveLayout}>Save layout</button>
+              {/* No `Save layout` here. Every drop already saves node positions to the
+                  graph, so that button re-sent what was stored -- and it sat beside the
+                  panes' reset, one noun naming the artifact everyone shares and a
+                  preference in this browser. V8 of GOAL_MOVEMENT_2026-09-12. */}
               <button onClick={() => void undoMove()} disabled={!moves.length}>Undo move</button>
               <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
               <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>

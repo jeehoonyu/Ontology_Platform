@@ -345,7 +345,10 @@ export function PaneHost({ state, render }: {
               ))}
             </select>
           ))}
-          <button type="button" onClick={reset}>Reset layout</button>
+          {/* Named for what it touches: this screen's panes, in this browser. It was
+              `Reset layout`, on a screen where the graph's node positions are also a
+              layout and are shared with everyone who opens it. V8 of GOAL_MOVEMENT. */}
+          <button type="button" onClick={reset}>Reset panes</button>
         </div>
         <div className="pane-host-row">
           {(["left", "center", "right"] as SlotName[]).map((slot) => (

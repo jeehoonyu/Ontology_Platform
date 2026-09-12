@@ -26,7 +26,7 @@ test.describe("a cancelled drag leaves everything where it was", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; a pointer drag across slots needs the side-by-side layout.");
     await page.goto("/workspace/pipeline");
-    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "Reset panes" }).click();
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   });
 
@@ -123,7 +123,7 @@ test.describe("a resize can be taken back, and done without a drag", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; below 700px the slots stack and there is no width.");
     await page.goto("/workspace/pipeline");
-    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "Reset panes" }).click();
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   });
 
@@ -304,7 +304,7 @@ test.describe("a committed pipeline move can be taken back", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
     await page.goto("/workspace/pipeline");
-    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "Reset panes" }).click();
     await page.getByRole("button", { name: "New pipeline" }).click();
     await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
     await page.getByRole("button", { name: "Input Dataset input" }).click();
@@ -316,6 +316,20 @@ test.describe("a committed pipeline move can be taken back", () => {
   test("one Undo takes back a committed pipeline node move", async ({ page }) => {
     const node = page.locator(".pipeline-canvas .pipeline-node").first();
     const left = async () => Number.parseFloat((await node.evaluate((element) => (element as HTMLElement).style.left)) || "0");
+    // In view first. A node outside the canvas's scrolled viewport has its arrow
+    // keys spent scrolling the canvas by dnd-kit's keyboard sensor, and the move
+    // lands a few pixels along -- measured at 9.3 once a header button was removed
+    // and the canvas opened scrolled differently. GOAL_DRAG L8, from the other side.
+    // From the canvas's own origin, unscrolled. A pipeline node picked up on a canvas
+    // already scrolled sideways is displaced by that scroll offset before any key is
+    // pressed, and the drop commits it: measured scrolled 103px at zoom 0.86, the
+    // node jumped -119.8 stage px on pick-up, and four presses right landed it 3.5px
+    // to the left. That is V10 of the goal, its own defect with its own test; this
+    // one is about taking a move back, so it starts where that defect cannot reach it. The three
+    // placements tried before this -- in view, centred, at the edge -- each moved the
+    // canvas and each failed differently, which is how the defect was found.
+    await page.locator(".pipeline-canvas").evaluate((element) => { element.scrollLeft = 0; });
+    await page.waitForTimeout(200);
     const before = await left();
 
     // The keyboard, so the move is a known committed drop with no bounding box
@@ -379,7 +393,7 @@ test.describe("a pipeline node's preview lands where its drop does", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
     await page.goto("/workspace/pipeline");
-    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "Reset panes" }).click();
     await page.getByRole("button", { name: "New pipeline" }).click();
     await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
     await page.getByRole("button", { name: "Input Dataset input" }).click();
@@ -404,6 +418,16 @@ test.describe("a pipeline node's preview lands where its drop does", () => {
 
       const node = page.locator(".pipeline-canvas .pipeline-node").first();
       const left = async () => Number.parseFloat((await node.evaluate((element) => (element as HTMLElement).style.left)) || "0");
+      // From the canvas's own origin, unscrolled. A pipeline node picked up on a canvas
+      // already scrolled sideways is displaced by that scroll offset before any key is
+      // pressed, and the drop commits it: measured scrolled 103px at zoom 0.86, the
+      // node jumped -119.8 stage px on pick-up, and four presses right landed it 3.5px
+      // to the left. That is V10 of the goal, its own defect with its own test; this
+      // one is about the preview against the landing, so it starts where that defect cannot reach it. The three
+      // placements tried before this -- in view, centred, at the edge -- each moved the
+      // canvas and each failed differently, which is how the defect was found.
+      await page.locator(".pipeline-canvas").evaluate((element) => { element.scrollLeft = 0; });
+      await page.waitForTimeout(200);
       const before = await left();
 
       await node.focus();
@@ -418,7 +442,10 @@ test.describe("a pipeline node's preview lands where its drop does", () => {
       // The transform sits inside the scaled stage, so it is already in stage pixels.
       const preview = await node.evaluate((element) =>
         Number(/translate3d\(([-\d.]+)px/.exec((element as HTMLElement).style.transform)?.[1] ?? NaN));
-      expect(preview, "the live drag wrote no transform").toBeGreaterThan(0);
+      // A floor, not only a sign. If the arrow keys were spent scrolling, the preview
+      // and the landing would agree at a few pixels and this test would pass having
+      // measured nothing -- the V6 run showed exactly that movement, 9.3 pixels.
+      expect(preview, "the drag barely moved, so the comparison below would prove nothing").toBeGreaterThan(20);
 
       await page.keyboard.press("Space");
       await expect(page.getByText(/Saved .+ position\./), "the move was not committed").toBeVisible();
@@ -430,4 +457,85 @@ test.describe("a pipeline node's preview lands where its drop does", () => {
         .toBeLessThanOrEqual(1);
     });
   }
+});
+
+/**
+ * Every save and reset names the scope it touches. V8 of the goal. The research
+ * names four scopes -- personal workspace, authored artifact, saved analysis view,
+ * transient work -- and asks that an action be named by the one it touches. The
+ * census read three defects from the source: `Save layout` beside `Reset layout`
+ * on one screen, meaning the shared artifact and a browser preference; Platform
+ * Graph's `Save view` keeping positions only and saying nothing; and the ontology
+ * designer inviting an arrangement and discarding every one on reload.
+ */
+test.describe("every save and reset names the scope it touches", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("the pipeline screen has one control per scope", async ({ page }) => {
+    // Node positions are saved by the drop itself (V6 proves the request), so a
+    // button that re-sent them was a second name for the shared scope, and the
+    // panes' reset was the same noun for a preference in this browser.
+    await page.goto("/workspace/pipeline");
+    await expect(page.getByRole("button", { name: "Save layout", exact: true }),
+                 "a button re-saving positions every drop already saves is back").toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Reset panes", exact: true }),
+                 "the panes' reset does not say it touches the panes").toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Reset layout", exact: true })).toHaveCount(0);
+  });
+
+  test("platform graph positions are kept on this device, and it says so", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    await page.goto("/workspace/graph");
+    const canvas = page.locator(".platform-graph-canvas");
+    const node = canvas.locator(".react-flow__node").first();
+    await expect(node).toBeVisible();
+    const id = await node.getAttribute("data-id");
+    const byId = canvas.locator(`.react-flow__node[data-id="${id}"]`);
+    const position = () => byId.evaluate((element) => (element as HTMLElement).style.transform);
+    const before = await position();
+
+    const box = await byId.boundingBox();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2 + 120, box!.y + box!.height / 2 + 80, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(position, { message: "the drag did not move the node" }).not.toBe(before);
+    const moved = await position();
+
+    await page.getByRole("button", { name: "Save positions on this device" }).click();
+    await expect(page.getByRole("status").filter({ hasText: /saved in this browser/ }),
+                 "saving gave no sign of what it kept")
+      .toContainText("not part of it");
+
+    await page.reload();
+    await expect.poll(position, { message: "the saved positions did not come back after a reload" }).toBe(moved);
+  });
+
+  test("the ontology designer keeps an arrangement across a reload", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    await page.goto("/workspace/ontology");
+    const canvas = page.locator(".ontology-relationship-canvas");
+    const node = canvas.locator(".react-flow__node").first();
+    await expect(node).toBeVisible();
+    const id = await node.getAttribute("data-id");
+    const byId = canvas.locator(`.react-flow__node[data-id="${id}"]`);
+    const position = () => byId.evaluate((element) => (element as HTMLElement).style.transform);
+    const before = await position();
+
+    // The designer sits below the fold, and a mouse moved to coordinates outside
+    // the viewport reaches nothing -- the first run of this test dragged thin air.
+    await byId.scrollIntoViewIfNeeded();
+    const box = await byId.boundingBox();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2 + 120, box!.y + box!.height / 2 + 60, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(position, { message: "the drag did not move the object type" }).not.toBe(before);
+    const moved = await position();
+
+    await page.reload();
+    await expect.poll(position, { message: "the designer threw the arrangement away on reload" }).toBe(moved);
+  });
 });

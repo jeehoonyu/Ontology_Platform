@@ -35,7 +35,7 @@ test.describe("a pane, a node and a palette entry share one context", () => {
     test.skip(testInfo.project.name !== "desktop-1280",
               "Runs once; below 700px the slots stack and there is no second slot to cross.");
     await page.goto(SCREEN);
-    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "Reset panes" }).click();
   });
 
   test("one arrow key carries a pane to the next slot", async ({ page }) => {
@@ -45,7 +45,7 @@ test.describe("a pane, a node and a palette entry share one context", () => {
     // dnd-kit's default getter moves a keyboard drag 25px a press, so on a
     // 1280px screen a build without `slotKeyboardCoordinates` needs roughly
     // forty presses to cross a slot and this single press moves nothing at all.
-    // Let the layout settle before starting. `Reset layout` writes state, the
+    // Let the layout settle before starting. `Reset panes` writes state, the
     // workspace polls, and a re-render between the pick-up and the arrow key
     // takes dnd-kit's document listener with it -- which shows up as the
     // coordinate getter never being called at all.
