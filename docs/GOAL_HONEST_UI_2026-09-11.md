@@ -2,7 +2,7 @@
 
 Stated 2026-09-11, from [`FOUNDRY_PLATFORM_UI_REVIEW_2026-09-11.md`](FOUNDRY_PLATFORM_UI_REVIEW_2026-09-11.md)
 and its [companion canvas plan](FOUNDRY_UI_IMPROVEMENT_PLAN_2026-09-11.md). Runs alongside
-[`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), which is still open at M4.
+[`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), which is open at M5.
 
 ## Why these two, out of a review that lists twenty-four workspaces
 
@@ -223,10 +223,64 @@ plan, and it is measured there.
   same shape as the unused `specs` that N6 exists to remove. It is a constant now. Adding
   a parameter for a future caller, in the commit that states a condition against
   parameters with no callers, is only visible if you go looking for it in your own work.
-- **N4 — A gate that refuses a silent truncation.** **Open** —
-  `oms/audit_table_truncation.py`: a `slice(` inside a table component that is not
-  accompanied by a rendered total is refused. This is written after N3 rather than before
-  it, unlike N1, because the shape of what it gates is the thing N3 decides.
+- **N4 — A gate that refuses a silent truncation.** **Met** —
+  `oms/audit_table_truncation.py`, [`TABLE_TRUNCATION.md`](TABLE_TRUNCATION.md) generated
+  from the scan, a baseline, and `test_table_truncation_audit.py` at 46 assertions. Written
+  after N3 rather than before it, unlike N1, because the shape it refuses is the one N3
+  decided: a table may cut rows or columns, and when it does, the length of what it cut is
+  rendered beside what it kept.
+
+  | | |
+  | --- | --- |
+  | table elements — `<DataTable>`, `<table>`, `role="table"` or `"grid"` | **86** |
+  | collection truncations that reach one | **4** |
+  | of those rendering no true count | **2** — the ceiling |
+  | truncations outside a table, reported and not gated | **9** |
+
+  **The gate's own evasion path was already in the tree.** `DataTable` captions its own
+  cut, so the cheapest way to make a table silent again is to cut the rows *before*
+  handing them over: the component receives twenty-five, shows twenty-five, and truthfully
+  says nothing. The operations feed does exactly that — `events.slice(0, 25)` mapped into
+  `rows` and passed to a `DataTable` — so N3's caption never fires there. This is the
+  empty handler of N1 in a different shape, and it is refused whether the slice is written
+  in the prop or bound to a name first. The second silent site is Object Explorer's
+  `query.columns.slice(0, 8)`: the eight-column cap N3 took out of the shared table, still
+  alive in the one screen that draws its own.
+
+  Three refusals are asserted rather than implied: the length of what was *kept* is not a
+  count (`{shown.length}` can only ever say forty), a length used as a condition is not
+  rendered (`{issues.length ? …}`), and `.filter((_, i) => i < n)` is the same cut as
+  `.slice`. The pre-N3 `DataTable`, embedded in the test, is refused three ways — rows,
+  column sample, key cap — and the column sample is found only by following the `columns`
+  binding four lines above the `<table>` that draws it.
+
+  **The first scope was wrong, and the census said so.** It counted a cut as reaching a
+  table when the *component* rendered one, and reported four silent sites: the two above,
+  plus Object Explorer's facet chips and Vertex's seed buttons, which sit in components
+  that also draw a table somewhere else. A table is an element, not the function that
+  contains one. The scan now asks whether the cut is written inside the element — or among
+  a `<DataTable>`'s props — or is bound to a name that is, and a test holds a list cut
+  beside a table to not being the table's.
+
+  Negative runs, both halves seen. Three breaks of live source — `DataTable`'s caption
+  removed, `PipelineBuilder`'s rendered issue count removed, a call-site slice added in
+  `Automate` — each failed with the per-file ratchet message. The message was checked, not
+  the exit code: the stale-reference rule would have failed all three on its own, so a red
+  exit proved nothing about the ratchet. Eight mutations of the scanner — component scope,
+  no index filter, kept count accepted, condition accepted, bindings not followed, rows
+  prop ignored, tag ending at the first `>`, fallback kept in the source — were each
+  caught by a named assertion.
+
+  And one small instance of the defect, in my own terminal: reading the generated
+  reference through `sed -n '5,40p'`, a row past line forty looked missing from the scan
+  and was investigated as a bug. The rows were there. The printout had cut them and said
+  nothing.
+
+  What it does not see is written in the script: a cut made in a `.ts` helper (the census
+  found none), a cut handed to a child component in another file, a server-side limit —
+  which is N5 — and a total taken from a different field, which is refused and is the
+  stricter of the two errors. The two silent sites are not fixed here; each is a behaviour
+  change that needs a fixture to prove, and that is N8.
 - **N5 — Every row reachable.** **Open** — paging past the limit, so the rows the caption
   now counts can be read. The column half of this was folded into N3, for the reason
   recorded there.
@@ -238,6 +292,13 @@ plan, and it is measured there.
 - **N7 — The full grid.** **Open** — column visibility, reorder, resize, pin, sort,
   filter, selection, virtualization, rolled out behind the `audit_ui_primitives` user
   count. Not started until N2 through N5 are met.
+- **N8 — The two tables N4 found.** **Open** — the operations feed stops cutting its
+  events before `DataTable` sees them, so the component's own caption can count them, and
+  Object Explorer says how many of the object type's columns it is drawing. Numbered after
+  N7 because it was found after N7 was written, not because it waits on it. Each needs a
+  fixture larger than the cut — more than forty operational events, an object type with
+  more than eight properties — and the ceiling in `table-truncation-baseline.json` falls
+  to zero when both land.
 
 ## Order and size
 
@@ -250,6 +311,7 @@ plan, and it is measured there.
 | N5 | `DataDisplay.tsx`, spec | 1–2 |
 | N6 | the sixteen call-site files, or `DataDisplay.tsx` | 1–2 |
 | N7 | a new grid component, then rollout | 3+ |
+| N8 | `OpsWorkspace.tsx`, `ObjectExplorer.tsx`, two fixtures, spec, baseline | 1 |
 
 Every test is run once against a build with the thing it defends removed before it is
 believed. That discipline has now caught a bug in four consecutive pieces of work,

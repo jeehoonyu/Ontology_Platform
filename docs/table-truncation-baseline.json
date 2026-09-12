@@ -1,0 +1,14 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-09-12T21:50:56Z"
+  },
+  "note": "Collection truncations that reach a table and render no true count. A ceiling, not a floor: the count may fall and must never rise.",
+  "tables": 86,
+  "reaching": 4,
+  "silent": 2,
+  "per_file": {
+    "workspaces/ObjectExplorer.tsx": 1,
+    "workspaces/OpsWorkspace.tsx": 1
+  }
+}

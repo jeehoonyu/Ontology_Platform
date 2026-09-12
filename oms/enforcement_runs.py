@@ -137,6 +137,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "no control renders as a control while doing nothing",
         "runs_in": "suite",
     },
+    "audit_table_truncation": {
+        "purpose": "no table shows part of what it was given without saying how much",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

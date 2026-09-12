@@ -67,6 +67,7 @@ FAST_CHECKS = [
     "audit_drag_affordances",
     "audit_pane_layout",
     "audit_inert_controls",
+    "audit_table_truncation",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",
