@@ -362,3 +362,72 @@ test.describe("a committed pipeline move can be taken back", () => {
                  "a click on a node was recorded as a move").toBeDisabled();
   });
 });
+
+/**
+ * Where a pipeline node's preview is during a drag, against where it lands. V7 of
+ * the goal and the research's first evaluation scenario. Measured before it at
+ * the zoom floor: dnd-kit's delta of 88 screen pixels was written as a transform
+ * inside the scaled stage, so the preview had moved 48.4 pixels on screen while
+ * the drop committed 160 stage pixels and landed 88 away -- the node trailed its
+ * own landing and jumped on release.
+ *
+ * Everything is compared in stage pixels and read from the keyboard, so no
+ * bounding box is involved: the pointer version of this measurement failed three
+ * times because the canvas was still scrolling after the zoom presses.
+ */
+test.describe("a pipeline node's preview lands where its drop does", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+    await page.goto("/workspace/pipeline");
+    await page.getByRole("button", { name: "Reset layout" }).click();
+    await page.getByRole("button", { name: "New pipeline" }).click();
+    await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+    await page.getByRole("button", { name: "Input Dataset input" }).click();
+    await page.locator(".pipeline-canvas").getByRole("button", { name: /^Add / }).click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(1);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  });
+
+  const levels: Array<[string, string, number, number]> = [
+    ["the zoom floor", "Zoom out", 12, 0.55],
+    ["the fitted zoom", "Fit to view", 1, 0.86],
+    ["the zoom ceiling", "Zoom in", 20, 1.35],
+  ];
+
+  for (const [label, control, presses, expected] of levels) {
+    test(`at ${label} the drag preview and the landing agree`, async ({ page }) => {
+      for (let press = 0; press < presses; press += 1) await page.getByRole("button", { name: control }).click();
+      const scale = await page.locator(".canvas-stage").first()
+        .evaluate((element) => Number(/scale\(([\d.]+)\)/.exec((element as HTMLElement).style.transform)?.[1] ?? NaN));
+      expect(scale, `the canvas did not reach ${label}`).toBeCloseTo(expected, 5);
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+      const node = page.locator(".pipeline-canvas .pipeline-node").first();
+      const left = async () => Number.parseFloat((await node.evaluate((element) => (element as HTMLElement).style.left)) || "0");
+      const before = await left();
+
+      await node.focus();
+      const announcement = page.locator("[id^='DndLiveRegion']").filter({ hasText: /node:/ });
+      await page.keyboard.press("Space");
+      await expect(announcement, "the node drag never started").toContainText(/draggable item/i);
+      for (let step = 0; step < 4; step += 1) {
+        await page.keyboard.press("ArrowRight");
+        await page.waitForTimeout(60);
+      }
+      await page.waitForTimeout(150);
+      // The transform sits inside the scaled stage, so it is already in stage pixels.
+      const preview = await node.evaluate((element) =>
+        Number(/translate3d\(([-\d.]+)px/.exec((element as HTMLElement).style.transform)?.[1] ?? NaN));
+      expect(preview, "the live drag wrote no transform").toBeGreaterThan(0);
+
+      await page.keyboard.press("Space");
+      await expect(page.getByText(/Saved .+ position\./), "the move was not committed").toBeVisible();
+      const landed = (await left()) - before;
+
+      expect(Math.abs(preview - landed),
+             `at zoom ${scale} the preview was ${preview.toFixed(1)} stage px along and the node landed `
+             + `${landed.toFixed(1)} along, so it jumped on release`)
+        .toBeLessThanOrEqual(1);
+    });
+  }
+});

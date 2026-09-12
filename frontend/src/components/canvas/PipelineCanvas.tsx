@@ -123,6 +123,7 @@ export function PipelineCanvas({
           <PipelineNodeCard
             key={node.id}
             node={node}
+            zoom={zoom}
             selected={selectedNodeId === node.id}
             onSelect={onSelect}
           />
@@ -160,12 +161,21 @@ export function PipelineCanvas({
  * which also removes the uncommitted position updates the old version pushed on
  * every pointer move.
  */
-function PipelineNodeCard({ node, selected, onSelect }: {
+function PipelineNodeCard({ node, zoom, selected, onSelect }: {
   node: PipelineNode;
+  zoom: number;
   selected: boolean;
   onSelect: (nodeId: string) => void;
 }) {
   const draggable = useDraggable({ id: `node:${node.id}` });
+  // dnd-kit reports the drag in screen pixels, and this card sits inside a stage
+  // scaled by `zoom`, so the transform is divided by it -- the same division the
+  // drop already makes. Without it the preview moved 48.4 screen pixels of an
+  // 88-pixel landing at the zoom floor, and 35% past it at the ceiling: the node
+  // jumped on release. V7 of GOAL_MOVEMENT_2026-09-12.
+  const scaled = draggable.transform
+    ? { x: draggable.transform.x / zoom, y: draggable.transform.y / zoom }
+    : null;
   return (
     <button
       ref={draggable.setNodeRef}
@@ -173,9 +183,7 @@ function PipelineNodeCard({ node, selected, onSelect }: {
       style={{
         left: node.position.x,
         top: node.position.y,
-        transform: draggable.transform
-          ? `translate3d(${draggable.transform.x}px, ${draggable.transform.y}px, 0)`
-          : undefined,
+        transform: scaled ? `translate3d(${scaled.x}px, ${scaled.y}px, 0)` : undefined,
         zIndex: draggable.isDragging ? 3 : undefined
       }}
       onClick={() => onSelect(node.id)}

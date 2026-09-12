@@ -28,8 +28,8 @@ alert taken as a default is not a hidden row.
 
 | File | Line | In | Cuts | How | True count rendered |
 | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 252 | `MiniGraph` | `nodes` (slice) | mapped | no |
-| `components/canvas/PipelineCanvas.tsx` | 259 | `MiniGraph` | `edges` (slice) | mapped | no |
+| `components/canvas/PipelineCanvas.tsx` | 260 | `MiniGraph` | `nodes` (slice) | mapped | no |
+| `components/canvas/PipelineCanvas.tsx` | 267 | `MiniGraph` | `edges` (slice) | mapped | no |
 | `workspaces/DecisionWorkspace.tsx` | 118 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | no |
 | `workspaces/MapWorkspace.tsx` | 248 | `MapWorkspace` | `collection.features` (slice) | mapped | yes |
 | `workspaces/ObjectExplorer.tsx` | 191 | `ObjectExplorer` | `facet.buckets` (slice) | mapped | no |

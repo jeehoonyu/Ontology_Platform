@@ -237,11 +237,28 @@ Three things in that table are the defect the research describes:
   labelled a guard in its title for that reason.
 
   `MOVEMENT_CONTRACT.md` falls from **21 gaps to 20**.
-- **V7 — The preview lands where the drop does, at every zoom.** **Open** — a pipeline
-  node's live transform is divided by the stage's scale, so the preview and the landing
-  agree within a pixel at 0.55, 1 and 1.35. Proven by the keyboard measurement above,
-  turned into an assertion at all three zoom levels; today it reads 48.4 against 88 at the
-  floor.
+- **V7 — The preview lands where the drop does, at every zoom.** **Met** — a pipeline
+  node's live transform is divided by the stage's scale, the same division the drop already
+  made, so the preview and the landing agree within a pixel. Proven by three tests in
+  `movement-contract.spec.ts`, at the floor, the fitted zoom and the ceiling, each comparing
+  the live transform with the committed move in stage pixels from a keyboard drag.
+
+  The unfixed build ran first and failed all three, which turned the census's one
+  measurement and one derivation into three measurements:
+
+  | Zoom | Preview, stage px | Landed, stage px | Jump on release |
+  | --- | --- | --- | --- |
+  | 0.55 | 88.0 | 160.0 | 72.0 |
+  | 0.86 | 92.0 | 107.0 | 15.0 |
+  | 1.35 | 63.0 | 46.7 | 16.3 |
+
+  The ceiling row is the census's derivation — *35% past the landing* — now measured:
+  63.0 / 46.7 is 1.349. The middle row is the one worth saying out loud. `0.86` is the zoom
+  every pipeline opens at, so this was not an edge of the range: every node drag anyone had
+  made jumped fifteen stage pixels on release, and it read as the grid snapping. The fixed
+  build passed all three, with the cancel, undo, keyboard-move and shared-context tests
+  green beside them. This condition's negative run is the unfixed build, run before the fix
+  rather than after it; the break and the thing it breaks are the same line.
 - **V8 — Every save and reset says which scope it touches.** **Open** — the two
   Pipeline Builder controls stop sharing a noun; Platform Graph's control says what it
   keeps and confirms it; the ontology designer either keeps an arrangement as a personal
