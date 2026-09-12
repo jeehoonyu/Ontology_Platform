@@ -1,5 +1,5 @@
 import { useState, type MutableRefObject } from "react";
-import { useDraggable, useDroppable } from "@dnd-kit/core";
+import { useDndMonitor, useDraggable, useDroppable } from "@dnd-kit/core";
 import { DataTable, KeyValueGrid, StatusBadge } from "../data/DataDisplay";
 import { asString, classNames, formatValue } from "../../utils/format";
 import type {
@@ -20,6 +20,7 @@ export function PipelineCanvas({
   canvas,
   zoom,
   selectedNodeId,
+  selection = [],
   details,
   onSelect,
   containerRef,
@@ -33,8 +34,10 @@ export function PipelineCanvas({
   canvas: PipelineCanvasState | null;
   zoom: number;
   selectedNodeId: string;
+  /** Nodes selected together; a drag of any one of them carries all of them. */
+  selection?: string[];
   details?: PipelineNodeDetails | null;
-  onSelect: (nodeId: string) => void;
+  onSelect: (nodeId: string, extend?: boolean) => void;
   containerRef: MutableRefObject<HTMLDivElement | null>;
   onInsertEdge: () => void;
   onAddFirst?: () => void;
@@ -45,6 +48,19 @@ export function PipelineCanvas({
   onZoom: (next: number) => void;
 }) {
   const droppable = useDroppable({ id: "pipeline-canvas" });
+  // The live delta of a node drag, so the other selected nodes move with the one
+  // being dragged instead of jumping when it drops. dnd-kit transforms only the
+  // active draggable; the rest of a selection follows it from here. M5.
+  const [carry, setCarry] = useState<{ id: string; x: number; y: number } | null>(null);
+  useDndMonitor({
+    onDragMove(event) {
+      const id = String(event.active.id);
+      if (id.startsWith("node:")) setCarry({ id: id.slice(5), x: event.delta.x, y: event.delta.y });
+    },
+    onDragEnd() { setCarry(null); },
+    onDragCancel() { setCarry(null); }
+  });
+  const carried = carry && selection.length > 1 && selection.includes(carry.id) ? new Set(selection) : null;
   const nodes = canvas?.nodes || [];
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const selectedNode = byId.get(selectedNodeId);
@@ -136,7 +152,8 @@ export function PipelineCanvas({
             key={node.id}
             node={node}
             zoom={zoom}
-            selected={selectedNodeId === node.id}
+            selected={selectedNodeId === node.id || selection.includes(node.id)}
+            follow={carried && carry && carry.id !== node.id && carried.has(node.id) ? carry : null}
             onSelect={onSelect}
           />
         ))}
@@ -174,11 +191,13 @@ export function PipelineCanvas({
  * which also removes the uncommitted position updates the old version pushed on
  * every pointer move.
  */
-function PipelineNodeCard({ node, zoom, selected, onSelect }: {
+function PipelineNodeCard({ node, zoom, selected, follow, onSelect }: {
   node: PipelineNode;
   zoom: number;
   selected: boolean;
-  onSelect: (nodeId: string) => void;
+  /** Another selected node's live drag, which this one moves with. */
+  follow?: { x: number; y: number } | null;
+  onSelect: (nodeId: string, extend?: boolean) => void;
 }) {
   const draggable = useDraggable({ id: `node:${node.id}` });
   // dnd-kit reports the drag in screen pixels, and this card sits inside a stage
@@ -186,9 +205,8 @@ function PipelineNodeCard({ node, zoom, selected, onSelect }: {
   // drop already makes. Without it the preview moved 48.4 screen pixels of an
   // 88-pixel landing at the zoom floor, and 35% past it at the ceiling: the node
   // jumped on release. V7 of GOAL_MOVEMENT_2026-09-12.
-  const scaled = draggable.transform
-    ? { x: draggable.transform.x / zoom, y: draggable.transform.y / zoom }
-    : null;
+  const moved = draggable.transform || follow;
+  const scaled = moved ? { x: moved.x / zoom, y: moved.y / zoom } : null;
   return (
     <button
       ref={draggable.setNodeRef}
@@ -199,7 +217,7 @@ function PipelineNodeCard({ node, zoom, selected, onSelect }: {
         transform: scaled ? `translate3d(${scaled.x}px, ${scaled.y}px, 0)` : undefined,
         zIndex: draggable.isDragging ? 3 : undefined
       }}
-      onClick={() => onSelect(node.id)}
+      onClick={(event) => onSelect(node.id, event.shiftKey)}
       {...draggable.attributes}
       {...draggable.listeners}
     >

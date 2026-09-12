@@ -80,6 +80,10 @@ export function PipelineBuilder() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedGraphId, setSelectedGraphId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
+  // Nodes selected together, so one drag can carry several. M5 of
+  // GOAL_PANES_2026-09-11. The primary node still drives details, preview and the
+  // context menu; this only widens what a node drag moves.
+  const [selection, setSelection] = useState<string[]>([]);
   const [canvas, setCanvas] = useState<PipelineCanvasState | null>(null);
   const [preview, setPreview] = useState<NodePreview | null>(null);
   const [suggestions, setSuggestions] = useState<NodeSuggestions | null>(null);
@@ -92,7 +96,17 @@ export function PipelineBuilder() {
   // could take a move back. A move belongs to the graph it was made on, so a
   // different graph starts with nothing to undo.
   const [moves, setMoves] = useState<Array<{ graphId: string; nodeId: string; positions: Record<string, { x: number; y: number }> }>>([]);
-  useEffect(() => { setMoves([]); }, [selectedGraphId]);
+  useEffect(() => { setMoves([]); setSelection([]); }, [selectedGraphId]);
+  useEffect(() => {
+    if (!selection.length) return;
+    const clear = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if ((event.target as HTMLElement | null)?.closest("input, textarea, select")) return;
+      setSelection([]);
+    };
+    window.addEventListener("keydown", clear);
+    return () => window.removeEventListener("keydown", clear);
+  }, [selection.length]);
   // Node configuration typed and not yet saved, held above the panes. A pane moved
   // to another slot is a new parent, React remounts what it holds, and the form's
   // own state went with it: measured, a plain move or `Reset panes` replaced a
@@ -301,32 +315,46 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
-  function moveNode(nodeId: string, position: { x: number; y: number }, commit: boolean) {
-    setCanvas((current) => {
-      if (!current) return current;
-      const nodes = current.nodes.map((node) => node.id === nodeId ? { ...node, position } : node);
-      return {
-        ...current,
-        nodes,
-        selected_node: current.selected_node?.id === nodeId ? { ...current.selected_node, position } : current.selected_node
-      };
+  /** Click selects one node; Shift-click adds or removes one from the selection. */
+  function selectNode(nodeId: string, extend = false) {
+    setSelectedNodeId(nodeId);
+    setSelection((current) => {
+      if (!extend) return [nodeId];
+      const base = current.length ? current : selectedNodeId ? [selectedNodeId] : [];
+      return base.includes(nodeId) ? base.filter((id) => id !== nodeId) : [...base, nodeId];
     });
-    if (commit && selectedGraphId && canvas) {
-      const previous = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
-      setMoves((current) => [...current, { graphId: selectedGraphId, nodeId, positions: previous }]);
-      const positions = Object.fromEntries(canvas.nodes.map((node) => [
-        node.id,
-        node.id === nodeId ? position : node.position
-      ]));
-      setActionStatus(`Saving ${nodeId} position...`);
-      void savePipelineLayout(selectedGraphId, positions)
-        .then((nextCanvas) => {
-          setCanvas(nextCanvas);
-          setActionStatus(`Saved ${nodeId} position.`);
-          setRefreshKey((key) => key + 1);
-        })
-        .catch((error: Error) => setActionStatus(`Could not save layout: ${error.message}`));
-    }
+  }
+
+  /**
+   * Moves one node or several by the same stage-pixel delta, and commits once.
+   *
+   * One layout request and one undo entry however many nodes moved, because the
+   * move is one act: taking it back one node at a time would be three Undos for
+   * one drag, the defect V4 of GOAL_MOVEMENT removed from the artifact canvases.
+   */
+  function moveNodes(nodeIds: string[], delta: { x: number; y: number }) {
+    if (!selectedGraphId || !canvas) return;
+    const moving = new Set(nodeIds);
+    const placed = (node: { id: string; position: { x: number; y: number } }) => moving.has(node.id)
+      ? { x: Math.max(0, node.position.x + delta.x), y: Math.max(0, node.position.y + delta.y) }
+      : node.position;
+    setCanvas((current) => current && {
+      ...current,
+      nodes: current.nodes.map((node) => ({ ...node, position: placed(node) })),
+      selected_node: current.selected_node ? { ...current.selected_node, position: placed(current.selected_node) } : current.selected_node
+    });
+    const previous = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
+    const label = nodeIds.length === 1 ? nodeIds[0] : `${nodeIds.length} nodes`;
+    setMoves((current) => [...current, { graphId: selectedGraphId, nodeId: label, positions: previous }]);
+    const positions = Object.fromEntries(canvas.nodes.map((node) => [node.id, placed(node)]));
+    setActionStatus(`Saving ${label} position...`);
+    void savePipelineLayout(selectedGraphId, positions)
+      .then((nextCanvas) => {
+        setCanvas(nextCanvas);
+        setActionStatus(nodeIds.length === 1 ? `Saved ${label} position.` : `Saved positions of ${label}.`);
+        setRefreshKey((key) => key + 1);
+      })
+      .catch((error: Error) => setActionStatus(`Could not save layout: ${error.message}`));
   }
 
   /** One Undo, one committed move: the positions before it are saved back. */
@@ -363,10 +391,10 @@ export function PipelineBuilder() {
       // A node already on the canvas: commit once, where it came to rest.
       const node = canvas?.nodes.find((item) => item.id === id.slice(5));
       if (!node || (!event.delta.x && !event.delta.y)) return;
-      moveNode(node.id, {
-        x: Math.max(0, node.position.x + event.delta.x / zoom),
-        y: Math.max(0, node.position.y + event.delta.y / zoom)
-      }, true);
+      // A node inside a multi-node selection carries the whole selection; any
+      // other node moves alone, whatever else happens to be selected.
+      const carried = selection.length > 1 && selection.includes(node.id) ? selection : [node.id];
+      moveNodes(carried, { x: event.delta.x / zoom, y: event.delta.y / zoom });
       return;
     }
     if (event.over?.id !== "pipeline-canvas") return;
@@ -455,8 +483,9 @@ export function PipelineBuilder() {
               zoom={zoom}
               onZoom={(next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)))}
               selectedNodeId={selectedNodeId}
+              selection={selection}
               details={details}
-              onSelect={setSelectedNodeId}
+              onSelect={selectNode}
               containerRef={canvasRef}
               onInsertEdge={() => insertAfter(quickAddType)}
               onAddFirst={() => addFirstNode(quickAddType)}

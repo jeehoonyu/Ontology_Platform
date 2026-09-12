@@ -17,7 +17,7 @@ so. A count of what was kept does not fix that — only the length of what was c
 | --- | --- | --- | --- | --- | --- |
 | `components/data/DataDisplay.tsx` | 131 | `DataTable` | `safeRows` (slice) | held as shown | yes |
 | `workspaces/ObjectExplorer.tsx` | 160 | `ObjectExplorer` | `query.columns` (slice) | held as columns | yes |
-| `workspaces/PipelineBuilder.tsx` | 672 | `OntologyContractPanel` | `issues` (slice) | passed as rows | yes |
+| `workspaces/PipelineBuilder.tsx` | 701 | `OntologyContractPanel` | `issues` (slice) | passed as rows | yes |
 
 ## Outside a table — reported, not gated
 
@@ -28,8 +28,8 @@ alert taken as a default is not a hidden row.
 
 | File | Line | In | Cuts | How | True count rendered |
 | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 273 | `MiniGraph` | `nodes` (slice) | mapped | no |
-| `components/canvas/PipelineCanvas.tsx` | 280 | `MiniGraph` | `edges` (slice) | mapped | no |
+| `components/canvas/PipelineCanvas.tsx` | 291 | `MiniGraph` | `nodes` (slice) | mapped | no |
+| `components/canvas/PipelineCanvas.tsx` | 298 | `MiniGraph` | `edges` (slice) | mapped | no |
 | `workspaces/DecisionWorkspace.tsx` | 118 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | no |
 | `workspaces/MapWorkspace.tsx` | 248 | `MapWorkspace` | `collection.features` (slice) | mapped | yes |
 | `workspaces/ObjectExplorer.tsx` | 191 | `ObjectExplorer` | `facet.buckets` (slice) | mapped | no |

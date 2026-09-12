@@ -260,9 +260,34 @@ count upward and refuses a new fixed-track pane in a screen already on `Pane`.
   that way in M2 and not noticed, because the drop worked. M4 found it from the other end: a
   keyboard move announced `slot:center` and then committed `slot:left`, because the element
   was still physically in its old slot and a re-render mid-drag re-measured it there.
-- **M5 — More than one node in one drag.** **Open** — selection, `data: { ids }`, one
-  commit. Proven by `three selected nodes move together and commit once`, reading
-  committed positions and counting the command batch.
+- **M5 — More than one node in one drag.** **Met** — on the pipeline canvas, click selects a
+  node, Shift-click adds or removes one, and Escape clears the selection. Dragging any node of
+  a multi-node selection carries all of them by the same delta, live, and commits once: one
+  layout request and one `Undo move` entry, however many nodes moved. A node outside the
+  selection still moves alone. Proven by `three selected nodes move together and commit
+  once` in `multi-node-drag.spec.ts`, which reads committed positions — `style.left`, never a
+  bounding box — and counts the `PATCH …/layout` requests, because "moved together" and
+  "saved once" are separate claims and a build can make the first true with three requests.
+
+  Two things differ from the design above, and both are deliberate. **The selection rides in
+  the drop handler rather than in `data: { ids }`**: the handler already knows the selection,
+  so copying it into every draggable's data would be a second copy to keep in step with the
+  first. **The other selected nodes follow the drag through `useDndMonitor`**, because dnd-kit
+  transforms only the active draggable — without it the rest of the selection sat still and
+  jumped into place on release. The count badge in a `DragOverlay` is not built; the selection
+  highlight on every carried node already says what is moving, and a badge is a design choice
+  this condition does not need.
+
+  Negative runs, three builds. A drag that moves only the dragged node: `the move was not
+  committed as one`. The rest of the selection not following a live drag: `selected node 2
+  did not move with the drag while it was live`, the transform empty. Escape leaving the
+  selection: `Received: 3`. Restored, it passed, with every pipeline cancel, undo, zoom,
+  scrolled-canvas and reset test from `GOAL_MOVEMENT`, the concurrent drags, the keyboard node
+  move, the palette drop and the zoom controls green on the same build — nineteen tests.
+
+  Escape during a live node drag still cancels the drag, as dnd-kit does, and also clears the
+  selection. The cancel test holds position and writes; the selection is transient state, so
+  clearing it is not a mutation, and it is named here rather than left for someone to find.
 - **M6 — The person holding a node is visible before the conflict.** **Open** — the
   held-by badge from heartbeat selection. Proven by a two-context browser test where the
   second page sees the first page's selection on the node within one heartbeat.
