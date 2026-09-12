@@ -52,11 +52,23 @@ export function PipelineCanvas({
   return (
     <div
       ref={(element) => {
-        droppable.setNodeRef(element);
         containerRef.current = element;
       }}
       className={classNames("pipeline-canvas", droppable.isOver && "drag-active")}
     >
+      {/* The drop target sits inside the scrolling canvas rather than being it.
+          dnd-kit sums scroll offsets over the scrollable ancestors of whatever a
+          drag is over, and an element is not its own ancestor, so with the canvas
+          as the droppable its scroll left the sum the moment a node was over it:
+          a node picked up on a canvas scrolled 100px at zoom 0.86 jumped -116.3
+          stage px and was saved there. Sized to the zoomed stage and stretched to
+          the canvas, so it still covers everything a drop can land on. V10 of
+          GOAL_MOVEMENT_2026-09-12. */}
+      <div
+        ref={droppable.setNodeRef}
+        className="pipeline-canvas-drop"
+        style={{ minWidth: 1500 * zoom, minHeight: 700 * zoom }}
+      >
       {/* These three rendered and did nothing, while a working copy of the same
           three sat in the document action row beside Deploy and Delete node --
           so the obvious place to zoom was the dead one. Zoom is a viewport
@@ -142,6 +154,7 @@ export function PipelineCanvas({
             </button>
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );

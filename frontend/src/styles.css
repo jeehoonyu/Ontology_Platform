@@ -2777,6 +2777,9 @@ pre {
 .pipeline-canvas {
   position: relative;
   overflow: auto;
+  /* One grid item, the drop target, so it stretches to the whole canvas while
+     staying inside the scroll container: see `.pipeline-canvas-drop`. */
+  display: grid;
   min-height: 520px;
   background: #edf1f4;
 }
@@ -2785,6 +2788,17 @@ pre {
   outline: 2px solid #1e88e5;
   outline-offset: -2px;
   background: #e9f4fb;
+}
+
+/* The pipeline canvas's drop target. It is inside the scrolling canvas rather than
+   being it, because dnd-kit adds up scroll offsets over the scrollable ancestors
+   of whatever a drag is over, and an element is not its own ancestor: with the
+   canvas itself as the droppable, its scroll dropped out of the sum the moment a
+   node was over it, and a node picked up on a canvas scrolled sideways jumped by
+   that scroll. V10 of GOAL_MOVEMENT_2026-09-12. Not positioned, so the controls
+   and legend still place themselves against the canvas. */
+.pipeline-canvas-drop {
+  min-width: 0;
 }
 
 .canvas-stage {

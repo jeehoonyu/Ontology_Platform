@@ -323,8 +323,38 @@ Three things in that table are the defect the research describes:
   pane threw away input that had not been sent` — before it reached the reset. Restored,
   it passed, with the movement contract and the pipeline workflows green on the same build,
   sixteen tests.
-- **V10 — Picking a node up on a scrolled canvas does not move it.** **Open** — found while
-  V8 was being verified, not by the census. A pipeline node picked up on a canvas already
+- **V10 — Picking a node up on a scrolled canvas does not move it.** **Met** — the pipeline
+  canvas's drop target is a wrapper inside the scrolling canvas instead of the canvas
+  itself. Proven by two tests on a canvas scrolled 100 pixels sideways: a pick-up and drop
+  with no movement leaves the node where it was and saves nothing, and one arrow key to the
+  right moves it to the right.
+
+  **The cause was in how the canvas was wired to dnd-kit, not in dnd-kit.** dnd-kit adds up
+  scroll offsets over the scrollable ancestors of the node being dragged — and, once the drag
+  is over a droppable, over the ancestors of *that* droppable instead. The droppable here was
+  `.pipeline-canvas`, which is also the element that scrolls, and an element is not its own
+  ancestor. So at pick-up the canvas's scroll was in the sum, a frame later the node was over
+  the canvas and it was not, and dnd-kit read the difference as the canvas having scrolled
+  back by `scrollLeft`. That predicts a pick-up transform of exactly `-scrollLeft / zoom` and
+  nothing at all on an unscrolled canvas, which is what the probe had measured before the
+  source was read. Found by reading `useScrollableAncestors(overNode ?? activeNode)` in
+  dnd-kit's own build after the numbers, not before.
+
+  The fix puts the droppable one level inside the scroll container, so the dragged node and
+  the thing it is over share the same scrolling ancestors, canvas included. The canvas became
+  a one-item grid so the wrapper stretches to the whole visible canvas, with a minimum size of
+  the zoomed stage so a drop anywhere on the drawn graph still lands. The wrapper is not
+  positioned, so the zoom controls and legend still place themselves against the canvas.
+
+  The unfixed build ran first and failed both: the pick-up transform read
+  `translate3d(-116.279px, 0px, 0px)` — `-100 / 0.86` — and the node was saved at `3.72`
+  instead of `120`; one arrow key right moved it `-87.2`. The fixed build passed both, and
+  twenty-one more beside them across four widths: every cancel, undo and zoom test in the
+  spec, the palette drop onto the canvas, the touch first-node add, the keyboard node move,
+  the zoom controls, the shared-context drags, and the pipeline screen's render and
+  accessibility sweep.
+
+  Found while V8 was being verified, not by the census. A pipeline node picked up on a canvas already
   scrolled sideways is displaced by that scroll offset before any key is pressed, and the
   drop commits the displacement. Measured by a probe recording every scrollable ancestor
   press by press:

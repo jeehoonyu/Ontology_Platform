@@ -324,8 +324,8 @@ test.describe("a committed pipeline move can be taken back", () => {
     // already scrolled sideways is displaced by that scroll offset before any key is
     // pressed, and the drop commits it: measured scrolled 103px at zoom 0.86, the
     // node jumped -119.8 stage px on pick-up, and four presses right landed it 3.5px
-    // to the left. That is V10 of the goal, its own defect with its own test; this
-    // one is about taking a move back, so it starts where that defect cannot reach it. The three
+    // to the left. That was V10 of the goal, fixed with its own test; this one is
+    // about taking a move back, and stays unscrolled so a regression of V10 fails V10. The three
     // placements tried before this -- in view, centred, at the edge -- each moved the
     // canvas and each failed differently, which is how the defect was found.
     await page.locator(".pipeline-canvas").evaluate((element) => { element.scrollLeft = 0; });
@@ -422,8 +422,8 @@ test.describe("a pipeline node's preview lands where its drop does", () => {
       // already scrolled sideways is displaced by that scroll offset before any key is
       // pressed, and the drop commits it: measured scrolled 103px at zoom 0.86, the
       // node jumped -119.8 stage px on pick-up, and four presses right landed it 3.5px
-      // to the left. That is V10 of the goal, its own defect with its own test; this
-      // one is about the preview against the landing, so it starts where that defect cannot reach it. The three
+      // to the left. That was V10 of the goal, fixed with its own test; this one is
+      // about the preview against the landing, and stays unscrolled so a regression of V10 fails V10. The three
       // placements tried before this -- in view, centred, at the edge -- each moved the
       // canvas and each failed differently, which is how the defect was found.
       await page.locator(".pipeline-canvas").evaluate((element) => { element.scrollLeft = 0; });
@@ -594,5 +594,78 @@ test.describe("resetting the panes touches only the panes", () => {
            "resetting the panes moved a node in the graph")
       .toBe(positionBefore);
     expect(writes, "resetting the panes sent a write to the server").toEqual([]);
+  });
+});
+
+/**
+ * A pipeline node picked up on a canvas already scrolled sideways. V10 of the goal,
+ * found while V8 was verified: the node was displaced by the canvas's scroll
+ * offset before any key was pressed, and the drop committed it -- scrolled 103px
+ * at zoom 0.86, a pick-up and four presses right landed the node 3.5px to the left.
+ */
+test.describe("a node picked up on a scrolled canvas stays where it was", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+    await page.goto("/workspace/pipeline");
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    await page.getByRole("button", { name: "New pipeline" }).click();
+    await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+    await page.getByRole("button", { name: "Input Dataset input" }).click();
+    await page.locator(".pipeline-canvas").getByRole("button", { name: /^Add / }).click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(1);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  });
+
+  async function scrollCanvas(page: Page, px: number) {
+    const canvas = page.locator(".pipeline-canvas");
+    await canvas.evaluate((element, left) => { element.scrollLeft = left; }, px);
+    await expect.poll(() => canvas.evaluate((element) => element.scrollLeft),
+                      { message: "the canvas could not be scrolled sideways" }).toBeGreaterThanOrEqual(px - 1);
+    await page.waitForTimeout(200);
+  }
+
+  const leftOf = (page: Page) => page.locator(".pipeline-canvas .pipeline-node").first()
+    .evaluate((element) => Number.parseFloat((element as HTMLElement).style.left) || 0);
+
+  test("a pick-up and drop with no movement on a scrolled canvas leaves the node in place", async ({ page }) => {
+    await scrollCanvas(page, 100);
+    const node = page.locator(".pipeline-canvas .pipeline-node").first();
+    const before = await leftOf(page);
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    });
+
+    await node.focus();
+    const announcement = page.locator("[id^='DndLiveRegion']").filter({ hasText: /node:/ });
+    await page.keyboard.press("Space");
+    await expect(announcement, "the node drag never started").toContainText(/draggable item/i);
+    await page.waitForTimeout(200);
+    const onPickUp = await node.evaluate((element) => (element as HTMLElement).style.transform);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(800);
+
+    expect(await leftOf(page),
+           `picking the node up and putting it straight down moved it; its transform on pick-up was "${onPickUp}"`)
+      .toBe(before);
+    expect(writes, "a drop that moved nothing saved a position").toEqual([]);
+  });
+
+  test("an arrow key to the right on a scrolled canvas moves the node right", async ({ page }) => {
+    await scrollCanvas(page, 100);
+    const node = page.locator(".pipeline-canvas .pipeline-node").first();
+    const before = await leftOf(page);
+
+    await node.focus();
+    const announcement = page.locator("[id^='DndLiveRegion']").filter({ hasText: /node:/ });
+    await page.keyboard.press("Space");
+    await expect(announcement, "the node drag never started").toContainText(/draggable item/i);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Space");
+    await expect(page.getByText(/Saved .+ position\./), "the move was not committed").toBeVisible();
+
+    expect(await leftOf(page) - before, "one arrow key to the right did not move the node to the right")
+      .toBeGreaterThan(10);
   });
 });
