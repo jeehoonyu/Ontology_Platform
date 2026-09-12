@@ -1,0 +1,186 @@
+# Goal — A move you can take back, and a save that says what it keeps
+
+Stated 2026-09-12, from [`FOUNDRY_UI_RESEARCH_2026-09-12.md`](FOUNDRY_UI_RESEARCH_2026-09-12.md),
+which extends the [platform review](FOUNDRY_PLATFORM_UI_REVIEW_2026-09-11.md). Runs
+alongside [`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), open at M5, and
+[`GOAL_HONEST_UI_2026-09-11.md`](GOAL_HONEST_UI_2026-09-11.md), open at N5.
+
+## Why this, out of a plan with eight work packages
+
+The research proposes an interaction contract — discover, start, preview, traverse,
+reject, commit, cancel, recover — and a delivery order whose first item is not a feature:
+*recheck the existing pane and canvas implementation against the contract, record current
+behaviour and remaining gaps.* It says in as many words that the earlier review's code
+observations are a dated baseline that must be rechecked before anything is built.
+
+That recheck is this goal's census, and it was run before a condition was written. It
+is the same discipline as every goal before it: count, gate the count, then fix. The later
+packages — typed drop targets, a nested layout editor, saved views with private and shared
+defaults, map camera stability, rendering cost, narrow screens — are real, and each needs
+its own census. They are listed at the end as not started, not as done.
+
+## What the census says
+
+Measured in a browser against the build at `bd44a57`, by a probe that recorded each drag's
+mid-drag state before judging it — the class a live drag carries, the transform it writes,
+the announcement it makes. Two of the probe's first readings were wrong for exactly that
+reason: a pipeline node drag and a VisualBuilder drag each "passed" Escape because the drag
+had never started. One was aimed at a node scrolled out of view, so the pointer landed on
+the sidebar. A cancel test that does not prove the drag was live proves nothing.
+
+### Cancel and recover, per movement surface
+
+| Surface | Mechanism | Escape mid-drag | Undo after | Measured |
+| --- | --- | --- | --- | --- |
+| pane between slots | `DragKit` | **restores**, no write | not applicable — a layout preference; `Reset layout` and `Move to…` | live: transform and `moved over slot:right` before Escape |
+| pipeline node on its canvas | `DragKit` | **restores**, no request | **none** — the drop saves to the server and nothing takes it back | live: `dragging` class, transform, announcement |
+| pane splitter | hand-written pointer listener | **does not cancel** — 220 → 382 during, 382 after, 382 written to `localStorage` | not applicable | live: `aria-valuenow` 382 mid-drag |
+| VisualBuilder node (xyflow) | `@xyflow/react` | **does not cancel** — (120, 100) → (192, 128), stays | **8 undo presses for one drag** | live: `dragging` class |
+| VisualBuilder node, click with no movement | `@xyflow/react` | — | **no entry**, as the contract asks | one Undo removed the node added before it |
+| palette entry, library entry, field and property rows | `DragKit` | same sensor as the pipeline node; not separately measured | — | — |
+| ontology designer and platform graph nodes | `@xyflow/react` | same library as VisualBuilder; not separately measured | none | — |
+
+**One VisualBuilder drag writes eight undo entries into a fifty-entry history.** `changeNodes`
+snapshots on every `position` change, and xyflow emits one for each grid step a drag
+crosses. So one move takes eight presses to take back, and six ordinary drags push the
+oldest real edit out of the history entirely. The research's recover rule is one undo per
+completed move; this is one per sixteen pixels.
+
+**The splitter is the only surface where Escape commits.** It is the one control not on
+a drag library — kept on a pointer listener on purpose, with the reason recorded in
+`DRAG_AFFORDANCES.md` — and it listens for `pointermove` and `pointerup` and nothing else.
+No `pointercancel` either, so a touch interrupted by the system leaves it resizing.
+
+**And the splitter has no single-pointer alternative.** It resizes by drag and by arrow
+keys. The research is specific that keyboard support does not satisfy WCAG 2.5.7, which
+asks for a way to do a dragging operation with a single pointer and no drag. Every *move*
+in the product already has one (`Move to…`, `Up`/`Down`, tap-to-place); the *resize* does
+not.
+
+### Where a drag lands, at a zoom other than one
+
+**At the zoom floor the preview shows a little over half of the move.** A keyboard drag of
+a pipeline node at `scale(0.55)`, chosen so that no bounding box is read: dnd-kit's delta
+was 88 screen pixels, and it is written as the node's transform *inside* the scaled stage,
+so while the drag was live the node had moved 48.4 pixels on screen. The drop divided the
+delta by the zoom, as it should, committed 160 stage pixels, and the node landed 88 pixels
+from where it began. The preview trails its own landing by 40 pixels and the node jumps on
+release.
+
+The commit is right and the preview is wrong: `endCanvasDrag` divides by `zoom` and
+`PipelineNodeCard`'s transform does not. At the ceiling, `1.35`, the same arithmetic puts
+the preview 35% *past* the landing — derived from the code, not measured. This is the
+research's first evaluation scenario, and it fails at both ends of the range that
+`GOAL_HONEST_UI` N2 wired to the canvas zoom controls.
+
+The pointer version of this measurement failed three times before the keyboard one was
+used, and not for a reason about zoom: after twelve zoom presses the canvas was still
+scrolling, so a node's box read before the pointer went down was somewhere else by the
+time it did. That is worth a sentence because it is the same lesson as `GOAL_DRAG` L8 from
+the other side — a bounding box is what the layout engine was doing at the moment it was
+read.
+
+### Every save and reset, and the scope it actually has
+
+The research names four scopes — personal workspace, authored artifact, saved analysis
+view, transient work — and asks that each save action be named by the one it touches. Read
+from the source, not measured:
+
+| Control | Screen | Writes | Scope | What it says |
+| --- | --- | --- | --- | --- |
+| `Reset layout` | Pipeline Builder | pane slots, sizes, collapsed, hidden — `localStorage` | personal workspace | nothing; the layout changes |
+| `Save layout` | Pipeline Builder | node positions — server | authored artifact | "Layout saved for this graph." |
+| a node drop | Pipeline Builder | node positions — server | authored artifact | "Saved *id* position." |
+| `Save view` | Platform Graph | node positions only — `localStorage` | personal workspace | **nothing** |
+| `Save view` | Object Explorer | filters, columns, charts, search — server | saved analysis view | "Saved exploration *name*"; no private or shared choice |
+| autosave | the four VisualBuilder artifacts | a revision, 1.2 s after an edit — server | authored artifact | the revision reason |
+| `Reset view` | Map | the camera | transient | — |
+| *(no control)* | Ontology designer | node positions — **nowhere** | — | the panel says *drag object types to arrange the ontology* |
+
+Three things in that table are the defect the research describes:
+
+- **`Save layout` and `Reset layout` sit on the same screen and mean different things.**
+  One writes the artifact to the server for everyone; the other clears a personal
+  arrangement in this browser. The same noun names two scopes, and the one with the wider
+  reach is the one that sounds smaller. `Save layout` also re-sends positions every drop
+  has already saved.
+- **Platform Graph's `Save view` saves node positions and nothing else, silently.** The
+  search, the kind filters and the neighbourhood toggle — the things a person would call a
+  view — are not in it, and the button gives no sign it did anything.
+- **The ontology designer invites arranging and keeps none of it.** Positions live in
+  component state; a reload lays the graph out again. The instruction is on the panel and
+  the arrangement is discarded without a word.
+
+## Conditions
+
+- **V1 — Count the contract, and make the count a gate.** **Open** —
+  `oms/audit_movement_contract.py` and a generated `MOVEMENT_CONTRACT.md`: every movement
+  surface the drag census knows, against *cancel*, *recover* and *single-pointer
+  alternative*, each either a named browser test that exists or a recorded gap. Gaps are a
+  ceiling; a claim naming a test that does not exist is refused; a new movement surface
+  with no row is refused. Written first, because its number decides the order of the rest.
+- **V2 — Escape cancels a resize.** **Open** — the splitter restores the width it started
+  from and writes nothing, on `Escape` and on `pointercancel`. Proven against a live resize,
+  asserting the mid-drag width moved before asserting it came back.
+- **V3 — A resize without a drag or a key.** **Open** — a single-pointer control for every
+  splitter, proven with clicks only. WCAG 2.5.7, which keyboard support does not satisfy.
+- **V4 — One move, one undo.** **Open** — a VisualBuilder drag records one history entry
+  when it starts, not one per grid step: one Undo returns the node to where the drag began.
+  The click-with-no-movement case stays at zero entries and is kept as a guard.
+- **V5 — Escape cancels a graph node drag.** **Open** — VisualBuilder first, which is where
+  a cancelled drag would otherwise be autosaved into a revision; the ontology designer and
+  platform graph follow if the same fix reaches them. Restores positions, records no history,
+  marks nothing dirty.
+- **V6 — A pipeline node move can be taken back.** **Open** — one Undo reverses one
+  committed move, re-saving the previous positions. A drop that moved nothing records
+  nothing, which the drop handler already guarantees and the test holds.
+- **V7 — The preview lands where the drop does, at every zoom.** **Open** — a pipeline
+  node's live transform is divided by the stage's scale, so the preview and the landing
+  agree within a pixel at 0.55, 1 and 1.35. Proven by the keyboard measurement above,
+  turned into an assertion at all three zoom levels; today it reads 48.4 against 88 at the
+  floor.
+- **V8 — Every save and reset says which scope it touches.** **Open** — the two
+  Pipeline Builder controls stop sharing a noun; Platform Graph's control says what it
+  keeps and confirms it; the ontology designer either keeps an arrangement as a personal
+  preference or stops inviting one. Each proven by a test that reloads.
+- **V9 — Resetting a layout touches only the layout.** **Open** — `Reset layout` leaves the
+  artifact's nodes and any unsent input exactly as they were. The research's fourth
+  scenario; nothing asserts it today.
+
+## Order and size
+
+| Step | Touches | Commits |
+| --- | --- | --- |
+| V1 | `oms/audit_movement_contract.py`, test, reference, baseline, registries | 1 |
+| V2, V3 | `components/layout/Pane.tsx`, spec | 1 |
+| V4, V5 | `workspaces/VisualBuilder.tsx`, spec | 1–2 |
+| V6 | `workspaces/PipelineBuilder.tsx`, spec | 1 |
+| V7 | `components/canvas/PipelineCanvas.tsx`, spec | 1 |
+| V8 | `PipelineBuilder.tsx`, `PlatformGraph.tsx`, `OntologyManager.tsx`, spec | 1–2 |
+| V9 | spec | 1 |
+
+Every test is run once against a build with the thing it defends removed, and every cancel
+test first proves the drag was live.
+
+## Deliberately not here
+
+- **Typed drop targets with effect labels** ("Use 12 flights as chart input"). The research's
+  P1. Needs a census of what each droppable accepts before any label can be honest.
+- **A nested operational layout editor** — sections, rows, proportions. P1, and a design
+  project, not a defect.
+- **Saved views with private and global defaults.** P1. Object Explorer's `Save view` is
+  the one real saved view today and has no audience choice; that is recorded above and
+  left for its own goal.
+- **Map camera stability, rendering cost under repeated resizes, narrow-screen
+  presentation.** P2, each with its own measurement.
+- **Undo for a multi-node drag.** Rides with `GOAL_PANES` M5, which introduces the
+  multi-node drag.
+
+## What this is not
+
+Not a restatement of the research. Its visual references and product observations stand
+where they are; this goal cites them and copies neither.
+
+Not a claim that the contract's other stages are met. Discover, start, preview, traverse,
+reject and commit are not measured here; V1's census is where they would be added, one
+column at a time, once each has a test that can fail.

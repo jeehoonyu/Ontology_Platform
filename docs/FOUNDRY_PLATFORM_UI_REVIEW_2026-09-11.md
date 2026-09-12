@@ -2,6 +2,8 @@
 
 Reviewed September 11, 2026. Companion to the [initial canvas plan](FOUNDRY_UI_IMPROVEMENT_PLAN_2026-09-11.md).
 
+September 12 update: [Deeper research with official visual references](FOUNDRY_UI_RESEARCH_2026-09-12.md) refines movement models, save scopes, accessibility, rendering behavior, and implementation acceptance criteria.
+
 ## Scope and evidence
 
 The authenticated application's launcher exposed 61 application entries. I opened all 61 entry points and inspected their rendered UI. These include three IDE-specific links to the shared Code Workspaces application; 61 entries does not mean 61 distinct editors.
