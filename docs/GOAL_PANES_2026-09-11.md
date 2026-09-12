@@ -288,9 +288,40 @@ count upward and refuses a new fixed-track pane in a screen already on `Pane`.
   Escape during a live node drag still cancels the drag, as dnd-kit does, and also clears the
   selection. The cancel test holds position and writes; the selection is transient state, so
   clearing it is not a mutation, and it is named here rather than left for someone to find.
-- **M6 — The person holding a node is visible before the conflict.** **Open** — the
-  held-by badge from heartbeat selection. Proven by a two-context browser test where the
-  second page sees the first page's selection on the node within one heartbeat.
+- **M6 — The person holding a node is visible before the conflict.** **Met**, on the four
+  artifact canvases — a node another editor has selected is outlined and labelled *Selected
+  by …*, from the selection each participant's heartbeat already carried and nothing drew.
+  Proven by `a second editor sees the first editor's selection on the node within seconds` in
+  `collaboration-held-by.spec.ts`: two browser contexts on one artifact; the first selects a
+  node; the second sees it marked within eight seconds, a node the first did not select stays
+  unmarked, the first page does not see its own selection as someone else's, and the mark
+  follows the selection when it moves to another node.
+
+  **"Within one heartbeat" was twenty seconds, which is after the conflict.** The heartbeat
+  ran every 20 seconds, so a badge fed by it could arrive long after the second editor had
+  already dragged the node and taken the 409. The selection now goes out 300 milliseconds
+  after it changes, and the other page refetches presence every four seconds — so the test
+  holds eight seconds, not twenty.
+
+  Both contexts sign in as the same local principal, so the badge's *name* cannot tell them
+  apart in the test; *where* it appears can, and that is what is asserted. The badge is drawn
+  on the canvas's copy of the nodes only — through xyflow's `domAttributes` and a class — so it
+  never reaches the artifact's state, its command diff or a saved revision. No lock was added,
+  as the design above decided.
+
+  Negative runs, two builds. The canvas handed the plain nodes instead of the badged copy:
+  `the second editor was not told the node is selected by someone else`, the node's class
+  list without `held-by-other`. The selection left to the periodic heartbeat: the same
+  failure inside eight seconds. That second negative depends on setup finishing well inside
+  twenty seconds of the first page joining, which it did; it is a timing argument, and it is
+  named as one. Restored, it passed, with the undo and Escape tests for the artifact canvas,
+  the visual builder workflow, the two-editor collaboration test and the library and
+  field-list drags green on the same build.
+
+  Not reached: the pipeline builder has no collaboration session, so its canvas has no
+  participants whose selection could be drawn. The design's drag overlay that names the
+  holder during the drag is not built; the badge is visible before the drag starts, which is
+  the moment the condition is about.
 - **M7 — Every builder is on `Pane`, and the count cannot fall.** **Open** — the four
   visual-builder artifact types, then the ontology manager. The rollout is the
   `audit_ui_primitives` user count for `Pane` and the `audit_pane_layout` movable ratchet.

@@ -6413,3 +6413,24 @@ pre {
   text-align: center;
   padding: 20px 24px;
 }
+
+/* A node another editor has selected. M6 of GOAL_PANES_2026-09-11: visible before
+   the overlap becomes a 409, not after. */
+.react-flow__node.held-by-other {
+  outline: 2px dashed #b58018;
+  outline-offset: 3px;
+}
+
+.react-flow__node.held-by-other::after {
+  content: "Selected by " attr(data-held-by);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #fff4d6;
+  color: #5c4308;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}

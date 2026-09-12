@@ -272,6 +272,21 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     };
   }, [artifact?.id, collaboration?.participant_token, queryClient]);
 
+  // Tell the others what is selected as soon as it changes, not at the next
+  // twenty-second heartbeat. M6 of GOAL_PANES_2026-09-11: a held-by badge that
+  // arrives twenty seconds after someone picked a node up arrives after the
+  // conflict it exists to prevent.
+  const selectionKey = selectedNodeIds(nodes).join(",");
+  useEffect(() => {
+    if (!artifact || !collaboration) return;
+    const timer = window.setTimeout(() => {
+      heartbeatArtifactCollaboration(artifact.id, collaboration.participant_token, selectionRef.current)
+        .then(() => queryClient.invalidateQueries({ queryKey: ["artifact-collaboration", artifact.id] }))
+        .catch(() => undefined);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [selectionKey, artifact?.id, collaboration?.participant_token, queryClient]);
+
   useEffect(() => {
     if (!artifact || !collaboration) return;
     let active = true;
@@ -611,6 +626,30 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }, [nodes, edges, selectedNodeId]);
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+
+  // Who else is holding each node, from their heartbeat selection. M6 of
+  // GOAL_PANES_2026-09-11: collaboration rebases non-overlapping edits and returns
+  // 409 on overlap, and nothing showed that someone else had a node until the
+  // 409 arrived. No lock: this only makes the overlap visible before it happens.
+  const heldBy = useMemo(() => {
+    const names = new Map<string, string[]>();
+    for (const participant of collaborators.data?.participants || []) {
+      if (participant.id === collaboration?.participant.id) continue;
+      for (const id of participant.selection || []) names.set(id, [...(names.get(id) || []), participant.display_name]);
+    }
+    return names;
+  }, [collaborators.data?.participants, collaboration?.participant.id]);
+  // What the canvas draws. The badge lives on this copy only, so it never reaches
+  // the artifact's state, its command diff, or a saved revision.
+  const flowNodes = useMemo(() => heldBy.size ? nodes.map((node) => {
+    const holders = heldBy.get(node.id);
+    if (!holders) return node;
+    return {
+      ...node,
+      className: `${node.className || ""} held-by-other`,
+      domAttributes: { title: `Selected by ${holders.join(", ")}`, "data-held-by": holders.join(", ") } as Node["domAttributes"]
+    };
+  }) : nodes, [nodes, heldBy]);
   const pendingCommands = artifact ? diffArtifactCommands(artifact.state, nodes, edges) : [];
 
   if (artifacts.isLoading) return <LoadingState label={`Loading ${title} artifacts...`} />;
@@ -693,7 +732,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
         <div className="visual-builder-center">
           <BuilderCanvas breakpoint={breakpoint}>
             <ReactFlow<Node<ArtifactNodeData>, Edge>
-              nodes={nodes}
+              nodes={flowNodes}
               edges={edges}
               onInit={setInstance}
               onNodesChange={changeNodes}
