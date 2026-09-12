@@ -51,7 +51,13 @@ What this does not see, stated rather than implied:
   - a cut passed down to a child component declared in another file;
   - a limit applied by the server, which is paging and is N5;
   - a total from a different field -- a server-side `summary.events` beside a
-    table of `events` -- which is refused, and is the stricter of the two errors.
+    table of `events` -- which is refused, and is the stricter of the two errors;
+  - a total rendered under a condition that has nothing to do with the cut.
+    Found by N8's own negative run: the operations feed's server-limit note
+    renders `{events.length}` only when the server holds more events than were
+    loaded, and with the call-site slice put back this gate accepted the slice
+    because of that note. Whether a condition coincides with a cut is not
+    something a scan can decide, so the browser test is what refuses that build.
 
   - *Reported:* every truncation, whether it reaches a table, and whether it is
     accompanied. Truncations outside a table are listed and not gated.

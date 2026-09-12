@@ -35,8 +35,15 @@ export function OpsWorkspace() {
 }
 
 function CommandTab({ summary, events }: { summary: OpsSummary | null; events: OpsEvent[] }) {
-  const rows: TableRow[] = events.slice(0, 25).map((event) => ({ severity: event.severity, source: event.source, event: event.event_type, title: event.title, status: event.status, occurred: new Date(event.created_at * 1000).toLocaleString() }));
-  return <div className="ops-command-layout"><Panel title="Live Operational Feed" action={<Activity size={16} />}><DataTable rows={rows} empty="No operational events yet" /></Panel><Panel title="Current Severity"><KeyValueGrid data={summary?.severity_counts || {}} /><h3>Latest incidents</h3><div className="ops-compact-list">{summary?.latest_incidents.map((item) => <article key={item.id}><span><strong>{item.display_name}</strong><small>{item.owner || "unassigned"}</small></span><StatusBadge value={item.severity} /></article>)}</div>{!summary?.latest_incidents.length ? <div className="empty">No open incidents.</div> : null}</Panel></div>;
+  // Every loaded event goes to the table, and the table says how many it shows.
+  // This cut them to twenty-five first, so DataTable received twenty-five,
+  // showed twenty-five, and had nothing to caption -- the one way round N3's
+  // caption, found by `audit_table_truncation`. The list endpoint also stops at
+  // 250, so when the server holds more than was loaded that is said as well: a
+  // caption counting 250 would be the same silence one layer down.
+  const rows: TableRow[] = events.map((event) => ({ severity: event.severity, source: event.source, event: event.event_type, title: event.title, status: event.status, occurred: new Date(event.created_at * 1000).toLocaleString() }));
+  const held = summary?.events || 0;
+  return <div className="ops-command-layout"><Panel title="Live Operational Feed" action={<Activity size={16} />}>{held > events.length ? <p className="table-truncated" role="note">Loaded the latest {events.length.toLocaleString()} of {held.toLocaleString()} events</p> : null}<DataTable rows={rows} empty="No operational events yet" /></Panel><Panel title="Current Severity"><KeyValueGrid data={summary?.severity_counts || {}} /><h3>Latest incidents</h3><div className="ops-compact-list">{summary?.latest_incidents.map((item) => <article key={item.id}><span><strong>{item.display_name}</strong><small>{item.owner || "unassigned"}</small></span><StatusBadge value={item.severity} /></article>)}</div>{!summary?.latest_incidents.length ? <div className="empty">No open incidents.</div> : null}</Panel></div>;
 }
 
 function AlertsTab({ rules, alerts, busy, onCreate, onEvent }: { rules: AlertRule[]; alerts: AlertEvent[]; busy: string; onCreate: (body: { display_name: string; source?: string; event_type?: string; min_severity: string }) => void; onEvent: (body: { source: string; event_type: string; severity: string; title: string }) => void }) {

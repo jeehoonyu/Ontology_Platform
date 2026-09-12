@@ -292,13 +292,53 @@ plan, and it is measured there.
 - **N7 — The full grid.** **Open** — column visibility, reorder, resize, pin, sort,
   filter, selection, virtualization, rolled out behind the `audit_ui_primitives` user
   count. Not started until N2 through N5 are met.
-- **N8 — The two tables N4 found.** **Open** — the operations feed stops cutting its
-  events before `DataTable` sees them, so the component's own caption can count them, and
-  Object Explorer says how many of the object type's columns it is drawing. Numbered after
-  N7 because it was found after N7 was written, not because it waits on it. Each needs a
-  fixture larger than the cut — more than forty operational events, an object type with
-  more than eight properties — and the ceiling in `table-truncation-baseline.json` falls
-  to zero when both land.
+- **N8 — The two tables N4 found.** **Met** — the ceiling in
+  `table-truncation-baseline.json` is **0 of 3**. The operations feed hands every loaded
+  event to `DataTable`, whose own caption now reads `Showing 40 of N rows`; Object Explorer
+  captions its table `Showing 8 of 14 columns`. Proven by `truncation-sites.spec.ts`, four
+  tests, with the existing Explorer and Ops workflow tests and their four-width render
+  sweep green on the same build. Numbered after N7 because it was found after N7 was
+  written, not because it waits on it.
+
+  **Both fixes found a second silent cut underneath the one the gate could see, on the
+  server, where a scan of `.tsx` cannot look.** The events endpoint returns the 250 the
+  client asks for, so with the call-site slice gone the table would have read `40 of 250`
+  over a server holding more — the old silence, one layer down. The panel now says
+  `Loaded the latest 250 of 251 events` when `summary.events` exceeds what arrived. And
+  `_object_schema_columns` returned at most twelve columns, so a fourteen-property type
+  would have been captioned `8 of 12`: a wrong number where there used to be none, which
+  is worse than the silence it replaced. It returns every column now. Each fixture was
+  sized past both layers — forty-one events, then 251; fourteen properties — so that a
+  build fixing only the visible cut fails, and the negative run showed that it does:
+  `Received: "Showing 8 of 12 columns"`.
+
+  **The gate has a hole, and N8's negative run is what found it.** With the call-site
+  slice put back, `audit_table_truncation` refused the Explorer build and accepted the Ops
+  one, because the new server-limit note renders `{events.length}` — the length of the
+  source — under a condition unrelated to the cut. Whether a condition coincides with a
+  cut is not something a scan can decide. The browser test refused that build; the hole
+  is written into the gate's list of what it does not see.
+
+  Negative runs, three builds. Build 1, call-site slice restored and Explorer caption
+  removed: the feed rendered 25 rows where 40 were expected, and the Explorer caption was
+  missing. Build 2, server-limit note removed and the twelve-column cap restored: the
+  note was missing and the caption read `8 of 12`. Build 3, restored: four passed. The
+  first attempt at build 2 never ran — its mutation looked for `\n` in a file with CRLF
+  endings, the script restored the sources and stopped, and `frontend/dist` was left
+  holding broken build 1. Nothing was believed until build 3 had run.
+
+  Not fixed, and not silent by choice: the Explorer's rows stop at the client's
+  `limit: 500`, and the endpoint deliberately computes no total (`with_total=False`,
+  GOAL2-010 — at ten million objects, a filter matching 500,000 rows took 621.9 ms with
+  the count and 1.8 ms without). There
+  is no number to render without paying for it again. That is N5, and it is a cost
+  decision as much as a display one.
+
+  `.table-truncated` is declared shared across `DataDisplay`, `ObjectExplorer` and
+  `OpsWorkspace` in `style-scope-baseline.json`. Re-recording that baseline also absorbed
+  drift left by N2 — `.button-row` stopped being used in `Workbench.tsx` and started in
+  `PipelineBuilder.tsx` — which is not new coupling, and is recorded here rather than
+  folded in unmentioned.
 
 ## Order and size
 

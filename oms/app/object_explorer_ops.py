@@ -150,7 +150,11 @@ def _object_schema_columns(object_type: Optional[models.ObjectType], objects: Li
     preferred = ["name", "title", "status", "criticality", "priority", "owner", "updated_at"]
     ordered = [field for field in preferred if field in columns]
     ordered.extend([field for field in columns if field not in ordered])
-    return ordered[:12]
+    # Every column, not the first twelve. The explorer draws eight and says how
+    # many there were, and it can only say that truthfully if the list it counts
+    # is the whole list: capped here, a fourteen-property type read "8 of 12"
+    # and the caption became a second silent cut. N8 of GOAL_HONEST_UI.
+    return ordered
 
 
 def _matches_text(obj: Dict[str, Any], query: Optional[str]) -> bool:

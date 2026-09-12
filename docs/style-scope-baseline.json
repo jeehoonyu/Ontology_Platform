@@ -1,15 +1,14 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-08-19T20:49:37Z"
+    "recorded_at": "2026-09-12T22:02:19Z"
   },
   "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
-  "single_file_classes": 297,
+  "single_file_classes": 301,
   "shared": {
     "button-row": [
       "App.tsx",
       "components/data/DataDisplay.tsx",
-      "components/workbench/Workbench.tsx",
       "workspaces/Analytics.tsx",
       "workspaces/Automate.tsx",
       "workspaces/ControlPanel.tsx",
@@ -25,6 +24,7 @@
       "workspaces/OntologyRegistryPanel.tsx",
       "workspaces/OntologyReleasePanel.tsx",
       "workspaces/OpsWorkspace.tsx",
+      "workspaces/PipelineBuilder.tsx",
       "workspaces/Security.tsx",
       "workspaces/Vertex.tsx"
     ],
@@ -183,6 +183,11 @@
       "workspaces/DataMedia.tsx",
       "workspaces/Delivery.tsx"
     ],
+    "table-truncated": [
+      "components/data/DataDisplay.tsx",
+      "workspaces/ObjectExplorer.tsx",
+      "workspaces/OpsWorkspace.tsx"
+    ],
     "table-wrap": [
       "components/data/DataDisplay.tsx",
       "workspaces/Analytics.tsx",
@@ -216,8 +221,8 @@
       "workspaces/PipelineBuilder.tsx"
     ],
     "workspace-header": [
-      "components/workbench/Workbench.tsx",
       "workspaces/ControlPanel.tsx",
+      "workspaces/PipelineBuilder.tsx",
       "workspaces/Security.tsx"
     ],
     "workspace-summary-row": [
