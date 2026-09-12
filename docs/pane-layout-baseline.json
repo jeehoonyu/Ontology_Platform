@@ -1,0 +1,112 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-09-11T23:09:38Z"
+  },
+  "note": "Pane regions per screen, and how many a person can move. The movable count is a floor, not a ceiling: it may rise and must never fall.",
+  "regions": 22,
+  "movable": 4,
+  "screens": {
+    "App.tsx": {
+      "fixed": [
+        "sidebar"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "components/workbench/ArtifactReviewPanel.tsx": {
+      "fixed": [
+        "artifact-review-panel"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/AgentRuntimePanel.tsx": {
+      "fixed": [
+        "agent-runtime-panel"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/DecisionWorkspace.tsx": {
+      "fixed": [
+        "(unnamed)"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/MapWorkspace.tsx": {
+      "fixed": [
+        "map-inspector",
+        "map-layer-rail"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/ObjectExplorer.tsx": {
+      "fixed": [
+        "explorer-inspector",
+        "explorer-left-rail"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/OntologyHealthPanel.tsx": {
+      "fixed": [
+        "ontology-health-center"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/OntologyManager.tsx": {
+      "fixed": [
+        "resource-nav",
+        "walkthrough-panel"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/OntologyRegistryPanel.tsx": {
+      "fixed": [
+        "ontology-registry"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/OntologyReleasePanel.tsx": {
+      "fixed": [
+        "ontology-release-studio"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/PipelineBuilder.tsx": {
+      "fixed": [
+        "ontology-contract-panel"
+      ],
+      "movable": [
+        "canvas",
+        "drawer",
+        "library",
+        "output"
+      ],
+      "resizable": false
+    },
+    "workspaces/PlatformGraph.tsx": {
+      "fixed": [
+        "platform-graph-canvas"
+      ],
+      "movable": [],
+      "resizable": false
+    },
+    "workspaces/VisualBuilder.tsx": {
+      "fixed": [
+        "builder-execution-drawer",
+        "node-library-panel",
+        "visual-inspector-panel"
+      ],
+      "movable": [],
+      "resizable": false
+    }
+  }
+}

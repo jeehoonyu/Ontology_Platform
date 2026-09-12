@@ -129,6 +129,14 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "every drag can also be done without dragging, and a browser test operates the alternative",
         "runs_in": "suite",
     },
+    "audit_pane_layout": {
+        "purpose": "the count of panes a person can move never falls",
+        "runs_in": "suite",
+    },
+    "audit_inert_controls": {
+        "purpose": "no control renders as a control while doing nothing",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

@@ -14,8 +14,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repository root. Unanchored, `lib/` is a Python build-output
+# pattern that also matches `frontend/src/lib/`, which is TypeScript source --
+# it silently kept `paneLayout.ts` out of the tree the panes work depends on,
+# and a fresh clone would have failed to build. The only `lib` directory in the
+# repository is that one.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

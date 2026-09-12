@@ -20,11 +20,19 @@ export function Page({ title, subtitle, children }: { title: string; subtitle: s
 
 export function Toolbar({ groups }: { groups: PipelineCanvasState["toolbar_groups"] }) {
   return (
-    <div className="toolbar-strip">
+    // `overflow-x: auto` with nothing focusable inside is a region a keyboard
+    // cannot scroll, which axe reports as serious and which was true the moment
+    // the two-letter buttons became labels. Focusable region, the same shape
+    // `DataTable`'s wrapper already uses.
+    <div className="toolbar-strip" tabIndex={0} role="region" aria-label="Pipeline toolbar actions">
       {groups.map((group) => (
         <div key={group.id} className="toolbar-group">
           <span>{group.label}</span>
-          <div>{group.actions.slice(0, 8).map((action) => <button key={action} title={action}>{action.slice(0, 2).toUpperCase()}</button>)}</div>
+          {/* These were two-letter buttons with the full name in a `title` and
+              no handler: unreadable and dead at once. The group and its actions
+              are real information the canvas state carries, so they stay -- as
+              the labels they are, rather than as controls they are not. */}
+          <div>{group.actions.map((action) => <span key={action} className="toolbar-action">{action.replace(/_/g, " ")}</span>)}</div>
         </div>
       ))}
     </div>

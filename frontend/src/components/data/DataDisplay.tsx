@@ -97,22 +97,40 @@ export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
  * stringified -- the same dispatch `KeyValueGrid` uses, so a table and a detail
  * pane of the same object agree on how its geometry or its timestamp reads.
  */
+export const TABLE_ROW_LIMIT = 40;
+
 export function DataTable({ rows, specs, empty = "No records" }: { rows?: TableRow[]; specs?: Record<string, PropertySpec>; empty?: string }) {
   const safeRows = rows || [];
   const columns = useMemo(() => {
+    // Every row, and every key. This read the first ten rows and took eight
+    // keys from each, so a field that first appeared in row eleven had no
+    // column -- and its value was then missing from every row, including the
+    // ten that were sampled. That is the truncation that never looked like one:
+    // forty complete-looking rows with three fields silently absent.
     const seen = new Set<string>();
-    for (const row of safeRows.slice(0, 10)) Object.keys(row || {}).slice(0, 8).forEach((key) => seen.add(key));
+    for (const row of safeRows) Object.keys(row || {}).forEach((key) => seen.add(key));
     return Array.from(seen);
   }, [safeRows]);
   if (!safeRows.length) return <div className="empty">{empty}</div>;
+  const shown = safeRows.slice(0, TABLE_ROW_LIMIT);
   return (
     <div className="table-wrap" tabIndex={0} role="region" aria-label="Scrollable data table">
       <table>
+        {/* A limit a person can see is a limit; a limit a person cannot see is
+            a wrong answer. This comes from the component rather than from each
+            of the seventy-five call sites, because a convention seventy-five
+            places have to remember is one that will be wrong in some of them
+            and nobody will know which. */}
+        {shown.length < safeRows.length ? (
+          <caption className="table-truncated">
+            Showing {shown.length.toLocaleString()} of {safeRows.length.toLocaleString()} rows
+          </caption>
+        ) : null}
         <thead>
           <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
         </thead>
         <tbody>
-          {safeRows.slice(0, 40).map((row, index) => (
+          {shown.map((row, index) => (
             <tr key={index}>{columns.map((column) => {
               const text = formatValue(row[column]);
               return <td key={column} title={text}>{specs ? renderPropertyValue(row[column], specs[column]) : text}</td>;
@@ -197,7 +215,6 @@ export function RelationshipStrip({ rows, fallback }: { rows: TableRow[]; fallba
     return (
       <div className="relationship-strip">
         <span>{fallback}</span>
-        <button>Create new link type</button>
       </div>
     );
   }

@@ -191,12 +191,24 @@ test.describe("a drag is never the only way", () => {
       // strips of its own. And match any announcement rather than the pick-up
       // one specifically -- the node starts already over the canvas droppable,
       // so "Picked up" is replaced by "was moved over" before this can read it.
-      const announcement = desktop.locator("[id^='DndLiveRegion']");
+      //
+      // There are two regions on this screen since the panes gained a context of
+      // their own, one per `DndContext`, so this takes the one announcing the
+      // node. That the pane context stays silent through a node drag is the
+      // nesting M4 is about, visible here as a side effect.
+      const announcement = desktop.locator("[id^='DndLiveRegion']")
+        .filter({ hasText: /node:/ });
       await expect(announcement, "no live-region announcement, so the drag never started")
         .toContainText(/draggable item/i);
 
+      // A gap between presses, because dnd-kit moves a keyboard drag once per
+      // render and a burst is coalesced: four presses with no gap land as one or
+      // two, which is a real limit of the interaction and not only of this test.
+      // Someone holding an arrow key moves the node more slowly than the
+      // keyboard repeats.
       for (let step = 0; step < 4; step += 1) {
         await desktop.keyboard.press("ArrowRight");
+        await desktop.waitForTimeout(60);
       }
       await desktop.keyboard.press("Space");
       await expect(announcement, "no drop was announced").toContainText(/dropped/i);

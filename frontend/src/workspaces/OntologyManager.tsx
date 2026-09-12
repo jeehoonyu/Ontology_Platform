@@ -260,11 +260,6 @@ export function OntologyManager() {
           )}
         </section>
       </div>
-      <footer className="ontology-utility-bar">
-        <button>SQL console</button>
-        <button>Preview</button>
-        <button>Object mode</button>
-      </footer>
     </section>
   );
 }
@@ -272,17 +267,8 @@ export function OntologyManager() {
 function WalkthroughRail({ walkthrough }: { walkthrough: OntologyWalkthrough | null }) {
   return (
     <aside className="walkthrough-panel">
-      <div className="walkthrough-tabs">
-        <button className="active">Guide</button>
-        <button>Overview</button>
-        <button>Files</button>
-      </div>
       <h2>{walkthrough?.title || "Build ontology workflow"}</h2>
       <p>Guided evidence from pipeline output into object type review.</p>
-      <div className="walkthrough-actions">
-        <button>Previous</button>
-        <button>Next</button>
-      </div>
       <ol>
         {(walkthrough?.steps || []).map((step, index) => (
           <li key={step.id} className={classNames(step.status === "active" && "active", step.status === "complete" && "complete")}>
@@ -354,8 +340,6 @@ function ManagerSurface({
           </div>
         </div>
         <div className="button-row">
-          <button>Actions</button>
-          <button>Open in</button>
           <button onClick={() => setEditing((value) => !value)}>{editing ? "Cancel edit" : "Edit metadata"}</button>
           <button onClick={onIndex}>Index</button>
         </div>

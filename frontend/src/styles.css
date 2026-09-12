@@ -2305,6 +2305,17 @@ h2 {
   border-radius: 7px;
 }
 
+.table-truncated {
+  caption-side: top;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #64717a;
+  background: #f8fafb;
+  border-bottom: 1px solid #e3e8ea;
+  white-space: nowrap;
+}
+
 table {
   width: 100%;
   min-width: 620px;
@@ -2528,6 +2539,15 @@ pre {
   font-size: 11px;
 }
 
+.toolbar-group .toolbar-action {
+  border: 1px solid #d7dedf;
+  border-radius: 4px;
+  padding: 2px 7px;
+  background: #ffffff;
+  color: #33424b;
+  white-space: nowrap;
+}
+
 .toolbar-group div {
   display: flex;
   gap: 4px;
@@ -2542,10 +2562,176 @@ pre {
 }
 
 .builder-shell {
+  /* One column now: `PaneHost` owns the left/centre/right split, because the
+     person using the screen decides which pane sits where. A fixed 330px track
+     here would have fought it. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   min-height: calc(100vh - 88px);
+}
+
+.pane-host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pane-host-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 4px;
+}
+
+.pane-host-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 520px;
+  min-width: 0;
+}
+
+.pane-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pane-slot-center {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pane-slot-left,
+.pane-slot-right {
+  /* 220px, not 260: at 1280 two 260px flanks left the pipeline canvas 236px
+     wide, narrower than either pane framing it. The centre is the screen; the
+     panes are the margin. A person who wants them wider has a splitter. */
+  flex: 0 0 auto;
+  width: 220px;
+}
+
+.pane-slot-bottom {
+  min-height: 0;
+}
+
+.pane-slot.drag-active {
+  outline: 2px dashed #6b8ba4;
+  outline-offset: -2px;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #ffffff;
+  border: 1px solid #d7dedf;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #d7dedf;
+  background: #f3f6f7;
+}
+
+.pane-header strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.pane-controls button,
+.pane-controls select {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+.pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.pane-collapsed {
+  flex: 0 0 auto;
+}
+
+/* The grip takes the touch gesture; nothing else on a pane does. A 22px target
+   scrolls nothing, and `GOAL_DRAG_2026-08-19.md` L5 measured what happens when
+   this is left off: the drag works with a mouse and not at all with a finger.
+   Written here before a finger measures it this time. */
+.pane-grip {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #7d8b99;
+  cursor: grab;
+  font-weight: 800;
+  touch-action: none;
+}
+
+.pane-splitter {
+  flex: 0 0 auto;
+  width: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: #dfe5e8;
+  cursor: col-resize;
+  /* The grip and the splitter take the touch gesture; nothing else on a pane
+     does. Both are narrow enough that no scroll starts on them. */
+  touch-action: none;
+}
+
+.pane-splitter:hover,
+.pane-splitter:focus-visible {
+  background: #6b8ba4;
+  outline: none;
+}
+
+.pane-grip-anchored {
+  cursor: default;
+  opacity: 0.35;
+}
+
+@media (max-width: 700px) {
+  /* Four slots become one stack, and slot order becomes list order. */
+  .pane-host-row {
+    flex-direction: column;
+  }
+
+  .pane-slot-left,
+  .pane-slot-right {
+    width: auto;
+  }
+
+  /* Stacked, there is no boundary to drag: slot order is list order and the
+     widths the splitter writes mean nothing. */
+  .pane-splitter {
+    display: none;
+  }
 }
 
 .builder-main {
@@ -3030,7 +3216,7 @@ pre {
 }
 
 .pipeline-workbench-page .pipeline-body {
-  grid-template-columns: 0 minmax(0, 1fr) 38px;
+  grid-template-columns: 0 minmax(0, 1fr);
   min-height: calc(100vh - 326px);
   border-left: 0;
   border-right: 0;
@@ -3047,16 +3233,6 @@ pre {
   min-height: calc(100vh - 326px);
 }
 
-.pipeline-utility-rail {
-  display: grid;
-  align-content: start;
-  gap: 16px;
-  padding: 12px 6px;
-  background: #f9fbfc;
-  border-left: 1px solid #d7dedf;
-}
-
-.pipeline-utility-rail button,
 .canvas-controls button,
 .node-context-menu button {
   border-radius: 4px;
@@ -3489,25 +3665,6 @@ pre {
   overflow: auto;
 }
 
-.walkthrough-tabs,
-.walkthrough-actions {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 14px;
-}
-
-.walkthrough-tabs button,
-.walkthrough-actions button {
-  color: #dbe8ef;
-  background: #22313d;
-  border-color: #334a5b;
-  border-radius: 4px;
-}
-
-.walkthrough-tabs button.active {
-  background: #334a5b;
-}
-
 .walkthrough-links {
   display: grid;
   gap: 6px;
@@ -3557,23 +3714,6 @@ pre {
 .ontology-workbench-page .manager-nav {
   border-radius: 5px;
   box-shadow: none;
-}
-
-.ontology-utility-bar {
-  height: 38px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  background: #ffffff;
-  border-top: 1px solid #d7dedf;
-}
-
-.ontology-utility-bar button {
-  border-color: transparent;
-  background: transparent;
-  color: #46535d;
-  padding: 6px 8px;
 }
 
 .ontology-release-studio {
@@ -4964,10 +5104,6 @@ pre {
     padding: 10px;
     overflow: auto;
     border-right: 1px solid #d7dedf;
-  }
-
-  .pipeline-utility-rail {
-    display: none;
   }
 }
 

@@ -933,8 +933,12 @@ test("pipeline creates a graph and accepts a dragged node", async ({ page }, tes
   await page.mouse.move((sourceBox?.x || 0) + (sourceBox?.width || 0) / 2,
                         (sourceBox?.y || 0) + (sourceBox?.height || 0) / 2);
   await page.mouse.down();
-  const targetX = (canvasBox?.x || 0) + 360;
-  const targetY = (canvasBox?.y || 0) + 180;
+  // The middle of the canvas, not a fixed offset into it. `+360` was inside the
+  // canvas until panes made it resizable, and then landed on a panel in the pane
+  // beside it -- a coordinate that encodes one layout cannot survive a layout
+  // people rearrange.
+  const targetX = (canvasBox?.x || 0) + (canvasBox?.width || 0) / 2;
+  const targetY = (canvasBox?.y || 0) + (canvasBox?.height || 0) / 3;
   for (let step = 1; step <= 8; step += 1) {
     await page.mouse.move((sourceBox?.x || 0) + ((targetX - (sourceBox?.x || 0)) * step) / 8,
                           (sourceBox?.y || 0) + ((targetY - (sourceBox?.y || 0)) * step) / 8);

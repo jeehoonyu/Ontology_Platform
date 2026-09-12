@@ -65,6 +65,8 @@ FAST_CHECKS = [
     "audit_ui_primitives",
     "audit_route_cost",
     "audit_drag_affordances",
+    "audit_pane_layout",
+    "audit_inert_controls",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",
