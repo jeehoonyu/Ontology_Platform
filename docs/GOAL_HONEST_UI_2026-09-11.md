@@ -332,7 +332,57 @@ plan, and it is measured there.
   renderers for declared types would have a caller.
 - **N7 — The full grid.** **Open** — column visibility, reorder, resize, pin, sort,
   filter, selection, virtualization, rolled out behind the `audit_ui_primitives` user
-  count. Not started until N2 through N5 are met.
+  count. Not started until N2 through N5 are met, which they now are.
+
+  **Built on `@tanstack/react-table` and `@tanstack/react-virtual`**, chosen on 2026-09-12
+  over growing `DataTable` by hand: both are headless, so the product's own markup and
+  styles stay, and they come from the family whose query library the app already uses.
+  The cost is payload, and it is recorded route by route as the grid reaches each one. Four
+  steps, each a condition of its own, because "the full grid" in one commit is a large
+  change nobody could review:
+
+  - **N7a — A grid that sorts and hides columns, on one screen.** **Met** — `DataGrid`, in
+    its own module, adopted by the data-media records table. It keeps what N3 and N5 made
+    true of `DataTable` — every column any row has, a caption with the true count, every row
+    reachable — and the three `data-table.spec.ts` tests that hold those now run against the
+    grid, unchanged. It adds sorting from the header, in natural order and announced through
+    `aria-sort`, and a column control that counts what it hides: `Columns · 2 of 3 shown`.
+    Proven by `data-grid.spec.ts`, two tests. Negative runs: a header wired to nothing failed
+    at `aria-sort`, `Received: "none"`; a control counting every column as shown failed at
+    `Received: "Columns · 3 of 3 shown"`.
+
+    **The payload estimate given when the library was chosen was wrong by more than half.**
+    The choice put the cost at roughly 20 KB a route. Measured, the data-media route went from
+    441.4 KB to **485.4 KB, +44.0 KB**, uncompressed, which is what `audit_route_payload`
+    counts. The packages all declare `sideEffects: false`, so this is the library's core and
+    two features rather than a failure to tree-shake. The ceiling was raised for that route
+    alone; the shared closure every route pays is unchanged at 434 KB, because the grid lives
+    in its own module. That module boundary is what keeps it so, and it is why N7d is a
+    decision rather than a mechanical step: `App.tsx` holds thirteen `DataTable`s, and moving
+    those would put the grid into the shared closure of all seventeen routes.
+
+    Three more things, each found on the way. **The installed version is v9**, whose API is not
+    v8's — `useTable` and feature slots registered through `tableFeatures`, no
+    `useReactTable` or `getSortedRowModel` — so the grid was written from the installed type
+    declarations rather than from memory of the older API. **Paging is a slice over the sorted
+    rows, not the library's paginated row model**, because `audit_table_truncation` can see a
+    slice and hold it to its caption and cannot see a cut made inside a library; the gate
+    reads the grid's cut as counted. And **`audit_table_truncation` did not at first count a
+    `<DataGrid>` as a table**: added to its pattern, the component fell through to the branch
+    that handles `role="table"` elements and a call-site cut into it read as outside any table.
+    The test asserting that cut is refused is what found it, before the grid existed.
+
+    `audit_ui_states` refused the first commit: the grid drew its empty state as a raw
+    `<div className="empty">`, taking the hand-written count from 32 to 33 against a ceiling
+    that only falls. It uses `EmptyState inline`, which renders the same markup.
+
+    The package README carries an instruction addressed to coding agents to install a further
+    tool; it was read as documentation and not acted on.
+  - **N7b — Resize, reorder and pin.** **Open** — each with a control that is not a drag.
+  - **N7c — Filter and select.** **Open**.
+  - **N7d — Virtualized, and rolled out.** **Open** — virtualization replacing paging where a
+    table is long, and the remaining `DataTable` call sites moved across, with the
+    `DataGrid` user count as the ratchet.
 - **N8 — The two tables N4 found.** **Met** — the ceiling in
   `table-truncation-baseline.json` is **0 of 3**. The operations feed hands every loaded
   event to `DataTable`, whose own caption now reads `Showing 40 of N rows`; Object Explorer

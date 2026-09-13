@@ -100,6 +100,14 @@ export function Contract({ issues }) {
 check(call_site["table"] and not call_site["counted"] and call_site["how"] == "passed as rows",
       f"rows cut before they reach DataTable pass because DataTable has nothing to caption: {call_site}")
 
+grid_call_site = only("""
+export function Records({ rows }) {
+  return <DataGrid rows={rows.slice(0, 25)} />;
+}
+""")
+check(grid_call_site["table"] and not grid_call_site["counted"],
+      f"rows cut before they reach DataGrid pass; the grid is a table as DataTable is: {grid_call_site}")
+
 held_then_passed = only("""
 function CommandTab({ events }) {
   const rows = events.slice(0, 25).map((event) => ({ title: event.title }));

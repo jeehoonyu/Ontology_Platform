@@ -6380,3 +6380,40 @@ pre {
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* The data grid. N7a of GOAL_HONEST_UI_2026-09-11: sorting from the header, and a
+   column control that counts what it hides. */
+.grid-columns {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.grid-columns summary {
+  cursor: pointer;
+  color: #4d5b64;
+}
+
+.grid-columns-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 0;
+}
+
+.grid-columns-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.grid-sort {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.grid-sort:focus-visible {
+  outline: 2px solid #1e88e5;
+  outline-offset: 2px;
+}

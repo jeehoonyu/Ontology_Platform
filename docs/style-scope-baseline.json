@@ -1,7 +1,7 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-12T22:58:43Z"
+    "recorded_at": "2026-09-13T00:21:21Z"
   },
   "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
   "single_file_classes": 301,
@@ -42,6 +42,7 @@
       "App.tsx",
       "components/canvas/PipelineCanvas.tsx",
       "components/data/DataDisplay.tsx",
+      "components/data/DataGrid.tsx",
       "workspaces/Analytics.tsx",
       "workspaces/DataMedia.tsx",
       "workspaces/DecisionWorkspace.tsx",
@@ -184,13 +185,19 @@
       "workspaces/DataMedia.tsx",
       "workspaces/Delivery.tsx"
     ],
+    "table-pager": [
+      "components/data/DataDisplay.tsx",
+      "components/data/DataGrid.tsx"
+    ],
     "table-truncated": [
       "components/data/DataDisplay.tsx",
+      "components/data/DataGrid.tsx",
       "workspaces/ObjectExplorer.tsx",
       "workspaces/OpsWorkspace.tsx"
     ],
     "table-wrap": [
       "components/data/DataDisplay.tsx",
+      "components/data/DataGrid.tsx",
       "workspaces/Analytics.tsx",
       "workspaces/Automate.tsx",
       "workspaces/DataMedia.tsx",

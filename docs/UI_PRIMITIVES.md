@@ -24,6 +24,7 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
+| `DataGrid` | `components/data/DataGrid.tsx` | **1** — DataMedia |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `MiniGraph` | `components/canvas/PipelineCanvas.tsx` | **1** — Vertex |
 | `PipelineCanvas` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |

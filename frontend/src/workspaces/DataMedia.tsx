@@ -11,6 +11,7 @@ import {
   Panel,
   StatusBadge
 } from "../components/data/DataDisplay";
+import { DataGrid } from "../components/data/DataGrid";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
 import type { JsonObject, TableRow } from "../types";
@@ -213,7 +214,7 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
       <div className="two-col">
         <Panel title={selectedAsset ? `Records — ${selectedAsset.display_name || selectedAsset.id}` : "Records"}>
           {selectedAsset ? (
-            <DataTable rows={records} empty="No records yet. Upload a file to populate this dataset." />
+            <DataGrid rows={records} label="Dataset records" empty="No records yet. Upload a file to populate this dataset." />
           ) : (
             <EmptyState title="No dataset selected" />
           )}

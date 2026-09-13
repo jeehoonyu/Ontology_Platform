@@ -92,7 +92,10 @@ _DECLARATION = re.compile(
     r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?"
     r"(?:function\s+(\w+)|(?:const|let)\s+(\w+))", re.MULTILINE)
 
-_TABLE = re.compile(r"<(DataTable|table)\b|\brole=[\"'](?:table|grid)[\"']")
+# `DataGrid` is the product's second table, N7 of the goal. It is named here with
+# `DataTable` because a call-site cut into either is the same evasion: the
+# component captions what it is given and cannot caption what it never received.
+_TABLE = re.compile(r"<(DataTable|DataGrid|table)\b|\brole=[\"'](?:table|grid)[\"']")
 
 # `.slice(` and the index filter. The first two groups mark where the argument
 # list opens.
@@ -194,7 +197,12 @@ def table_extents(text: str) -> List[Tuple[int, int]]:
     """Where each table is written: a `<DataTable>`'s tag, or the whole element."""
     extents: List[Tuple[int, int]] = []
     for match in _TABLE.finditer(text):
-        if match.group(1) == "DataTable":
+        # A table component's extent is its own tag, props included. `DataGrid` has
+        # to be named here as well as in `_TABLE`: added only to the pattern, it fell
+        # through to the `role=` branch, which looks backwards for the element's
+        # opening `<`, and a call-site cut into the grid read as outside any table.
+        # The test that asserts that cut is refused is what found it.
+        if match.group(1) in ("DataTable", "DataGrid"):
             extents.append((match.start(), _tag_end(text, match.end())))
         elif match.group(1) == "table":
             extents.append((match.start(), _element_end(text, match.start(), "table")))
