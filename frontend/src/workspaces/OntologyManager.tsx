@@ -59,6 +59,8 @@ interface DataAssetsResponseItem extends TableRow {
 
 const BASE_TYPE_OPTIONS = ["string", "integer", "number", "boolean", "date", "timestamp", "json", "geometry", "geoshape", "array"];
 const STATUS_OPTIONS = ["active", "experimental", "deprecated"];
+// The Drafts panel opens on the drafts updated most recently, and says when there are more.
+const RECENT_DRAFTS = 6;
 
 /**
  * The ontology manager's panes. Second half of M7 of GOAL_PANES_2026-09-11: a
@@ -87,9 +89,12 @@ export function OntologyManager() {
   const [manager, setManager] = useState<OntologyManagerState | null>(null);
   const [walkthrough, setWalkthrough] = useState<OntologyWalkthrough | null>(null);
   const [sectionState, setSectionState] = useState<OntologySectionState | null>(null);
+  const [allDrafts, setAllDrafts] = useState(false);
   const state = useAsyncState<OntologyUiState>(getOntologyState, [refreshKey]);
   const assets = useAsyncState<DataAssetsResponseItem[]>(() => api<DataAssetsResponseItem[]>("/data-assets"), [refreshKey]);
   const drafts = useAsyncState<TableRow[]>(() => api<TableRow[]>("/ontology-generator/drafts"), [refreshKey]);
+  // Every draft the server holds, newest first: the endpoint neither pages nor caps them.
+  const draftList = drafts.value || [];
   // The pane grips' own context. The field-mapping and property-order drags keep
   // theirs, nested inside the surface: each is a self-contained list whose
   // draggables and droppables never cross a pane, which is the case M2 found
@@ -255,12 +260,25 @@ export function OntologyManager() {
             </select>
           </Panel>
           <Panel title="Drafts">
-            {(drafts.value || []).slice(0, 6).map((draft) => (
+            {/* This showed the six most recently updated drafts and nothing else, so a
+                seventh could not be seen or applied from here, and nothing said it existed.
+                It still opens on those six, says how many there are, and shows the rest on
+                request. `audit_table_truncation` follows cuts into tables only; it never saw
+                this one. */}
+            {draftList.length > RECENT_DRAFTS && !allDrafts ? (
+              <p className="table-truncated" role="note">Showing the {RECENT_DRAFTS} most recently updated of {draftList.length.toLocaleString()} drafts</p>
+            ) : null}
+            {(allDrafts ? draftList : draftList.slice(0, RECENT_DRAFTS)).map((draft) => (
               <button key={asString(draft.id)} className="resource-row" onClick={() => applyDraft(asString(draft.id))}>
                 <strong>{formatValue(draft.id)}</strong>
                 <span>{formatValue(draft.status)}</span>
               </button>
             ))}
+            {draftList.length > RECENT_DRAFTS ? (
+              <button type="button" aria-expanded={allDrafts} onClick={() => setAllDrafts((shown) => !shown)}>
+                {allDrafts ? `Show only the ${RECENT_DRAFTS} most recent` : `Show all ${draftList.length.toLocaleString()} drafts`}
+              </button>
+            ) : null}
           </Panel>
           <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} />
         </div>

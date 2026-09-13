@@ -358,3 +358,59 @@ test.describe("a table the gate found says what it is not showing", () => {
     await expectUnclipped(counts, "at the pane's narrow width the contract's counts are cut off");
   });
 });
+
+test.describe("a list the gate cannot see says what it is not showing", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("the ontology manager's Drafts list says how many drafts there are, and shows the rest", async ({ page }) => {
+    // The panel showed the six most recently updated drafts and nothing else: no count, and
+    // no way to reach a seventh. `audit_table_truncation` follows cuts into tables only, so
+    // it never saw this one. Draft times are whole seconds, so two drafts made a second
+    // before the other six are the two a correct list hides, and then shows on request.
+    const suffix = `${Date.now()}`;
+    const assetId = `drafts_asset_${suffix}`;
+    const asset = await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: `Drafts asset ${suffix}`, kind: "dataset", asset_schema: {},
+      records: [{ asset_id: "D-1", name: "First" }, { asset_id: "D-2", name: "Second" }]
+    } });
+    expect(asset.ok(), await asset.text()).toBeTruthy();
+    const createDraft = async (label: string) => {
+      const id = `drafts_${label}_${suffix}`;
+      const response = await page.request.post("/ontology-generator/drafts", { data: {
+        id, asset_id: assetId, object_type_id: `${id}_type`
+      } });
+      expect(response.ok(), await response.text()).toBeTruthy();
+      return id;
+    };
+    const older = [await createDraft("older_1"), await createDraft("older_2")];
+    await page.waitForTimeout(1100);
+    const newer: string[] = [];
+    for (let index = 1; index <= 6; index += 1) newer.push(await createDraft(`newer_${index}`));
+    const held = (await (await page.request.get("/ontology-generator/drafts")).json() as Array<{ id: string }>).length;
+    expect(held, "the fixture did not reach past the six the panel shows").toBeGreaterThanOrEqual(8);
+
+    await page.goto("/workspace/ontology");
+    const panel = page.locator(".manager-resource-nav .panel").filter({ has: page.getByRole("heading", { name: "Drafts", exact: true }) });
+    const rows = panel.locator(".resource-row");
+    await expect(rows).toHaveCount(6);
+    for (const id of newer) {
+      await expect(rows.filter({ hasText: id }), `${id} is newer than two others and is not among the six shown`).toHaveCount(1);
+    }
+    // No locale is pinned, so the count is formatted the way this browser formats it.
+    const count = await page.evaluate((total) => total.toLocaleString(), held);
+    const note = panel.getByRole("note");
+    await expect(note, "the panel shows six drafts of more and does not say so")
+      .toHaveText(`Showing the 6 most recently updated of ${count} drafts`);
+    await expectUnclipped(note, "the note is cut off in the Resources pane, hiding how many drafts there are");
+
+    await panel.getByRole("button", { name: `Show all ${count} drafts` }).click();
+    await expect(rows, "the drafts past the sixth cannot be reached").toHaveCount(held);
+    for (const id of older) await expect(rows.filter({ hasText: id })).toHaveCount(1);
+    await expect(note, "the note still says six are shown when every draft is").toHaveCount(0);
+
+    await panel.getByRole("button", { name: "Show only the 6 most recent" }).click();
+    await expect(rows).toHaveCount(6);
+  });
+});

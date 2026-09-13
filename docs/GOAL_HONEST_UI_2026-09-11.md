@@ -1297,6 +1297,86 @@ plan, and it is measured there.
   no ceiling moved, and route cost reports no route over its requests or bytes.
   `TABLE_TRUNCATION.md` moved only by line numbers.
 
+  **Then the ontology manager's Drafts list, which no gate could see.** The Drafts panel in the
+  manager's Resources pane rendered `(drafts.value || []).slice(0, 6)`. The endpoint returns every
+  generator draft, newest first by `updated_at`, with no cap, so the panel showed the six most
+  recently updated and nothing else. A seventh draft could not be seen or applied from there, and
+  nothing on the screen said it existed. `audit_table_truncation` follows cuts into tables only.
+  `TABLE_TRUNCATION.md` did list this one, as `drafts.value (slice)`, mapped, not reaching a table
+  and with no true count rendered, and for that reason never counted it as silent.
+
+  **The fix keeps the six and says so.** The panel still opens on the six most recently updated
+  drafts. When there are more, it says "Showing the 6 most recently updated of N drafts", in the
+  same `table-truncated` note the other lists use, and a button, "Show all N drafts", lists every
+  one; "Show only the 6 most recent" folds it back. The button carries `aria-expanded`.
+
+  **Proven by one test in `truncation-sites.spec.ts`,** "the ontology manager's Drafts list says how
+  many drafts there are, and shows the rest". It makes two drafts, waits a second, and makes six
+  more. Draft times are whole seconds, so those two are the ones a correct list hides first. On the
+  panel it checks that six rows show and all six newer drafts are among them, that the note states
+  the total and is not cut off in the 260px pane, that "Show all" lists every draft including the
+  two older ones and drops the note, and that the list folds back to six. The count is formatted by
+  the browser. Run on the committed build before the fix, the test showed the six newer drafts and
+  failed at the note: `Expected: "Showing the 6 most recently updated of 8 drafts"`, element not
+  found.
+
+  On the fixed build the test passes, and so do the other tests of `truncation-sites.spec.ts` and
+  `grid-sites.spec.ts`, 15 in all. Every evaluator test that opens the ontology manager passes too,
+  among them the ontology route's accessibility sweep at all four widths: 14 passed, 30 skipped by
+  design.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the silent six back:** six drafts and no note, and the test failed at the note, element
+    not found.
+  - **N2, a Show all that still lists six:** the note and the button were there, and the test failed
+    at the drafts past the sixth: `Expected: 8`, `Received: 6`.
+  - Restored: 15 pass on desktop-1280 across the two specs, the ontology evaluator tests pass, and
+    the source is byte for byte what it was.
+
+  **A sweep for other silent list cuts found nine.** Three read-only readers searched the frontend by
+  code pattern, by API limit and by list panel, and a skeptic tried to refute each finding against the
+  source. The Drafts finding was refuted for the right reason: the tree it read already stated the
+  count. Nine stood. None has been measured in a browser yet, and none is fixed here:
+  - Object Explorer loads 500 objects and reads the page as the whole set, already recorded above as
+    not fixed;
+  - the Decision Risk Board and its metrics score only the first 250 objects by id;
+  - entity resolution scans only 1,000 objects for duplicates;
+  - map layers stop at 2,000 features, and the status strip's count reads as the whole layer;
+  - the platform graph stops at 500 of each kind;
+  - Object Explorer's facets show 7 buckets, so a numeric facet's eighth bin, the one holding the
+    maximum, is always hidden;
+  - Vertex shows 24 of the 50 seed objects it fetches;
+  - reliability shows the 8 newest of 25 contract runs, beside status counts taken over all 25;
+  - connector fetch evidence shows the newest 50 attempts with no total.
+
+  Five more candidates were not verified, because the readers disagreed about them: plugin executions
+  and import jobs stopping at 50, the connector preview dropping its next page, the pipeline node
+  preview's five rows, and the mapping preview's twenty. The sweep also read the gate.
+  `audit_table_truncation` already reports plain-list slices without gating them, and it cannot see a
+  request limit, a server default or a server-side cap at all. The nine findings, the five candidates
+  and the gate are filed as four tasks of their own.
+
+  **Payload, route cost and style scope.** The ontology manager route measures 778,409 bytes, 387
+  more than after the Outputs pane fix and 1,190 over its recorded ceiling of 777,219. That is
+  inside the 8 KB tolerance, so the ceiling is unchanged, and the shared closure did not move. Route
+  cost reports no route over its requests or bytes. `.table-truncated` is now used in seven files,
+  the Drafts note being the seventh; the style-scope gate reports that as a change it does not gate,
+  and its baseline is re-recorded to match. The re-record also counts 311 single-file classes, not
+  310: `contract-row-counts` came in with the Outputs pane fix, which did not re-record it.
+  `INERT_CONTROLS.md` now counts 0 of 328 controls inert, the Show all toggle being the 328th. The
+  first fast-tier run refused this commit until that reference was regenerated.
+
+  **The truncation reference lost a row, and the gate learned nothing.** Regenerated,
+  `TABLE_TRUNCATION.md` no longer lists the Drafts cut. The cut is still there on purpose, since the
+  panel opens on six. The scanner still finds the `.slice(`; what it cannot read is where the result
+  goes. It records a cut only when `.map` follows the slice's closing parenthesis, or when the result
+  is iterated, passed as `rows`, or assigned and mapped later (`_how`), and it skips any cut it
+  cannot place without a word (`cuts_in`: `if how is None: continue`). In
+  `(allDrafts ? draftList : draftList.slice(0, RECENT_DRAFTS)).map(`, a parenthesis closes the
+  condition before `.map`. So the reference stopped naming a list it used to name. It still counts no
+  silent cut, which is true, but for a reason it cannot see, and the same wrapping would hide an
+  unstated cut just as well. That hole is filed with the gate task below.
+
 ## Order and size
 
 | Step | Touches | Commits |
