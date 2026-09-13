@@ -184,6 +184,8 @@ interface ImportJob extends TableRow {
 
 interface ImportJobsResponse {
   jobs?: ImportJob[];
+  count?: number;
+  total?: number;
 }
 
 interface DataAssetsResponseItem extends TableRow {
@@ -1053,6 +1055,7 @@ function DataOnboarding() {
         <DataTable rows={importsUi.value?.templates || []} />
       </Panel>
       <Panel title="Recent Import Jobs">
+        {(jobs.value?.total ?? 0) > (jobs.value?.jobs?.length ?? 0) ? <p className="table-truncated" role="note">Loaded the latest {(jobs.value?.jobs?.length ?? 0).toLocaleString()} of {(jobs.value?.total ?? 0).toLocaleString()} import jobs</p> : null}
         <DataTable rows={jobs.value?.jobs || []} />
       </Panel>
     </Page>

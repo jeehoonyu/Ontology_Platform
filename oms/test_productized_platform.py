@@ -131,6 +131,8 @@ promoted = ok(client.post("/imports/jobs/user_asset_csv_import/promote-to-datase
 assert_true(promoted["dataset"]["id"] == "user_asset_dataset" and len(promoted["dataset"]["records"]) == 2, "dataset created from import", promoted)
 jobs = ok(client.get("/imports/jobs"), "list import jobs")
 assert_true(jobs["count"] >= 2 and any(job["status"] == "PROMOTED" for job in jobs["jobs"]), "import jobs list includes promoted job", jobs)
+window = ok(client.get("/imports/jobs?limit=1"), "a window of import jobs")
+assert_true(window["count"] == 1 and window["total"] == jobs["total"] and jobs["total"] >= 2, "a window of import jobs says how many there are", window)
 events = ok(client.get("/events", params={"source": "imports"}), "import events")
 assert_true(events["count"] >= 2, "import flow emits ops events", events)
 

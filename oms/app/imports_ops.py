@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, JSON, String
+from sqlalchemy import Integer, JSON, String, func
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import models, models_action, ontology_generator, ops_control, tenancy
@@ -967,8 +967,11 @@ def list_import_jobs(
         query = query.filter(ImportJob.project_id == project_id)
     if status:
         query = query.filter(ImportJob.status == status.upper())
+    # `count` is the jobs returned, as callers read it; `total` is how many match, so a
+    # screen listing the latest 50 can say so.
+    total = query.count()
     rows = query.order_by(ImportJob.created_at.desc()).limit(limit).all()
-    return {"count": len(rows), "jobs": [_job_dict(row) for row in rows]}
+    return {"count": len(rows), "total": total, "jobs": [_job_dict(row) for row in rows]}
 
 
 @router.get("/ui-state/imports")
@@ -978,11 +981,18 @@ def imports_ui_state(project_id: Optional[str] = None, principal: Principal = De
     if project_id:
         tenancy.assert_project_permission(db, principal, project_id, "view")
         query = query.filter(ImportJob.project_id == project_id)
+    # The counts are over every accessible job, in SQL. They were taken from the 50 jobs
+    # loaded for the lists below, so "Import jobs" read 50 however many there were.
+    job_count = query.count()
+    status_counts: Dict[str, int] = {
+        status: count
+        for status, count in query.with_entities(ImportJob.status, func.count()).group_by(ImportJob.status).all()
+    }
+    promoted_dataset_count = query.filter(
+        ImportJob.status == "PROMOTED", ImportJob.target_dataset_id.isnot(None)
+    ).with_entities(func.count(func.distinct(ImportJob.target_dataset_id))).scalar() or 0
     jobs = query.order_by(ImportJob.updated_at.desc()).limit(50).all()
     job_payloads = [_job_dict(row) for row in jobs]
-    status_counts: Dict[str, int] = {}
-    for row in jobs:
-        status_counts[row.status] = status_counts.get(row.status, 0) + 1
     templates = [
         {
             "id": template_id,
@@ -1011,7 +1021,7 @@ def imports_ui_state(project_id: Optional[str] = None, principal: Principal = De
             "title": "Upload or paste records",
             "status": "complete" if jobs else "active",
             "description": "Create a reviewable import job before data reaches a dataset.",
-            "metrics": {"job_count": len(jobs), "template_count": len(templates)},
+            "metrics": {"job_count": job_count, "template_count": len(templates)},
             "rows": job_payloads[:8],
             "href": "/workspace/imports",
         },
@@ -1029,7 +1039,7 @@ def imports_ui_state(project_id: Optional[str] = None, principal: Principal = De
             "title": "Clean and enrich",
             "status": "available" if jobs else "blocked",
             "description": "Normalize units, enums, timestamps, MGRS/geometry, and duplicates before promotion.",
-            "metrics": {"recent_job": getattr(latest_job, "id", None), "transformed": sum(1 for job in jobs if (job.inferred_schema or {}).get("transformations"))},
+            "metrics": {"recent_job": getattr(latest_job, "id", None), "transformed_in_latest_50": sum(1 for job in jobs if (job.inferred_schema or {}).get("transformations"))},
             "rows": [
                 {"operation": "enum cleanup", "supported": True},
                 {"operation": "unit normalization", "supported": True},
@@ -1043,14 +1053,14 @@ def imports_ui_state(project_id: Optional[str] = None, principal: Principal = De
             "title": "Promote to dataset",
             "status": "complete" if promoted_jobs else ("available" if jobs else "blocked"),
             "description": "Create a local DataAsset that can feed ontology generation and pipelines.",
-            "metrics": {"promoted": len(promoted_jobs), "dataset_count": len({job.target_dataset_id for job in promoted_jobs if job.target_dataset_id})},
+            "metrics": {"promoted": status_counts.get("PROMOTED", 0), "dataset_count": promoted_dataset_count},
             "rows": [{"job_id": job.id, "dataset_id": job.target_dataset_id, "status": job.status} for job in promoted_jobs[:8]],
             "href": "/workspace/ontology",
         },
     ]
     return {
         "summary": {
-            "job_count": len(jobs),
+            "job_count": job_count,
             "template_count": len(templates),
             "status_counts": status_counts,
             "latest_job_id": getattr(latest_job, "id", None),

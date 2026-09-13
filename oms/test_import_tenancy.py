@@ -62,7 +62,7 @@ for method, path, body in (
     response = method(path, json=body) if body is not None else method(path)
     ok(response, f"deny cross-project {path}", 403)
 listed = ok(client.get("/imports/jobs"), "filter import list")
-assert listed["count"] == 0 and listed["jobs"] == [], listed
+assert listed["count"] == 0 and listed["jobs"] == [] and listed["total"] == 0, listed
 
 app.dependency_overrides[production_auth.current_principal] = lambda: viewer
 ok(client.post("/imports/csv", json={"project_id": "alpha", "content": "id\n1\n"}), "deny viewer mutation", 403)

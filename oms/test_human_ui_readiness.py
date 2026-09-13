@@ -54,10 +54,24 @@ ok(client.post("/imports/csv", json={
     "target_dataset_id": "human_assets_dataset",
     "content": "asset_id,name,status,criticality\nasset_human_1,Human Pump,RUNNING,high\n",
 }), "create human import", expect=201)
+# Past the 50 jobs the imports screen loads, so its counts must come from every job.
+for index in range(51):
+    ok(client.post("/imports/csv", json={
+        "id": f"human_assets_import_{index}",
+        "filename": "human-assets.csv",
+        "display_name": f"Human Assets {index}",
+        "target_dataset_id": f"human_assets_dataset_{index}",
+        "content": "asset_id,name,status,criticality\nasset_human_1,Human Pump,RUNNING,high\n",
+    }), f"create human import {index}", expect=201)
 
 imports = ok(client.get("/ui-state/imports"), "imports ui state")
 assert_ui_state(imports, "imports")
 assert imports["summary"]["job_count"] >= 1, imports["summary"]
+every_job = ok(client.get("/imports/jobs?limit=500"), "list every import job")
+assert imports["summary"]["job_count"] == every_job["total"] == len(every_job["jobs"]) and every_job["total"] > 50, (imports["summary"]["job_count"], every_job["total"])
+assert sum(imports["summary"]["status_counts"].values()) == imports["summary"]["job_count"], imports["summary"]
+upload = next(section for section in imports["sections"] if section["id"] == "upload")
+assert upload["metrics"]["job_count"] == imports["summary"]["job_count"], upload["metrics"]
 assert any(template["id"] == "asset" for template in imports["templates"]), imports["templates"]
 
 validation = ok(client.get("/ui-state/validation"), "validation ui state")

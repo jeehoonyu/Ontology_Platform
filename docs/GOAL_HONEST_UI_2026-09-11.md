@@ -1871,6 +1871,46 @@ plan, and it is measured there.
   `.table-truncated` is now used in ten files, `App.tsx` the tenth, and the style-scope baseline is
   re-recorded to match. `TABLE_TRUNCATION.md` and `INERT_CONTROLS.md` do not move.
 
+  **Then Data Onboarding's import jobs.** `GET /ui-state/imports` loaded the 50 most recently updated
+  import jobs and counted everything from them: the "Import jobs" metric read `len(jobs)`, so it showed
+  50 however many jobs existed, and the ready, invalid, promoted and dataset counts in its sections came
+  from the same 50. "Recent Import Jobs" listed `GET /imports/jobs`, which returns the 50 newest, and
+  said nothing about the rest.
+
+  **Every count is over every job, and the recent list says it is a window.** The summary now counts
+  every accessible job in SQL: the job count, the counts by status, the promoted jobs and the distinct
+  datasets they promoted to. The one count that needs each job's stored schema, the jobs with
+  transformations, stays over the latest 50 and is renamed `transformed_in_latest_50` to say so.
+  `GET /imports/jobs` keeps `count` as the jobs returned, which callers read, and adds `total`. When more
+  jobs exist than it lists, "Recent Import Jobs" reads "Loaded the latest 50 of N import jobs". The
+  warnings and evidence links still cover the latest 50 with nothing said; they are listed here as not
+  fixed.
+
+  **The proof.** `test_human_ui_readiness.py` now creates 51 more import jobs and requires the summary's
+  job count to equal `/imports/jobs`' total, more than 50, its counts by status to add up to it, and its
+  upload section to carry the same count; `test_productized_platform.py` requires a window of one job to
+  report the same total as the whole list, and `test_import_tenancy.py` a total of 0 for a project that
+  sees none. In `truncation-sites.spec.ts`, a new browser test creates 51 jobs, reads the true total from
+  the list, and requires Data Onboarding's "Import jobs" metric to show it and "Recent Import Jobs" to
+  read "Loaded the latest 50 of N import jobs", not cut off. They pass on the fix, with the Data
+  Onboarding connector tests and the compatibility, UI alignment and tenancy scripts.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, the list without its total:** `test_productized_platform.py` failed with `KeyError: 'total'`.
+  - **B2, the summary counting the jobs it loaded:** `test_human_ui_readiness.py` failed reading 50
+    jobs where 52 exist.
+  - **N1, the metric counting the jobs loaded:** the browser test failed at the metric, `Expected: "51"`,
+    `Received: "50"`.
+  - **N2, the note removed:** it failed at the note, element not found.
+  - **N3, the committed code:** it failed at the fixture's check, the list reporting no total.
+  - Restored: the five Data Onboarding browser tests pass, the five backend scripts pass, and both
+    sources are byte for byte what they were.
+
+  **The references.** Data Onboarding still opens with 12 requests, at 443 KB, and no route exceeds its
+  payload ceiling. `.table-truncated` was already used in `App.tsx`, and neither `TABLE_TRUNCATION.md`
+  nor `INERT_CONTROLS.md` moves. The tenancy census holds at 360: every new count runs on the
+  project-scoped job query.
+
 ## Order and size
 
 | Step | Touches | Commits |

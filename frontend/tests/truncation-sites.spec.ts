@@ -695,6 +695,34 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     }
   });
 
+  test("Data Onboarding counts every import job and says the recent list is a window", async ({ page }) => {
+    test.setTimeout(120_000);
+    // "Import jobs" counted the 50 jobs the summary loaded, and Recent Import Jobs listed the 50
+    // newest, with nothing said. Here 51 more jobs, so the server holds more than 50 whatever
+    // ran before.
+    const suffix = `${Date.now()}`;
+    for (let start = 0; start < 51; start += 10) {
+      const batch = Array.from({ length: Math.min(10, 51 - start) }, (unused, offset) => page.request.post("/imports/csv", { data: {
+        id: `import_window_${suffix}_${start + offset}`, filename: "window.csv", display_name: `Import window ${start + offset}`,
+        target_dataset_id: `import_window_${suffix}_${start + offset}_dataset`, content: "asset_id,name\nwindow_1,Window Pump\n"
+      } }));
+      for (const response of await Promise.all(batch)) expect(response.ok(), await response.text()).toBeTruthy();
+    }
+    const listed = await (await page.request.get("/imports/jobs?limit=1")).json() as { total?: number };
+    expect(typeof listed.total, "the import job list does not say how many jobs there are").toBe("number");
+    const total = listed.total as number;
+    expect(total, "the fixture did not reach past the 50 jobs the screen loads").toBeGreaterThan(50);
+
+    await page.goto("/workspace/imports");
+    const metric = page.locator(".metric-card").filter({ has: page.getByText("Import jobs", { exact: true }) });
+    await expect(metric.locator("strong"), "the Import jobs metric counts only the jobs loaded").toHaveText(String(total));
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Recent Import Jobs", exact: true }) });
+    const totalText = await page.evaluate((count) => count.toLocaleString(), total);
+    await expect(panel.getByRole("note"), "the recent list shows 50 of more jobs and does not say so")
+      .toHaveText(`Loaded the latest 50 of ${totalText} import jobs`);
+    await expectUnclipped(panel.getByRole("note"), "the import jobs note is cut off, hiding how many jobs there are");
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The
