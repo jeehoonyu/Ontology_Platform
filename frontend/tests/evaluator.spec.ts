@@ -460,6 +460,8 @@ test("data onboarding previews a live connector with write-only credentials and 
     await page.getByLabel("Secret (write only)").fill("browser-secret");
     await page.getByRole("button", { name: "Save and Preview" }).click();
     await expect(page.getByText("Live Browser Pump", { exact: true })).toBeVisible();
+    // Two records is the whole source: a preview that did not reach its limit says nothing.
+    await expect(page.getByRole("note").filter({ hasText: "The preview stops at" })).toHaveCount(0);
     await expect(page.getByText("SUCCEEDED", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Secret (write only)")).toHaveValue("");
     await expect(page.getByRole("row", { name: /s3 AVAILABLE/ })).toBeVisible();

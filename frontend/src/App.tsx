@@ -796,6 +796,10 @@ function CommandCenter() {
   );
 }
 
+// The live preview reads at most this many records. No adapter reports how many a source
+// holds, and a form-made REST source has no cursor, so a full preview can only say it stopped.
+const LIVE_PREVIEW_LIMIT = 25;
+
 function DataOnboarding() {
   const [csvContent, setCsvContent] = useState("asset_id,name,status,criticality,vibration_mm_s,temperature_f,longitude,latitude\nasset_react_1,React Pump,degraded,HIGH,0.42,194,-122.4012,37.7924\nasset_react_1,React Pump,degraded,HIGH,0.42,194,-122.4012,37.7924\n");
   const [job, setJob] = useState<ImportJob | null>(null);
@@ -937,7 +941,7 @@ function DataOnboarding() {
         });
         setConnectorForm((current) => ({ ...current, secret: "", sessionToken: "" }));
       }
-      const preview = await previewLiveConnector(source.id, 25);
+      const preview = await previewLiveConnector(source.id, LIVE_PREVIEW_LIMIT);
       setSourcePreview(preview.preview_rows || []);
       await refreshConnectorEvidence(source.id);
     } catch (error) {
@@ -1031,6 +1035,7 @@ function DataOnboarding() {
             {connectorForm.credentialType === "aws" && <label className="connector-wide-field"><span>Session token (optional, write only)</span><input type="password" autoComplete="new-password" value={connectorForm.sessionToken} onChange={(event) => setConnectorForm((current) => ({ ...current, sessionToken: event.target.value }))} /></label>}
           </div>
           <div className="connector-runtime-summary"><StatusBadge value={activeSource?.status || "NOT_CONNECTED"} /><span>{activeSource ? `${activeSource.display_name} uses ${activeSource.source_type}` : "Configure a live source to test access and inspect records."}</span></div>
+          {sourcePreview.length >= LIVE_PREVIEW_LIMIT ? <p className="table-truncated" role="note">Showing the first {LIVE_PREVIEW_LIMIT} records. The preview stops at {LIVE_PREVIEW_LIMIT}, and this source does not say how many it holds.</p> : null}
           <DataTable rows={sourcePreview} empty="No live records previewed." />
         </Panel>
         <Panel title="Stream Replay" action={<button onClick={replayStream}>Replay Sensor Stream</button>}>

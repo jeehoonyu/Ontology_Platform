@@ -802,6 +802,53 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(caption).toContainText("41–50 of 50 rows");
   });
 
+  test("the mapping preview says it hydrates only the first rows of a larger dataset", async ({ page }) => {
+    // The drawer read "Hydrated object preview · 20 rows", the length of what the server kept,
+    // for a dataset of any size. Here a dataset of 25 records.
+    const suffix = `${Date.now()}`;
+    const assetId = `mapping_window_${suffix}`;
+    const typeResponse = await page.request.post("/object-types", { data: {
+      id: `mapping_window_type_${suffix}`, display_name: `Mapping window ${suffix}`, description: "Mapping preview window", properties: { name: { type: "string" } }
+    } });
+    expect(typeResponse.ok(), await typeResponse.text()).toBeTruthy();
+    const asset = await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: `Mapping window ${suffix}`, kind: "dataset", asset_schema: {},
+      records: Array.from({ length: 25 }, (unused, index) => ({ id: `m${index}`, name: `Mapped ${index}` }))
+    } });
+    expect(asset.ok(), await asset.text()).toBeTruthy();
+
+    await page.goto("/workspace/ontology");
+    const mappingPanel = page.locator(".ontology-mapping-panel");
+    await mappingPanel.getByLabel("Source dataset").selectOption(assetId);
+    await mappingPanel.getByRole("button", { name: "Preview objects" }).click();
+    await expect(mappingPanel.locator(".mapping-preview-drawer summary"), "the preview reads its kept rows as the dataset")
+      .toHaveText("Hydrated object preview · the first 20 of 25 rows");
+  });
+
+  test("a full live connector preview says it stopped at its limit", async ({ page }) => {
+    // The live preview asks for 25 records and drew them with nothing said, though no adapter
+    // reports how many a source holds. Here a source of 30 records.
+    const server = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ records: Array.from({ length: 30 }, (unused, index) => ({ asset_id: `live-window-${index}`, name: `Live Window ${index}` })) }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Could not determine connector test server port");
+      await page.goto("/workspace/imports");
+      await page.getByLabel("Source ID").fill(`live_window_${Date.now()}`);
+      await page.getByLabel("Base URL").fill(`http://127.0.0.1:${address.port}`);
+      await page.getByRole("button", { name: "Save and Preview" }).click();
+      await expect(page.getByText("Live Window 0", { exact: true })).toBeVisible();
+      const note = page.getByRole("note").filter({ hasText: "The preview stops at" });
+      await expect(note, "a preview that filled its limit does not say so").toHaveText("Showing the first 25 records. The preview stops at 25, and this source does not say how many it holds.");
+      await expectUnclipped(note, "the live preview note is cut off");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

@@ -648,7 +648,7 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
           </div>
           </DndContext>
           {preview.errors.length || preview.warnings.length ? <DataTable rows={[...preview.errors, ...preview.warnings]} empty="Mapping is valid." /> : null}
-          <details className="mapping-preview-drawer" open><summary>Hydrated object preview · {preview.hydrated_preview.length} rows</summary><DataTable rows={preview.hydrated_preview} empty="No objects can be previewed." /></details>
+          <details className="mapping-preview-drawer" open><summary>Hydrated object preview · {preview.asset.row_count > preview.hydrated_preview.length ? `the first ${preview.hydrated_preview.length.toLocaleString()} of ${preview.asset.row_count.toLocaleString()} rows` : `${preview.hydrated_preview.length.toLocaleString()} rows`}</summary><DataTable rows={preview.hydrated_preview} empty="No objects can be previewed." /></details>
         </>
       ) : <EmptyState inline>Choose a dataset to map fields and preview object hydration.</EmptyState>}
     </Panel>

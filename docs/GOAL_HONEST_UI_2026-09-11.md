@@ -1997,6 +1997,40 @@ plan, and it is measured there.
   style-scope baseline records it. `TABLE_TRUNCATION.md` moves only by line: the canvas's two list cuts
   sit seven lines lower. `INERT_CONTROLS.md` does not move, and the tenancy census holds at 360.
 
+  **Then the mapping and live previews, the last of the smaller lists.** Ontology Manager's mapping
+  drawer read "Hydrated object preview · 20 rows", the length of the rows the server hydrated, for a
+  dataset of any size, though the reply carries the dataset's row count. Data Onboarding's live
+  connector preview asked a source for 25 records and drew them with nothing said.
+
+  **Both say they are windows.** The mapping summary reads "the first 20 of N rows" when the dataset
+  holds more than was hydrated, and "N rows" when it does not; no server change was needed. The live
+  preview is the weak one the sweep named: no adapter reports how many records a source holds, and a
+  REST source made by the form has no cursor to say there are more, so a statement is the only honest
+  fix. Its limit is a named constant, and a preview that fills it reads "Showing the first 25 records.
+  The preview stops at 25, and this source does not say how many it holds." A preview that stops short
+  of its limit is the whole source and says nothing.
+
+    **The proof.** In `truncation-sites.spec.ts`, a new browser test maps a 25-record dataset and requires
+  the drawer's summary to read "Hydrated object preview · the first 20 of 25 rows"; a second serves a
+  live REST source of 30 records and requires "Showing the first 25 records. The preview stops at 25,
+  and this source does not say how many it holds.", not cut off. The live connector test in
+  `evaluator.spec.ts`, whose source holds two records, now requires no such note. They pass on the fix,
+  with the ontology, Object Explorer, map, decision and Drafts tests the same run matched.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the summary counting the rows it kept:** the mapping test failed, `Received: "Hydrated object
+    preview · 20 rows"`.
+  - **N2, the live note removed:** the live test failed at the note, element not found.
+  - **N3, the note shown for any preview:** the evaluator's two-record test failed, one note where it
+    requires none.
+  - **N4, the committed code:** both new tests failed at their statements.
+  - Restored: the five matching browser tests pass, and both sources are byte for byte what they were.
+
+    **The references.** Ontology Manager opens with 20 requests at 764 KB and Data Onboarding with 12 at
+  444 KB, no more than before and within their payload ceilings; the shared closure is 437 KB.
+  `.table-truncated` was already used in both files, and neither `TABLE_TRUNCATION.md` nor
+  `INERT_CONTROLS.md` moves. No server file changed.
+
 ## Order and size
 
 | Step | Touches | Commits |
