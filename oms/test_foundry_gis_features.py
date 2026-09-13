@@ -79,6 +79,11 @@ def main():
         rendered = render_gis_map_layer("critical_asset_layer", db=db)
         assert rendered["type"] == "FeatureCollection"
         assert rendered["metadata"]["feature_count"] == 1
+        assert rendered["metadata"]["total"] == 1, rendered["metadata"]
+        # A layer rendered with room for none still says what it holds, beside its style.
+        empty = render_gis_map_layer("critical_asset_layer", limit=0, db=db)
+        assert empty["metadata"]["feature_count"] == 0 and empty["metadata"]["total"] == 1, empty["metadata"]
+        assert empty["metadata"]["layer_id"] == "critical_asset_layer", empty["metadata"]
         assert rendered["layer"]["style"]["marker_color"] == "#d43f3a"
         assert rendered["features"][0]["properties"]["object_id"] == "asset_pump_4"
 

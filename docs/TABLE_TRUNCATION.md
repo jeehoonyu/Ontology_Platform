@@ -34,7 +34,6 @@ alert taken as a default is not a hidden row.
 | `components/canvas/PipelineCanvas.tsx` | 298 | `MiniGraph` | `nodes` (slice) | mapped | no | no |
 | `components/canvas/PipelineCanvas.tsx` | 305 | `MiniGraph` | `edges` (slice) | mapped | no | no |
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | no | no |
-| `workspaces/MapWorkspace.tsx` | 248 | `MapWorkspace` | `collection.features` (slice) | mapped | no | yes |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 700 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 804 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | no | no |

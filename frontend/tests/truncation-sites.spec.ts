@@ -895,6 +895,83 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(rows, "the True bucket's filter does not return the objects it counts").toHaveCount(trueCount);
   });
 
+  test("the map says how many features a type holds, lists them all on request, and counts a geofence past its limit", async ({ page }) => {
+    test.setTimeout(300_000);
+    // The map loaded 2,000 features and read them as the type: the strip said "2000 features",
+    // the rail listed 12 with nothing said, and a geofence counted only among the 2,000 kept.
+    // Here 2,001 objects at one point, so the geofence holds every one.
+    const suffix = `${Date.now()}`;
+    const typeId = `map_window_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/object-types", { data: {
+      id: typeId, display_name: `Map window ${suffix}`, description: "Map window",
+      properties: { name: { type: "string" }, latitude: { type: "number" }, longitude: { type: "number" } }
+    } }), "object type");
+    const records = Array.from({ length: 2001 }, (unused, index) => ({ id: `${typeId}_${String(index).padStart(4, "0")}`, name: `Mapped ${index}`, latitude: 37.8, longitude: -122.41 }));
+    await settled(await page.request.post("/data-assets", { data: { id: `${typeId}_feed`, display_name: `Map window feed ${suffix}`, kind: "dataset", asset_schema: {}, records } }), "feed");
+    await settled(await page.request.post("/pipelines", { data: {
+      id: `${typeId}_hydrate`, display_name: `Map window hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+      steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id", property_map: { name: "$name", latitude: "$latitude", longitude: "$longitude" }, omit_nulls: true }]
+    } }), "pipeline");
+    const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+    expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+    const [loaded, held] = await page.evaluate(() => [(2000).toLocaleString(), (2001).toLocaleString()]);
+
+    await page.goto("/workspace/map");
+    await page.getByLabel("Map object type").selectOption(typeId);
+    await page.getByRole("button", { name: "Render" }).click();
+    await expect(page.locator(".map-status-strip strong"), "the strip reads the loaded window as the type").toHaveText(`${loaded} of ${held} features`);
+    const rail = page.locator(".map-layer-rail");
+    // Not "Loaded": a text filter ignores case, and the list's note says "loaded features".
+    const windowNote = rail.getByRole("note").filter({ hasText: "show only these" });
+    await expect(windowNote, "the rail does not say the map loaded some of the features").toHaveText(`Loaded ${loaded} of ${held} features. The map and this list show only these.`);
+    await expectUnclipped(windowNote, "the map's window note is cut off, hiding how many features there are");
+    const list = rail.locator(".map-feature-list button");
+    await expect(list).toHaveCount(12);
+    const listNote = rail.getByRole("note").filter({ hasText: "Listing" });
+    await expect(listNote).toHaveText(`Listing 12 of ${loaded} loaded features`);
+    await expectUnclipped(listNote, "the feature list note is cut off");
+    const showAll = rail.getByRole("button", { name: `Show all ${loaded} loaded features` });
+    await showAll.click();
+    await expect(list, "the features past the twelfth cannot be reached from the list").toHaveCount(2000);
+    await expect(rail.getByRole("button", { name: "Show only the first 12" })).toHaveAttribute("aria-expanded", "true");
+    await expect(listNote).toHaveCount(0);
+    await rail.getByRole("button", { name: "Show only the first 12" }).click();
+    await expect(list).toHaveCount(12);
+
+    await list.first().click();
+    await page.getByRole("button", { name: "Evaluate geofence" }).click();
+    await expect(page.locator(".geofence-summary"), "the geofence counted only the objects the map kept").toContainText(`${held} inside`);
+    await expect(page.locator(".geofence-summary")).toContainText("0 outside");
+  });
+
+  test("a map that loaded its whole type says nothing about windows", async ({ page }) => {
+    const suffix = `${Date.now()}`;
+    const typeId = `map_whole_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/object-types", { data: {
+      id: typeId, display_name: `Map whole ${suffix}`, description: "Map whole",
+      properties: { name: { type: "string" }, latitude: { type: "number" }, longitude: { type: "number" } }
+    } }), "object type");
+    for (let index = 0; index < 3; index += 1) {
+      await settled(await page.request.post("/objects", { data: { id: `${typeId}_${index}`, object_type_id: typeId, properties: { name: `Whole ${index}`, latitude: 37.8, longitude: -122.41 } } }), `object ${index}`);
+    }
+    await page.goto("/workspace/map");
+    await page.getByLabel("Map object type").selectOption(typeId);
+    await page.getByRole("button", { name: "Render" }).click();
+    await expect(page.locator(".map-status-strip strong")).toHaveText("3 features");
+    await expect(page.locator(".map-layer-rail").getByRole("note"), "a whole type is not a window").toHaveCount(0);
+    await expect(page.locator(".map-layer-rail").getByRole("button", { name: /^Show all/ })).toHaveCount(0);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

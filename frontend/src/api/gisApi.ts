@@ -12,7 +12,7 @@ export type GeoFeature = {
 export type FeatureCollection = {
   type: "FeatureCollection";
   features: GeoFeature[];
-  metadata: JsonObject;
+  metadata: JsonObject & { feature_count?: number; total?: number };
   layer?: JsonObject;
 };
 export type MapLayer = {

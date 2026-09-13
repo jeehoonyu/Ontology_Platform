@@ -88,6 +88,15 @@ def main():
         assert geofence["inside"][0]["id"] == "asset_pump_4"
         assert geofence["outside"][0]["id"] == "asset_chiller_2"
 
+        # A window of one still says how many features there are, and a geofence counts every
+        # object, not the one it kept. Which object is kept is not asserted: there is no ORDER BY.
+        window = export_gis_feature_collection(schemas.GISFeatureCollectionRequest(object_type_id="asset", limit=1), db)
+        assert window["metadata"]["feature_count"] == 1 and window["metadata"]["total"] == 2, window["metadata"]
+        assert len(window["features"]) == 1
+        fenced = evaluate_gis_geofence(schemas.GISGeofenceRequest(object_type_id="asset", geofence=geofence["geofence"], limit=1), db)
+        assert fenced["summary"] == {"total": 2, "inside": 1, "outside": 1}, fenced["summary"]
+        assert len(fenced["inside"]) + len(fenced["outside"]) == 1, fenced
+
         print("GIS runtime scenario passed")
     finally:
         db.close()

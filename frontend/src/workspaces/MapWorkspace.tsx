@@ -66,6 +66,9 @@ function MapClick({ onPick }: { onPick: (point: [number, number]) => void }) {
   return null;
 }
 
+// The rail lists the first dozen loaded features; the map draws them all.
+const FEATURE_PREVIEW = 12;
+
 export function MapWorkspace() {
   const mapRef = useRef<LeafletMap | null>(null);
   const [types, setTypes] = useState<ObjectTypeSummary[]>([]);
@@ -74,6 +77,8 @@ export function MapWorkspace() {
   const [objectTypeId, setObjectTypeId] = useState("");
   const [geometryField, setGeometryField] = useState("geometry");
   const [collection, setCollection] = useState<FeatureCollection | null>(null);
+  const [allFeatures, setAllFeatures] = useState(false);
+  useEffect(() => setAllFeatures(false), [collection]);
   const [selected, setSelected] = useState<GeoFeature | null>(null);
   const [pickedPoint, setPickedPoint] = useState<[number, number] | null>(null);
   const [mgrsInput, setMgrsInput] = useState("");
@@ -198,7 +203,7 @@ export function MapWorkspace() {
       setGeofence(polygon);
       const result = await evaluateGeofence(objectTypeId, geometryField, polygon);
       setGeofenceResult(result);
-      setNotice(`${result.summary.inside} objects inside the ${radius} m geofence`);
+      setNotice(`${result.summary.inside.toLocaleString()} objects inside the ${radius} m geofence`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Geofence evaluation failed");
     }
@@ -211,6 +216,12 @@ export function MapWorkspace() {
   const geofenceCollection = useMemo<LeafletFeatureCollection>(() => ({ type: "FeatureCollection", features: geofence ? [{ type: "Feature", properties: {}, geometry: geofence as unknown as Geometry }] : [] }), [geofence]);
   const layer = layers.find((item) => item.id === activeLayerId);
   const focus = featurePoint(selected) || pickedPoint;
+  // How many features the layer holds, from the server, against those loaded: the map, the
+  // list and the strip all read the loaded window as the layer.
+  const features = collection?.features || [];
+  const held = typeof collection?.metadata.total === "number" ? collection.metadata.total : features.length;
+  const listedFeatures = allFeatures ? features : features.slice(0, FEATURE_PREVIEW);
+  const featureButton = (feature: GeoFeature, index: number) => <button key={String(feature.id || index)} className={selected === feature ? "selected" : ""} onClick={() => setSelected(feature)}><i style={{ background: riskColor(feature.properties) }} /><span>{featureLabel(feature)}</span><small>{String(feature.id || feature.properties.id || "object")}</small></button>;
   // Feature properties are ontology object properties, so the inspector draws
   // them by their declared base type like every other object surface. This is
   // the panel where it matters most: without it a polygon arrives as GeoJSON
@@ -245,7 +256,12 @@ export function MapWorkspace() {
           <Panel title="Layers" action={<Layers size={15} />}>
             <div className="map-layer-list">{layers.map((item) => <button key={item.id} className={item.id === activeLayerId ? "selected" : ""} onClick={() => void loadLayer(item.id)}><span className="layer-swatch" style={{ background: riskColor(item.style) }} /><span><strong>{item.display_name}</strong><small>{item.object_type_id} · {item.geometry_field}</small></span><StatusBadge value={item.visible ? "visible" : "hidden"} /></button>)}</div>
             {!layers.length ? <div className="empty">Render an object type, then save it as a reusable operational layer.</div> : null}
-            {collection?.features.length ? <><h3 className="map-subheading">Features</h3><div className="map-feature-list">{collection.features.slice(0, 12).map((feature, index) => <button key={String(feature.id || index)} className={selected === feature ? "selected" : ""} onClick={() => setSelected(feature)}><i style={{ background: riskColor(feature.properties) }} /><span>{featureLabel(feature)}</span><small>{String(feature.id || feature.properties.id || "object")}</small></button>)}</div></> : null}
+            {features.length ? <><h3 className="map-subheading">Features</h3>
+              {held > features.length ? <p className="table-truncated" role="note">Loaded {features.length.toLocaleString()} of {held.toLocaleString()} features. The map and this list show only these.</p> : null}
+              {features.length > FEATURE_PREVIEW && !allFeatures ? <p className="table-truncated" role="note">Listing {FEATURE_PREVIEW} of {features.length.toLocaleString()} loaded features</p> : null}
+              <div className="map-feature-list">{listedFeatures.map(featureButton)}</div>
+              {features.length > FEATURE_PREVIEW ? <button type="button" aria-expanded={allFeatures} onClick={() => setAllFeatures((open) => !open)}>{allFeatures ? `Show only the first ${FEATURE_PREVIEW}` : `Show all ${features.length.toLocaleString()} loaded features`}</button> : null}
+            </> : null}
           </Panel>
           <Panel title="MGRS" action={<Crosshair size={15} />}>
             <label className="stacked-field"><span>Coordinate</span><input aria-label="MGRS coordinate" value={mgrsInput} onChange={(event) => setMgrsInput(event.target.value.toUpperCase())} placeholder="10SEG..." /></label>
@@ -255,7 +271,7 @@ export function MapWorkspace() {
           <Panel title="Radius / Geofence" action={<Radar size={15} />}>
             <label className="stacked-field"><span>Radius: {radius} m</span><input aria-label="Geofence radius" type="range" min="50" max="5000" step="50" value={radius} onChange={(event) => setRadius(Number(event.target.value))} /></label>
             <button className="wide-button" onClick={() => void runGeofence()}><ShieldAlert size={15} />Evaluate geofence</button>
-            {geofenceResult ? <div className="geofence-summary"><span><strong>{geofenceResult.summary.inside}</strong> inside</span><span><strong>{geofenceResult.summary.outside}</strong> outside</span></div> : null}
+            {geofenceResult ? <div className="geofence-summary"><span><strong>{geofenceResult.summary.inside.toLocaleString()}</strong> inside</span><span><strong>{geofenceResult.summary.outside.toLocaleString()}</strong> outside</span></div> : null}
           </Panel>
         </aside>
 
@@ -269,7 +285,7 @@ export function MapWorkspace() {
             {geofence ? <GeoJSON key={`geofence-${radius}`} data={geofenceCollection} style={{ color: "#c46a13", fillColor: "#efb263", fillOpacity: 0.14, dashArray: "6 5", weight: 2 }} /> : null}
             {pickedPoint ? <CircleMarker center={[pickedPoint[1], pickedPoint[0]]} radius={7} pathOptions={{ color: "#172f3d", fillColor: "#fff", fillOpacity: 1, weight: 3 }} /> : null}
           </MapContainer>
-          <div className="map-status-strip"><span><i className="map-dot critical" />critical</span><span><i className="map-dot warning" />warning</span><span><i className="map-dot normal" />normal</span><strong>{collection?.features.length || 0} features</strong></div>
+          <div className="map-status-strip"><span><i className="map-dot critical" />critical</span><span><i className="map-dot warning" />warning</span><span><i className="map-dot normal" />normal</span><strong>{held > features.length ? `${features.length.toLocaleString()} of ${held.toLocaleString()} features` : `${features.length.toLocaleString()} features`}</strong></div>
         </main>
 
         <aside className="map-inspector">
@@ -277,7 +293,7 @@ export function MapWorkspace() {
             {!selected ? <EmptyState title="Select a feature" description="Click an object on the map to inspect ontology properties and spatial state." /> : <><header className="map-selection-heading"><div><strong>{String(selected.properties.name || selected.properties.title || selected.id || "Selected feature")}</strong><small>{String(selected.id || selected.properties.id || "ontology object")}</small></div><StatusBadge value={String(selected.properties.risk_band || selected.properties.criticality || selected.properties.status || "active")} /></header><KeyValueGrid data={selected.properties} specs={specs} /></>}
           </Panel>
           <Panel title="Layer Evidence">
-            <dl className="map-coordinate-summary"><div><dt>Layer</dt><dd>{layer?.display_name || "Ad hoc object view"}</dd></div><div><dt>Object type</dt><dd>{objectTypeId || "none"}</dd></div><div><dt>Geometry</dt><dd>{geometryField}</dd></div><div><dt>Geofence</dt><dd>{geofenceResult ? `${geofenceResult.summary.inside} matches` : "not evaluated"}</dd></div></dl>
+            <dl className="map-coordinate-summary"><div><dt>Layer</dt><dd>{layer?.display_name || "Ad hoc object view"}</dd></div><div><dt>Object type</dt><dd>{objectTypeId || "none"}</dd></div><div><dt>Geometry</dt><dd>{geometryField}</dd></div><div><dt>Geofence</dt><dd>{geofenceResult ? `${geofenceResult.summary.inside.toLocaleString()} matches` : "not evaluated"}</dd></div></dl>
           </Panel>
         </aside>
       </div>

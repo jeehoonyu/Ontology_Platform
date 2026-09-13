@@ -1,7 +1,7 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-13T20:53:16Z"
+    "recorded_at": "2026-09-13T21:14:53Z"
   },
   "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
   "single_file_classes": 312,
@@ -195,6 +195,7 @@
       "components/data/DataGrid.tsx",
       "workspaces/ControlPanel.tsx",
       "workspaces/DecisionWorkspace.tsx",
+      "workspaces/MapWorkspace.tsx",
       "workspaces/ObjectExplorer.tsx",
       "workspaces/OntologyManager.tsx",
       "workspaces/OpsWorkspace.tsx",

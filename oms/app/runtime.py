@@ -1657,8 +1657,12 @@ def spatial_query_objects(
     polygon: Optional[Dict[str, Any]] = None,
     limit: int = 100,
     include_lineage: bool = True,
+    count_within: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     bounded_limit = max(0, min(int(limit), 10000))
+    # A polygon to count matches inside of without filtering by it: a geofence lists the
+    # kept objects inside and outside, and counts every object inside, past the limit too.
+    within = normalize_geometry(count_within) if count_within else None
     near_point = geometry_reference_point(normalize_geometry(near) or {}) if near else None
     normalized_polygon = normalize_geometry(polygon) if polygon else None
     normalized_bbox = [float(item) for item in bbox] if bbox else None
@@ -1706,6 +1710,7 @@ def spatial_query_objects(
     # by scan order, which is what the previous stable sort did.
     kept: List[Tuple[float, int, Dict[str, Any]]] = []
     total = 0
+    total_within = 0
     sequence = 0
 
     for row in rows:
@@ -1729,6 +1734,8 @@ def spatial_query_objects(
                 continue
 
         total += 1
+        if within and ref_point and point_in_polygon(ref_point, within):
+            total_within += 1
         sequence += 1
         rank = distance if near_point else float(sequence)
         if not bounded_limit:
@@ -1762,6 +1769,7 @@ def spatial_query_objects(
             "polygon": polygon,
         },
         "total": total,
+        **({"total_within": total_within} if within else {}),
         "count": len(objects),
         "objects": objects,
     }
@@ -1827,6 +1835,9 @@ def object_set_feature_collection(
             "filters": filters or {},
             "geometry_field": geometry_field,
             "feature_count": len(features),
+            # Every matching object with geometry, where `feature_count` is those returned.
+            # The query counted it and this dropped it, so a map of 2,000 read as the layer.
+            "total": query["total"],
         },
     }
 
@@ -1987,6 +1998,7 @@ def evaluate_geofence(
         geometry_field=geometry_field,
         limit=limit,
         include_lineage=False,
+        count_within=polygon,
     )
     inside: List[Dict[str, Any]] = []
     outside: List[Dict[str, Any]] = []
@@ -2005,10 +2017,13 @@ def evaluate_geofence(
         "object_type_id": object_type_id,
         "geometry_field": geometry_field,
         "geofence": polygon,
+        # Over every object, not the `limit` kept: classifying only the kept objects missed
+        # every object inside the fence past them, and the ops event took its severity
+        # from that count. The lists stay the kept objects.
         "summary": {
-            "total": len(query["objects"]),
-            "inside": len(inside),
-            "outside": len(outside),
+            "total": query["total"],
+            "inside": query["total_within"],
+            "outside": query["total"] - query["total_within"],
         },
         "inside": inside,
         "outside": outside,

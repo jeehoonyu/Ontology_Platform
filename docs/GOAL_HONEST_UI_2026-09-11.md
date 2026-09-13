@@ -2069,6 +2069,47 @@ plan, and it is measured there.
   its payload ceiling. No class became shared, `TABLE_TRUNCATION.md` moves only by line (the column cut
   sits 17 lines lower), `INERT_CONTROLS.md` does not move, and the tenancy census holds at 360.
 
+  **Then the map.** The Operational Map asked for 2,000 features and read them as the type. The status
+  strip said "2000 features", the rail listed the first 12 with no way to the rest, and a geofence
+  classified only the objects the query kept, so every object inside the fence past them was missed,
+  and the operations event took its severity from that count.
+
+  **The map says how many it loaded of how many, lists them all on request, and a geofence counts every
+  object.** The feature collection's metadata keeps the query's `total` beside `feature_count`. The strip
+  reads "2,000 of 2,001 features"; the rail says "Loaded 2,000 of 2,001 features. The map and this list
+  show only these.", lists 12 under "Listing 12 of 2,000 loaded features", and lists every loaded feature
+  on request. A geofence counts inside and outside over every object in the query, and its lists stay
+  the objects it kept. The truncation gate's list cut in `MapWorkspace` closes with it.
+
+    **The proof.** `test_gis_runtime.py` now renders a window of one and requires `feature_count` 1 and
+  `total` 2, and evaluates a geofence with a limit of one and requires its summary to count both objects;
+  `test_foundry_gis_features.py` requires a layer's `total`, including one rendered with room for no
+  features. In `truncation-sites.spec.ts`, a new browser test hydrates 2,001 objects at one point and
+  requires the strip to read "2,000 of 2,001 features", the rail's two notes, not cut off, twelve listed
+  features, all 2,000 after Show all and twelve again after folding it, and a geofence reading "2,001
+  inside" and "0 outside"; a second requires a map of three objects to say nothing about windows. They
+  pass on the fix, with the Operational Map evaluator test and five backend scripts.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, the collection dropping its total:** `test_gis_runtime.py` failed with `KeyError: 'total'`.
+  - **B2, the geofence counting what it kept:** it failed on a summary of `{'total': 1, 'inside': 0,
+    'outside': 1}`.
+  - **N1, the server dropping the total,** and **N2, the strip counting the features loaded:** the
+    browser test failed at the strip, `Received: "2,000 features"`.
+  - **N3, Show all doing nothing:** it failed at the list, `Expected: 2000`, `Received: 12`.
+  - **N4, the geofence counting what it kept:** it failed at the summary, which read "2,000 inside".
+  - **N5, the window note shown on a whole type:** the three-object test failed, one note where it
+    requires none.
+  - Restored: the three map browser tests and five backend scripts pass, and the three sources are byte
+    for byte what they were.
+
+    **The references.** The Operational Map opens with 25 requests at 906 KB, no more than before and
+  within its payload ceiling. `.table-truncated` reaches `MapWorkspace.tsx`, a twelfth file, and the
+  style-scope baseline records it; `INERT_CONTROLS.md` counts the new Show all button among 332 wired
+  controls. `TABLE_TRUNCATION.md` loses the map's feature-list row: the cut now sits in a condition,
+  which the committed gate cannot place and so drops, the first of the holes the gate record below
+  closes. The tenancy census holds at 360.
+
 ## Order and size
 
 | Step | Touches | Commits |
