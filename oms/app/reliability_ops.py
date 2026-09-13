@@ -646,6 +646,11 @@ def reliability_summary(db: Session = Depends(get_db)):
         },
         created_at=_now(),
     )
+    # The lists are built before the commit, which expires every run, plan and impact loaded
+    # above: built after it, each one was read again, a query apiece.
+    contract_runs = [_run_dict(run) for run in latest_contract_runs]
+    backfills = [_backfill_dict(plan) for plan in latest_backfills]
+    impacts = [_impact_dict(run) for run in latest_impacts]
     db.add(snapshot)
     db.commit()
     return {
@@ -657,7 +662,7 @@ def reliability_summary(db: Session = Depends(get_db)):
         # its shape.
         "contract_runs": db.query(DataQualityRun).count(),
         "contract_run_window": len(latest_contract_runs),
-        "latest_contract_runs": [_run_dict(run) for run in latest_contract_runs],
-        "latest_backfills": [_backfill_dict(plan) for plan in latest_backfills],
-        "latest_impacts": [_impact_dict(run) for run in latest_impacts],
+        "latest_contract_runs": contract_runs,
+        "latest_backfills": backfills,
+        "latest_impacts": impacts,
     }

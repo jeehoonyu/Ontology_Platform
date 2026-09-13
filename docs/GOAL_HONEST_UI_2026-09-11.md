@@ -2230,6 +2230,20 @@ plan, and it is measured there.
   whose path or body is assembled away from the call; and whether a note's condition matches its window,
   which each named browser test proves.
 
+  **Then a cost the Reliability tab's change left behind.** That change listed every one of the latest 25
+  contract runs, and `reliability_summary` built the list after committing its snapshot. The commit
+  expired each run loaded above it, so building the list read every run again, one statement apiece.
+  Neither the Reliability tests nor the fast tier measure statements per request; the suite cost census
+  does, and it runs when a baseline is re-earned, which the entity resolution migration below required.
+  It found `GET /reliability/summary` repeating one statement 25 times.
+
+  **The lists are built before the commit.** The runs, backfills and impacts are turned into the
+  response's dictionaries while they are still loaded, and the snapshot is committed after. Measured by
+  `measure_suite_cost.py --only test_ops_investigations_reliability.py`, the route falls from 41
+  statements with one shape repeated 25 times to 14 with none repeated; the committed file, swapped back
+  in and measured the same way, gives 41 and 25 again, and the fixed file is restored byte for byte. The
+  reliability, operations, industrial and platform scripts that call the route pass.
+
 ## Order and size
 
 | Step | Touches | Commits |
