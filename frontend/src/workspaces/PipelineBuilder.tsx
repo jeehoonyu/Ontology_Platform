@@ -586,7 +586,7 @@ export function PipelineBuilder() {
                 type: details.metadata.type,
                 upstream: formatValue(details.metadata.upstream),
                 downstream: formatValue(details.metadata.downstream),
-                preview_rows: details.preview.row_count,
+                rows: details.preview.row_count,
               }} />
               <PipelineNodeConfig
                 details={details}

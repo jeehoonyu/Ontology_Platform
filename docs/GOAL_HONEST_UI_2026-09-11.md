@@ -1949,6 +1949,54 @@ plan, and it is measured there.
   nor `INERT_CONTROLS.md` moves. The tenancy census holds at 360: the count runs on the project-scoped
   execution query.
 
+  **Then the pipeline drawer's preview.** Selecting a node asks `POST .../nodes/{id}/preview` for 50
+  rows. The endpoint sliced the node's stored sample, and `_execute_graph` cut every node's sample to 5,
+  so the drawer drew at most 5 rows of any node, with nothing said, and the `limit` did nothing. Beside
+  it the Selected Node panel labelled the node's full row count `preview_rows`.
+
+  **The preview returns what it asks for, and says how many the node holds.** `_execute_graph` takes the
+  node a preview names and keeps that node's rows up to the limit; every other node's sample stays at
+  5, because the canvas and node details carry every node's sample. The drawer's preview tab reads
+  "Previewing the first N of M rows" when the node holds more, counted from the same reply its rows
+  came from, and pages the rows it has. The Selected Node panel's key is now `rows`, the name the
+  drawer's selection tab already used for the same number.
+
+  **And the drawer could not be reached at 1280 by 900.** Above 900px wide the Pipeline Builder fixes
+  its page to the viewport and hides what overflows, and the row of side-by-side panes keeps a 520px
+  floor, so the bottom slot, the Evidence drawer holding this preview, sat below the clip where no
+  pointer or wheel could reach it. The browser test found it: its click on the drawer's tab landed on
+  `section.builder-main`. The panes now scroll inside their row. Scrolling alone was not enough, and the
+  second run showed why: the bottom slot, a flex child with no floor of its own, shrank to nothing and
+  the drawer spilled under the row above, where the click landed on the node library. Each part of the
+  pane host now keeps its height.
+
+    **The proof.** A new `test_pipeline_node_preview_window.py` previews a 60-row input and requires 50
+  rows back with a row count of 60, and 3 rows for a limit of 3, while the canvas and node details keep
+  every sample at 5. In `truncation-sites.spec.ts`, a new browser test builds the same graph, opens the
+  drawer's preview tab, requires "Previewing the first 50 of 60 rows", not cut off, and pages the table
+  to "41–50 of 50 rows"; its two clicks are the hit test that the drawer can be reached. They pass on
+  the fix, with the pipeline evaluator tests, the Outputs pane test, all 20 movement-contract tests and
+  five pipeline backend scripts.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, the preview cut to five again:** the backend script failed, "the preview asked for 50 rows and
+    returned 5".
+  - **B2, every node keeping more:** it failed at the canvas, "the canvas carries samples of [60, 60]
+    rows".
+  - **N1, the server cutting to five:** the browser test failed at the note, which read "Previewing the
+    first 5 of 60 rows".
+  - **N2, the note removed,** and **N3, the total taken from the rows shown:** each failed at the note,
+    element not found.
+  - **N4, the committed code,** and **N5, the pane rules removed:** each failed at the click on the
+    drawer's preview tab.
+  - Restored: the three matching browser tests and six backend scripts pass, and the four sources are
+    byte for byte what they were.
+
+    **The references.** The Pipeline Builder opens with 15 requests, no more than before, at 555 KB,
+  within its payload ceiling. `.table-truncated` reaches `PipelineCanvas.tsx`, an eleventh file, and the
+  style-scope baseline records it. `TABLE_TRUNCATION.md` moves only by line: the canvas's two list cuts
+  sit seven lines lower. `INERT_CONTROLS.md` does not move, and the tenancy census holds at 360.
+
 ## Order and size
 
 | Step | Touches | Commits |

@@ -1631,6 +1631,7 @@ def _execute_graph(
     *,
     parameters: Optional[Dict[str, Any]] = None,
     write_ontology: bool = False,
+    preview: Optional[Tuple[str, int]] = None,
 ) -> Dict[str, Any]:
     validation = _validate_graph(db, graph)
     if validation["errors"]:
@@ -1777,7 +1778,12 @@ def _execute_graph(
         "final_node_id": final_node_id or (ordered[-1][0] if ordered else None),
         "rows": current,
         "node_outputs": {
-            node_id: {"row_count": len(rows), "schema": _schema(rows), "sample": rows[:5], "field_lineage": lineage_outputs.get(node_id, {})}
+            # Five rows a node for the canvas and details, which carry every node's sample.
+            # `preview` names the one node a preview asked for, which keeps what it asked
+            # for: its limit was cut to these five, so `limit: 50` returned five.
+            node_id: {"row_count": len(rows), "schema": _schema(rows),
+                      "sample": rows[:preview[1]] if preview and node_id == preview[0] else rows[:5],
+                      "field_lineage": lineage_outputs.get(node_id, {})}
             for node_id, rows in outputs.items()
         },
         "lineage": {"graph_id": graph.id, "steps": step_metrics, "input_asset_ids": input_asset_ids, "fields_by_node": lineage_outputs},
@@ -2059,11 +2065,11 @@ def delete_pipeline_node(graph_id: str, node_id: str, principal: Principal = Dep
 def preview_pipeline_node(graph_id: str, node_id: str, body: PipelineNodePreviewRequest = PipelineNodePreviewRequest(), principal: Principal = Depends(require_permission("execute")), db: Session = Depends(get_db)):
     graph = _graph_for(db, graph_id, principal, "execute")
     _find_node(graph, node_id)
-    execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=False)
+    limit = max(1, min(int(body.limit), 500))
+    execution = _execute_graph(db, graph, parameters=body.parameters, write_ontology=False, preview=(node_id, limit))
     output = execution["node_outputs"].get(node_id)
     if output is None:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' did not produce preview rows")
-    limit = max(1, min(int(body.limit), 500))
     rows = output.get("sample", [])[:limit]
     schema = output.get("schema", {"fields": []})
     return {

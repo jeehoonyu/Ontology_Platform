@@ -767,6 +767,41 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expectUnclipped(panel.getByRole("note"), "the runs note is cut off, hiding how many runs there are");
   });
 
+  test("the pipeline drawer previews the rows it asks for and says how many the node holds", async ({ page }) => {
+    test.setTimeout(120_000);
+    // The drawer asked for 50 preview rows and the server cut every node's sample to 5, so it
+    // drew 5 rows of any node, with nothing said. Here an input of 60 rows.
+    const suffix = `${Date.now()}`;
+    const assetId = `preview_window_${suffix}`;
+    const graphName = `Preview window ${suffix}`;
+    const asset = await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: graphName, kind: "dataset", asset_schema: {},
+      records: Array.from({ length: 60 }, (unused, index) => ({ row: index, label: `row ${index}` }))
+    } });
+    expect(asset.ok(), await asset.text()).toBeTruthy();
+    const graph = await page.request.post("/pipeline-builder/graphs", { data: {
+      id: `preview_window_graph_${suffix}`, display_name: graphName,
+      nodes: [{ id: "input", type: "input_dataset", label: "Window input", position: { x: 80, y: 120 }, config: { asset_id: assetId } }],
+      edges: []
+    } });
+    expect(graph.ok(), await graph.text()).toBeTruthy();
+
+    await page.goto("/workspace/pipeline");
+    await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+    await page.getByRole("button", { name: /Window input \d+ rows input_dataset/ }).click();
+    const drawer = page.locator(".bottom-drawer");
+    // The clicks are the hit test. At this viewport the panes' row pushed the drawer below the
+    // page's clip, and `section.builder-main` took every click meant for it.
+    await drawer.getByRole("button", { name: "preview", exact: true }).click({ timeout: 15_000 });
+    await expect(drawer.getByRole("note"), "the drawer previews some of the node's rows and does not say so")
+      .toHaveText("Previewing the first 50 of 60 rows");
+    await expectUnclipped(drawer.getByRole("note"), "the preview note is cut off, hiding how many rows the node holds");
+    const caption = drawer.locator("caption");
+    await expect(caption, "the drawer did not receive the 50 rows it asked for").toContainText("of 50 rows");
+    await drawer.getByRole("button", { name: "Next rows" }).click({ timeout: 15_000 });
+    await expect(caption).toContainText("41–50 of 50 rows");
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

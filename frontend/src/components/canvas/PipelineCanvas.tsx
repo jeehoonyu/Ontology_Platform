@@ -244,6 +244,12 @@ export function BottomDrawer({
 }) {
   const [tab, setTab] = useState("preview");
   const rows = drawerRows(tab, preview, selectedNode, suggestions, validation, details);
+  // How many rows the node holds, from the same source as the rows shown: a preview of the
+  // first 50 of 60 rows read as the node's whole output.
+  const heldRows = tab !== "preview" ? null
+    : preview?.rows ? preview.row_count
+    : details?.preview.rows ? details.preview.row_count
+    : selectedNode?.row_count ?? null;
   return (
     <section className="bottom-drawer">
       <nav>
@@ -263,6 +269,7 @@ export function BottomDrawer({
           <DataTable rows={details?.preview.columns || selectedNode.schema?.fields || []} empty="No columns found for this node." />
         </div>
       ) : null}
+      {tab === "preview" && typeof heldRows === "number" && heldRows > rows.length ? <p className="table-truncated" role="note">Previewing the first {rows.length.toLocaleString()} of {heldRows.toLocaleString()} rows</p> : null}
       {tab !== "selection_preview" ? <DataTable rows={rows} empty="No preview rows, suggestions, or warnings for this node." /> : null}
     </section>
   );

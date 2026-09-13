@@ -5401,6 +5401,20 @@ pre {
     min-height: 0;
   }
 
+  /* The panes scroll inside their row. At 1280x900 the row of side-by-side panes keeps a
+     520px floor, which pushed the bottom slot -- the Evidence drawer, with a node's preview
+     rows -- below this page's clip, where no pointer or wheel could reach it. Each part
+     keeps its height, or the bottom slot shrinks to nothing and the drawer spills under
+     the row above it. */
+  .pipeline-workbench-page .pane-host {
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .pipeline-workbench-page .pane-host > * {
+    flex-shrink: 0;
+  }
+
   .pipeline-workbench-page .output-rail {
     overflow: auto;
   }
