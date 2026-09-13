@@ -261,8 +261,8 @@ export function activatePlugin(versionId: string): Promise<PluginVersion> {
   return postJson<PluginVersion>(`/api/v1/plugins/${encodeURIComponent(versionId)}/activate`, {});
 }
 
-export function listPluginExecutions(versionId: string): Promise<{ plugin_version_id: string; executions: PluginExecution[] }> {
-  return api<{ plugin_version_id: string; executions: PluginExecution[] }>(`/api/v1/plugins/${encodeURIComponent(versionId)}/executions`);
+export function listPluginExecutions(versionId: string): Promise<{ plugin_version_id: string; executions: PluginExecution[]; total?: number }> {
+  return api<{ plugin_version_id: string; executions: PluginExecution[]; total?: number }>(`/api/v1/plugins/${encodeURIComponent(versionId)}/executions`);
 }
 
 export function invokePluginAsync(

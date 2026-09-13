@@ -896,5 +896,9 @@ def invoke_plugin(version_id: str, body: PluginInvoke, principal: Principal = De
 @router.get("/plugins/{version_id}/executions")
 def list_plugin_executions(version_id: str, limit: int = Query(default=50, ge=1, le=500), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     row = _plugin(db, version_id, principal, "view")
-    executions = db.query(PluginExecution).filter(PluginExecution.plugin_version_id == row.id, PluginExecution.project_id == row.project_id).order_by(PluginExecution.created_at.desc(), PluginExecution.id.desc()).limit(limit).all()
-    return {"plugin_version_id": row.id, "executions": [_execution_dict(item) for item in executions]}
+    scope = db.query(PluginExecution).filter(PluginExecution.plugin_version_id == row.id, PluginExecution.project_id == row.project_id)
+    # The latest `limit` runs, and how many there are, so the screen can say it loaded the
+    # latest 50 of more rather than read 50 as every run.
+    total = scope.count()
+    executions = scope.order_by(PluginExecution.created_at.desc(), PluginExecution.id.desc()).limit(limit).all()
+    return {"plugin_version_id": row.id, "executions": [_execution_dict(item) for item in executions], "total": total}

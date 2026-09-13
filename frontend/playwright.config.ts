@@ -52,7 +52,10 @@ export default defineConfig({
       APP_ENV: "test",
       AUTH_MODE: "local",
       CONNECTOR_ALLOW_PRIVATE_NETWORKS: "true",
-      CONNECTOR_SECRET_KEY: "playwright-isolated-connector-key"
+      CONNECTOR_SECRET_KEY: "playwright-isolated-connector-key",
+      // Signed extensions the suite registers keep their bundles under oms/storage, which git
+      // ignores; the default is a folder at the repository root, which it does not.
+      PLUGIN_BUNDLE_ROOT: "../oms/storage/playwright-plugin-bundles"
     },
     reuseExistingServer: false,
     timeout: 120_000

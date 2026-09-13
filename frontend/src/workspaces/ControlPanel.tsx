@@ -1042,6 +1042,7 @@ function ExtensionsSection() {
   const catalog = useAsyncState(() => admin.getPluginCatalog(projectId), [projectId, refreshKey]);
   const [selected, setSelected] = useState<admin.PluginVersion | null>(null);
   const [executions, setExecutions] = useState<admin.PluginExecution[]>([]);
+  const [executionTotal, setExecutionTotal] = useState<number | null>(null);
   const [keyForm, setKeyForm] = useState({ id: "", organization_id: "local", display_name: "" });
   const [publicKeyFile, setPublicKeyFile] = useState<File | null>(null);
   const [packageForm, setPackageForm] = useState({ signer_key_id: "" });
@@ -1116,6 +1117,7 @@ function ExtensionsSection() {
       const result = await admin.listPluginExecutions(version.id);
       setSelected(version);
       setExecutions(result.executions);
+      setExecutionTotal(typeof result.total === "number" ? result.total : null);
       setOperation(Object.keys(version.operations)[0] || "");
       setOperationInput({});
       setError("");
@@ -1151,6 +1153,8 @@ function ExtensionsSection() {
         priority: 50,
         max_attempts: 3
       });
+      // A run queued here is one more the server counts, unless it was already listed.
+      if (!executions.some((item) => item.id === run.id)) setExecutionTotal((total) => (total === null ? null : total + 1));
       setExecutions((current) => [run, ...current.filter((item) => item.id !== run.id)]);
       setError("");
       setNotice(`${selected.plugin_id} queued as ${run.job_id || run.id}.`);
@@ -1234,6 +1238,7 @@ function ExtensionsSection() {
             {!Object.keys(inputProperties).length ? <p className="muted-copy">This operation has no declared input fields.</p> : null}
           </Panel>
           <Panel title={`${selected.plugin_id} execution evidence`} action={<div className="button-row"><StatusBadge value={selected.status} /><button onClick={() => inspect(selected)}>Refresh runs</button></div>}>
+            {executionTotal !== null && executionTotal > executions.length ? <p className="table-truncated" role="note">Loaded the latest {executions.length.toLocaleString()} of {executionTotal.toLocaleString()} runs</p> : null}
             <DataTable rows={executions.map((run) => ({ id: run.id, job_id: run.job_id || "direct", operation: run.operation, status: run.status, duration_ms: run.duration_ms, sandbox: String(run.sandbox.mode || (run.status === "QUEUED" ? "pending" : "unknown")), error: run.error || "", actor: run.actor, created_at: run.created_at }))} empty="This extension has not run yet." />
           </Panel>
         </>

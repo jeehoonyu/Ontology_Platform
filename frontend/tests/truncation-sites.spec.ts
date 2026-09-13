@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import { expect, test, type APIResponse, type Locator, type Page } from "@playwright/test";
 
 /**
@@ -721,6 +723,48 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(panel.getByRole("note"), "the recent list shows 50 of more jobs and does not say so")
       .toHaveText(`Loaded the latest 50 of ${totalText} import jobs`);
     await expectUnclipped(panel.getByRole("note"), "the import jobs note is cut off, hiding how many jobs there are");
+  });
+
+  test("an extension's run list says how many runs it has", async ({ page }) => {
+    test.setTimeout(180_000);
+    // The execution evidence panel listed the 50 runs the server returns and read as every run.
+    // A real signed extension is registered and queued three times; its real run list is then
+    // enlarged in its count only, since past fifty real sandboxed runs this is a load test.
+    const suffix = `${Date.now()}`;
+    const raw = execFileSync(process.env.PYTHON_BIN || "python", [resolve("../oms/build_rehearsal_plugin.py"), "--suffix", suffix], { cwd: resolve("."), encoding: "utf8" });
+    const fixture = JSON.parse(raw) as { trust_key: Record<string, unknown>; register: Record<string, unknown> & { manifest: { plugin_id: string } } };
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    // The rehearsal builder signs for its own organization; the suite's projects belong to "local".
+    await settled(await page.request.post("/api/v1/plugins/trust-keys", { data: { ...fixture.trust_key, organization_id: "local" } }), "trust key");
+    const version = await settled(await page.request.post("/api/v1/plugins/register", { data: fixture.register }), "register") as { id: string };
+    await settled(await page.request.post(`/api/v1/plugins/${version.id}/activate`), "activate");
+    for (let run = 0; run < 3; run += 1) {
+      await settled(await page.request.post(`/api/v1/plugins/${version.id}/invoke-async`, { data: {
+        operation: "fast", input: { marker: `run-${run}` }, idempotency_key: `${suffix}-${run}`
+      } }), `queue run ${run}`);
+    }
+    const EXTRA = 75;
+    let listed = -1;
+    await page.route(`**/api/v1/plugins/${version.id}/executions*`, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as { executions: unknown[]; total?: number };
+      listed = body.executions.length;
+      await route.fulfill({ response, json: typeof body.total === "number" ? { ...body, total: body.total + EXTRA } : body });
+    });
+
+    await page.goto("/workspace/control-panel");
+    await page.getByRole("button", { name: "Extensions", exact: true }).click();
+    const pluginId = fixture.register.manifest.plugin_id;
+    await page.getByRole("button", { name: `Runs: ${pluginId}` }).click();
+    await expect.poll(() => listed, { message: "the panel never asked for the extension's runs" }).toBeGreaterThanOrEqual(3);
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: `${pluginId} execution evidence`, exact: true }) });
+    await expect(panel.getByRole("note"), "the panel lists the latest runs of more and does not say so")
+      .toHaveText(`Loaded the latest ${listed} of ${listed + EXTRA} runs`);
+    await expectUnclipped(panel.getByRole("note"), "the runs note is cut off, hiding how many runs there are");
   });
 
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {

@@ -245,6 +245,10 @@ os.environ["APP_ENV"] = "development"
 executions = client.get(f"/api/v1/plugins/{plugin['id']}/executions")
 assert executions.status_code == 200, executions.text
 assert {item["status"] for item in executions.json()["executions"]} == {"SUCCEEDED", "FAILED"}
+# A window of the runs still says how many there are.
+window = client.get(f"/api/v1/plugins/{plugin['id']}/executions?limit=1")
+assert window.status_code == 200 and len(window.json()["executions"]) == 1, window.text
+assert window.json().get("total") == len(executions.json()["executions"]), window.json()
 
 revoked = client.post("/api/v1/plugins/trust-keys/vendor-key/revoke")
 assert revoked.status_code == 200, revoked.text

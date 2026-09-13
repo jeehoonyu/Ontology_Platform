@@ -1911,6 +1911,44 @@ plan, and it is measured there.
   nor `INERT_CONTROLS.md` moves. The tenancy census holds at 360: every new count runs on the
   project-scoped job query.
 
+  **Then an extension's runs.** The Control Panel's Extensions section loaded an extension's runs from
+  `GET /api/v1/plugins/{id}/executions`, which returns the 50 newest with no total, and listed them as
+  its execution evidence with nothing said about any older run.
+
+  **The server counts the runs, and the panel says when it loaded the latest of more.** The response,
+  already an object, gains `total`, counted over the same project-scoped filter. The section keeps it
+  beside the runs; a run queued from the screen raises it by one unless that run was already listed.
+  When there are more runs than were loaded, the evidence panel reads "Loaded the latest L of N runs".
+
+  **A real extension, with its count enlarged.** The browser test registers a real signed extension,
+  built by `oms/build_rehearsal_plugin.py`, activates it and queues three runs through the API. Past
+  fifty real sandboxed runs the fixture would be a load test, so the real run list is fulfilled with
+  only its `total` enlarged by 75, the arrangement the Outputs pane test already uses. Registering an
+  extension writes its bundle, and the browser suite's server did not say where, so bundles went to a
+  folder at the repository root that git does not ignore; `playwright.config.ts` now sends them under
+  `oms/storage`, which it does.
+
+    **The proof.** `test_signed_plugin_runtime.py` now reads a window of one run and requires its `total`
+  to equal the length of the whole list. In `truncation-sites.spec.ts`, a new browser test registers the
+  extension, queues three runs, fulfils the run list with its `total` enlarged by 75, and requires the
+  evidence panel to read "Loaded the latest 3 of 78 runs". They pass on the fix, with
+  `test_async_plugin_execution.py`.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, the window without its total:** `test_signed_plugin_runtime.py` failed at the new assertion,
+    the one-run window carrying no `total`.
+  - **N1, the note removed:** the browser test failed at the note, element not found.
+  - **N2, the total taken from the runs loaded:** it failed at the note, which never rendered.
+  - **N3, the server without a total:** it failed at the note; the reply it enlarges had no total.
+  - **N4, the committed code:** it failed at the note.
+  - Restored: the four matching Control Panel, extension and evaluator browser tests pass, both plugin
+    backend scripts pass, and the three sources are byte for byte what they were.
+
+    **The references.** The Control Panel still opens with 15 requests, at 556 KB, within its payload
+  ceiling. `.table-truncated` was already used in `ControlPanel.tsx`, and neither `TABLE_TRUNCATION.md`
+  nor `INERT_CONTROLS.md` moves. The tenancy census holds at 360: the count runs on the project-scoped
+  execution query.
+
 ## Order and size
 
 | Step | Touches | Commits |
