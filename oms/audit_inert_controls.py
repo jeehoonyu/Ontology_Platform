@@ -69,27 +69,60 @@ BASELINE = REPO_ROOT / "docs" / "inert-controls-baseline.json"
 # `_OPEN` finds the start; `_tags` walks forward counting braces and quotes.
 _OPEN = re.compile(r"<(button|a)(?=[\s/>])")
 
+# What a tag the walk cannot close reads as: no attributes, so nothing wires it.
+UNREADABLE = ""
+
 
 def _tags(text: str):
-    """Yield `(start, tag, attributes)` for every `<button>`/`<a>` opening tag."""
+    """Yield `(start, end, tag, attributes)` for every `<button>`/`<a>` opening tag.
+
+    Comments inside a handler are skipped, and template literals are quoted. The
+    first version tracked only `"` and `'`, and N7c's `Clear filters` button carried
+    `// ... the filters' summary.` in its onClick: the apostrophe opened a quote that
+    never closed, the walk ran off the end of the file, and the button was never
+    yielded. The census went on reporting the controls it could read, one short,
+    with nothing to say one was missing. A tag the walk still cannot close is now
+    yielded with no attributes, so it is counted -- as inert -- rather than dropped.
+    """
     for opener in _OPEN.finditer(text):
-        index, depth, quote = opener.end(), 0, ""
-        while index < len(text):
-            character = text[index]
-            if quote:
-                if character == quote:
-                    quote = ""
-            elif character in "\"'":
-                quote = character
-            elif character == "{":
-                depth += 1
-            elif character == "}":
-                depth -= 1
-            elif character == ">" and depth == 0:
-                yield opener.start(), index + 1, opener.group(1), \
-                    text[opener.end():index].rstrip("/")
-                break
-            index += 1
+        # A regex can look like a comment -- `/[/*]\d+/` -- and run the first walk off
+        # the end of the file. The walk is then tried again reading every character,
+        # and only a tag neither walk can close is unreadable.
+        close = _walk(text, opener.end(), comments=True)
+        if close < 0:
+            close = _walk(text, opener.end(), comments=False)
+        if close < 0:
+            yield opener.start(), len(text), opener.group(1), UNREADABLE
+        else:
+            yield opener.start(), close + 1, opener.group(1), text[opener.end():close].rstrip("/")
+
+
+def _walk(text: str, index: int, comments: bool) -> int:
+    """The index of the `>` that closes the tag being walked from `index`, or -1."""
+    depth, quote = 0, ""
+    while index < len(text):
+        character = text[index]
+        if quote:
+            if character == quote:
+                quote = ""
+        elif comments and depth > 0 and text.startswith("//", index):
+            newline = text.find("\n", index)
+            index = len(text) if newline < 0 else newline
+            continue
+        elif comments and depth > 0 and text.startswith("/*", index):
+            finish = text.find("*/", index + 2)
+            index = len(text) if finish < 0 else finish + 2
+            continue
+        elif character in "\"'`":
+            quote = character
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+        elif character == ">" and depth == 0:
+            return index
+        index += 1
+    return -1
 
 # What makes a control do something. `disabled` is here on purpose: the review's
 # criterion is "work or explain why unavailable", and a disabled control is the

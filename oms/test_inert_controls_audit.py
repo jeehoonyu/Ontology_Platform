@@ -77,6 +77,31 @@ check(not is_inert("<button disabled={!ready}>Run</button>"), "an expression-val
 # `aria-disabled` leaves the control focusable and clickable, so it explains nothing
 # on its own: a press has to do something. The hyphen is a word boundary, and the
 # first version of the rule read `aria-disabled=` as `disabled`.
+# --- a control the walk cannot read is counted, not lost ------------------------
+# N7c's `Clear filters` had `// ... the filters' summary.` in its handler. The
+# apostrophe opened a quote that never closed, and the button vanished from the
+# census without a word. Each of these tags must be found exactly once.
+commented = "<button type=\"button\" onClick={() => {\n  reset();\n  // focus goes to the filters' summary\n  focus();\n}}>Clear filters</button>"
+check(len(list(_tags(commented))) == 1, "an apostrophe in a // comment inside a handler hides the button from the census")
+check(not is_inert(commented), "a handler with a commented apostrophe reads as inert")
+block = "<button onClick={() => { /* it's the reset */ reset(); }}>Reset</button>"
+check(len(list(_tags(block))) == 1 and not is_inert(block), "an apostrophe in a block comment hides the button")
+template = "<button aria-label={`Clear ${column}'s filter`} onClick={clear}>Clear</button>"
+check(len(list(_tags(template))) == 1 and not is_inert(template),
+      "an apostrophe inside a template literal hides the button")
+unterminated = "<button onClick={() => { run(\"x) }>Run</button>"
+check(len(list(_tags(unterminated))) == 1 and is_inert(unterminated),
+      "a tag the walk cannot close is dropped instead of counted as a control nobody can show is wired")
+# ...and a slash that only looks like a comment does not start one.
+escaped = '<button onClick={() => setPath(path.replace(/^\\/*\\s+/, ""))}>Trim</button>'
+check(len(list(_tags(escaped))) == 1 and not is_inert(escaped),
+      "an escaped slash before a star, in a regex, is read as a comment and turns a wired button inert")
+bracketed = '<button onClick={() => setKey(key.replace(/[/*]\\d+/g, ""))}>Clean</button>'
+check(len(list(_tags(bracketed))) == 1 and not is_inert(bracketed),
+      "a slash and star inside a regex character class are read as a comment and turn a wired button inert")
+divided = "<button onClick={() => setRatio(width / 2 / scale)}>Halve</button>"
+check(len(list(_tags(divided))) == 1 and not is_inert(divided), "division is read as a comment")
+
 check(is_inert("<button aria-disabled={atEdge}>Later</button>"),
       "aria-disabled passes as wired, so a focusable button that does nothing when pressed is not counted")
 check(not is_inert("<button aria-disabled={atEdge} onClick={() => move(column, 1)}>Later</button>"),

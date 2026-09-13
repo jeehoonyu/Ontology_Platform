@@ -6383,13 +6383,35 @@ pre {
 
 /* The data grid. N7a of GOAL_HONEST_UI_2026-09-11: sorting from the header, and a
    column control that counts what it hides. */
-.grid-columns {
+.grid-columns,
+.grid-filters {
   margin: 0 0 6px;
   font-size: 12px;
 }
 
-.grid-columns summary {
+.grid-columns summary,
+.grid-filters summary {
   cursor: pointer;
+  color: #4d5b64;
+}
+
+/* The filters in force, and the way back to every row, outside both disclosures. */
+.grid-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #4d5b64;
+}
+
+.grid-rows-status {
+  margin: 0;
+  /* Its line is kept from the first paint: a sentence arriving on blur must not move
+     the button whose press caused the blur between mousedown and mouseup. */
+  min-height: 1.4em;
+  font-size: 12px;
   color: #4d5b64;
 }
 

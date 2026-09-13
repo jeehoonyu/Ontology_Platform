@@ -163,6 +163,77 @@ check(silent_per_file({"files": {"x.tsx": {"cuts": [counted_call_site]}}}) == {"
 check(not counted_rows["paging"] and silent_per_file({"files": {"x.tsx": {"cuts": [counted_rows]}}}) == {},
       "a counted cut inside a plain <table>, which pages nothing, is refused along with the paging ones")
 
+# 5. A filter, which cuts inside the library and never through a `.slice`. N7c of the
+#    goal: a grid captioning only the rows that matched reads as the whole dataset.
+FILTERED = """
+const features = tableFeatures({ columnFilteringFeature, filteredRowModel: createFilteredRowModel() });
+
+export function Grid({ table }) {
+  const rows = table.getRowModel().rows;
+%s
+  return <table><caption>%s</caption><tbody>{rows.map((row) => <tr key={row.id} />)}</tbody></table>;
+}
+"""
+
+
+def filtered_cuts(binding, caption, head=FILTERED):
+    return [cut for cut in cuts_in(head % (binding, caption)) if cut["spelling"] == "filtered row model"]
+
+
+matched_only = filtered_cuts("", "{rows.length} rows")
+check(len(matched_only) == 1 and matched_only[0]["table"] and not matched_only[0]["counted"],
+      f"a filtered grid captioning only what matched is not read as a silent cut: {matched_only}")
+check(silent_per_file({"files": {"x.tsx": {"cuts": matched_only}}}) == {"x.tsx": 1},
+      "a filtered grid counting only its matches is not silent")
+bound_total = filtered_cuts("  const total = table.getPreFilteredRowModel().rows;",
+                            "{rows.length} of {total.length.toLocaleString()} rows")
+check(len(bound_total) == 1 and bound_total[0]["counted"] and bound_total[0]["source"] == "total",
+      f"the total from before filtering, bound to a name, is not read as the true count: {bound_total}")
+unbound_total = filtered_cuts("", "{rows.length} of {table.getPreFilteredRowModel().rows.length}")
+check(len(unbound_total) == 1 and unbound_total[0]["counted"],
+      f"the total from before filtering, written inline, is not read as the true count: {unbound_total}")
+total_as_condition = filtered_cuts("  const total = table.getPreFilteredRowModel().rows;",
+                                   '{total.length ? "some" : "none"}')
+check(len(total_as_condition) == 1 and not total_as_condition[0]["counted"],
+      "a total used as a condition passes as a rendered count")
+kept_as_total = filtered_cuts("", "{rows.length} of {table.getFilteredRowModel().rows.length}")
+check(len(kept_as_total) == 1 and not kept_as_total[0]["counted"],
+      "the filtered model's own length, which is the count of what was kept, passes as the true count")
+kept_bound = filtered_cuts("  const total = table.getFilteredRowModel().rows;", "{rows.length} of {total.length}")
+check(len(kept_bound) == 1 and not kept_bound[0]["counted"],
+      "the filtered model bound to a name that sounds like a total passes as the true count")
+check(not filtered_cuts("", "{rows.length} rows",
+                        head=FILTERED.replace("columnFilteringFeature, filteredRowModel: createFilteredRowModel()",
+                                              "rowSortingFeature, sortedRowModel: createSortedRowModel()")),
+      "a grid that only sorts is read as filtering its rows")
+# The total has to be in the markup. A sentence built in a template is shown only
+# after Enter, so a caption without the total reads as the dataset while typing.
+template_only = filtered_cuts("  const total = table.getPreFilteredRowModel().rows;\n  const said = `${rows.length} of ${total.length} rows`;",
+                              "{rows.length} rows")
+check(len(template_only) == 1 and not template_only[0]["counted"],
+      "a total said only in a template sentence passes as the filtered grid's rendered count")
+typed = filtered_cuts("  const total: Row[] = table.getPreFilteredRowModel().rows", "{rows.length} of {total.length} rows")
+check(len(typed) == 1 and typed[0]["counted"] and typed[0]["source"] == "total",
+      f"a typed binding with no semicolon misreads the total from before filtering: {typed}")
+destructured = filtered_cuts("  const { rows: total } = table.getPreFilteredRowModel();", "{rows.length} of {total.length} rows")
+check(len(destructured) == 1 and destructured[0]["counted"] and destructured[0]["source"] == "total",
+      f"a destructured total from before filtering is misread: {destructured}")
+sorted_draw = [cut for cut in cuts_in((FILTERED % ("", "{rows.length} rows")).replace("table.getRowModel().rows", "table.getSortedRowModel().rows"))
+               if cut["spelling"] == "filtered row model"]
+check(len(sorted_draw) == 1 and not sorted_draw[0]["counted"],
+      f"rows drawn from the sorted model, which is downstream of the filter, are not read as a cut: {sorted_draw}")
+
+# ...and on the shipped grid, with the totals taken out of its captions.
+grid_source = (FRONTEND_SRC / "components" / "data" / "DataGrid.tsx").read_text(encoding="utf-8")
+grid_filtered = [cut for cut in cuts_in(grid_source) if cut["spelling"] == "filtered row model"]
+check(len(grid_filtered) == 1 and grid_filtered[0]["counted"],
+      f"the shipped DataGrid's filtered rows do not read as counted: {grid_filtered}")
+no_totals, taken = re.subn(r"(?<!\$)\{total\.length\.toLocaleString\(\)\}", "", grid_source)
+check(taken >= 2, f"the shipped DataGrid renders its total from before filtering in {taken} place(s), fewer than its two captions")
+stripped_filtered = [cut for cut in cuts_in(no_totals) if cut["spelling"] == "filtered row model"]
+check(len(stripped_filtered) == 1 and not stripped_filtered[0]["counted"],
+      "taking the total out of DataGrid's captions leaves its filtered rows reading as counted")
+
 # --- the scope is the table element, not the component -------------------------
 # The first version scoped this to the component and counted Object Explorer's
 # facet chips and Vertex's seed list, because both components draw a table

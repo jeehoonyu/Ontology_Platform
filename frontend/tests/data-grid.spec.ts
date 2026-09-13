@@ -449,3 +449,284 @@ test.describe("the records grid resizes, reorders and pins columns without a dra
     expect(results.violations.map((violation) => violation.id), "a column control is unnamed or unreachable").toEqual([]);
   });
 });
+
+/**
+ * N7c: a filter per column. A filter is the one cut in the grid that happens inside
+ * the library rather than in a `.slice`, so every test here holds the grid to
+ * saying how many rows matched out of how many it was given.
+ */
+function filterControls(panel: Locator) {
+  const filters = panel.locator("details.grid-filters");
+  return {
+    filters,
+    summary: filters.locator("summary"),
+    box: (id: string) => filters.getByRole("textbox", { name: `Rows where ${id} contains`, exact: true }),
+    bar: panel.locator(".grid-filter-bar"),
+    rowsStatus: panel.locator(".grid-rows-status"),
+    caption: panel.locator("table caption"),
+    bodyRows: panel.locator("tbody tr")
+  };
+}
+
+// Long enough for a debounced or deferred announcement to have fired, so a check
+// that nothing was announced is a check made after the page has gone quiet.
+const settled = (page: Page) => page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
+
+const columnValues = async (table: Locator, id: string) => {
+  const index = (await headerTexts(table)).indexOf(id);
+  return table.locator("tbody tr").evaluateAll((rows, at) => rows.map((row) => row.children[at]?.textContent || ""), index);
+};
+
+const FILTER_RECORDS = [
+  { name: "alpha", rank: "1" }, { name: "beta", rank: "2" }, { name: "alphonse", rank: "3" },
+  { name: "gamma", rank: "4" }, { name: "ALPHA-2", rank: "5" }
+];
+
+test.describe("the records grid filters rows, and says how many match", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("a column filter keeps the rows containing its text, in any case, and counts them against the dataset", async ({ page }) => {
+    const panel = await openDataset(page, `Filter fixture ${Date.now()}`, FILTER_RECORDS);
+    const { summary, box, bar, caption, bodyRows } = filterControls(panel);
+    await expect(summary).toHaveText("Filter rows");
+    await expect(caption).toHaveCount(0);
+    await expect(bar).toHaveCount(0);
+
+    await summary.click();
+    await box("name").fill("alp");
+    await expect(bodyRows, "the filter kept rows that do not contain its text").toHaveCount(3);
+    expect((await columnValues(panel.locator("table"), "name")).sort()).toEqual(["ALPHA-2", "alpha", "alphonse"]);
+    await expect(caption, "a filtered grid does not say how many rows the dataset has").toHaveText("3 of 5 rows match the filter on name");
+    await expect(summary, "the filters do not say one is in force").toHaveText("Filter rows · 1 filter");
+    await expect(bar.locator("span")).toHaveText('Filtered: name contains "alp"');
+    await expect(panel.locator("details.grid-columns summary")).toHaveText("Columns · 2 of 2 shown");
+
+    // Contains, not starts with, and blind to case on both sides: "PHA" is inside
+    // "alpha" and "ALPHA-2", and not inside "alphonse".
+    await box("name").fill("PHA");
+    await expect(bodyRows, "the filter matched only from the start, or kept the typed text's case").toHaveCount(2);
+    await expect(caption).toHaveText("2 of 5 rows match the filter on name");
+
+    await box("name").fill("");
+    await expect(bodyRows).toHaveCount(5);
+    await expect(caption, "an unfiltered grid showing every row announces a truncation that did not happen").toHaveCount(0);
+    await expect(bar).toHaveCount(0);
+    await expect(summary).toHaveText("Filter rows");
+  });
+
+  test("a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given", async ({ page }) => {
+    const panel = await openDataset(page, `Announce fixture ${Date.now()}`, FILTER_RECORDS);
+    const { summary, box, rowsStatus, caption } = filterControls(panel);
+    await summary.click();
+
+    await box("name").fill("alp");
+    await settled(page);
+    await expect(rowsStatus.locator("span"), "typing announced a filter, at once or after a pause").toHaveCount(0);
+    await box("name").press("Enter");
+    await expect(rowsStatus).toHaveText('name contains "alp": 3 of 5 rows match');
+    await rowsStatus.locator("span").evaluate((element) => element.setAttribute("data-announced", "once"));
+    await box("name").press("Enter");
+    await expect(rowsStatus.locator("span[data-announced]"), "a second Enter put nothing new in the live region").toHaveCount(0);
+    await expect(rowsStatus).toHaveText('name contains "alp": 3 of 5 rows match');
+
+    // Leaving a box whose filter was already announced says nothing again.
+    await rowsStatus.locator("span").evaluate((element) => element.setAttribute("data-announced", "once"));
+    await box("name").press("Tab");
+    await settled(page);
+    await expect(rowsStatus.locator("span[data-announced]"), "leaving a box re-announced a filter that had not changed").toHaveCount(1);
+
+    // Typing in another box changes the counts the sentence gave, so the sentence is
+    // withdrawn -- silently -- rather than left on screen saying what is no longer true.
+    await box("rank").fill("1");
+    await expect(caption).toHaveText("1 of 5 rows match the filters on name, rank");
+    await settled(page);
+    await expect(rowsStatus, "a sentence about filters that have since changed is still on screen").toHaveText("");
+    await box("rank").press("Enter");
+    await expect(rowsStatus).toHaveText('rank contains "1": 1 of 5 rows match, 2 filters');
+
+    await box("rank").fill("");
+    await box("rank").press("Tab");
+    await expect(rowsStatus, "emptying a box and leaving it said nothing").toHaveText("Filter on rank removed: 3 of 5 rows match, 1 filter");
+  });
+
+  test("a filter matching nothing keeps the columns, says so, and one press brings every row back", async ({ page }) => {
+    const panel = await openDataset(page, `Empty filter fixture ${Date.now()}`, FILTER_RECORDS);
+    const { summary, box, bar, rowsStatus, caption, bodyRows } = filterControls(panel);
+    await summary.click();
+    await box("name").fill("zzz");
+    await expect(panel.locator("thead th"), "no match took the columns away with the rows").toHaveCount(2);
+    await expect(bodyRows).toHaveCount(0);
+    await expect(caption).toHaveText("0 of 5 rows match the filter on name");
+    await expect(panel.locator(".empty"), "an empty filtered grid does not say why it is empty").toHaveText("No row matches the filter on name.");
+    await expect(panel.getByRole("button", { name: "Next rows" })).toHaveCount(0);
+
+    await summary.click();
+    const clear = bar.getByRole("button", { name: "Clear filters" });
+    await expect(clear, "with the filters closed there is no way back to every row").toBeVisible();
+    await clear.click();
+    await expect(bodyRows, "Clear filters left rows filtered").toHaveCount(5);
+    await expect(caption).toHaveCount(0);
+    await expect(summary).toHaveText("Filter rows");
+    await expect(rowsStatus, "clearing the filters said nothing").toHaveText("Filters cleared: 5 rows, none filtered out");
+    await expect(rowsStatus, "the rows status is hidden inside a closed disclosure").toBeVisible();
+    await expect(summary, "clearing the filters threw keyboard focus away").toBeFocused();
+    await summary.click();
+    await expect(box("name")).toHaveValue("");
+
+    // The box that held the cleared filter, left without a change, says nothing more.
+    await box("name").focus();
+    await box("name").press("Tab");
+    await settled(page);
+    await expect(rowsStatus, "leaving a cleared box announced removing a filter already announced as cleared")
+      .toHaveText("Filters cleared: 5 rows, none filtered out");
+  });
+
+  test("under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view", async ({ page }) => {
+    const panel = await openDataset(page, `Filter paging fixture ${Date.now()}`,
+      Array.from({ length: 95 }, (unused, index) => ({ id: `r${index}`, kind: index % 2 ? "odd" : "even" })));
+    const { summary, box, bar, caption, bodyRows } = filterControls(panel);
+    const table = panel.locator("table");
+    const next = panel.getByRole("button", { name: "Next rows" });
+    // Page two still exists under the 47 matches, so only a reset -- not a clamp to
+    // the last page that exists -- brings the reader back to the first match.
+    await next.click();
+    await expect(caption).toHaveText("Showing 41–80 of 95 rows");
+
+    await summary.click();
+    await box("kind").fill("odd");
+    await expect(caption, "a filter left the reader on a page of the rows before it")
+      .toHaveText("Showing 1–40 of 47 matching rows · 95 rows in all · filtered on kind");
+    expect([...new Set(await columnValues(table, "kind"))], "rows that do not match were paged in").toEqual(["odd"]);
+
+    await summary.click();
+    await expect(bar.getByRole("button", { name: "Clear filters" })).toBeVisible();
+    await next.click();
+    await expect(caption).toHaveText("Showing 41–47 of 47 matching rows · 95 rows in all · filtered on kind");
+    await expect(bodyRows).toHaveCount(7);
+    await expect(next).toBeDisabled();
+  });
+
+  test("a filter on a hidden column still applies, and the grid says where", async ({ page }) => {
+    const panel = await openDataset(page, `Hidden filter fixture ${Date.now()}`, [
+      { name: "alpha", note: "first", rank: "1" }, { name: "beta", note: "second", rank: "2" }
+    ]);
+    const { summary, box, bar, rowsStatus, caption, bodyRows } = filterControls(panel);
+    const control = panel.locator("details.grid-columns");
+    await summary.click();
+    await box("note").fill("fir");
+    await box("note").press("Enter");
+    await expect(rowsStatus).toHaveText('note contains "fir": 1 of 2 rows match');
+
+    await control.locator("summary").click();
+    await control.getByLabel("note", { exact: true }).uncheck();
+    await expect(bodyRows, "hiding the column dropped its filter").toHaveCount(1);
+    expect(await columnValues(panel.locator("table"), "name")).toEqual(["alpha"]);
+    await expect(control.getByRole("status")).toHaveText("note hidden, 2 of 3 columns shown; its filter still applies");
+    await expect(summary, "a filter on a hidden column is not counted").toHaveText("Filter rows · 1 filter, on a hidden column");
+    await expect(bar.locator("span"), "the filter bar does not say its column is hidden").toHaveText('Filtered: note (hidden) contains "fir"');
+    await expect(caption).toHaveText("1 of 2 rows match the filter on note (hidden)");
+    await expect(box("note"), "the filter box does not tell assistive technology its column is hidden")
+      .toHaveAccessibleDescription("hidden column");
+
+    await control.getByLabel("note", { exact: true }).check();
+    await expect(summary).toHaveText("Filter rows · 1 filter");
+    await expect(caption).toHaveText("1 of 2 rows match the filter on note");
+    await expect(box("note")).toHaveAccessibleDescription("");
+
+    // A columns sentence that speaks about filters is withdrawn once the filters change.
+    await control.getByLabel("note", { exact: true }).uncheck();
+    await expect(control.getByRole("status")).toHaveText("note hidden, 2 of 3 columns shown; its filter still applies");
+    await bar.getByRole("button", { name: "Clear filters" }).click();
+    await expect(control.getByRole("status"), "the columns status still says a filter applies after the filters were cleared")
+      .toHaveText("");
+  });
+
+  test("a filter follows a replacement file's fields, and does not come back with a field that went away", async ({ page }) => {
+    const panel = await openDataset(page, `Filter upload fixture ${Date.now()}`, [
+      { name: "a", note: "x", rank: "1" }, { name: "b", note: "y", rank: "2" }
+    ]);
+    const { summary, box, bar, rowsStatus, caption, bodyRows } = filterControls(panel);
+    const table = panel.locator("table");
+    await summary.click();
+    await box("note").fill("x");
+    await box("note").press("Enter");
+    await expect(bodyRows).toHaveCount(1);
+    await expect(summary).toHaveText("Filter rows · 1 filter");
+
+    const file = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Upload File" }) }).locator('input[type="file"]');
+    await file.setInputFiles({ name: "replacement.csv", mimeType: "text/csv", buffer: Buffer.from("rank,name\n2,b\n") });
+    await expect.poll(() => headerTexts(table)).toEqual(["rank", "name"]);
+    await expect(summary).toHaveText("Filter rows");
+    await expect(caption).toHaveCount(0);
+    await expect(bar).toHaveCount(0);
+    await expect(bodyRows).toHaveCount(1);
+    await expect(rowsStatus, "the rows status still describes a filter the replacement file dropped").toHaveText("");
+
+    await file.setInputFiles({ name: "again.csv", mimeType: "text/csv", buffer: Buffer.from("note,rank,name\ny,3,c\nz,4,d\n") });
+    await expect.poll(() => headerTexts(table)).toEqual(["note", "rank", "name"]);
+    await expect(bodyRows, "a filter on a field that went away came back with it").toHaveCount(2);
+    await expect(box("note")).toHaveValue("");
+    await box("note").focus();
+    await page.keyboard.press("Tab");
+    await settled(page);
+    await expect(rowsStatus, "leaving an empty box announced removing a filter that was already gone").toHaveText("");
+  });
+
+  test("Reset columns leaves filters alone and says so, and a sort orders only the matches", async ({ page }) => {
+    const panel = await openDataset(page, `Filter reset fixture ${Date.now()}`, [
+      { name: "alpha", rank: "10" }, { name: "beta", rank: "2" }, { name: "alphonse", rank: "3" }
+    ]);
+    const { summary, box, caption } = filterControls(panel);
+    const table = panel.locator("table");
+    const control = panel.locator("details.grid-columns");
+    await summary.click();
+    await box("name").fill("alp");
+    await control.locator("summary").click();
+    const reset = control.getByRole("button", { name: "Reset columns" });
+    await expect(reset, "a filter alone offers Reset columns, whose name does not claim filters").toHaveAttribute("aria-disabled", "true");
+    await reset.focus();
+    await page.keyboard.press("Enter");
+    await expect(control.getByRole("status"))
+      .toHaveText("Nothing to reset: every column is shown, unpinned, at the default width, in the dataset's order. Filters are unchanged.");
+
+    await headerCell(table, "rank").getByRole("button").click();
+    await expect.poll(() => columnValues(table, "rank")).toEqual(["3", "10"]);
+    await control.getByRole("button", { name: "Move rank earlier" }).click();
+    await reset.click();
+    await expect(control.getByRole("status"))
+      .toHaveText("Columns reset: every column shown, unpinned, at the default width, in the dataset's order. Sorting is unchanged. Filters are unchanged.");
+    await expect(caption, "Reset columns also cleared the filter").toHaveText("2 of 3 rows match the filter on name");
+    await expect(headerCell(table, "rank")).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  test("the filter controls are named by their visible text, the rows status exists outside both disclosures, and axe passes", async ({ page }) => {
+    const panel = await openDataset(page, `Filter names fixture ${Date.now()}`, [
+      { name: "alpha", note: "first", rank: "1" }, { name: "beta", note: "second", rank: "2" }
+    ]);
+    const { filters, summary, box } = filterControls(panel);
+    await expect(panel.locator('.grid-rows-status[role="status"]'),
+                 "the rows status appears with its first message, which is not announced").toHaveCount(1);
+    await expect(panel.locator("details .grid-rows-status"),
+                 "the rows status sits inside a disclosure, which hides it while closed").toHaveCount(0);
+    await expect(summary).toBeVisible();
+    await expect(summary).toHaveText("Filter rows");
+
+    await summary.click();
+    for (const id of ["name", "note", "rank"]) {
+      await expect(box(id), `the ${id} filter has no name`).toHaveCount(1);
+      await expect(filters.locator("label", { hasText: `Rows where ${id} contains` }),
+                   `the ${id} filter is not named by visible text`).toHaveCount(1);
+    }
+    await box("name").fill("zzz");
+    const results = await new AxeBuilder({ page })
+      .include("details.grid-filters")
+      .include("details.grid-columns")
+      .include(".grid-filter-bar")
+      .include(".table-wrap")
+      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+      .analyze();
+    expect(results.violations.map((violation) => violation.id), "a filter control is unnamed or unreachable").toEqual([]);
+  });
+});

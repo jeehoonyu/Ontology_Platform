@@ -507,7 +507,180 @@ plan, and it is measured there.
     - persistence and saved views;
     - N7c's filter and selection, measured at about +16.9 KB over N7b;
     - N7d's rollout to the seven sites the census names.
-  - **N7c — Filter and select.** **Open**.
+  - **N7c — Filter; selection deferred.** **Met**.
+
+    **Decided 2026-09-13: filter only.** Nothing in the product uses selected rows of this
+    grid. `DataGrid` takes no selection prop, and its one caller passes none. Every
+    record action on the data-media screen (create, upload, download) acts on a whole
+    dataset. No frontend API takes a subset of records. The only server write that does,
+    `POST /datasets/{id}/transactions`, reads as unsafe on a dataset with no snapshot,
+    and is filed as its own task. A checkbox column shipped now would be this goal's
+    first defect: a control that does nothing. `audit_inert_controls` would not catch it,
+    because it scans only buttons and links. So selection becomes its own condition, opened
+    when a screen names a use for selected rows. The owner was offered copying or
+    downloading selected rows, saving them as a dataset, and waiting for a server-side
+    bulk operation, and chose none of those for now.
+
+    **Met.** Every column has a row in a new `Filter rows` disclosure: a box labelled
+    `Rows where note contains`. The box keeps the rows whose displayed text contains what
+    was typed, ignoring case. The grid registers `columnFilteringFeature`,
+    `createFilteredRowModel()` and `filterFn_includesString`.
+
+    **What the grid says while a filter applies.** A filtered grid never reads as the
+    dataset:
+    - The caption counts the matches against every row the grid was given:
+      `3 of 5 rows match the filter on name`.
+    - Paged, it reads `Showing 1–40 of 47 matching rows · 95 rows in all · filtered on kind`.
+    - With no matches it reads `0 of 5 rows match the filter on name`. The headers stay,
+      and the empty state says `No row matches the filter on name.`
+    - A filter on a hidden column still applies, and is named as `note (hidden)`. Its box is
+      described to assistive technology as `hidden column`.
+
+    The disclosure's summary counts the filters in force. A bar outside both disclosures says
+    what is filtered and holds `Clear filters`, so the way back to every row stays in view
+    with both closed; after a press, focus goes to the filters' summary. Changing a filter
+    returns the reader to the first page, because the page they were on belonged to the rows
+    before it. `Reset columns` does not touch filters, since its name does not claim them,
+    and says `Filters are unchanged.` while one applies. A replacement file that drops a
+    field drops that field's filter.
+
+    **Announced on Enter, or on leaving a changed box, not while typing.** A sentence per
+    keystroke would talk over the typing. The rows status line sits outside both disclosures,
+    because a closed `<details>` does not render its content. Each sentence is fixed when its
+    action happens and put in a new node, so a second Enter is heard. **It is withdrawn,
+    silently, once it stops being true.** When the filters or the rows it described change, the
+    text goes. Text taken out of a live region is not read out, and a line left on screen giving
+    counts that no longer match the caption was a second, wrong count. A columns sentence that
+    speaks about filters is withdrawn the same way when the filters change. With no filter left,
+    a sentence says `5 rows, none filtered out`, not "all shown": past forty rows the grid pages.
+
+    **What a filter cannot tell apart,** written into the component: it matches the text a
+    cell shows, lowercased. So `1` matches `10`, `BREAKING` matches `NON_BREAKING`, an empty
+    cell never matches, and a list matches its summary rather than its contents. The
+    registry's BREAKING task in the census needs an equals filter, and N7c does not claim to
+    serve it.
+
+    **Not `globalFilteringFeature`.** One box over every column was one of the three designs.
+    The library's global filter searches hidden columns by default, and its memo ignores
+    visibility, so a box that searched only shown columns would need a re-filter beside every
+    visibility change.
+
+    **Payload, measured.** In scratch builds the library features measured +8,781 bytes
+    under Rollup and +8,743 under esbuild. That is already past the route's 8 KB tolerance,
+    before any component code. Registering the one filter function by name saves nothing:
+    `createFilteredRowModel` imports every built-in filter function, and none of them is
+    marked pure. The data-media route went from 515,663 to **528,411 bytes, +12,748
+    (+12.4 KB)**. That is the third raise of its ceiling in N7, approved with the selection
+    decision and set to the measured number. It was set once to the first build's 527,914,
+    then again after the review's fixes added 497 bytes. The closure every route downloads
+    measures 445,393 bytes, which leaves 5,645 bytes of the 8 KB tolerance.
+
+    **`audit_table_truncation` learned a third spelling.** A filter cuts inside the library,
+    never through a `.slice`, so before N7c a grid captioning only its matches would have
+    passed every gate. In a file that registers `createFilteredRowModel(`, rows drawn from any
+    model downstream of the filter now count as a cut. `getRowModel()` counts, and so does
+    `getSortedRowModel()`, which the review drew the grid from and found the first version of
+    the rule blind to. The cut's true count is the model from before filtering,
+    `table.getPreFilteredRowModel().rows`, however it is bound: plainly, with a type, or
+    destructured. That count must be in the markup. A `${total.length}` in a template sentence
+    does not count, because the sentence is shown only after an announcement, and a caption
+    without the total reads as the dataset while a person types. Neither does the filtered
+    model's own length, which is the count of what was kept. Checked against the shipped grid
+    too: with its caption totals taken out, its filtered rows read as silent. The reference reads
+    0 of 4.
+
+    Widening the getters went wrong once. Written as `get(?:Row|Sorted|…)RowModel`, the pattern
+    spelled the plain getter `getRowRowModel`, matched nothing, and wrote a reference with the
+    filtered row missing. The rule's own first assertion failed on the next run, and the
+    reference was written again after the fix.
+
+    **What it still does not see:** a filtered model registered in a different file from the
+    grid; rows drawn from `getFilteredRowModel()` itself, which is unsorted and read only for
+    counts; and a total rendered under a condition unrelated to the cut (N8's hole). The paged
+    caption can drop its total while the one-page caption still renders it, and the browser
+    test is what refuses that build.
+
+    **`audit_inert_controls` had lost a button without a word.** Regenerating its reference for
+    N7c's one new button, `Clear filters`, showed no change. The scan's tag walker tracked `"`
+    and `'`. The button's handler held a `//` comment reading "the filters' summary", whose
+    apostrophe opened a quote that never closed. The walk ran off the end of the file, and the
+    button was never counted. The census went on reporting the controls it could read, one
+    short, with nothing to say one was missing. The walker now skips comments inside a handler
+    and quotes template literals. A regex can look like a comment, `/[/*]\d+/`, and run that
+    walk off the end, so the walk is then retried reading every character. A tag neither walk
+    can close is counted as inert instead of dropped, so a control nobody can show is wired
+    fails the gate. The review also found that the comment rule misread such a regex, and a
+    check that a slash escaped by a backslash starts no comment was added. It was then taken
+    out again: the retry already rescues every tag that check would, so no build could fail on
+    the check alone. Eight new assertions, 42 in all. The committed scanner fails the first of
+    them. The census reads 327, exactly the one button, so the hole had hidden no other control.
+
+    **How it was designed.** Three designs were written: one box over the shown columns;
+    filters per column; and selection with a consumer. Three judges scored them through the
+    source, accessibility, and this goal's thesis. Two ranked per-column filters first and one
+    the single box. All three independently found that nothing uses selected rows. The built
+    design keeps the per-column mechanism and meets the dissenting judge's objections: a visible
+    `Filter rows` entry, real `<label>`s, and every filter control and sentence outside the
+    columns disclosure. Reading the API also turned up `POST /datasets/{id}/transactions` as
+    emptying a dataset that has no snapshot. That is filed as its own task and is not changed
+    here.
+
+    **Then a review, before the commit.** Five reviewers, one lens each, read a snapshot, and a
+    skeptic per lens tried to refute every finding. **Sixteen were confirmed and four refuted.**
+    Fixed in this commit:
+    - **The rows status left a filter sentence on screen after it stopped being true.** It
+      stayed after a replacement file dropped the field, while typing went on, and after more
+      rows arrived. Three of the five lenses found it. A columns sentence saying a filter still
+      applied also outlived `Clear filters`.
+    - **`Filters cleared: all 95 rows shown` on a grid showing forty.**
+    - **A hidden column's filter box did not say so to assistive technology.**
+    - **The empty status line filled on blur and moved the table.** A click whose mousedown
+      caused the blur could then land beside its button. The line now keeps its height from
+      the first paint.
+    - **Four test gaps:**
+      - nothing told contains from starts-with, or checked the typed text's case;
+      - leaving a box was tested only for an empty one;
+      - the "nothing announced" checks passed before an announcement delayed by a pause could
+        fire, and now wait for the page to go quiet;
+      - the paging fixture could not tell a reset from a clamp to the last page, and now starts
+        on a page that still exists under the filter.
+    - **Four gate gaps:** the template total, the typed and destructured bindings, the
+      downstream getters, and the regex read as a comment.
+
+    Refuted, with reasons recorded by the skeptics: that the gate reads the pre-filtered binding
+    of the wrong table, which needs two tables in one component and exists nowhere in the tree;
+    and that a `getRowModel()` handed to a child component is newly unseen, which was already
+    true of the slice rule. The template-total finding was refuted by two lenses as the gate's
+    documented rule, and confirmed by a third. The cheap fix was taken anyway, for this cut only.
+
+    **Tests:** eight in `data-grid.spec.ts`, which now holds nineteen. With the three in
+    `data-table.spec.ts`, twenty-two pass on one build.
+
+    **First round of negative runs,** on the source before the review: thirty-two builds, each
+    breaking one defended behaviour. Twenty-nine broke the grid and three the scanners, and
+    every one failed at the assertion expected of it. That includes the focus call after
+    `Clear filters`, written as a hypothesis and kept only because the build without it failed
+    at `clearing the filters threw keyboard focus away`. **Second round,** on the source after
+    the review's fixes: eighteen builds, and every one failed at the assertion expected of it. Nine broke the review's fixes: the rows sentence kept after the filters changed, the columns filter sentence kept after Clear filters, `all 5 rows shown`, the undescribed hidden box, a blur re-announcing a kept filter, Clear keeping what was last announced, an announcement after a pause in typing, a page clamped instead of reset, and starts-with in place of contains. Four re-ran first-round breaks whose tests the fixes changed. Five broke the scanners: the template total, the destructured and the typed binding, the downstream getters, and the walk's retry. Without the retry the scan failed first at the escaped-slash case rather than the character-class one, since both now rest on it. Restored, all twenty-two passed, with both gate tests, and the sources restored byte for byte.
+
+    **Not separately provable, and said so.**
+    - The rows sentence is also withdrawn when the rows change with the filters unchanged. But
+      every change of rows re-runs the pruning, which always hands the table a new filter
+      array, so no build breaks that check alone.
+    - After a replacement file drops a filtered field, the summary reads `Filter rows`, both
+      because filters are read from columns that exist and because stale ones are pruned.
+    - A sort ordering only the matches is the library's order.
+    - The status line's reserved height has no test.
+    - Moving the filter bar inside the disclosure was not built as a break. The assertion that
+      `Clear filters` stays visible with the disclosure closed is what guards it.
+
+    Out of scope, and whose it is:
+    - row selection and anything that acts on it (the decision above);
+    - a search over every column;
+    - operators other than contains;
+    - saving filters or saved views;
+    - filtering on the server, or over records the page never loaded;
+    - N7d's rollout.
   - **N7d — Virtualized, and rolled out where sorting is needed.** **Open** — virtualization
     replacing paging where a table is long, and the grid adopted by the `DataTable` call
     sites whose rows a person needs to sort, with the `DataGrid` user count as the ratchet.

@@ -16,6 +16,18 @@ mapped or otherwise consumed, iterated with `for ... of`, handed to a table as
 `rows`, or bound to a name that is then one of those. `run.id.slice(0, 8)`
 shortens a string for display and is none of them, so it is not counted.
 
+**A third spelling has no `.slice` at all.** N7c: a grid that registers
+`createFilteredRowModel()` drops rows inside the library and draws
+`table.getRowModel().rows`. In a file that registers one, each `getRowModel()`
+reaching a table is a cut, and its true count is the model before filtering:
+`const total = table.getPreFilteredRowModel().rows`, rendered as `{total.length}`.
+The count of what matched is the count of what was kept, and is refused. For this
+cut the total must be in the markup: a `${total.length}` in a template sentence
+does not count, because that sentence is shown only after an announcement, and a
+caption without the total reads as the dataset while a person types. Rows drawn
+from any model downstream of the filter count as the draw, `getSortedRowModel()`
+included; the review of N7c drew the grid from it and found the rule blind.
+
 **A truncation reaches a table** when it is written inside one -- between
 `<table>` and `</table>`, inside an element with `role="table"` or
 `role="grid"`, or among a `<DataTable>`'s props -- or when it is bound to a name
@@ -58,6 +70,9 @@ What this does not see, stated rather than implied:
 
   - a cut made in a `.ts` helper and returned (the census found none);
   - a cut passed down to a child component declared in another file;
+  - a filtered row model registered in a different file from the grid that draws it;
+  - rows drawn from `getFilteredRowModel()` itself, which is unsorted and is read here
+    only as a count;
   - a limit applied by the server, which is paging and is N5;
   - a total from a different field -- a server-side `summary.events` beside a
     table of `events` -- which is refused, and is the stricter of the two errors;
@@ -115,6 +130,22 @@ _PAGING = ("DataTable", "DataGrid")
 _CUT = re.compile(
     r"\.slice(\()"
     r"|\.filter(\()\s*\(\s*\w+\s*,\s*(\w+)\s*\)\s*=>\s*\3\s*<")
+
+# A third spelling, with no `.slice` at all: a library row model that filters.
+# Presence is read per file, because the grid registers its features at module
+# level, above the component that draws the rows.
+_FILTERED_MODEL = re.compile(r"\bcreateFilteredRowModel\(")
+# Every getter downstream of the filter that a grid could draw rows from. Not
+# `getFilteredRowModel`, which is unsorted and read for counts; not the core or
+# pre-filtered models, which come before the filter. A `.rows.length` read is a
+# count, not a draw.
+_ROW_MODEL = re.compile(
+    r"\.get(?:Sorted|PreSorted|Grouped|PreGrouped|Expanded|PreExpanded|Paginated|PrePaginated)?"
+    r"RowModel\(\)(?!\.rows\.length)")
+_PRE_FILTERED = re.compile(
+    r"\b(?:const|let)\s+(\w+)(?:\s*:[^=;]+?)?\s*=\s*[\w.]+\.getPreFilteredRowModel\(\)\.rows\b")
+_PRE_FILTERED_DESTRUCTURED = re.compile(
+    r"\b(?:const|let)\s+\{\s*rows\s*:\s*(\w+)\s*\}(?:\s*:[^=;]+?)?\s*=\s*[\w.]+\.getPreFilteredRowModel\(\)")
 
 _CONSUMED = re.compile(r"\s*\.(map|forEach|flatMap|reduce|filter|some|every)\(")
 _ITERATED = re.compile(r"\bof\s*$")
@@ -303,10 +334,14 @@ def source_of(receiver: str) -> str:
     return text
 
 
-def _renders_total(body: str, source: str) -> bool:
+def _renders_total(body: str, source: str, markup_only: bool = False) -> bool:
+    """Whether the length of `source` is rendered. `markup_only` refuses a template
+    literal's `${...}`, for the filtered-row-model cut, whose count belongs in the
+    caption rather than in a sentence shown only after an announcement."""
     if not source:
         return False
-    pattern = (r"(?:\{|\$\{)\s*" + re.escape(source)
+    opening = r"(?<!\$)\{" if markup_only else r"(?:\{|\$\{)"
+    pattern = (opening + r"\s*" + re.escape(source)
                + r"\.length\s*(?:\.toLocaleString\(\)\s*)?\}")
     return bool(re.search(pattern, body.replace("?.", ".")))
 
@@ -361,6 +396,28 @@ def cuts_in(text: str) -> List[Dict[str, Any]]:
                 "paging": _reaches(body, match.start(), paging),
                 "counted": _renders_total(body, source),
             })
+        # N7c. A filter drops rows inside the library's row model and never passes
+        # through a `.slice`, so a grid captioning only what matched would read as the
+        # dataset. In a file that registers a filtered row model, each `getRowModel()`
+        # reaching a table is a cut whose true count is the model before filtering.
+        if _FILTERED_MODEL.search(text):
+            bound = _PRE_FILTERED.search(body) or _PRE_FILTERED_DESTRUCTURED.search(body)
+            for match in _ROW_MODEL.finditer(body):
+                if not _reaches(body, match.start(), extents):
+                    continue
+                receiver = source_of(_receiver(body, match.start())[1])
+                source = bound.group(1) if bound else f"{receiver}.getPreFilteredRowModel().rows"
+                cuts.append({
+                    "line": text[:start + match.start()].count("\n") + 1,
+                    "declaration": name,
+                    "source": source,
+                    "spelling": "filtered row model",
+                    "how": "filtered in the library",
+                    "table": True,
+                    # Clearing the filter brings every row back: not N9's unreachable cut.
+                    "paging": False,
+                    "counted": _renders_total(body, source, markup_only=True),
+                })
     return cuts
 
 
