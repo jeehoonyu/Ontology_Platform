@@ -1,4 +1,4 @@
-import { api, postJson } from "../api";
+import { apiWithTotal, api, postJson } from "../api";
 import type {
   ConnectionSource,
   ConnectorAdapterCatalog,
@@ -41,6 +41,8 @@ export function previewLiveConnector(sourceId: string, limit = 25): Promise<Conn
   return postJson<ConnectorLivePreview>(`/connections/sources/${encodeURIComponent(sourceId)}/live-preview`, { limit });
 }
 
-export function listConnectorFetchAttempts(sourceId: string): Promise<ConnectorFetchAttempt[]> {
-  return api<ConnectorFetchAttempt[]>(`/connections/sources/${encodeURIComponent(sourceId)}/fetch-attempts`);
+// The latest 50 attempts, and how many the source has: the list alone read as all of them.
+export function listConnectorFetchAttempts(sourceId: string): Promise<{ attempts: ConnectorFetchAttempt[]; total: number | null }> {
+  return apiWithTotal<ConnectorFetchAttempt[]>(`/connections/sources/${encodeURIComponent(sourceId)}/fetch-attempts`)
+    .then(({ body, total }) => ({ attempts: body, total }));
 }

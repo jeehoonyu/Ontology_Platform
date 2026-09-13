@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { expect, test, type APIResponse, type Locator, type Page } from "@playwright/test";
 
 /**
@@ -658,6 +659,40 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(posture.getByRole("note"), "the status counts cover 25 runs and read as all of them")
       .toHaveText(`Status counts cover the latest 25 of ${heldText} contract runs`);
     await expectUnclipped(posture.getByRole("note"), "the posture note is cut off, hiding how many runs exist");
+  });
+
+  test("Fetch Evidence says when the source holds more attempts than it loaded", async ({ page }) => {
+    test.setTimeout(180_000);
+    // The panel listed the 50 attempts the server returns and read as every attempt. Here one
+    // preview through the screen, 51 more through the API, and one more through the screen:
+    // 53 attempts, of which the server returns the latest 50.
+    const server = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ records: [{ asset_id: "evidence-1", name: "Evidence Pump" }, { asset_id: "evidence-2", name: "Evidence Valve" }] }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Could not determine connector test server port");
+      const sourceId = `fetch_evidence_${Date.now()}`;
+      await page.goto("/workspace/imports");
+      await page.getByLabel("Source ID").fill(sourceId);
+      await page.getByLabel("Base URL").fill(`http://127.0.0.1:${address.port}`);
+      await page.getByRole("button", { name: "Save and Preview" }).click();
+      await expect(page.getByText("Evidence Pump", { exact: true })).toBeVisible();
+      for (let start = 0; start < 51; start += 10) {
+        const batch = Array.from({ length: Math.min(10, 51 - start) }, () => page.request.post(`/connections/sources/${sourceId}/live-preview`, { data: { limit: 25 } }));
+        for (const response of await Promise.all(batch)) expect(response.ok(), await response.text()).toBeTruthy();
+      }
+      await page.getByRole("button", { name: "Save and Preview" }).click();
+      const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Fetch Evidence", exact: true }) });
+      const note = panel.getByRole("note");
+      await expect(note, "the panel loaded 50 of 53 attempts and does not say so").toHaveText("Loaded the latest 50 of 53 fetch attempts");
+      await expectUnclipped(note, "the fetch evidence note is cut off, hiding how many attempts there are");
+      await expect(panel.locator("caption")).toContainText("of 50 rows");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {

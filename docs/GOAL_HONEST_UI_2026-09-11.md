@@ -1837,6 +1837,40 @@ plan, and it is measured there.
   measures 521 KB with the shared closure of 436 KB, under its ceiling. `.table-truncated` was already
   used in `OpsWorkspace.tsx`, and neither `TABLE_TRUNCATION.md` nor `INERT_CONTROLS.md` moves.
 
+  **Then Fetch Evidence.** Data Onboarding's Fetch Evidence panel listed a connector source's fetch
+  attempts from `GET /connections/sources/{id}/fetch-attempts`, which returns the 50 newest as a bare
+  list with no total. The table paged the 50, and nothing said the source held more.
+
+  **The server says how many attempts there are, in a header.** The route counts the same filtered
+  query and sets `X-Total-Count`. The body stays a bare list, because the REST, Kafka, S3 and SFTP
+  backend tests and any other caller count it; wrapping it would have broken them, and a separate
+  count route would have been a second request for one number. The shared client gains
+  `apiWithTotal`, which reads the header beside the JSON body. When the source holds more than was
+  loaded, the panel reads "Loaded the latest 50 of N fetch attempts".
+
+  **The proof.** `test_live_connector_runtime.py` now asks for a window of one attempt and requires a
+  list of one with `x-total-count` of 3, the attempts the script made; the Kafka, S3 and SFTP scripts,
+  which count the same list, pass unchanged. In `truncation-sites.spec.ts`, a new browser test serves
+  a REST source from a local server, previews it once through the screen, 51 times through the API and
+  once more through the screen, and requires the panel to read "Loaded the latest 50 of 53 fetch
+  attempts", not cut off, over a table of 50 rows. It passes on the fixed build, with the existing live
+  connector workflow test.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, the header dropped:** the backend script failed at the header, the response carrying only
+    its length and type.
+  - **N1, the server sending no header:** the browser test failed at the note, element not found.
+  - **N2, the client counting the list it received:** the total equalled the 50 loaded, and the note
+    was not found.
+  - **N3, the committed code:** it failed at the note, element not found.
+  - Restored: both browser tests pass, the backend script passes, and all four sources are byte for
+    byte what they were.
+
+  **The references.** The shared closure every route loads holds at 436 KB with `apiWithTotal` in it, and
+  no route exceeds its payload ceiling. Data Onboarding still opens with 12 requests, at 443 KB.
+  `.table-truncated` is now used in ten files, `App.tsx` the tenth, and the style-scope baseline is
+  re-recorded to match. `TABLE_TRUNCATION.md` and `INERT_CONTROLS.md` do not move.
+
 ## Order and size
 
 | Step | Touches | Commits |

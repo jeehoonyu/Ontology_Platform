@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String, Text, create_engine, text
 from sqlalchemy.engine import make_url
@@ -1033,7 +1033,12 @@ def live_preview(source_id: str, body: LivePreviewRequest = LivePreviewRequest()
 
 
 @router.get("/connections/sources/{source_id}/fetch-attempts")
-def list_fetch_attempts(source_id: str, limit: int = Query(50, ge=1, le=500), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+def list_fetch_attempts(source_id: str, response: Response, limit: int = Query(50, ge=1, le=500), principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     source = connectivity._source_or_404(db, source_id, principal, "view")
-    rows = db.query(ConnectorFetchAttempt).filter(ConnectorFetchAttempt.project_id == source.project_id, ConnectorFetchAttempt.source_id == source.id).order_by(ConnectorFetchAttempt.created_at.desc(), ConnectorFetchAttempt.id.desc()).limit(limit).all()
+    scope = db.query(ConnectorFetchAttempt).filter(ConnectorFetchAttempt.project_id == source.project_id, ConnectorFetchAttempt.source_id == source.id)
+    # The latest `limit` attempts, and how many there are. The body stays a bare list, which
+    # its callers count; the total rides in a header, so the screen can say it loaded 50
+    # of more rather than read 50 as all of them.
+    response.headers["X-Total-Count"] = str(scope.count())
+    rows = scope.order_by(ConnectorFetchAttempt.created_at.desc(), ConnectorFetchAttempt.id.desc()).limit(limit).all()
     return [_fetch_attempt_dict(row) for row in rows]

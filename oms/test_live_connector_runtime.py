@@ -125,6 +125,10 @@ passed += 1
 
 attempts = ok(client.get("/connections/sources/live_rest/fetch-attempts"), "inspect live fetch evidence")
 assert len(attempts) == 3 and all(row["status"] == "SUCCEEDED" for row in attempts), attempts
+# A window of the attempts still says how many there are, in a header, so the list stays a list.
+window = client.get("/connections/sources/live_rest/fetch-attempts?limit=1")
+assert window.status_code == 200 and len(window.json()) == 1, window.text
+assert window.headers.get("x-total-count") == "3", dict(window.headers)
 
 ok(client.post("/connections/sources", json={
     "id": "failing_rest", "display_name": "Failing REST", "source_type": "rest",

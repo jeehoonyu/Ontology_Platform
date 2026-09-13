@@ -802,6 +802,7 @@ function DataOnboarding() {
   const [activeSource, setActiveSource] = useState<ConnectionSource | null>(null);
   const [credentials, setCredentials] = useState<ConnectorCredentialMetadata[]>([]);
   const [fetchAttempts, setFetchAttempts] = useState<ConnectorFetchAttempt[]>([]);
+  const [fetchAttemptTotal, setFetchAttemptTotal] = useState<number | null>(null);
   const [connectorError, setConnectorError] = useState<string | null>(null);
   const [connectorBusy, setConnectorBusy] = useState(false);
   const [connectorForm, setConnectorForm] = useState({
@@ -878,12 +879,13 @@ function DataOnboarding() {
   }
 
   async function refreshConnectorEvidence(sourceId: string) {
-    const [credentialRows, attemptRows] = await Promise.all([
+    const [credentialRows, attemptPage] = await Promise.all([
       listConnectorCredentials(sourceId).catch(() => []),
       listConnectorFetchAttempts(sourceId)
     ]);
     setCredentials(credentialRows);
-    setFetchAttempts(attemptRows);
+    setFetchAttempts(attemptPage.attempts);
+    setFetchAttemptTotal(attemptPage.total);
   }
 
   async function connectorPreview() {
@@ -938,7 +940,7 @@ function DataOnboarding() {
       await refreshConnectorEvidence(source.id);
     } catch (error) {
       setConnectorError(error instanceof Error ? error.message : "Connector preview failed");
-      if (sourceId) await listConnectorFetchAttempts(sourceId).then(setFetchAttempts).catch(() => undefined);
+      if (sourceId) await listConnectorFetchAttempts(sourceId).then((page) => { setFetchAttempts(page.attempts); setFetchAttemptTotal(page.total); }).catch(() => undefined);
     } finally {
       setConnectorBusy(false);
       setRefreshKey((key) => key + 1);
@@ -1043,6 +1045,7 @@ function DataOnboarding() {
           <DataTable rows={(connectorCatalog.value?.adapters || []).map((adapter) => ({ adapter: adapter.id, status: adapter.available ? "AVAILABLE" : "PLUGIN_REQUIRED", modes: adapter.modes?.join(", ") || "-", reason: adapter.reason || "Installed" }))} empty="No connector adapters are registered." />
         </Panel>
         <Panel title="Fetch Evidence">
+          {fetchAttemptTotal !== null && fetchAttemptTotal > fetchAttempts.length ? <p className="table-truncated" role="note">Loaded the latest {fetchAttempts.length.toLocaleString()} of {fetchAttemptTotal.toLocaleString()} fetch attempts</p> : null}
           <DataTable rows={fetchAttempts.map((attempt) => ({ status: attempt.status, adapter: attempt.adapter_id, operation: attempt.operation, records: attempt.records_read, bytes: attempt.bytes_read, duration_ms: attempt.duration_ms, error: attempt.error || "-" }))} empty="Run a live preview to create durable fetch evidence." />
         </Panel>
       </div>
