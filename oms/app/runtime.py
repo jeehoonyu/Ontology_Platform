@@ -2229,10 +2229,27 @@ def hydrate_objects(
     # it is read for the whole batch in one grouped query rather than one max()
     # per object -- the last per-object read a6a4218 left on this path.
     resolve_schema = object_writes.schema_resolver(db)
-    ontology_runtime_v1.prime_change_versions(
-        db, object_type.project_id,
-        [str(candidate) for candidate in (_object_id_for(record) for record in records)
-         if candidate])
+    candidate_ids = [str(candidate) for candidate in (_object_id_for(record) for record in records)
+                     if candidate]
+    ontology_runtime_v1.prime_change_versions(db, object_type.project_id, candidate_ids)
+    try:
+        from . import decision_intelligence
+
+        decision_intelligence.prime_snapshot_seqs(db, object_type.project_id, object_type_id, candidate_ids)
+    except Exception:
+        # The snapshot is a read model, recorded best-effort per object; priming it
+        # must not fail a hydrate the recorder itself would not have failed.
+        pass
+    # The objects that already exist, read for the batch in chunks rather than one
+    # select per record: the suite census measured that select at x1000 on a hydrate
+    # of 1,000 records. Objects created by this loop are deliberately not added, so a
+    # record repeating an id behaves exactly as it did when each record asked alone.
+    unique_ids = sorted(set(candidate_ids))
+    existing_by_id: Dict[str, models.ObjectInstance] = {}
+    for start in range(0, len(unique_ids), 500):
+        for row in db.query(models.ObjectInstance).filter(
+                models.ObjectInstance.id.in_(unique_ids[start:start + 500])).all():
+            existing_by_id[row.id] = row
 
     for record in records:
         object_id = _object_id_for(record)
@@ -2254,7 +2271,7 @@ def hydrate_objects(
         if errors:
             raise ValueError("; ".join(errors))
 
-        existing = db.query(models.ObjectInstance).filter(models.ObjectInstance.id == str(object_id)).first()
+        existing = existing_by_id.get(str(object_id))
         lineage = {
             "source_asset_id": source_asset_id,
             "pipeline_id": pipeline_id,
@@ -2271,6 +2288,7 @@ def hydrate_objects(
                 db,
                 existing,
                 properties=properties,
+                schema=resolve_schema(object_type),
                 actor="pipeline",
                 event_type="pipeline.object.updated",
                 source_type="pipeline_run",
@@ -2287,6 +2305,7 @@ def hydrate_objects(
                 object_type_id=object_type_id,
                 project_id=object_type.project_id,
                 properties=properties,
+                schema=resolve_schema(object_type),
                 source_asset_id=source_asset_id,
                 lineage=lineage,
                 actor="pipeline",

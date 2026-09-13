@@ -11,10 +11,14 @@ export type DecisionFinding = { object: ObjectRecord; object_id: string; object_
 // object scored; `findings` holds only the highest-risk ones kept, and
 // `objects_in_scope` counts the scope the scan was cut from.
 export type DecisionEvaluation = { id: string; project_id: string; status: string; object_count: number; objects_in_scope: number; scan_limit: number; band_counts: Record<string, number>; high_risk_count: number; average_score: number; findings: DecisionFinding[]; findings_retained: number; finding_order: "score_desc" | "id_asc"; unlisted_max_score: number | null; created_at: number; completed_at: number };
-export type DecisionExplanation = { object: ObjectRecord; risk: RiskResult; explanation: string; recommended_actions: string[]; duplicate_warnings: Array<Record<string, unknown>>; temporal_summary: JsonObject };
+// `duplicate_warnings` lists at most five; `duplicate_warning_count` counts them all, and
+// `duplicate_coverage` says whether the latest entity-resolution job compared the object.
+export type DecisionExplanation = { object: ObjectRecord; risk: RiskResult; explanation: string; recommended_actions: string[]; duplicate_warnings: Array<Record<string, unknown>>; duplicate_warning_count?: number; duplicate_coverage?: { job_id: string; compared: boolean; objects_scanned: number | null; objects_in_scope: number | null } | null; temporal_summary: JsonObject };
 export type ObjectSnapshot = { id: string; project_id: string; object_id: string; object_type_id: string; properties: JsonObject; lineage: JsonObject; event_type: string; actor: string; source_type?: string | null; source_id?: string | null; created_at: number; seq: number };
 export type EntityCandidate = { id: string; project_id: string; job_id: string; object_type_id: string; object_ids: string[]; score: number; reasons: Array<Record<string, unknown>>; status: string; merged_object_id?: string | null; objects?: ObjectRecord[] };
-export type EntityJob = { id: string; project_id: string; object_type_id: string; fields: string[]; status: string; candidate_count: number; candidates: EntityCandidate[] };
+// A job compares every pair among the first `objects_scanned` objects of its type by id,
+// out of `objects_in_scope`. Both are null on a job that ran before they were kept.
+export type EntityJob = { id: string; project_id: string; object_type_id: string; fields: string[]; status: string; candidate_count: number; objects_in_scope: number | null; objects_scanned: number | null; last_scanned_id: string | null; scan_order?: string; scan_limit?: number; candidates: EntityCandidate[] };
 export type DecisionScenario = { id: string; project_id: string; display_name: string; seed_object_ids: string[]; baseline: Record<string, JsonObject>; scenario_output: Record<string, JsonObject>; impact: { changed_object_count: number; changed_object_ids: string[]; by_object: Record<string, JsonObject> }; created_at: number; updated_at: number };
 
 export const bootstrapDecision = (projectId: string, objectTypeId: string) => postJson<{ project_id: string; object_type_id: string; created: string[] }>("/decision/bootstrap", { project_id: projectId, object_type_id: objectTypeId });

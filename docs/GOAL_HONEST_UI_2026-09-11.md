@@ -1465,6 +1465,143 @@ plan, and it is measured there.
   tab shows. `INERT_CONTROLS.md` does not move, since the fix adds no control. Entity resolution's
   scan, the other limit in this workspace, lands in a commit of its own.
 
+  **Then entity resolution, which compared the first 1,000 objects in no stated order.** The
+  workspace posted `/entity-resolution/jobs` with `limit: 1000`. The server read up to that many
+  objects with no `ORDER BY` and compared every pair among them. The Candidate Review Queue read as
+  the type's whole duplicate list, an empty queue said "No candidates", and Explain called any object
+  with no pending candidate "clear", including objects the job never read.
+
+  **The fix states what each job compared; it does not yet reach the rest.** The scan now reads in
+  id order under a named `ENTITY_SCAN_CEILING` of 5,000, so "the first N" names a set. Each job
+  keeps three facts in new nullable columns, added by migration `0044_entity_resolution_coverage`:
+  `objects_in_scope`, counted with the scan's own filters; `objects_scanned`; and `last_scanned_id`.
+  The job list returns them after a reload, the create response adds the scan order and limit, the
+  audit entry carries them, and project snapshots export and restore them. Explain gains
+  `duplicate_coverage` from the latest completed job over the object's type. An object counts as
+  compared only if its id is at or below the job's last id, checked in SQL so the order is the one
+  the scan used, and it existed when the job ran. Explain also gains `duplicate_warning_count`, since
+  its list stops at five.
+
+  The workspace keeps the whole job, not only its candidates. When a job compared fewer objects
+  than its type holds, the queue says "Compared the first N of M objects, by id. Pairs involving the
+  other K were not compared.", and an empty queue says "No candidates among the first N objects". The
+  duplicate badge says "clear" only when the latest job compared the object and left nothing pending;
+  otherwise it reads "not compared", or "not loaded" before an explanation. The legacy shell's toast
+  names the same counts.
+
+  **Reaching past the scan is a product decision, and it is open.** Every pair is compared inside
+  the request, so the cost grows with the square of the scan: 499,500 pairs at 1,000 objects, 12.5
+  million at the 5,000 ceiling. The goal doc has no precedent for reaching the rest of a quadratic
+  scan, and each way of doing it trades recall, latency or a locked screen, so the question is put to
+  the owner rather than settled here.
+
+  **The proof.** `oms/test_entity_resolution_coverage.py` builds 1,002 objects of one type. A
+  duplicate pair with the highest ids is hydrated from a source asset whose id sorts before the
+  fillers'. SQLite reads this scope through the materialization index, in source-asset order and
+  then id order, so a scan without `ORDER BY` would read the pair first; only a scan in id order
+  leaves it out. The 1,000 fillers carry no name. A job at limit 1,000 must count 1,002 in
+  scope and 1,000 compared, end at filler 999, report `scan_order` "id", write no candidate, and keep
+  all three facts in the reloaded job list. Explain must say the pair's first object was not
+  compared, a filler was, and an object made after the job was not. A job at limit 5,000 must find
+  the pair, and Explain must then count one warning. A type no job has read gets no coverage. Run
+  against the committed server, it failed at once: every coverage field came back `None`.
+  `oms/test_entity_resolution_coverage_migration.py` upgrades to 0043 and removes the three columns
+  that `0001`'s `create_all` builds from today's models, so it stands for a database from before
+  them. It inserts a job, upgrades to head, checks that the old job's three columns are NULL, applies
+  head twice, downgrades and upgrades again. The first draft asserted that 0043 had no such columns,
+  and it failed for exactly that reason, which is how the `create_all` baseline showed itself. On the
+  fix both pass: 31 assertions and the migration check. So do the backend scripts over the evaluator,
+  entity resolution, snapshots, tenancy and the migration head, 32 in all. The
+  tenancy census caught one read the first draft added, the SQL id comparison with no project
+  filter, and passed once it named the object's project.
+
+  In `truncation-sites.spec.ts`, the first browser test builds 1,100 objects with a duplicate pair
+  at 1 and 2 and another at 1,099 and 1,100, runs Find duplicates, and finds the first pair. The
+  queue's note reads "Compared the first 1,000 of 1,100 objects, by id. Pairs involving the other 100
+  were not compared." without being cut off, and Explain on object 1,099 reads "not compared". The
+  second builds 1,002 objects with nothing to match, and the empty queue reads "No candidates among
+  the first 1,000 objects". Both pass on the fixed build.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B0, the committed server:** the backend script failed at the job's coverage, every field
+    `None`.
+  - **B1, the scan without `ORDER BY`:** it failed with the pair read inside the first 1,000: one
+    candidate, and the last id read filler 997. It took three fixtures. With the pair stored first
+    by insertion, and then by a hydrate run of its own, the mutation passed both times, because
+    SQLite reads this scope through `ix_object_instances_materialized_active`, ordered by source
+    asset and then id whatever order the rows were stored in. The fixture now gives the pair a
+    source asset that sorts first. The `ORDER BY` is what makes the order hold on a database whose
+    plan does not.
+  - **B2, the total counted after the limit:** it failed reading 1,000 in scope where there were
+    1,002.
+  - **B3, compared without the created-at check:** it failed at the object made after the job, called
+    compared.
+  - **N1, the committed Decision code, server, client and workspace:** the queue test failed at the
+    note, element not found.
+  - **N2, the server keeping coverage but the workspace keeping only the candidates:** it failed at the
+    note, element not found.
+  - **N3, the badge back to "clear":** it failed at object 1,099, `Expected: "not compared"`,
+    `Received: "clear"`.
+  - **N4, the empty state back to "No candidates":** the empty-queue test failed, element not found.
+  - Restored: the four Decision tests in `truncation-sites.spec.ts` pass, the Decision workflow test and
+    sweep pass (5 passed, 3 skipped by design), the coverage script passes, and all three mutated
+    sources are byte for byte what they were.
+
+  **Payload, route cost and the references.** The decision route still opens with 13 requests, at
+  460 KB, and its chunk measures 458 KB with the shared closure, under its ceiling, so neither
+  baseline moves. `.table-truncated` gains no file, since the queue's note is in
+  `DecisionWorkspace.tsx`, already counted. `TABLE_TRUNCATION.md` moved only by line numbers, and
+  `INERT_CONTROLS.md` does not move, since the fix adds no control. The migration head is now
+  `0044_entity_resolution_coverage`.
+
+  **The migration staled four baselines, and re-earning them found four reads per record.** Moving
+  the head to 0044 is what `audit_iteration_state` exists to notice: four baselines record the head
+  they were measured at, and the fast tier refused the commit with 22 of 23 until they described this
+  schema. As at 0043, each was measured again rather than re-stamped, on a tree holding only this
+  change. Query bounds held at 0 materializing call sites and 0 mapper bypasses. Request cost held: no
+  route repeats a statement shape more than 4 times, under the ceiling of 6.
+
+  The suite census did not hold. `POST /pipelines/{id}/run` repeated one statement 2,001 times where
+  its baseline says 4. The route had not changed; its fixtures had. The census uses the suite as
+  traffic, and this goal's backend scripts are the first to hydrate hundreds of objects in one run:
+  300 in the Risk Board's, 1,002 in this one. Each census named the next per-record read once the one
+  before it was gone:
+  - **The object type's profile, twice per object.** `create_object` and `update_object` resolved the
+    schema once to drop nulls and again to validate, and each resolve reads the profile. A type with
+    no profile has nothing for `db.get` to keep, so every call read again. Both now take the schema
+    the hydrate already resolves once per type, and resolve it once themselves otherwise.
+  - **Whether each object exists,** one select per record. The hydrate now reads the batch's existing
+    objects in chunks of 500 before its loop. Objects the loop creates are not added, so a record
+    repeating an id behaves as it did.
+  - **The project's production environment.** Only a found environment was cached, and no test
+    project has one. A miss is now cached too, and forgotten by the first flush that writes an
+    environment, before which the query could not have seen one.
+  - **Each object's last decision snapshot.** `prime_snapshot_seqs` reads them for the batch in one
+    grouped query a chunk, the trade `prime_change_versions` already makes.
+
+  The route now runs 66 statements with a worst repeat of 4 on a hydrate of 1,000 records, where its
+  baseline measured 68 on a handful. The census then wrote the suite-cost baseline over 696 route and
+  method pairs, 32 of them above the ceiling of 6, one fewer than before: `run-next` falls from 2,006
+  repeats to 1,004 with the same fixes, and five other routes improved. Three routes rise, none of
+  them by this change, and each is recorded as measured. `POST /artifacts/adopt` repeats a project
+  lookup 3 times against 2, and the package version capture 4 times against 2; both lookups arrived
+  with the tenancy commit of 2026-09-02, after the last census, and both stay under the ceiling. `GET
+  /project/readiness` repeats a migration-record insert 33 times against 22. That is the fallback
+  taken when concurrent first calls race to write the 32 migration records: in three runs of its one
+  script, 17, 15 and 9 of 48 calls took it, and the first census today stayed within 22, so the count
+  follows timing rather than code. The probe was not repeated on the committed tree.
+  `test_request_cost_concurrency.py` exits non-zero under the census recorder in both censuses and
+  passes on its own, and `test_iteration_state_audit.py` failed until these baselines were written.
+
+  The browser run found one more thing the new tests' data exposed. The legacy shell's accessibility
+  test failed at wide-1600, the last width to run, with "Form elements must have labels", and passed
+  when run alone. A diagnostic that creates one ontology generator draft reproduced it: the draft's
+  property table renders a disabled Include checkbox per row with no name. Earlier specs leave drafts
+  behind, so the page listed one only once they had run. Each checkbox is now named for its property,
+  and the same diagnostic then reported no label violation. The browser run then passed at all four
+  widths, 220 ran, 388 skipped by design, 0 failed and 0 flaky, from a bundle built from the current
+  source, and its baseline is written with the one known failure still listed.
+
 ## Order and size
 
 | Step | Touches | Commits |

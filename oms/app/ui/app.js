@@ -701,7 +701,7 @@ function renderOntologyGenerator() {
       <tbody>
         ${properties.map((prop, index) => `
           <tr>
-            <td><input type="checkbox" ${prop.include === false ? "" : "checked"} disabled /></td>
+            <td><input type="checkbox" aria-label="Include ${escapeHtml(prop.source_field || prop.api_name || prop.property_name || "property")}" ${prop.include === false ? "" : "checked"} disabled /></td>
             <td><strong>${escapeHtml(prop.source_field || "")}</strong>${prop.generated ? '<br><span>generated</span>' : ""}</td>
             <td>${escapeHtml(prop.api_name || prop.property_name || "")}</td>
             <td>${escapeHtml(prop.base_type || "string")}</td>
@@ -3755,7 +3755,11 @@ async function runEntityResolution() {
   state.decision.candidates = state.decision.entityJob.candidates || [];
   setDecisionTab("entity");
   renderDecisionWorkspace();
-  showToast(`${state.decision.candidates.length} candidates`);
+  const job = state.decision.entityJob;
+  // A job compares every pair among the first objects of its type by id; say how many.
+  showToast(job.objects_scanned != null && job.objects_in_scope != null
+    ? `${state.decision.candidates.length} candidates from the first ${job.objects_scanned} of ${job.objects_in_scope} objects`
+    : `${state.decision.candidates.length} candidates`);
 }
 
 async function refreshEntityCandidates() {

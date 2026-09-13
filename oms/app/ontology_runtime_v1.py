@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.schema import CreateIndex
 from sqlalchemy.sql.expression import Grouping
 from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy import event
 
 from . import models, ontology_core, ontology_versioning, semantic_scope, tenancy
 from .database import Base, get_db
@@ -463,20 +464,42 @@ def _active_revision_id(db: Session, project_id: str) -> Optional[str]:
     promotion mutated, so reading the attribute here sees the new id; and if the
     session commits in between, the expired instance refreshes itself.
 
-    Only a found row is cached: a project with no production environment yet may
-    acquire one later in the same request.
+    A miss is cached too, because a project with no production environment -- every
+    project a test builds -- asked again for every object: the suite census measured
+    it at x1,000 on a hydrate of 1,000 records. A project may still acquire one later
+    in the same request, so the miss is forgotten by the first flush that adds or
+    changes an environment (`_forget_missing_environments`). Before that flush the
+    query could not see the pending row either, so nothing answers differently.
     """
     cache = db.info.setdefault("_production_environments", {})
     environment = cache.get(project_id)
+    if environment is _NO_PRODUCTION_ENVIRONMENT:
+        return None
     if environment is None:
         environment = db.query(ontology_versioning.OntologyEnvironment).filter(
             ontology_versioning.OntologyEnvironment.project_id == project_id,
             ontology_versioning.OntologyEnvironment.name == "production",
         ).first()
         if environment is None:
+            cache[project_id] = _NO_PRODUCTION_ENVIRONMENT
             return None
         cache[project_id] = environment
     return environment.current_revision_id
+
+
+_NO_PRODUCTION_ENVIRONMENT = object()
+
+
+@event.listens_for(Session, "after_flush")
+def _forget_missing_environments(session: Session, _flush_context: Any) -> None:
+    """Drop cached misses once a flush has written an environment they could not see."""
+    cache = session.info.get("_production_environments")
+    if not cache or _NO_PRODUCTION_ENVIRONMENT not in cache.values():
+        return
+    if any(isinstance(item, ontology_versioning.OntologyEnvironment)
+           for item in (*session.new, *session.dirty)):
+        for project_id in [key for key, value in cache.items() if value is _NO_PRODUCTION_ENVIRONMENT]:
+            del cache[project_id]
 
 
 _OBJECT_REFERENCE_KEYS = {

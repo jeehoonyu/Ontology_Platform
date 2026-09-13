@@ -187,6 +187,36 @@ async function riskScoredType(page: Page, count: number, risky: Set<number>) {
   return typeId;
 }
 
+/**
+ * A fresh object type of real objects for entity resolution, hydrated by one pipeline
+ * run. `build` makes the records from the type id, each with an `id`, and any of `name`,
+ * `serial_number` and `status`.
+ */
+async function entityType(page: Page, build: (typeId: string) => Array<Record<string, string>>) {
+  const suffix = `${Date.now()}`;
+  const typeId = `entity_scan_${suffix}`;
+  const settled = async (response: APIResponse, label: string) => {
+    const text = await response.text();
+    expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+    return JSON.parse(text || "null");
+  };
+  await settled(await page.request.post("/object-types", { data: {
+    id: typeId, display_name: `Entity scan ${suffix}`, description: "Entity resolution coverage",
+    properties: { name: { type: "string" }, serial_number: { type: "string" }, status: { type: "string" } }
+  } }), "object type");
+  await settled(await page.request.post("/data-assets", { data: {
+    id: `${typeId}_feed`, display_name: `Entity scan feed ${suffix}`, kind: "dataset", asset_schema: {}, records: build(typeId)
+  } }), "feed");
+  await settled(await page.request.post("/pipelines", { data: {
+    id: `${typeId}_hydrate`, display_name: `Entity scan hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+    steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id",
+              property_map: { name: "$name", serial_number: "$serial_number", status: "$status" }, omit_nulls: true }]
+  } }), "pipeline");
+  const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+  expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+  return typeId;
+}
+
 test.describe("a table the gate found says what it is not showing", () => {
   test.beforeEach(async ({}, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
@@ -522,5 +552,65 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(note, "the scope was cut at the ceiling and nothing says so")
       .toHaveText(`Scored the first ${scored} of ${inScope} active objects, by id. Every figure and the board below cover only those ${scored}.`);
     await expectUnclipped(note, "the ceiling note is cut off, hiding how many objects the scope holds");
+  });
+
+  test("the Candidate Review Queue says how much of the type it compared, and Explain does not call an uncompared object clear", async ({ page }) => {
+    test.setTimeout(240_000);
+    // A job compares every pair among the objects it reads. It read at most 1,000, in no
+    // stated order, while the queue read as the whole duplicate list and Explain called any
+    // object with no pending candidate "clear". Here 1,100 objects: a duplicate pair at 1
+    // and 2, inside the scan, and another at 1,099 and 1,100, past it. The rest carry no
+    // name or serial number, so their pairs score nothing and write no candidate.
+    const pairs: Record<number, Record<string, string>> = {
+      1: { name: "Kestrel Valve", serial_number: "KV-1" }, 2: { name: "Kestrel Valve", serial_number: "KV-1" },
+      1099: { name: "Osprey Pump", serial_number: "OP-9" }, 1100: { name: "Osprey Pump", serial_number: "OP-9" }
+    };
+    const typeId = await entityType(page, (id) => Array.from({ length: 1100 }, (unused, offset) => {
+      const index = offset + 1;
+      return { id: `${id}_${String(index).padStart(4, "0")}`, status: "RUNNING", ...(pairs[index] ?? {}) };
+    }));
+
+    await page.goto("/workspace/decision");
+    await page.getByLabel("Decision object type").selectOption(typeId);
+    await expect(page.getByRole("status")).toHaveText("Ontology context loaded");
+    const views = page.getByRole("navigation", { name: "Decision intelligence views" });
+    await views.getByRole("button", { name: "Entity Resolution" }).click();
+    await page.getByRole("button", { name: "Find duplicates" }).click();
+    await expect(page.getByRole("status")).toHaveText("Entity review queue generated", { timeout: 180_000 });
+
+    const queue = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Candidate Review Queue", exact: true }) });
+    await expect(queue.locator("article strong").filter({ hasText: `${typeId}_0001 + ${typeId}_0002` }), "the pair inside the scan was not found").toHaveCount(1);
+    const [scanned, inScope, rest] = await page.evaluate(() => [(1000).toLocaleString(), (1100).toLocaleString(), (100).toLocaleString()]);
+    const note = queue.getByRole("note");
+    await expect(note, "the queue compared 1,000 of 1,100 objects and does not say so")
+      .toHaveText(`Compared the first ${scanned} of ${inScope} objects, by id. Pairs involving the other ${rest} were not compared.`);
+    await expectUnclipped(note, "the queue's note is cut off, hiding how many objects were compared");
+
+    await page.getByLabel("Decision object ID").fill(`${typeId}_1099`);
+    await views.getByRole("button", { name: "Explain Object" }).click();
+    await page.getByRole("button", { name: "Explain selected object" }).click();
+    await expect(page.getByRole("status")).toHaveText("Explanation loaded");
+    const badge = page.locator("h3", { hasText: "Duplicate warnings" }).locator("xpath=following-sibling::*[1]");
+    await expect(badge, "an object the job never read is called clear").toHaveText("not compared");
+  });
+
+  test("an empty Candidate Review Queue says which objects it compared", async ({ page }) => {
+    test.setTimeout(180_000);
+    // "No candidates" claimed the whole type. With 1,002 objects and nothing to match, the
+    // job compares the first 1,000 and the queue says that is where it found none.
+    const typeId = await entityType(page, (id) => Array.from({ length: 1002 }, (unused, offset) => ({
+      id: `${id}_${String(offset + 1).padStart(4, "0")}`, status: "RUNNING"
+    })));
+
+    await page.goto("/workspace/decision");
+    await page.getByLabel("Decision object type").selectOption(typeId);
+    await expect(page.getByRole("status")).toHaveText("Ontology context loaded");
+    await page.getByRole("navigation", { name: "Decision intelligence views" }).getByRole("button", { name: "Entity Resolution" }).click();
+    await page.getByRole("button", { name: "Find duplicates" }).click();
+    await expect(page.getByRole("status")).toHaveText("Entity review queue generated", { timeout: 120_000 });
+
+    const queue = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Candidate Review Queue", exact: true }) });
+    const [scanned] = await page.evaluate(() => [(1000).toLocaleString()]);
+    await expect(queue.getByText(`No candidates among the first ${scanned} objects`), "the empty queue claims the whole type").toBeVisible();
   });
 });

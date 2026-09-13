@@ -130,6 +130,11 @@ class EntityResolutionJob(Base):
     created_at: Mapped[int] = mapped_column(Integer)
     completed_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     candidate_count: Mapped[int] = mapped_column(Integer, default=0)
+    # How much of its type the job compared (GOAL_HONEST_UI_2026-09-11, the Decision
+    # workspace limits). NULL on a job that ran before these were kept.
+    objects_in_scope: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    objects_scanned: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_scanned_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class EntityCandidate(Base):
@@ -340,6 +345,9 @@ def _job_dict(job: EntityResolutionJob) -> Dict[str, Any]:
         "fields": job.fields or [],
         "status": job.status,
         "candidate_count": job.candidate_count,
+        "objects_in_scope": job.objects_in_scope,
+        "objects_scanned": job.objects_scanned,
+        "last_scanned_id": job.last_scanned_id,
         "created_at": job.created_at,
         "completed_at": job.completed_at,
     }
@@ -736,13 +744,39 @@ def evaluate_object_rows_inline(
     } for obj in rows]
 
 
-def _pending_duplicate_warnings(db: Session, object_id: str, project_id: str) -> List[Dict[str, Any]]:
+def _pending_duplicates(db: Session, object_id: str, project_id: str) -> List[EntityCandidate]:
     candidates = db.query(EntityCandidate).filter(EntityCandidate.project_id == project_id, EntityCandidate.status == "PENDING").all()
-    return [
-        _candidate_dict(candidate)
-        for candidate in candidates
-        if object_id in (candidate.object_ids or [])
-    ][:5]
+    return [candidate for candidate in candidates if object_id in (candidate.object_ids or [])]
+
+
+def _duplicate_coverage(db: Session, obj: models.ObjectInstance) -> Optional[Dict[str, Any]]:
+    """Whether the latest completed entity-resolution job over this object's type compared it.
+
+    No pending warning means "clear" only if a job read the object. A job reads the first N
+    objects of its type by id, so an object past its last id, or made after it ran, was
+    never compared, and Explain called it clear all the same. None when no job has run.
+    """
+    job = db.query(EntityResolutionJob).filter(
+        EntityResolutionJob.project_id == obj.project_id,
+        EntityResolutionJob.object_type_id == obj.object_type_id,
+        EntityResolutionJob.status == "COMPLETED",
+    ).order_by(EntityResolutionJob.completed_at.desc(), EntityResolutionJob.created_at.desc()).first()
+    if job is None:
+        return None
+    compared = False
+    if job.last_scanned_id is not None and (obj.created_at or 0) <= (job.created_at or 0):
+        # Compared in SQL, so the order is the database's own, the one the scan read in.
+        compared = db.query(models.ObjectInstance.id).filter(
+            models.ObjectInstance.project_id == obj.project_id,
+            models.ObjectInstance.id == obj.id,
+            models.ObjectInstance.id <= job.last_scanned_id,
+        ).first() is not None
+    return {
+        "job_id": job.id,
+        "compared": compared,
+        "objects_scanned": job.objects_scanned,
+        "objects_in_scope": job.objects_in_scope,
+    }
 
 
 def explain_object_by_id(
@@ -768,12 +802,15 @@ def explain_object_by_id(
         "last_seen": snapshots[-1].created_at if snapshots else obj.updated_at,
         "last_event_type": snapshots[-1].event_type if snapshots else "current_state",
     }
+    pending = _pending_duplicates(db, object_id, obj.project_id)
     return {
         "object": _object_dict(obj),
         "risk": risk,
         "rule_results": rule_results,
         "temporal_summary": temporal_summary,
-        "duplicate_warnings": _pending_duplicate_warnings(db, object_id, obj.project_id),
+        "duplicate_warnings": [_candidate_dict(candidate) for candidate in pending][:5],
+        "duplicate_warning_count": len(pending),
+        "duplicate_coverage": _duplicate_coverage(db, obj),
         "recommended_actions": risk["recommended_actions"],
         "explanation": risk["explanation"],
     }
@@ -782,6 +819,38 @@ def explain_object_by_id(
 def score_object_by_id(db: Session, object_type_id: str, object_id: str, scorecard_ids: Optional[List[str]] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
     obj = _get_object(db, object_type_id, object_id, project_id)
     return score_object(db, obj, scorecard_ids=scorecard_ids)
+
+
+_PRIME_SNAPSHOT_CHUNK = 500
+
+
+def prime_snapshot_seqs(db: Session, project_id: str, object_type_id: str, object_ids: List[str]) -> int:
+    """Answer each object's last snapshot seq for a whole batch, one grouped query a chunk.
+
+    `record_object_snapshot` read the last snapshot once per object, and a bulk
+    hydrate writes a thousand: the suite census measured that read at x1,000 on a
+    hydrate of 1,000 records. The trade is `prime_change_versions`' own: a primed
+    answer is the state at prime time, and within the session `_pending_snapshot_seqs`
+    still carries every seq this session hands out. An object with no snapshot primes
+    to 0, which is what the per-object read answered.
+    """
+    from sqlalchemy import func
+
+    _ensure_object_snapshot_table(db)
+    primed = db.info.setdefault("_primed_snapshot_seqs", {})
+    unknown = sorted({str(object_id) for object_id in object_ids
+                      if (project_id, str(object_id), object_type_id) not in primed})
+    for start in range(0, len(unknown), _PRIME_SNAPSHOT_CHUNK):
+        chunk = unknown[start:start + _PRIME_SNAPSHOT_CHUNK]
+        rows = db.query(ObjectSnapshot.object_id, func.max(ObjectSnapshot.seq)).filter(
+            ObjectSnapshot.project_id == project_id,
+            ObjectSnapshot.object_type_id == object_type_id,
+            ObjectSnapshot.object_id.in_(chunk),
+        ).group_by(ObjectSnapshot.object_id).all()
+        found = {str(object_id): int(seq or 0) for object_id, seq in rows}
+        for object_id in chunk:
+            primed[(project_id, object_id, object_type_id)] = found.get(object_id, 0)
+    return len(unknown)
 
 
 def record_object_snapshot(
@@ -795,11 +864,16 @@ def record_object_snapshot(
     extra_lineage: Optional[Dict[str, Any]] = None,
 ) -> ObjectSnapshot:
     _ensure_object_snapshot_table(db)
-    last = db.query(ObjectSnapshot).filter(
-        ObjectSnapshot.project_id == obj.project_id,
-        ObjectSnapshot.object_id == obj.id,
-        ObjectSnapshot.object_type_id == obj.object_type_id,
-    ).order_by(ObjectSnapshot.seq.desc()).first()
+    primed_seq = db.info.get("_primed_snapshot_seqs", {}).get((obj.project_id, str(obj.id), obj.object_type_id))
+    if primed_seq is not None:
+        last_seq = primed_seq
+    else:
+        last = db.query(ObjectSnapshot).filter(
+            ObjectSnapshot.project_id == obj.project_id,
+            ObjectSnapshot.object_id == obj.id,
+            ObjectSnapshot.object_type_id == obj.object_type_id,
+        ).order_by(ObjectSnapshot.seq.desc()).first()
+        last_seq = last.seq if last else 0
     # Sessions here are `autoflush=False`, so that query cannot see a snapshot
     # added earlier in this same request. Until now the sequence came out right
     # by accident: the change-event recorder called `db.flush()` per object, and
@@ -810,7 +884,7 @@ def record_object_snapshot(
     pending = db.info.setdefault("_pending_snapshot_seqs", {})
     key = (obj.project_id, obj.object_id if hasattr(obj, "object_id") else obj.id,
            obj.object_type_id)
-    next_seq = max((last.seq if last else 0), pending.get(key, 0)) + 1
+    next_seq = max(last_seq, pending.get(key, 0)) + 1
     pending[key] = next_seq
     lineage = copy.deepcopy(obj.lineage or {})
     if extra_lineage:
@@ -890,6 +964,15 @@ def _default_resolution_fields(db: Session, object_type_id: str) -> List[str]:
     return list(props.keys())[:2] or ["name"]
 
 
+# The most objects one entity-resolution job compares. It compares every pair among
+# them inside the request, so the cost grows with the square of this number.
+ENTITY_SCAN_CEILING = 5000
+
+
+def _entity_scan_limit(limit: int) -> int:
+    return max(2, min(int(limit), ENTITY_SCAN_CEILING))
+
+
 def _build_entity_candidates(
     db: Session,
     job: EntityResolutionJob,
@@ -897,10 +980,18 @@ def _build_entity_candidates(
     threshold: int,
     limit: int,
 ) -> List[EntityCandidate]:
-    rows = db.query(models.ObjectInstance).filter(
+    # In id order, so "the first N" names a set: with no order the database chose which
+    # objects were compared. The total uses the scan's own filters -- project and type,
+    # retired objects included, as the scan includes them -- and is kept on the job with
+    # the last id read, so a reloaded job list and Explain can say what was compared.
+    scope = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.project_id == job.project_id,
         models.ObjectInstance.object_type_id == job.object_type_id
-    ).limit(max(2, min(limit, 5000))).all()
+    )
+    rows = scope.order_by(models.ObjectInstance.id.asc()).limit(_entity_scan_limit(limit)).all()
+    job.objects_in_scope = scope.count()
+    job.objects_scanned = len(rows)
+    job.last_scanned_id = rows[-1].id if rows else None
     fields = job.fields or _default_resolution_fields(db, job.object_type_id)
     candidates: List[EntityCandidate] = []
     for left_idx, left in enumerate(rows):
@@ -1405,10 +1496,18 @@ def create_entity_resolution_job(body: EntityResolutionJobRequest, principal: pr
     job.status = "COMPLETED"
     job.completed_at = _now()
     job.candidate_count = len(candidates)
-    _audit(db, "entity_resolution.job.completed", "entity_resolution_job", job.id, {"project_id": project_id, "candidate_count": len(candidates)}, actor=principal.id)
+    _audit(db, "entity_resolution.job.completed", "entity_resolution_job", job.id, {
+        "project_id": project_id, "candidate_count": len(candidates),
+        "objects_in_scope": job.objects_in_scope, "objects_scanned": job.objects_scanned,
+    }, actor=principal.id)
     db.commit()
     db.refresh(job)
-    return {**_job_dict(job), "candidates": [_candidate_dict(candidate, db) for candidate in candidates]}
+    return {
+        **_job_dict(job),
+        "scan_order": "id",
+        "scan_limit": _entity_scan_limit(body.limit),
+        "candidates": [_candidate_dict(candidate, db) for candidate in candidates],
+    }
 
 
 @router.get("/entity-resolution/jobs")

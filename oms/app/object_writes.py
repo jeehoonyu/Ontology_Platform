@@ -149,10 +149,14 @@ def drop_unrepresentable_nulls(schema: Dict[str, Any],
 
 def validate(db: Session, object_type: models.ObjectType,
              properties: Dict[str, Any]) -> List[str]:
+    return _validate_against(object_type, properties, resolved_schema(db, object_type))
+
+
+def _validate_against(object_type: models.ObjectType, properties: Dict[str, Any],
+                      schema: Dict[str, Any]) -> List[str]:
     from .runtime import validate_object_properties
 
-    return validate_object_properties(object_type, properties or {},
-                                      schema=resolved_schema(db, object_type))
+    return validate_object_properties(object_type, properties or {}, schema=schema)
 
 
 def _object_type(db: Session, object_type_id: str) -> Optional[models.ObjectType]:
@@ -179,6 +183,7 @@ def create_object(
     materialization_id: Optional[str] = None,
     is_active: Optional[bool] = None,
     retired_at: Optional[int] = None,
+    schema: Optional[Dict[str, Any]] = None,
 ) -> models.ObjectInstance:
     """Create one object, validated against its live schema, with its history.
 
@@ -187,13 +192,18 @@ def create_object(
     flush, and a caller that assigns it after construction writes a value the
     outbox payload has already read as None. That exact bug was found once
     already, in a6a4218.
+
+    `schema` is for callers in a loop that already hold the type's live schema
+    from `schema_resolver`. Resolving it here reads the profile, and for a type
+    with no profile `db.get` has nothing to cache, so every call reads again.
     """
     stamp = now if now is not None else _now()
     declared = object_type if object_type is not None else _object_type(db, object_type_id)
 
     if declared is not None:
-        properties = drop_unrepresentable_nulls(resolved_schema(db, declared), properties or {})
-        errors = validate(db, declared, properties)
+        live = schema if schema is not None else resolved_schema(db, declared)
+        properties = drop_unrepresentable_nulls(live, properties or {})
+        errors = _validate_against(declared, properties, live)
         if errors:
             raise HTTPException(status_code=422, detail=errors)
 
@@ -237,13 +247,14 @@ def update_object(
     now: Optional[int] = None,
     valid_from: Optional[int] = None,
     merge: bool = True,
+    schema: Optional[Dict[str, Any]] = None,
 ) -> Tuple[models.ObjectInstance, Dict[str, Any]]:
     """Apply a property change, validated, with its history. Returns the before-state.
 
     `merge` is not a policy switch: the callers genuinely differ. An action
     mutation sets named keys and leaves the rest, while a pipeline hydration
     replaces the row. Both need the same validation and the same change event,
-    which is what this exists to guarantee.
+    which is what this exists to guarantee. `schema` is as for `create_object`.
     """
     stamp = now if now is not None else _now()
     before = dict(instance.properties or {})
@@ -251,8 +262,9 @@ def update_object(
 
     declared = _object_type(db, instance.object_type_id)
     if declared is not None:
-        after = drop_unrepresentable_nulls(resolved_schema(db, declared), after)
-        errors = validate(db, declared, after)
+        live = schema if schema is not None else resolved_schema(db, declared)
+        after = drop_unrepresentable_nulls(live, after)
+        errors = _validate_against(declared, after, live)
         if errors:
             raise HTTPException(status_code=422, detail=errors)
 

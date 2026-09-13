@@ -907,7 +907,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             for row in _for_project(db.query(decision_intelligence.ObjectSnapshot), decision_intelligence.ObjectSnapshot.project_id, project_id).all()
         ],
         "entity_resolution_jobs": [
-            _row_dict(row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count"])
+            _row_dict(row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count", "objects_in_scope", "objects_scanned", "last_scanned_id"])
             for row in _for_project(db.query(decision_intelligence.EntityResolutionJob), decision_intelligence.EntityResolutionJob.project_id, project_id).all()
         ],
         "entity_candidates": [
@@ -2691,7 +2691,7 @@ def import_project(
     for row in snapshot.get("entity_resolution_jobs") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)
-        track(_upsert_model(db, decision_intelligence.EntityResolutionJob, row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count"]))
+        track(_upsert_model(db, decision_intelligence.EntityResolutionJob, row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count", "objects_in_scope", "objects_scanned", "last_scanned_id"]))
     for row in snapshot.get("entity_candidates") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)

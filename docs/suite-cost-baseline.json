@@ -1,7 +1,7 @@
 {
   "provenance": {
-    "migration_head": "0043_drop_orphaned_value_types",
-    "recorded_at": "2026-08-25T06:26:34Z",
+    "migration_head": "0044_entity_resolution_coverage",
+    "recorded_at": "2026-09-13T19:32:09Z",
     "stale_after": "migration head"
   },
   "repeat_ceiling": 6,
@@ -9,7 +9,7 @@
   "routes": {
     "DELETE /ontology/object-types/{object_type_id}/properties/{property_name}": {
       "worst_repeat": 3,
-      "queries": 38,
+      "queries": 37,
       "calls": 2
     },
     "DELETE /pipeline-builder/graphs/{graph_id}/nodes/{node_id}": {
@@ -175,7 +175,7 @@
     "GET /api/v1/dataset-snapshots/{snapshot_id}/rows": {
       "worst_repeat": 0,
       "queries": 3,
-      "calls": 3
+      "calls": 6
     },
     "GET /api/v1/datasets/{asset_id}/snapshots": {
       "worst_repeat": 0,
@@ -265,12 +265,22 @@
     "GET /api/v1/plugins/catalog": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 2
+      "calls": 4
     },
     "GET /api/v1/plugins/executions/{execution_id}": {
       "worst_repeat": 0,
       "queries": 1,
       "calls": 3
+    },
+    "GET /api/v1/plugins/{version_id}/executions": {
+      "worst_repeat": 0,
+      "queries": 2,
+      "calls": 1
+    },
+    "GET /api/v1/snapshot-cache/summary": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 2
     },
     "GET /api/v1/streams/processing/summary": {
       "worst_repeat": 2,
@@ -345,7 +355,7 @@
     "GET /apps/workshop/{module_id}/render": {
       "worst_repeat": 0,
       "queries": 3,
-      "calls": 1
+      "calls": 3
     },
     "GET /apps/workshop/{module_id}/versions": {
       "worst_repeat": 0,
@@ -360,7 +370,7 @@
     "GET /artifacts/{artifact_id}": {
       "worst_repeat": 2,
       "queries": 12,
-      "calls": 52
+      "calls": 53
     },
     "GET /artifacts/{artifact_id}/collaboration": {
       "worst_repeat": 2,
@@ -400,7 +410,7 @@
     "GET /audit-logs/search": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 4
+      "calls": 5
     },
     "GET /auth/session": {
       "worst_repeat": 0,
@@ -559,8 +569,8 @@
     },
     "GET /decision/objects/{object_type_id}/{object_id}/explain": {
       "worst_repeat": 2,
-      "queries": 9,
-      "calls": 4
+      "queries": 11,
+      "calls": 9
     },
     "GET /decision/rules": {
       "worst_repeat": 2,
@@ -590,7 +600,7 @@
     "GET /entity-resolution/jobs": {
       "worst_repeat": 2,
       "queries": 6,
-      "calls": 5
+      "calls": 6
     },
     "GET /entity-resolution/jobs/{job_id}/candidates": {
       "worst_repeat": 0,
@@ -734,8 +744,8 @@
     },
     "GET /interfaces/{interface_id}/implementers": {
       "worst_repeat": 0,
-      "queries": 2,
-      "calls": 1
+      "queries": 5,
+      "calls": 2
     },
     "GET /investigations": {
       "worst_repeat": 2,
@@ -1105,7 +1115,7 @@
     "GET /ops/events": {
       "worst_repeat": 2,
       "queries": 14,
-      "calls": 6
+      "calls": 7
     },
     "GET /ops/inbox": {
       "worst_repeat": 0,
@@ -1190,10 +1200,10 @@
     "GET /project/export": {
       "worst_repeat": 10,
       "queries": 266,
-      "calls": 34
+      "calls": 36
     },
     "GET /project/readiness": {
-      "worst_repeat": 22,
+      "worst_repeat": 33,
       "queries": 1136,
       "calls": 57
     },
@@ -1249,7 +1259,7 @@
     },
     "GET /runtime/observability/summary": {
       "worst_repeat": 20,
-      "queries": 103,
+      "queries": 107,
       "calls": 15
     },
     "GET /runtime/pilot-evidence": {
@@ -1529,12 +1539,12 @@
     },
     "PATCH /ontology/object-types/{object_type_id}/properties/order": {
       "worst_repeat": 4,
-      "queries": 38,
+      "queries": 37,
       "calls": 1
     },
     "PATCH /ontology/object-types/{object_type_id}/properties/{property_name}": {
       "worst_repeat": 3,
-      "queries": 37,
+      "queries": 36,
       "calls": 1
     },
     "PATCH /pipeline-builder/graphs/{graph_id}": {
@@ -1559,12 +1569,12 @@
     },
     "POST /action-types": {
       "worst_repeat": 11,
-      "queries": 41,
+      "queries": 42,
       "calls": 23
     },
     "POST /actions/execute": {
-      "worst_repeat": 3,
-      "queries": 44,
+      "worst_repeat": 2,
+      "queries": 43,
       "calls": 16
     },
     "POST /admin/access-check": {
@@ -1669,7 +1679,7 @@
     },
     "POST /agents/{agent_id}/sessions": {
       "worst_repeat": 8,
-      "queries": 51,
+      "queries": 59,
       "calls": 1
     },
     "POST /aip/agents/workers/run-next": {
@@ -1763,7 +1773,7 @@
       "calls": 1
     },
     "POST /api/v1/agents/tasks/{task_id}/retry": {
-      "worst_repeat": 7,
+      "worst_repeat": 5,
       "queries": 38,
       "calls": 1
     },
@@ -1800,7 +1810,7 @@
     "POST /api/v1/dataset-snapshots/{snapshot_id}/query": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 4
+      "calls": 16
     },
     "POST /api/v1/datasets/{asset_id}/snapshots": {
       "worst_repeat": 0,
@@ -1810,7 +1820,7 @@
     "POST /api/v1/datasets/{asset_id}/snapshots/register": {
       "worst_repeat": 0,
       "queries": 12,
-      "calls": 5
+      "calls": 11
     },
     "POST /api/v1/event-stream-bindings": {
       "worst_repeat": 2,
@@ -1849,12 +1859,12 @@
     },
     "POST /api/v1/industrial/workflows/asset-reliability/onboard": {
       "worst_repeat": 12,
-      "queries": 198,
+      "queries": 196,
       "calls": 18
     },
     "POST /api/v1/industrial/workflows/asset-reliability/triage": {
       "worst_repeat": 9,
-      "queries": 126,
+      "queries": 127,
       "calls": 2
     },
     "POST /api/v1/objects/query": {
@@ -1905,22 +1915,27 @@
     "POST /api/v1/pipeline-plans/{plan_id}/execute": {
       "worst_repeat": 5,
       "queries": 65,
-      "calls": 24
+      "calls": 29
     },
     "POST /api/v1/pipelines/{graph_id}/plans": {
       "worst_repeat": 6,
       "queries": 17,
-      "calls": 18
+      "calls": 22
     },
     "POST /api/v1/plugins/register": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 8
+      "calls": 9
     },
     "POST /api/v1/plugins/trust-keys": {
       "worst_repeat": 2,
       "queries": 8,
       "calls": 2
+    },
+    "POST /api/v1/plugins/trust-keys/{key_id}/revoke": {
+      "worst_repeat": 2,
+      "queries": 9,
+      "calls": 1
     },
     "POST /api/v1/plugins/workers/complete": {
       "worst_repeat": 2,
@@ -1940,17 +1955,22 @@
     "POST /api/v1/plugins/{version_id}/activate": {
       "worst_repeat": 2,
       "queries": 9,
-      "calls": 2
+      "calls": 3
     },
     "POST /api/v1/plugins/{version_id}/invoke": {
       "worst_repeat": 2,
       "queries": 16,
-      "calls": 6
+      "calls": 11
     },
     "POST /api/v1/plugins/{version_id}/invoke-async": {
       "worst_repeat": 2,
       "queries": 16,
       "calls": 4
+    },
+    "POST /api/v1/snapshot-cache/prune": {
+      "worst_repeat": 0,
+      "queries": 0,
+      "calls": 3
     },
     "POST /api/v1/streams/processors": {
       "worst_repeat": 3,
@@ -2013,9 +2033,9 @@
       "calls": 2
     },
     "POST /apps/slate/{app_id}/event": {
-      "worst_repeat": 3,
-      "queries": 26,
-      "calls": 1
+      "worst_repeat": 2,
+      "queries": 25,
+      "calls": 2
     },
     "POST /apps/slate/{app_id}/render": {
       "worst_repeat": 2,
@@ -2039,7 +2059,7 @@
     },
     "POST /apps/workshop/{module_id}/event": {
       "worst_repeat": 5,
-      "queries": 34,
+      "queries": 33,
       "calls": 6
     },
     "POST /apps/workshop/{module_id}/publish": {
@@ -2065,12 +2085,12 @@
     "POST /artifacts": {
       "worst_repeat": 2,
       "queries": 21,
-      "calls": 15
+      "calls": 16
     },
     "POST /artifacts/adopt": {
-      "worst_repeat": 2,
-      "queries": 19,
-      "calls": 1
+      "worst_repeat": 3,
+      "queries": 27,
+      "calls": 2
     },
     "POST /artifacts/{artifact_id}/collaboration/commands": {
       "worst_repeat": 3,
@@ -2104,8 +2124,8 @@
     },
     "POST /artifacts/{artifact_id}/preview": {
       "worst_repeat": 3,
-      "queries": 12,
-      "calls": 2
+      "queries": 14,
+      "calls": 3
     },
     "POST /artifacts/{artifact_id}/publish": {
       "worst_repeat": 3,
@@ -2214,7 +2234,7 @@
     },
     "POST /connections/exports": {
       "worst_repeat": 0,
-      "queries": 2,
+      "queries": 3,
       "calls": 1
     },
     "POST /connections/exports/{export_id}/run": {
@@ -2225,7 +2245,7 @@
     "POST /connections/sources": {
       "worst_repeat": 0,
       "queries": 4,
-      "calls": 18
+      "calls": 19
     },
     "POST /connections/sources/{source_id}/generate-import-job": {
       "worst_repeat": 5,
@@ -2249,8 +2269,8 @@
     },
     "POST /connections/sources/{source_id}/syncs": {
       "worst_repeat": 0,
-      "queries": 5,
-      "calls": 10
+      "queries": 6,
+      "calls": 11
     },
     "POST /connections/syncs/{sync_id}/run": {
       "worst_repeat": 2,
@@ -2258,7 +2278,7 @@
       "calls": 2
     },
     "POST /connections/syncs/{sync_id}/run-incremental": {
-      "worst_repeat": 2,
+      "worst_repeat": 0,
       "queries": 10,
       "calls": 2
     },
@@ -2275,7 +2295,7 @@
     "POST /data-assets": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 79
+      "calls": 84
     },
     "POST /data-assets/{asset_id}/expectations/run": {
       "worst_repeat": 2,
@@ -2299,13 +2319,13 @@
     },
     "POST /decision/evaluate": {
       "worst_repeat": 2,
-      "queries": 32,
-      "calls": 9
+      "queries": 33,
+      "calls": 14
     },
     "POST /decision/rules": {
       "worst_repeat": 0,
       "queries": 10,
-      "calls": 8
+      "calls": 10
     },
     "POST /decision/scenarios": {
       "worst_repeat": 2,
@@ -2320,7 +2340,7 @@
     "POST /decision/scorecards": {
       "worst_repeat": 0,
       "queries": 10,
-      "calls": 8
+      "calls": 10
     },
     "POST /devops/products": {
       "worst_repeat": 0,
@@ -2354,8 +2374,8 @@
     },
     "POST /entity-resolution/jobs": {
       "worst_repeat": 2,
-      "queries": 14,
-      "calls": 5
+      "queries": 15,
+      "calls": 7
     },
     "POST /entity-resolution/objects/{object_id}/split": {
       "worst_repeat": 0,
@@ -2515,12 +2535,12 @@
     "POST /interfaces": {
       "worst_repeat": 0,
       "queries": 7,
-      "calls": 4
+      "calls": 5
     },
     "POST /interfaces/{interface_id}/check-object-type": {
       "worst_repeat": 0,
-      "queries": 2,
-      "calls": 1
+      "queries": 4,
+      "calls": 2
     },
     "POST /interfaces/{interface_id}/query-objects": {
       "worst_repeat": 3,
@@ -2554,7 +2574,7 @@
     },
     "POST /jobs/claim": {
       "worst_repeat": 13,
-      "queries": 56,
+      "queries": 63,
       "calls": 47
     },
     "POST /jobs/{job_id}/cancel": {
@@ -2845,27 +2865,32 @@
     "POST /object-types": {
       "worst_repeat": 7,
       "queries": 30,
-      "calls": 70
+      "calls": 75
     },
     "POST /object-types/{object_type_id}/implement-interface": {
       "worst_repeat": 4,
       "queries": 16,
-      "calls": 7
+      "calls": 8
     },
     "POST /objects": {
       "worst_repeat": 3,
-      "queries": 26,
-      "calls": 107
+      "queries": 25,
+      "calls": 109
+    },
+    "POST /observability/checks/build-status": {
+      "worst_repeat": 0,
+      "queries": 4,
+      "calls": 1
     },
     "POST /observability/checks/freshness": {
       "worst_repeat": 0,
-      "queries": 1,
-      "calls": 1
+      "queries": 3,
+      "calls": 2
     },
     "POST /observability/checks/row-count": {
       "worst_repeat": 0,
-      "queries": 1,
-      "calls": 1
+      "queries": 3,
+      "calls": 3
     },
     "POST /observability/metrics": {
       "worst_repeat": 0,
@@ -2938,9 +2963,9 @@
       "calls": 1
     },
     "POST /ontology-packages/{package_id}/versions/capture": {
-      "worst_repeat": 2,
-      "queries": 16,
-      "calls": 1
+      "worst_repeat": 4,
+      "queries": 22,
+      "calls": 2
     },
     "POST /ontology-packages/{package_id}/versions/{version}/install": {
       "worst_repeat": 4,
@@ -2954,7 +2979,7 @@
     },
     "POST /ontology/action-types/{action_type_id}/execute": {
       "worst_repeat": 4,
-      "queries": 23,
+      "queries": 22,
       "calls": 10
     },
     "POST /ontology/branches": {
@@ -2989,7 +3014,7 @@
     },
     "POST /ontology/environments/{environment_name}/rollback": {
       "worst_repeat": 5,
-      "queries": 47,
+      "queries": 48,
       "calls": 2
     },
     "POST /ontology/health/run": {
@@ -3029,7 +3054,7 @@
     },
     "POST /ontology/object-types/{object_type_id}/properties": {
       "worst_repeat": 4,
-      "queries": 38,
+      "queries": 37,
       "calls": 2
     },
     "POST /ontology/proposals": {
@@ -3045,7 +3070,7 @@
     "POST /ontology/proposals/{proposal_id}/merge": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 1
+      "calls": 2
     },
     "POST /ontology/proposals/{proposal_id}/submit": {
       "worst_repeat": 0,
@@ -3120,11 +3145,11 @@
     "POST /pipeline-builder/graphs": {
       "worst_repeat": 0,
       "queries": 5,
-      "calls": 35
+      "calls": 39
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver": {
-      "worst_repeat": 8,
-      "queries": 94,
+      "worst_repeat": 5,
+      "queries": 88,
       "calls": 16
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver/async": {
@@ -3168,19 +3193,19 @@
       "calls": 7
     },
     "POST /pipeline-builder/workers/run-next": {
-      "worst_repeat": 2006,
-      "queries": 5206,
-      "calls": 39
+      "worst_repeat": 1004,
+      "queries": 4204,
+      "calls": 44
     },
     "POST /pipelines": {
       "worst_repeat": 2,
       "queries": 12,
-      "calls": 10
+      "calls": 14
     },
     "POST /pipelines/{pipeline_id}/run": {
       "worst_repeat": 4,
-      "queries": 68,
-      "calls": 5
+      "queries": 69,
+      "calls": 9
     },
     "POST /policies": {
       "worst_repeat": 2,
@@ -3199,23 +3224,23 @@
     },
     "POST /project/demo/bootstrap": {
       "worst_repeat": 52,
-      "queries": 889,
+      "queries": 857,
       "calls": 4
     },
     "POST /project/demo/reset": {
       "worst_repeat": 49,
-      "queries": 833,
+      "queries": 826,
       "calls": 1
     },
     "POST /project/import": {
       "worst_repeat": 94,
       "queries": 299,
-      "calls": 17
+      "calls": 19
     },
     "POST /project/import/validate": {
       "worst_repeat": 0,
       "queries": 2,
-      "calls": 14
+      "calls": 16
     },
     "POST /projects": {
       "worst_repeat": 0,
@@ -3245,12 +3270,12 @@
     "POST /reliability/backfills": {
       "worst_repeat": 0,
       "queries": 13,
-      "calls": 1
+      "calls": 2
     },
     "POST /reliability/backfills/{backfill_id}/run": {
       "worst_repeat": 2,
       "queries": 30,
-      "calls": 1
+      "calls": 2
     },
     "POST /reliability/data-contracts": {
       "worst_repeat": 0,
@@ -3309,12 +3334,12 @@
     },
     "POST /scenarios/asset-reliability/bootstrap": {
       "worst_repeat": 44,
-      "queries": 748,
+      "queries": 716,
       "calls": 4
     },
     "POST /scenarios/asset-reliability/run-triage": {
       "worst_repeat": 19,
-      "queries": 294,
+      "queries": 295,
       "calls": 3
     },
     "POST /schedules": {
@@ -3354,8 +3379,8 @@
     },
     "POST /security/markings/propagate": {
       "worst_repeat": 3,
-      "queries": 6,
-      "calls": 1
+      "queries": 8,
+      "calls": 2
     },
     "POST /security/resource-markings": {
       "worst_repeat": 0,
@@ -3367,6 +3392,16 @@
       "queries": 7,
       "calls": 1
     },
+    "POST /shared-property-types/{spt_id}/apply": {
+      "worst_repeat": 0,
+      "queries": 12,
+      "calls": 2
+    },
+    "POST /shared-property-types/{spt_id}/detach": {
+      "worst_repeat": 0,
+      "queries": 5,
+      "calls": 1
+    },
     "POST /streams": {
       "worst_repeat": 0,
       "queries": 5,
@@ -3375,7 +3410,7 @@
     "POST /streams/{stream_id}/archive": {
       "worst_repeat": 2,
       "queries": 26,
-      "calls": 1
+      "calls": 2
     },
     "POST /streams/{stream_id}/publish": {
       "worst_repeat": 2,
@@ -3405,12 +3440,12 @@
     "POST /tenancy/organizations": {
       "worst_repeat": 2,
       "queries": 3,
-      "calls": 19
+      "calls": 21
     },
     "POST /tenancy/projects": {
       "worst_repeat": 2,
       "queries": 5,
-      "calls": 35
+      "calls": 38
     },
     "PUT /aip/agents/{agent_id}/tools": {
       "worst_repeat": 0,
@@ -3426,6 +3461,11 @@
       "worst_repeat": 0,
       "queries": 5,
       "calls": 1
+    },
+    "PUT /ontology/object-types/{object_type_id}": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 2
     },
     "PUT /ontology/object-types/{object_type_id}/profile": {
       "worst_repeat": 6,
