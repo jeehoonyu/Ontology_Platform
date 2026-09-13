@@ -284,6 +284,11 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
   // Every row the grid was given, before any filter: what a filtered count is out of.
   const total = table.getPreFilteredRowModel().rows;
   const allRows = table.getRowModel().rows;
+  // The caption's words sit in a sticky span as wide as the words, inside a caption as
+  // wide as the table, so wrapping alone never happens. Held to the width the scroll
+  // area shows, less the caption's padding, the span wraps there instead of running past
+  // the edge, where a filtered caption in a 180px pane lost "100 rows in all".
+  const captionFit = wrapWidth > 20 ? { maxWidth: wrapWidth - 20 } : undefined;
   const pages = Math.ceil(allRows.length / TABLE_ROW_LIMIT);
   const current = Math.min(page, pages - 1);
   const first = current * TABLE_ROW_LIMIT;
@@ -567,11 +572,11 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
             // it has no room to stick itself, and would scroll away with the columns.
             <caption className="table-truncated">
               {filtered && pages > 1 ? (
-                <span>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} matching rows · {total.length.toLocaleString()} rows in all · filtered on {filterNames}</span>
+                <span style={captionFit}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} matching rows · {total.length.toLocaleString()} rows in all · filtered on {filterNames}</span>
               ) : filtered ? (
-                <span>{allRows.length.toLocaleString()} of {total.length.toLocaleString()} rows match {onWhat}</span>
+                <span style={captionFit}>{allRows.length.toLocaleString()} of {total.length.toLocaleString()} rows match {onWhat}</span>
               ) : (
-                <span>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} rows</span>
+                <span style={captionFit}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} rows</span>
               )}
             </caption>
           ) : null}

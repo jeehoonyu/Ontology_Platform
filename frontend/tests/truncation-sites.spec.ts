@@ -61,6 +61,30 @@ async function valuesOf(scope: Locator, column: string) {
   return scope.locator("tbody tr").evaluateAll((rows, at) => rows.map((row) => row.children[at]?.textContent || ""), headers.indexOf(column));
 }
 
+/**
+ * How far a statement's text runs past the nearest box that clips it: the pane, the
+ * table's scroll area, or the window. A caption's words are measured in the span that
+ * holds them. `scrollWidth` cannot see this for that span, which is as wide as its words
+ * wherever they end up, so the words themselves are measured.
+ */
+async function hiddenPx(statement: Locator) {
+  return statement.evaluate((element) => {
+    const target = element.tagName === "CAPTION" && element.firstElementChild ? element.firstElementChild : element;
+    let limit = document.documentElement.clientWidth;
+    for (let node = target.parentElement; node; node = node.parentElement) {
+      if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(node).overflowX)) limit = Math.min(limit, node.getBoundingClientRect().right);
+    }
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    return Math.round(range.getBoundingClientRect().right - limit);
+  });
+}
+
+/** A statement of how much is missing loses the count at its end when it runs past the edge. */
+async function expectUnclipped(statement: Locator, message: string) {
+  await expect.poll(() => hiddenPx(statement), { message }).toBeLessThanOrEqual(1);
+}
+
 /** A published object type requiring `name`, and a graph feeding it rows with none. */
 async function rejectingContract(page: Page, rejected: number) {
   // Digits only: the suffix also goes into an ontology `api_name`.
@@ -147,6 +171,7 @@ test.describe("a table the gate found says what it is not showing", () => {
     await expect(panel.getByRole("note"),
                  "the server holds more events than the feed loaded, and nothing says so")
       .toHaveText(`Loaded the latest 250 of ${held.toLocaleString("en-US")} events`);
+    await expectUnclipped(panel.getByRole("note"), "the note is cut off, hiding how many events the server holds");
   });
 
   test("the object explorer names the columns it is not drawing", async ({ page }) => {
@@ -231,6 +256,14 @@ test.describe("a table the gate found says what it is not showing", () => {
     await expect(issues.getByRole("note"),
                  "130 rows were rejected and the contract carries 100, and nothing says so")
       .toHaveText("Listing the issues of the first 100 of 130 rejected rows");
+    // The Outputs pane is about 180px wide at this viewport, narrower than the sentence.
+    await expectUnclipped(issues.getByRole("note"), "the note is cut off in the Outputs pane, hiding how many rows were rejected");
+
+    // A filter gives the grid its longest caption, about twice the pane's width on one line.
+    await issues.locator("details.grid-filters summary").click();
+    await issues.getByRole("textbox", { name: "Rows where field contains", exact: true }).fill("name");
+    await expect(issues.locator("caption")).toContainText("100 rows in all · filtered on field");
+    await expectUnclipped(issues.locator("caption"), "the filtered caption runs past the pane, hiding how many rows there are in all");
   });
 
   test("contract issues sort, and say they rank only the issues the contract carries", async ({ page }) => {

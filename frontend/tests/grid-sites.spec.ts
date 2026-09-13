@@ -142,6 +142,8 @@ test.describe("the census sites sort the way the census said a person needs", ()
     const panel = panelTitled(page, "Durable Job Telemetry");
     await expect(panel.getByRole("note"), "the telemetry does not say it holds only the latest jobs")
       .toHaveText("Loaded the latest 50 of 51 jobs");
+    await expect.poll(() => panel.getByRole("note").evaluate((element) => element.scrollWidth <= element.clientWidth),
+                      { message: "the note is cut off, hiding how many jobs there are" }).toBe(true);
 
     const costHeader = header(panel, "estimated_cost_usd");
     await costHeader.getByRole("button").click();

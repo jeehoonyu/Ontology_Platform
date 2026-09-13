@@ -2268,6 +2268,10 @@ h2 {
   padding: 6px 0 0;
 }
 
+/* No nowrap. A statement of how much is missing wraps rather than running past its box:
+   on one line, in the pipeline builder's 180px Outputs pane, the contract note lost its
+   count past the edge and a filtered grid caption lost "100 rows in all". A table's
+   caption is as wide as its table, so a short one still reads on one line. */
 .table-truncated {
   caption-side: top;
   text-align: left;
@@ -2276,7 +2280,6 @@ h2 {
   color: #64717a;
   background: #f8fafb;
   border-bottom: 1px solid #e3e8ea;
-  white-space: nowrap;
 }
 
 table {

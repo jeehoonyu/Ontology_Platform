@@ -1150,6 +1150,79 @@ plan, and it is measured there.
   digits only. A search of the server did not find the rule that refuses it, so the cause is
   inferred from the fix. The setup calls now print the response they got.
 
+  **Then the note itself was cut off.** A screenshot T8 takes (N7d, commit 4) showed it. At
+  desktop-1280 the pipeline builder's Outputs pane is about 180px wide, and `.table-truncated`
+  set `white-space: nowrap`, so the note read "Listing the issues of the first 100 of" and the
+  count it exists to state lay past the pane's edge. A statement of what is missing that hides
+  its own number is the silence this condition removed, one layer further down.
+
+  **Measured before the fix, at all four widths.** A probe, run once and deleted, measured how
+  far each truncation statement's text ran past the nearest box that clips it. It covered 54
+  statements across the operations feed, the contract panel and job telemetry, first unfiltered
+  and then filtered and sorted. Two were cut:
+  - the contract note, by 87 to 90px, at the tablet, desktop and wide widths, where the Outputs
+    pane is 180px wide;
+  - the grid's filtered caption, "Showing 1–40 of 100 matching rows · 100 rows in all · filtered
+    on field", by 168px in the same pane and by 74px at mobile. The operations feed's filtered
+    caption was cut by 68px at mobile.
+
+  Unfiltered captions, the operations and telemetry notes, the rows status and the sort sentence
+  were whole. Job telemetry at mobile was not measured: the probe could not reach its Runtime tab
+  at that width.
+
+  **The fix is in two places.** `.table-truncated` no longer sets `white-space: nowrap`, so a note
+  wraps inside its box. That alone does not reach the grid's caption. Its words sit in a sticky
+  span as wide as the words, inside a caption as wide as the table, so nothing makes them wrap.
+  The span is now held to the width the scroll area shows, less the caption's padding, using the
+  width the grid already tracks for pinned columns. A `DataTable` caption is as wide as its table,
+  at least 620px, so a short one still reads on one line.
+
+  **A read-only sweep of the source agreed, and found more.** Three readers, of the CSS, the
+  markup and the tests, listed every statement that could clip, and a skeptic tried to refute each
+  one. The sweep read the tree while this fix was landing. Its nine findings about the contract
+  note and the grid captions were refuted for that reason: the source they were checked against no
+  longer set `nowrap`, and already held the caption span to the scroll area's width.
+
+  Three findings stood. All three are estimated from font metrics rather than measured, and none is
+  fixed here:
+  - **A `DataTable` caption in the Outputs pane.** The table's scroll area there shows about 140px
+    of a caption at least 620px wide. The field lineage table's caption clips by a few pixels from
+    row 81, and a caption with four-digit counts, or any caption at the pane's `Narrow · 160px`
+    width, clips further. Scrolling the table sideways reaches the tail, but the start then
+    scrolls out. Wrapping cannot fix it, because the caption is as wide as its table; it needs what
+    the grid now has, a span held to the visible width.
+  - **Each Ontology Contracts row's "N accepted / M rejected"** is ellipsized in a 122px track once
+    the two counts reach about four digits between them.
+  - **The ontology manager's Drafts list is cut to six**, with nothing saying more exist. That is
+    not a clipped statement but a missing one.
+
+  Each is filed as a task of its own, to be measured before it is fixed.
+
+  **Proven in the three tests that render a note, which now also ask that its words fit.**
+  `truncation-sites.spec.ts` measures how far a statement's words run past the nearest box that
+  clips them, the probe's own measure. `scrollWidth` cannot do this for a caption, whose span is
+  as wide as its words wherever they land. On the build before the fix the contract test failed at
+  that check. The operations note and the job telemetry note fit at desktop-1280 either way, so
+  those two checks guard rather than prove. The contract test now also filters its issues on
+  `field` and holds the caption to the same check, where the unfixed build hid 168px.
+
+  On the fixed build, 37 pass on desktop-1280 across `truncation-sites.spec.ts`,
+  `grid-sites.spec.ts`, `data-grid.spec.ts` and `data-table.spec.ts`. The accessibility sweeps of
+  the pipeline, operations, control-panel and ontology routes pass at all four widths, with the
+  contract test: 17 passed, 3 skipped by design. The probe, run again and deleted, found no hidden
+  text in any of the 54 statements.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **With `nowrap` back on `.table-truncated`,** the contract test failed at the note, 87px of
+    it past the pane.
+  - **With the caption span no longer held to the scroll area's width,** the note wrapped and
+    passed, and the test failed at the filtered caption, 168px past the pane.
+  - Restored: 37 pass on desktop-1280, and both mutated sources are byte for byte what they were.
+
+  **Payload and route cost hold.** The shared closure is 19 bytes lighter and the grid's chunk 59
+  bytes heavier, a net 40 bytes on each route that carries the grid. Every route stays inside its
+  tolerance, no ceiling moved, and route cost reports no route over its requests or bytes.
+
 ## Order and size
 
 | Step | Touches | Commits |
