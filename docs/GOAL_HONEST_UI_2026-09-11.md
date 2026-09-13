@@ -1375,7 +1375,95 @@ plan, and it is measured there.
   `(allDrafts ? draftList : draftList.slice(0, RECENT_DRAFTS)).map(`, a parenthesis closes the
   condition before `.map`. So the reference stopped naming a list it used to name. It still counts no
   silent cut, which is true, but for a reason it cannot see, and the same wrapping would hide an
-  unstated cut just as well. That hole is filed with the gate task below.
+  unstated cut just as well. That hole is filed with the gate task above.
+
+  **Then the Decision workspace's Risk Board, which scored the first 250 objects by id.** The
+  workspace posted `/decision/evaluate` with `limit: 250`. The server ran `ORDER BY id LIMIT 250`,
+  and the board and its metrics read as the whole type. "Objects evaluated" read 250, "High-risk
+  findings" and "Average risk" were counted from those 250, the selected object was the lowest id,
+  and the ops event took its severity from them. A critical object at id 251 changed no number and
+  never reached the board.
+
+  **The fix scores the whole scope, keeps the riskiest findings, and says how much of each there
+  is.** The server scores every object in scope, up to a named ceiling, `EVALUATE_SCAN_CEILING`,
+  still 10,000, in batches of 1,000 with the rule and scorecard catalogs loaded once.
+  - It counts the scope with the scan's own filters, including `is_active`, and returns that as
+    `objects_in_scope`. A total from the object-set endpoints would have counted retired objects
+    too.
+  - It returns `band_counts`, `high_risk_count` and an unrounded `average_score` over every scored
+    object.
+  - With `finding_limit: 250`, which the workspace now sends, it keeps the 250 highest scores,
+    lowest id on a tie, and reports `unlisted_max_score`. A call without it keeps every finding in
+    id order, as the Object Explorer's and the industrial workflow's calls still expect.
+  - The saved run carries the scored count, the kept findings and the bands. The ops event takes
+    its severity from all the bands, and its payload carries the totals instead of one band per
+    object.
+
+  The workspace takes its metrics from the server. When the board lists fewer findings than were
+  scored, the Risk Board says "Showing the 250 highest-risk of N evaluated objects; none of the other
+  M scores above S". Only when the ceiling cut the scope does a note above the metrics say "Scored the
+  first N of M active objects, by id. Every figure and the board below cover only those N." The
+  selected object is now the riskiest. The legacy shell sends the same request.
+
+  **Measured before landing: scoring the whole scope is cheap enough for a click.**
+  `oms/measure_decision_evaluate_cost.py` hydrates a fresh type and times one evaluation through the
+  API, with one rule and a two-feature scorecard. On this Windows host 1,000 objects took 0.049 s
+  and 10,000 took 0.556 s, about 0.056 s per 1,000, and the response stayed near 300 KB, because
+  only the 250 kept findings travel. The ceiling stays at 10,000. Hydrating the 10,000 objects took
+  12.4 s; that is the fixture's cost, not the click's.
+
+  **Proven by one backend script and two browser tests.** `oms/test_decision_scope_totals.py`
+  builds 300 real objects through a pipeline run, with index 2 and 251 to 300 critical under a rule
+  and a scorecard of its own, and holds 37 assertions:
+  - every scored object is counted: 300 of 300 in scope, bands of 249 low and 51 critical, a
+    high-risk count of 51 and an average of 15.3;
+  - the 250 kept findings are the riskiest, object 2 first, with every critical object past id 250
+    among them;
+  - the Object Explorer's call, which names its objects, still keeps every finding in id order;
+  - with the ceiling lowered to 100, 100 are scored and 300 still counted in scope;
+  - retiring 5 objects leaves 295 in scope;
+  - on a type whose only critical objects sit past id 250, the ops event is critical, and it carries
+    band counts rather than one band per object.
+
+  Run against the committed server, the script failed at once with `KeyError: 'objects_in_scope'`.
+  The twelve backend scripts that exercise the evaluator and its callers pass: decision intelligence
+  and its tenancy, the project-scope migration, ops and reliability, the asset reliability command
+  center, the five industrial workflows, project snapshots, and docs conformance.
+
+  In `truncation-sites.spec.ts`, the first browser test builds the same 300 objects and evaluates
+  them from the workspace. The metrics read 300, 51 and 15, the board lists 250 cards with objects
+  251, 275 and 300 among them, object 2 is selected, and the board's note reads "Showing the 250
+  highest-risk of 300 evaluated objects; none of the other 50 scores above 0." without being cut
+  off, while no ceiling note shows. The second builds 5 objects and enlarges only `objects_in_scope`
+  in the real evaluate reply, and the ceiling note reads "Scored the first 5 of 12,345 active
+  objects, by id. Every figure and the board below cover only those 5." Both pass on the fixed build,
+  and so do the existing Decision Intelligence workflow test and the decision route's accessibility
+  sweep at all four widths: 5 passed, 3 skipped by design.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **B1, the total counted after the limit:** with the ceiling lowered to 100, the backend script
+    failed, reading 100 in scope where there were 300.
+  - **N1, the committed Decision code, server and workspace both:** the browser test failed at the
+    first metric, Objects evaluated, `Expected: "300"`, `Received: "250"`.
+  - **N2, the server fixed but the metrics counted from the kept findings:** it failed at Average
+    risk, `Expected: "15"`, `Received: "18"`, the average of 51 critical objects among 250 kept.
+  - **N3, the board's note removed:** it failed at the note, element not found.
+  - **N4, the server keeping the first 250 findings by id:** it failed at critical object 251, not
+    on the board.
+  - **N5, the ceiling note keyed to the findings kept rather than to the cut:** the ceiling test
+    failed at the note, element not found.
+  - Restored: 17 pass across `truncation-sites.spec.ts` and `grid-sites.spec.ts`, the Decision
+    workflow test and sweep pass (5 passed, 3 skipped by design), and all three mutated sources are
+    byte for byte what they were.
+
+  **Payload, route cost and the references.** The decision workspace route measures 468,589 bytes,
+  3,557 over its recorded ceiling of 465,032 and inside the 8 KB tolerance, so the ceiling is
+  unchanged. Route cost holds: the decision route still opens with 13 requests, 913 bytes heavier.
+  `.table-truncated` is now used in eight files, the Risk Board's notes being the eighth, and the
+  style-scope baseline is re-recorded to match. `TABLE_TRUNCATION.md` moved only by line numbers.
+  It still lists each card's `drivers.slice(0, 3)`, a per-object preview whose full list the Explain
+  tab shows. `INERT_CONTROLS.md` does not move, since the fix adds no control. Entity resolution's
+  scan, the other limit in this workspace, lands in a commit of its own.
 
 ## Order and size
 

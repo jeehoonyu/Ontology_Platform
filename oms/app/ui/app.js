@@ -3710,14 +3710,15 @@ async function runDecisionEvaluation(notify = true) {
   if (!objectTypeId) return;
   state.decision.evaluation = await api("/decision/evaluate", {
     method: "POST",
-    body: JSON.stringify({ object_type_id: objectTypeId, filters: {}, limit: 250, persist_run: true })
+    // The whole scope up to the server's ceiling, keeping the 250 highest-risk findings.
+    body: JSON.stringify({ object_type_id: objectTypeId, filters: {}, limit: 10000, finding_limit: 250, persist_run: true })
   });
   if (!el("decisionObjectIdInput").value && state.decision.evaluation.findings?.[0]) {
     el("decisionObjectIdInput").value = state.decision.evaluation.findings[0].object_id;
   }
   setDecisionTab("risk");
   renderDecisionWorkspace();
-  if (notify) showToast(`${state.decision.evaluation.object_count} objects evaluated`);
+  if (notify) showToast(`${state.decision.evaluation.object_count} of ${state.decision.evaluation.objects_in_scope} objects evaluated`);
 }
 
 async function explainDecisionObject() {

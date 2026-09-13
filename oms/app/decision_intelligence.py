@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import heapq
 import os
 import re
 import time
@@ -197,6 +198,9 @@ class DecisionEvaluateRequest(BaseModel):
     rule_ids: List[str] = Field(default_factory=list)
     scorecard_ids: List[str] = Field(default_factory=list)
     limit: int = 100
+    # Keep only this many findings, highest score first. Every scored object still
+    # counts toward the bands and the average. None keeps every finding in id order.
+    finding_limit: Optional[int] = None
     persist_run: bool = True
     include_inactive: bool = False
 
@@ -515,7 +519,16 @@ def _matching_filters(db: Session, obj: models.ObjectInstance, filters: Any) -> 
     return True
 
 
-def _objects_for_scope(db: Session, body: DecisionEvaluateRequest) -> List[models.ObjectInstance]:
+# The most objects one evaluation scores inside the request, and how many it scores at
+# a time. The Decision workspace asked for 250 and got the first 250 by id, while its
+# board and metrics read as the whole type (GOAL_HONEST_UI_2026-09-11). A module
+# constant, so a test can lower it; whatever its value, the response says how much of
+# the scope it scored.
+EVALUATE_SCAN_CEILING = 10000
+EVALUATE_BATCH_SIZE = 1000
+
+
+def _scope_query(db: Session, body: DecisionEvaluateRequest):
     project_id = body.project_id or _object_type_project(db, body.object_type_id)
     query = db.query(models.ObjectInstance).filter(
         models.ObjectInstance.project_id == project_id,
@@ -525,13 +538,22 @@ def _objects_for_scope(db: Session, body: DecisionEvaluateRequest) -> List[model
         query = query.filter(models.ObjectInstance.id.in_(body.object_ids))
     if not body.include_inactive:
         query = query.filter(models.ObjectInstance.is_active.is_(True))
-    limit = max(0, min(int(body.limit or 100), 10000))
+    return query
+
+
+def _scoped_rows(db: Session, body: DecisionEvaluateRequest) -> Tuple[List[models.ObjectInstance], int, int]:
+    """The objects one evaluation scores, how many the scope holds, and the scan limit.
+
+    The total is counted with the scan's own filters -- project, type, object ids,
+    is_active and any expression filter -- so "the first N of M" compares one set with
+    itself. A total from the object-set endpoints would count retired objects too.
+    """
+    query = _scope_query(db, body)
+    limit = max(0, min(int(body.limit or 100), EVALUATE_SCAN_CEILING))
     if not body.filters:
-        return query.order_by(models.ObjectInstance.id.asc()).limit(limit).all()
-    rows = query.order_by(models.ObjectInstance.id.asc()).all()
-    if body.filters:
-        rows = [row for row in rows if _matching_filters(db, row, body.filters)]
-    return rows[:limit]
+        return query.order_by(models.ObjectInstance.id.asc()).limit(limit).all(), query.count(), limit
+    rows = [row for row in query.order_by(models.ObjectInstance.id.asc()).all() if _matching_filters(db, row, body.filters)]
+    return rows[:limit], len(rows), limit
 
 
 def _rules_for_object(db: Session, object_type_id: str, rule_ids: Optional[List[str]] = None, project_id: Optional[str] = None) -> List[DecisionRule]:
@@ -1200,28 +1222,84 @@ def list_decision_scorecards(
 def evaluate_decision_scope_inline(body: DecisionEvaluateRequest, db: Session) -> Dict[str, Any]:
     project_id = _request_project(db, body.object_type_id, body.project_id)
     body = body.model_copy(update={"project_id": project_id})
-    rows = _objects_for_scope(db, body)
-    findings = evaluate_object_rows_inline(
-        db, rows, rule_ids=body.rule_ids, scorecard_ids=body.scorecard_ids,
-    )
+    rows, objects_in_scope, scan_limit = _scoped_rows(db, body)
+    finding_limit = None if body.finding_limit is None else max(0, int(body.finding_limit))
+    rules = _rules_for_object(db, body.object_type_id, body.rule_ids, project_id)
+    scorecards = _scorecards_for_object(db, body.object_type_id, body.scorecard_ids, project_id)
+    # Every scored object counts toward the bands and the average. When a finding limit
+    # is set, only the findings are kept to it: highest score first, lowest id on a tie,
+    # so whatever is left out scores no higher than `unlisted_max_score`.
+    band_counts = {band: 0 for band in ("low", "medium", "high", "critical")}
+    score_sum = 0
+    findings: List[Dict[str, Any]] = []
+    kept: List[Tuple[int, int, Dict[str, Any]]] = []
+    unlisted_max_score: Optional[int] = None
+    sequence = 0
+    for start in range(0, len(rows), EVALUATE_BATCH_SIZE):
+        for finding in evaluate_object_rows_inline(
+            db, rows[start:start + EVALUATE_BATCH_SIZE], rule_ids=body.rule_ids, scorecard_ids=body.scorecard_ids,
+            rule_catalog=rules, scorecard_catalog=scorecards,
+        ):
+            risk = finding.get("risk") or {}
+            band = str(risk.get("band") or "low")
+            band_counts[band] = band_counts.get(band, 0) + 1
+            score = int(risk.get("score") or 0)
+            score_sum += score
+            if finding_limit is None:
+                findings.append(finding)
+                continue
+            # Rows arrive in id order, so a later object loses a tie to every object
+            # already kept: the heap key is (score, -sequence).
+            entry = (score, -sequence, finding)
+            sequence += 1
+            if len(kept) < finding_limit:
+                heapq.heappush(kept, entry)
+                continue
+            dropped = heapq.heapreplace(kept, entry) if kept and entry[:2] > kept[0][:2] else entry
+            unlisted_max_score = dropped[0] if unlisted_max_score is None else max(unlisted_max_score, dropped[0])
+    if finding_limit is not None:
+        findings = [entry[2] for entry in sorted(kept, key=lambda entry: (-entry[0], -entry[1]))]
+    evaluated = len(rows)
+    now = _now()
+    scope = {
+        **body.model_dump(),
+        "objects_in_scope": objects_in_scope,
+        "scan_limit": scan_limit,
+        "band_counts": band_counts,
+        "finding_retention": "all" if finding_limit is None else "highest_score",
+        "findings_retained": len(findings),
+    }
     payload = {
         "id": _new_id("decision_run"),
         "project_id": project_id,
-        "scope": body.model_dump(),
+        "scope": scope,
         "status": "SUCCESS",
-        "object_count": len(rows),
+        "object_count": evaluated,
+        "objects_in_scope": objects_in_scope,
+        "scan_limit": scan_limit,
+        "band_counts": band_counts,
+        "high_risk_count": band_counts["high"] + band_counts["critical"],
+        # Unrounded: the client rounds, so Python's half-to-even never disagrees with it.
+        "average_score": score_sum / evaluated if evaluated else 0.0,
         "findings": findings,
-        "created_at": _now(),
-        "completed_at": _now(),
+        "findings_retained": len(findings),
+        "finding_order": "id_asc" if finding_limit is None else "score_desc",
+        "unlisted_max_score": unlisted_max_score,
+        "created_at": now,
+        "completed_at": now,
     }
     if body.persist_run:
-        run = DecisionRun(**payload)
+        run = DecisionRun(
+            id=payload["id"], project_id=project_id, scope=scope, status="SUCCESS",
+            object_count=evaluated, findings=findings, created_at=now, completed_at=now,
+        )
         db.add(run)
-        _audit(db, "decision.evaluate", "decision_run", run.id, {"object_count": len(rows)})
+        _audit(db, "decision.evaluate", "decision_run", run.id, {"object_count": evaluated, "objects_in_scope": objects_in_scope})
         try:
             from . import ops_control
-            bands = [item.get("risk", {}).get("band") for item in findings]
-            severity = "critical" if "critical" in bands else "high" if "high" in bands else "medium" if "medium" in bands else "info"
+            # From every scored object. It was taken from the findings, so a critical
+            # object past the first 250 by id left the event at "info".
+            severity = "critical" if band_counts["critical"] else "high" if band_counts["high"] else "medium" if band_counts["medium"] else "info"
             ops_control.record_ops_event(
                 db,
                 project_id=project_id,
@@ -1232,7 +1310,7 @@ def evaluate_decision_scope_inline(body: DecisionEvaluateRequest, db: Session) -
                 subject_type="decision_run",
                 subject_id=run.id,
                 object_type_id=body.object_type_id,
-                payload={"object_count": len(rows), "bands": bands},
+                payload={"object_count": evaluated, "objects_in_scope": objects_in_scope, "band_counts": band_counts, "findings_retained": len(findings)},
             )
         except Exception:
             pass

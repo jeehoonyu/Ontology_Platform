@@ -137,6 +137,56 @@ async function rejectingContract(page: Page, rejected: number) {
   return graphName;
 }
 
+/**
+ * A fresh object type of `count` real objects for the Decision workspace, hydrated by
+ * one pipeline run, with a rule and a scorecard under which an object at an index in
+ * `risky` scores 90 (critical) and every other object 0 (low).
+ */
+async function riskScoredType(page: Page, count: number, risky: Set<number>) {
+  const suffix = `${Date.now()}`;
+  const typeId = `risk_board_${suffix}`;
+  const settled = async (response: APIResponse, label: string) => {
+    const text = await response.text();
+    expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+    return JSON.parse(text || "null");
+  };
+  await settled(await page.request.post("/object-types", { data: {
+    id: typeId, display_name: `Risk board ${suffix}`, description: "Decision workspace limits",
+    properties: { name: { type: "string" }, status: { type: "string" }, criticality: { type: "string" } }
+  } }), "object type");
+  const records = Array.from({ length: count }, (unused, offset) => {
+    const index = offset + 1;
+    return {
+      id: `${typeId}_${String(index).padStart(4, "0")}`, name: `Object ${index}`,
+      status: risky.has(index) ? "DEGRADED" : "RUNNING", criticality: risky.has(index) ? "high" : "low"
+    };
+  });
+  await settled(await page.request.post("/data-assets", { data: {
+    id: `${typeId}_feed`, display_name: `Risk board feed ${suffix}`, kind: "dataset", asset_schema: {}, records
+  } }), "feed");
+  await settled(await page.request.post("/pipelines", { data: {
+    id: `${typeId}_hydrate`, display_name: `Risk board hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+    steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id",
+              property_map: { name: "$name", status: "$status", criticality: "$criticality" }, omit_nulls: true }]
+  } }), "pipeline");
+  // The run route answers 200 when the run fails, so its status is what is checked.
+  const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+  expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+  await settled(await page.request.post("/decision/rules", { data: {
+    id: `${typeId}_degraded`, display_name: "Degraded", object_type_id: typeId,
+    expression: { field: "status", op: "eq", value: "DEGRADED" }, severity: "high"
+  } }), "rule");
+  await settled(await page.request.post("/decision/scorecards", { data: {
+    id: `${typeId}_scorecard`, display_name: "Risk board scorecard", object_type_id: typeId,
+    features: [
+      { rule_id: `${typeId}_degraded`, weight: 60, reason: "degraded" },
+      { field: "criticality", op: "eq", value: "high", weight: 30, reason: "high criticality" }
+    ],
+    thresholds: { medium: 35, high: 65, critical: 85 }
+  } }), "scorecard");
+  return typeId;
+}
+
 test.describe("a table the gate found says what it is not showing", () => {
   test.beforeEach(async ({}, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
@@ -412,5 +462,65 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
 
     await panel.getByRole("button", { name: "Show only the 6 most recent" }).click();
     await expect(rows).toHaveCount(6);
+  });
+
+  test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
+    test.setTimeout(120_000);
+    // The workspace asked for 250 objects and the server scored the first 250 by id. The
+    // metrics counted them as the type, and a critical object at id 251 moved no number
+    // and never reached the board. Here 300 objects: index 2, and 251 to 300, are critical.
+    const typeId = await riskScoredType(page, 300, new Set([2, ...Array.from({ length: 50 }, (unused, offset) => 251 + offset)]));
+
+    await page.goto("/workspace/decision");
+    await page.getByLabel("Decision object type").selectOption(typeId);
+    await expect(page.getByRole("status")).toHaveText("Ontology context loaded");
+    await page.getByRole("button", { name: "Evaluate risk" }).click();
+    await expect(page.getByRole("status")).toHaveText("Risk evaluation completed", { timeout: 30_000 });
+
+    const metric = (label: string) => page.locator(".decision-metrics .metric-card")
+      .filter({ has: page.locator("span", { hasText: new RegExp(`^${label}$`) }) }).locator("strong");
+    await expect(metric("Objects evaluated"), "the metrics count only the objects the board was sent").toHaveText("300");
+    await expect(metric("High-risk findings"), "a critical object past the first 250 by id is not counted").toHaveText("51");
+    await expect(metric("Average risk"), "the average is taken over the findings kept, not every scored object").toHaveText("15");
+
+    const board = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Risk Board", exact: true }) });
+    const cards = board.locator(".decision-risk-grid > button");
+    await expect(cards).toHaveCount(250);
+    for (const index of [251, 275, 300]) {
+      await expect(cards.filter({ hasText: `${typeId}_${String(index).padStart(4, "0")}` }), `critical object ${index} is not on the board`).toHaveCount(1);
+    }
+    await expect(page.getByLabel("Decision object ID"), "the riskiest object is not the one selected").toHaveValue(`${typeId}_0002`);
+
+    // No locale is pinned, so the counts are formatted the way this browser formats them.
+    const [listed, scored, others] = await page.evaluate(() => [(250).toLocaleString(), (300).toLocaleString(), (50).toLocaleString()]);
+    const note = board.getByRole("note");
+    await expect(note, "the board lists 250 of 300 scored objects and does not say so")
+      .toHaveText(`Showing the ${listed} highest-risk of ${scored} evaluated objects; none of the other ${others} scores above 0.`);
+    await expectUnclipped(note, "the board's note is cut off, hiding how many objects were scored");
+    await expect(page.getByRole("note").filter({ hasText: "Scored the first" }), "the ceiling note shows though the whole type was scored").toHaveCount(0);
+  });
+
+  test("the Risk Board says so when the server's ceiling cut the scope it scored", async ({ page }) => {
+    // A scope past the server's ceiling takes more objects than a test should make, so the
+    // type is small and real and the evaluate reply is the real one with only its total
+    // enlarged, the way the Outputs pane test enlarges only counts.
+    const typeId = await riskScoredType(page, 5, new Set([3]));
+    await page.route((url) => url.pathname === "/decision/evaluate", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: { ...body, objects_in_scope: 12345 } });
+    });
+
+    await page.goto("/workspace/decision");
+    await page.getByLabel("Decision object type").selectOption(typeId);
+    await expect(page.getByRole("status")).toHaveText("Ontology context loaded");
+    await page.getByRole("button", { name: "Evaluate risk" }).click();
+    await expect(page.getByRole("status")).toHaveText("Risk evaluation completed", { timeout: 30_000 });
+
+    const [scored, inScope] = await page.evaluate(() => [(5).toLocaleString(), (12345).toLocaleString()]);
+    const note = page.getByRole("note").filter({ hasText: "Scored the first" });
+    await expect(note, "the scope was cut at the ceiling and nothing says so")
+      .toHaveText(`Scored the first ${scored} of ${inScope} active objects, by id. Every figure and the board below cover only those ${scored}.`);
+    await expectUnclipped(note, "the ceiling note is cut off, hiding how many objects the scope holds");
   });
 });

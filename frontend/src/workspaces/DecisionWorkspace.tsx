@@ -75,14 +75,19 @@ export function DecisionWorkspace() {
   });
   const runEvaluation = () => void act("Risk evaluation completed", async () => {
     const result = await evaluateDecision(projectId, objectTypeId);
+    // The findings arrive riskiest first, so this selects the riskiest object; it
+    // selected the lowest id, because the findings arrived in id order.
     setEvaluation(result); setObjectId(result.findings[0]?.object_id || ""); setTab("risk");
   });
   const updateCandidate = async (id: string, accept: boolean) => {
     const changed = accept ? await acceptEntityCandidate(id) : await rejectEntityCandidate(id);
     setCandidates((items) => items.map((item) => item.id === id ? changed : item));
   };
-  const highCount = evaluation?.findings.filter((item) => ["high", "critical"].includes(item.risk.band.toLowerCase())).length || 0;
-  const averageRisk = evaluation?.findings.length ? Math.round(evaluation.findings.reduce((sum, item) => sum + item.risk.score, 0) / evaluation.findings.length) : 0;
+  // From the server, over every object it scored. These were counted from the findings,
+  // which were the first 250 objects by id, so a critical object at id 251 moved no
+  // number here. The findings are now only the highest-risk ones kept.
+  const highCount = evaluation?.high_risk_count ?? 0;
+  const averageRisk = evaluation ? Math.round(evaluation.average_score) : 0;
   // Timeline snapshots carry the object's own properties, so they render by the
   // declared base type rather than stringified -- the same treatment the
   // Explorer and the Map give the same object.
@@ -102,6 +107,8 @@ export function DecisionWorkspace() {
     </div>
     <ErrorBanner message={error} />
     {notice ? <div className="inline-success" role="status">{notice}</div> : null}
+    {/* Only when the server's ceiling cut the scope: a condition that is the cut itself. */}
+    {evaluation && evaluation.object_count < evaluation.objects_in_scope ? <p className="table-truncated" role="note">Scored the first {evaluation.object_count.toLocaleString()} of {evaluation.objects_in_scope.toLocaleString()} active objects, by id. Every figure and the board below cover only those {evaluation.object_count.toLocaleString()}.</p> : null}
     <div className="decision-metrics"><Metric label="Objects evaluated" value={evaluation?.object_count || 0} /><Metric label="High-risk findings" value={highCount} /><Metric label="Average risk" value={averageRisk} /><Metric label="Active rules" value={rules.length} /><Metric label="Scorecards" value={scorecards.length} /></div>
     <nav className="decision-tabs" aria-label="Decision intelligence views">{TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
     {tab === "risk" ? <RiskBoard evaluation={evaluation} rules={rules} scorecards={scorecards} onSelect={(id) => { setObjectId(id); setTab("explain"); }} /> : null}
@@ -115,7 +122,7 @@ export function DecisionWorkspace() {
 
 function RiskBoard({ evaluation, rules, scorecards, onSelect }: { evaluation: DecisionEvaluation | null; rules: DecisionRule[]; scorecards: DecisionScorecard[]; onSelect: (id: string) => void }) {
   const sorted = useMemo(() => [...(evaluation?.findings || [])].sort((a, b) => b.risk.score - a.risk.score), [evaluation]);
-  return <div className="decision-risk-layout"><Panel title="Risk Board" action={<ShieldAlert size={17} />}><div className="decision-risk-grid">{sorted.map((finding) => <button key={finding.object_id} onClick={() => onSelect(finding.object_id)}><header><strong>{String(finding.object.properties.name || finding.object.properties.title || finding.object_id)}</strong><StatusBadge value={finding.risk.band} /></header><span>{finding.object_id}</span><div className="decision-score"><b>{finding.risk.score}</b><span>risk score</span></div><p>{finding.risk.explanation}</p><footer>{finding.risk.drivers.slice(0, 3).map((driver, index) => <span key={index}>{driver.feature || driver.rule_id || "driver"}</span>)}</footer></button>)}</div>{!sorted.length ? <EmptyState title="No evaluated objects" description="Bootstrap decision rules, then evaluate the selected ontology type." /> : null}</Panel><aside><Panel title="Active Rules"><div className="decision-definition-list">{rules.map((rule) => <article key={rule.id}><span><strong>{rule.display_name}</strong><small>{String(rule.expression.field || "linked condition")} {String(rule.expression.op || "")}</small></span><StatusBadge value={rule.severity} /></article>)}</div>{!rules.length ? <div className="empty">No rules configured.</div> : null}</Panel><Panel title="Risk Scorecards"><div className="decision-definition-list">{scorecards.map((scorecard) => <article key={scorecard.id}><span><strong>{scorecard.display_name}</strong><small>{scorecard.features.length} weighted drivers</small></span><StatusBadge value={scorecard.active ? "active" : "disabled"} /></article>)}</div>{!scorecards.length ? <div className="empty">No scorecards configured.</div> : null}</Panel></aside></div>;
+  return <div className="decision-risk-layout"><Panel title="Risk Board" action={<ShieldAlert size={17} />}>{evaluation && evaluation.findings.length < evaluation.object_count ? <p className="table-truncated" role="note">Showing the {evaluation.findings.length.toLocaleString()} highest-risk of {evaluation.object_count.toLocaleString()} evaluated objects; none of the other {(evaluation.object_count - evaluation.findings.length).toLocaleString()} scores above {evaluation.unlisted_max_score ?? 0}.</p> : null}<div className="decision-risk-grid">{sorted.map((finding) => <button key={finding.object_id} onClick={() => onSelect(finding.object_id)}><header><strong>{String(finding.object.properties.name || finding.object.properties.title || finding.object_id)}</strong><StatusBadge value={finding.risk.band} /></header><span>{finding.object_id}</span><div className="decision-score"><b>{finding.risk.score}</b><span>risk score</span></div><p>{finding.risk.explanation}</p><footer>{finding.risk.drivers.slice(0, 3).map((driver, index) => <span key={index}>{driver.feature || driver.rule_id || "driver"}</span>)}</footer></button>)}</div>{!sorted.length ? <EmptyState title="No evaluated objects" description="Bootstrap decision rules, then evaluate the selected ontology type." /> : null}</Panel><aside><Panel title="Active Rules"><div className="decision-definition-list">{rules.map((rule) => <article key={rule.id}><span><strong>{rule.display_name}</strong><small>{String(rule.expression.field || "linked condition")} {String(rule.expression.op || "")}</small></span><StatusBadge value={rule.severity} /></article>)}</div>{!rules.length ? <div className="empty">No rules configured.</div> : null}</Panel><Panel title="Risk Scorecards"><div className="decision-definition-list">{scorecards.map((scorecard) => <article key={scorecard.id}><span><strong>{scorecard.display_name}</strong><small>{scorecard.features.length} weighted drivers</small></span><StatusBadge value={scorecard.active ? "active" : "disabled"} /></article>)}</div>{!scorecards.length ? <div className="empty">No scorecards configured.</div> : null}</Panel></aside></div>;
 }
 
 function ExplainPanel({ objectId, explanation, busy, onExplain }: { objectId: string; explanation: DecisionExplanation | null; busy: string; onExplain: () => void }) {
