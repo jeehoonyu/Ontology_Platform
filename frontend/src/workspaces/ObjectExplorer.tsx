@@ -13,6 +13,7 @@ import {
   type ActionResult,
   type ExplorerAction,
   type ExplorerFacet,
+  type FacetBucket,
   type ExplorerQuery,
   type Exploration,
   type ObjectProfile,
@@ -23,7 +24,14 @@ import { formatValue } from "../utils/format";
 import { propertySpecs, renderPropertyValue } from "../utils/semanticRender";
 
 type Risk = { score: number; band: string; explanation?: string };
-type FilterValue = string | number | boolean;
+// A histogram bucket filters by its range: the last bin, and a single bin, include the upper
+// edge, as the server counted them.
+type RangeFilter = { gte: number; lt?: number; lte?: number };
+type FilterValue = string | number | boolean | RangeFilter;
+
+function filterLabel(value: FilterValue): string {
+  return typeof value === "object" ? `${value.gte} – ${value.lte ?? value.lt}` : String(value);
+}
 
 function propertyValue(object: ObjectRecord, field: string): unknown {
   if (field === "id") return object.id;
@@ -47,6 +55,16 @@ function parameterNames(action: ExplorerAction): string[] {
 // most common, says how many values there are, and shows the rest on request.
 const FACET_SHORT = 7;
 
+// What a bucket filters by. A histogram bucket sent its label, "0 - 13.75", which no number
+// equals, so every click read "No matching objects".
+function facetFilter(facet: ExplorerFacet, bucket: FacetBucket, index: number): FilterValue {
+  if (facet.type === "histogram" && bucket.range) {
+    const [low, high] = bucket.range;
+    return index === facet.buckets.length - 1 || low === high ? { gte: low, lte: high } : { gte: low, lt: high };
+  }
+  return bucket.value ?? bucket.label ?? "";
+}
+
 function FacetCard({ facet, onApply }: { facet: ExplorerFacet; onApply: (value: FilterValue) => void }) {
   const [expanded, setExpanded] = useState(false);
   const listogram = facet.type === "listogram";
@@ -60,8 +78,7 @@ function FacetCard({ facet, onApply }: { facet: ExplorerFacet; onApply: (value: 
     <header><strong>{facet.field}</strong><small>{facet.type}</small></header>
     {listogram && shown.length < total ? <p className="table-truncated" role="note">Showing the {shown.length.toLocaleString()} most common of {total.toLocaleString()} values</p> : null}
     {shown.map((bucket, index) => {
-      const value = bucket.value ?? bucket.label ?? index;
-      return <button key={`${String(value)}-${index}`} onClick={() => onApply(value as FilterValue)}><span>{bucket.label || String(bucket.value)}</span><i style={{ width: `${Math.max(5, bucket.count / max * 100)}%` }} /><b>{bucket.count}</b></button>;
+      return <button key={`${bucket.label ?? String(bucket.value)}-${index}`} onClick={() => onApply(facetFilter(facet, bucket, index))}><span>{bucket.label || String(bucket.value)}</span><i style={{ width: `${Math.max(5, bucket.count / max * 100)}%` }} /><b>{bucket.count}</b></button>;
     })}
     {listogram && facet.buckets.length > FACET_SHORT ? <footer className="facet-card-footer"><button type="button" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{toggleLabel}</button></footer> : null}
   </section>;
@@ -211,7 +228,7 @@ export function ObjectExplorer() {
             {!explorations.length ? <div className="empty">Save a query to return to it later.</div> : null}
           </Panel>
           <Panel title="Filters" action={<Filter size={15} />}>
-            <div className="filter-chip-list">{Object.entries(filters).map(([field, value]) => <button key={field} onClick={() => { const next = { ...filters }; delete next[field]; setFilters(next); void runQuery(objectTypeId, next, search); }} title="Remove filter"><span>{field}: {String(value)}</span><X size={12} /></button>)}</div>
+            <div className="filter-chip-list">{Object.entries(filters).map(([field, value]) => <button key={field} onClick={() => { const next = { ...filters }; delete next[field]; setFilters(next); void runQuery(objectTypeId, next, search); }} title="Remove filter"><span>{field}: {filterLabel(value)}</span><X size={12} /></button>)}</div>
             {!Object.keys(filters).length ? <div className="empty compact">Select a facet value to filter results.</div> : null}
           </Panel>
           <div className="facet-stack">{query?.facets.map((facet) => <FacetCard key={`${query.object_type_id}:${facet.field}`} facet={facet} onApply={(value) => applyFacet(facet, value)} />)}</div>

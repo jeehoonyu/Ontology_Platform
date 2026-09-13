@@ -2031,6 +2031,44 @@ plan, and it is measured there.
   `.table-truncated` was already used in both files, and neither `TABLE_TRUNCATION.md` nor
   `INERT_CONTROLS.md` moves. No server file changed.
 
+  **Then the facet filter.** Object Explorer's facet cards count objects per bucket, and a click filtered
+  by something no object matched. A histogram bucket carried rounded edges and no value, so its button
+  sent its label, "0 - 13.75", which no number equals; a value list keyed its buckets by their text, so
+  a True bucket sent "True", which no stored true equals. Every such click read "No matching objects"
+  under a count that said there were some.
+
+  **A bucket filters by what it counted.** The server keeps a histogram bin's exact edges, and a value
+  bucket sends the value itself, keyed by its JSON so that True and "True" stay two values. The card
+  filters a bin by its range, including the upper edge for the last bin and for a single-value bin, as
+  the server counted them, and the filter chip names the range it holds.
+
+    **The proof.** A new `test_explorer_facet_filters.py` hydrates 23 objects whose highest score makes a
+  bin width of 13.7500001, so the value 13.75 falls in the first bin by the edges the counts used and in
+  the second by rounded ones; it requires every score bin's range filter, and every value of a boolean
+  facet, to return exactly the bucket's count, and the boolean buckets to send booleans. In
+  `truncation-sites.spec.ts`, a new browser test clicks the top score bin and requires the table to hold
+  its count, with no "No matching objects" and a chip reading "score: N – 110", then clicks the True
+  bucket and requires its count. They pass on the fix, with the three Object Explorer browser tests
+  beside them and two backend scripts.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, rounded edges:** the backend script failed, "score bin 0 (0.0 - 13.75) counts 4 and its
+    filter {'gte': 0.0, 'lt': 13.75} returns 3".
+  - **B2, values keyed by their text:** it failed, "the active facet sends ['True', 'False'], not
+    booleans".
+  - **N1, the client sending the bin's label:** the browser test failed at the top bin, `Expected: 3`,
+    `Received: 0`. Its first mutation did not compile and was replaced by one that does.
+  - **N2, the last bin excluding its upper edge:** the browser test failed at the top bin, `Expected: 3`,
+    `Received: 2`.
+  - **N3, the server sending text values:** it failed at the True bucket, `Expected: 12`, `Received: 0`.
+  - **N4, the committed code:** it failed at the top bin, `Expected: 3`, `Received: 0`.
+  - Restored: the four Object Explorer browser tests and three backend scripts pass, and both sources
+    are byte for byte what they were.
+
+    **The references.** Object Explorer opens with 13 requests at 450 KB, no more than before and within
+  its payload ceiling. No class became shared, `TABLE_TRUNCATION.md` moves only by line (the column cut
+  sits 17 lines lower), `INERT_CONTROLS.md` does not move, and the tenancy census holds at 360.
+
 ## Order and size
 
 | Step | Touches | Commits |

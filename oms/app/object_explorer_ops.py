@@ -179,15 +179,23 @@ def _facet(field: str, objects: List[Dict[str, Any]], bins: int = 8) -> Dict[str
                 b_hi = hi if index == bins - 1 else lo + (index + 1) * width
                 count = sum(1 for num in nums if (b_lo <= num < b_hi) or (index == bins - 1 and num == hi))
                 buckets.append({
-                    "range": [round(b_lo, 6), round(b_hi, 6)],
+                    # The edges the counts used. A click filters by them, and rounded they
+                    # moved a value at a bin's edge into the next bin's filter.
+                    "range": [b_lo, b_hi],
                     "label": f"{round(b_lo, 2)} - {round(b_hi, 2)}",
                     "count": count,
                 })
         return {"field": field, "type": "histogram", "buckets": buckets}
 
+    # Keyed by the value's JSON, so True and "True" are two values and 1 is not "1", and each
+    # bucket sends back the value itself, which is what a filter compares. Keyed by its text,
+    # a True bucket sent "True", which no stored true equals.
     counts: Dict[str, int] = {}
+    raw: Dict[str, Any] = {}
     for value in values:
-        counts[str(value)] = counts.get(str(value), 0) + 1
+        key = json.dumps(value, sort_keys=True, default=str)
+        counts[key] = counts.get(key, 0) + 1
+        raw.setdefault(key, value)
     return {
         "field": field,
         "type": "listogram",
@@ -196,7 +204,7 @@ def _facet(field: str, objects: List[Dict[str, Any]], bins: int = 8) -> Dict[str
         # already holds every one.
         "distinct_count": len(counts),
         "buckets": [
-            {"value": key, "label": key, "count": count}
+            {"value": raw[key], "label": str(raw[key]), "count": count}
             for key, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:20]
         ],
     }

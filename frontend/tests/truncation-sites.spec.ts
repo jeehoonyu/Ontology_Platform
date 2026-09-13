@@ -849,6 +849,52 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     }
   });
 
+  test("an Object Explorer facet filters to the objects it counts", async ({ page }) => {
+    test.setTimeout(120_000);
+    // A histogram bucket sent its label as the filter, which no number equals, and a True
+    // bucket sent the text "True", which no stored true equals: every such click read "No
+    // matching objects". Here 23 objects, scores 0 to 110 and every other one active.
+    const suffix = `${Date.now()}`;
+    const typeId = `facet_filter_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/object-types", { data: {
+      id: typeId, display_name: `Facet filter ${suffix}`, description: "Facet filter",
+      properties: { name: { type: "string" }, score: { type: "number" }, active: { type: "boolean" } }
+    } }), "object type");
+    const records = Array.from({ length: 23 }, (unused, index) => ({ id: `${typeId}_${String(index).padStart(2, "0")}`, name: `f${index}`, score: index * 5, active: index % 2 === 0 }));
+    await settled(await page.request.post("/data-assets", { data: { id: `${typeId}_feed`, display_name: `Facet filter feed ${suffix}`, kind: "dataset", asset_schema: {}, records } }), "feed");
+    await settled(await page.request.post("/pipelines", { data: {
+      id: `${typeId}_hydrate`, display_name: `Facet filter hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+      steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id", property_map: { name: "$name", score: "$score", active: "$active" }, omit_nulls: true }]
+    } }), "pipeline");
+    const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+    expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+
+    await page.goto(`/workspace/object-explorer?type=${typeId}`);
+    const card = (field: string) => page.locator(".facet-card-react").filter({ has: page.locator("header strong").getByText(field, { exact: true }) });
+    const rows = page.locator(".explorer-table tbody tr");
+    await expect(rows).toHaveCount(23);
+
+    const topBin = card("score").locator(":scope > button").last();
+    const topCount = Number(await topBin.locator("b").textContent());
+    await topBin.click();
+    await expect(rows, "the top bin's filter does not return the objects the bin counts").toHaveCount(topCount);
+    await expect(page.getByText("No matching objects", { exact: true })).toHaveCount(0);
+    const chip = page.locator(".filter-chip-list button");
+    await expect(chip, "the filter chip does not say which range it holds").toHaveText(/^score: \d+(\.\d+)? – 110$/);
+    await chip.click();
+    await expect(rows).toHaveCount(23);
+
+    const trueBucket = card("active").locator(":scope > button").filter({ has: page.getByText("True", { exact: true }) });
+    const trueCount = Number(await trueBucket.locator("b").textContent());
+    await trueBucket.click();
+    await expect(rows, "the True bucket's filter does not return the objects it counts").toHaveCount(trueCount);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The
