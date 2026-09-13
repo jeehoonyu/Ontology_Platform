@@ -11,10 +11,12 @@ truncated three ways -- rows past forty, columns from a ten-row sample, eight
 keys a row -- and the rule must find all three, including the column sample,
 which reaches the table only through a `columns` binding four lines above it.
 
-The second is the three ways round the rule: cutting the rows at the call site
-so the component has nothing to caption, rendering the count of what was kept
-instead of what was cut, and spelling the cut as an index filter. Each of those
-would leave this gate reporting a number that is wrong rather than high.
+The second is the ways round the rule: cutting the rows at the call site so the
+component has nothing to caption, rendering the count of what was kept instead
+of what was cut, spelling the cut as an index filter, and -- N9, found after the
+first three -- rendering the true count beside rows cut before a table that pages
+them. Each of those would leave this gate reporting a number that is wrong rather
+than high.
 """
 import re
 import sys
@@ -99,13 +101,14 @@ export function Contract({ issues }) {
 """)
 check(call_site["table"] and not call_site["counted"] and call_site["how"] == "passed as rows",
       f"rows cut before they reach DataTable pass because DataTable has nothing to caption: {call_site}")
+check(call_site["paging"], f"a cut handed to DataTable is not read as a cut into a table that pages: {call_site}")
 
 grid_call_site = only("""
 export function Records({ rows }) {
   return <DataGrid rows={rows.slice(0, 25)} />;
 }
 """)
-check(grid_call_site["table"] and not grid_call_site["counted"],
+check(grid_call_site["table"] and not grid_call_site["counted"] and grid_call_site["paging"],
       f"rows cut before they reach DataGrid pass; the grid is a table as DataTable is: {grid_call_site}")
 
 held_then_passed = only("""
@@ -114,7 +117,7 @@ function CommandTab({ events }) {
   return <Panel title="Feed"><DataTable rows={rows} /></Panel>;
 }
 """)
-check(held_then_passed["table"] and not held_then_passed["counted"],
+check(held_then_passed["table"] and not held_then_passed["counted"] and held_then_passed["paging"],
       f"the operations feed's own shape -- cut, mapped, bound, passed -- is not seen: {held_then_passed}")
 
 # 2. The count of what was kept.
@@ -142,6 +145,23 @@ export function Feed({ rows }) {
 """)
 check(filtered["spelling"] == "index filter" and filtered["table"] and not filtered["counted"],
       f"the same cut spelled as an index filter walks past the rule: {filtered}")
+
+# 4. The true count beside rows the table was never given. N9 of the goal: the
+#    pipeline builder's contract panel summarised every issue and handed its table
+#    twenty-five, and this gate read that as counted. DataTable pages what it
+#    receives, so the rows past the cut were not missing from the count; they were
+#    missing from the screen. Found by the N7d census, not by this gate.
+counted_call_site = only("""
+function OntologyContractPanel({ issues }) {
+  return <details open><summary>{issues.length} contract issues</summary><DataTable rows={issues.slice(0, 25)} /></details>;
+}
+""")
+check(counted_call_site["counted"] and counted_call_site["paging"],
+      f"the contract panel's shape is not read as counted and cut into a paging table: {counted_call_site}")
+check(silent_per_file({"files": {"x.tsx": {"cuts": [counted_call_site]}}}) == {"x.tsx": 1},
+      "a counted cut into a table that pages passes: the count names rows nobody can reach")
+check(not counted_rows["paging"] and silent_per_file({"files": {"x.tsx": {"cuts": [counted_rows]}}}) == {},
+      "a counted cut inside a plain <table>, which pages nothing, is refused along with the paging ones")
 
 # --- the scope is the table element, not the component -------------------------
 # The first version scoped this to the component and counted Object Explorer's
@@ -234,7 +254,7 @@ for name, entry in found["files"].items():
 # --- the ratchet refuses a rise, in total and per file ----------------------------
 def synthetic(count, name="workspaces/Made.tsx"):
     cuts = [{"line": 10 + index, "declaration": "Made", "source": "rows", "spelling": "slice",
-             "how": "mapped", "table": True, "counted": False} for index in range(count)]
+             "how": "mapped", "table": True, "paging": False, "counted": False} for index in range(count)]
     return {"files": {name: {"tables": 1, "cuts": cuts}}, "tables": 1}
 
 

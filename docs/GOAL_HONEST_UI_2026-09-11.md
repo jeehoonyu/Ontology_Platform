@@ -445,7 +445,7 @@ plan, and it is measured there.
   drift left by N2 — `.button-row` stopped being used in `Workbench.tsx` and started in
   `PipelineBuilder.tsx` — which is not new coupling, and is recorded here rather than
   folded in unmentioned.
-- **N9 — The contract issues nobody can reach.** **Open** — found by the N7d census, not by
+- **N9 — The contract issues nobody can reach.** **Met** — found by the N7d census, not by
   a gate. The pipeline builder's ontology contract panel summarises `{issues.length} contract
   issues` and hands the table `issues.slice(0, 25)` (`PipelineBuilder.tsx:701` at `33508ae`).
   Given 25 rows, the table shows all 25 and no caption, so a preview with 120 issues names
@@ -464,8 +464,35 @@ plan, and it is measured there.
   the call-site cut gone, the table would page through the issues of the first 100 rejected
   rows while `rejected_rows` counts them all. Met when every loaded issue is reachable in
   the table, and the panel says when `rejected_rows` exceeds the violations that arrived.
-  The 422 raised when `on_error` is `fail` carries only 25 violations (`:1544`); whether
-  the panel ever shows that response is part of the census the fix begins with.
+  The 422 raised when `on_error` is `fail` carries only 25 violations (`:1544`), but it never
+  reaches this panel. The panel's contract comes from the node preview's `ontology_contract`
+  or from the latest contract run, and no frontend code reads the 422's violations.
+
+  **Met by both layers.** The panel hands `DataTable` every loaded issue. When the contract
+  carries fewer violations than it rejected rows, it says so:
+  `Listing the issues of the first 100 of 130 rejected rows`.
+
+  **The gate hole is closed rather than documented.** `audit_table_truncation` now records
+  whether a cut reaches a table that pages, `DataTable` or `DataGrid`, and counts such a cut
+  as silent whatever total is rendered beside it. A counted cut inside a plain `<table>` is
+  still accepted, because nothing would have paged its rows. Run against the tree before the
+  panel was fixed, the gate refused it:
+  `workspaces/PipelineBuilder.tsx: 0 -> 1 silent table truncation(s) — this file had none`.
+  Four new assertions hold the rule, 50 in all. The reference now reads 0 of 3 and says, for
+  each cut, whether it feeds a paging table.
+
+  Proven by one test in `truncation-sites.spec.ts`, sized past all three layers: 130 rejected
+  rows, past the 25 the call site kept, the 40 a page shows and the 100 the contract carries.
+  It pages to `Showing 81–100 of 100 rows`. Negative runs, three builds. With the call-site
+  slice restored, it failed at `Expected: 40`, `Received: 25`. With the note removed, it
+  failed at the note, `element(s) not found`. Restored, it passed, with the file's other four
+  tests green on the same build. The existing evaluator test that opens this panel passed on
+  the fix's first build. Route payload holds, with PipelineBuilder at 466 KB.
+
+  The fixture's first version failed before the page opened. The object type's profile call
+  was refused while its suffix held an underscore and a random number, and accepted with
+  digits only. A search of the server did not find the rule that refuses it, so the cause is
+  inferred from the fix. The setup calls now print the response they got.
 
 ## Order and size
 

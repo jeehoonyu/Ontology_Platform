@@ -698,7 +698,18 @@ function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyC
         updated: contract.updated_objects,
         unchanged: contract.unchanged_objects
       }} />
-      {issues.length ? <details open><summary>{issues.length} contract issue{issues.length === 1 ? "" : "s"}</summary><DataTable rows={issues.slice(0, 25)} /></details> : <p className="contract-success">All preview rows satisfy the ontology contract.</p>}
+      {/* N9 of GOAL_HONEST_UI_2026-09-11. The table was handed the first twenty-five
+          issues under a summary counting all of them, so the rest were named and could
+          not be read. DataTable pages what it is given. The contract itself carries at
+          most 100 violations, so when more rows were rejected than arrived, that is
+          said as well: paging through 100 would be the same silence one layer down. */}
+      {issues.length ? (
+        <details open>
+          <summary>{issues.length} contract issue{issues.length === 1 ? "" : "s"}</summary>
+          {contract.rejected_rows > contract.violations.length ? <p className="table-truncated" role="note">Listing the issues of the first {contract.violations.length.toLocaleString()} of {contract.rejected_rows.toLocaleString()} rejected rows</p> : null}
+          <DataTable rows={issues} />
+        </details>
+      ) : <p className="contract-success">All preview rows satisfy the ontology contract.</p>}
       {lineage.length ? <details><summary>Mapped field lineage ({lineage.length})</summary><DataTable rows={lineage} /></details> : null}
       {contract.quarantine_asset_id ? <a className="evidence-link" href={`/workspace/imports?asset=${encodeURIComponent(contract.quarantine_asset_id)}`}>Open quarantine dataset</a> : null}
     </section>

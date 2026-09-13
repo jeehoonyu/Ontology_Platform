@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIResponse, type Page } from "@playwright/test";
 
 /**
  * The two tables `audit_table_truncation` found cutting in silence.
@@ -20,6 +20,12 @@ import { expect, test, type Page } from "@playwright/test";
  * for, and `_object_schema_columns` returned at most twelve. Each test here is
  * sized past both layers, so each would fail against a build that fixed only
  * the one the gate could see.
+ *
+ * N9 added a third table, which the gate had read as counted: the pipeline
+ * builder's contract panel summarised every issue and handed its table the first
+ * twenty-five. The total was on screen, and the rows behind it were not. The N7d
+ * census found it, and the gate now refuses a cut into a table that pages,
+ * whatever count is beside it.
  */
 const FEED = "Live Operational Feed";
 
@@ -46,6 +52,56 @@ async function eventsHeld(page: Page) {
 
 function feedTable(page: Page) {
   return page.locator(".panel").filter({ has: page.getByRole("heading", { name: FEED }) });
+}
+
+/** A published object type requiring `name`, and a graph feeding it rows with none. */
+async function rejectingContract(page: Page, rejected: number) {
+  // Digits only: the suffix also goes into an ontology `api_name`.
+  const suffix = `${Date.now()}`;
+  const assetId = `n9_contract_asset_${suffix}`;
+  const objectTypeId = `n9_contract_type_${suffix}`;
+  const graphName = `N9 contract ${suffix}`;
+  const properties = { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true } };
+  const settled = async (response: APIResponse) => {
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return response;
+  };
+  await settled(await page.request.post("/data-assets", { data: {
+    id: assetId, display_name: graphName, kind: "dataset", asset_schema: {},
+    records: Array.from({ length: rejected }, (unused, index) => ({ asset_id: `N9-${suffix}-${index}`, name: null }))
+  } }));
+  await settled(await page.request.post("/object-types", { data: {
+    id: objectTypeId, display_name: graphName, description: "N9 contract target",
+    properties: { assetId: { type: "string" }, name: { type: "string" } }
+  } }));
+  await settled(await page.request.put(`/ontology/object-types/${objectTypeId}/profile`, { data: {
+    api_name: `NineContract${suffix}`, primary_key: "assetId", title_key: "name", properties
+  } }));
+  const environments = await (await page.request.get("/ontology/environments?project_id=default")).json() as Array<{ name: string; current_revision_id?: string | null }>;
+  const activeRevisionId = environments.find((item) => item.name === "production")?.current_revision_id;
+  const release = await page.request.post("/ontology/change-sets", { data: {
+    project_id: "default", title: `Publish ${graphName}`,
+    ...(activeRevisionId ? { base_revision_id: activeRevisionId } : {}),
+    changes: activeRevisionId ? [{ operation: "add_object_type", resource: {
+      id: objectTypeId, display_name: graphName, description: "N9 contract target",
+      primary_key: "assetId", title_key: "name", status: "ACTIVE", properties
+    } }] : []
+  } });
+  await settled(release);
+  const change = await release.json() as { id: string };
+  await settled(await page.request.post(`/ontology/change-sets/${change.id}/validate`));
+  await settled(await page.request.post(`/ontology/change-sets/${change.id}/decision`, { data: { approve: true } }));
+  await settled(await page.request.post(`/ontology/change-sets/${change.id}/publish`, { data: { environment: "production" } }));
+  await settled(await page.request.post("/pipeline-builder/graphs", { data: {
+    id: `n9_contract_graph_${suffix}`, display_name: graphName, nodes: [
+      { id: "input", type: "input_dataset", label: "Contract input", position: { x: 80, y: 120 }, config: { asset_id: assetId } },
+      { id: "ontology", type: "ontology_output", label: "Contract ontology output", position: { x: 390, y: 120 }, config: {
+        object_type_id: objectTypeId, primary_key: "asset_id", property_mapping: { asset_id: "assetId", name: "name" },
+        write_mode: "upsert", on_error: "quarantine", quarantine_asset_id: `${assetId}_quarantine`, source_asset_id: assetId
+      } }
+    ], edges: [{ source: "input", target: "ontology" }]
+  } }));
+  return graphName;
 }
 
 test.describe("a table the gate found says what it is not showing", () => {
@@ -139,5 +195,33 @@ test.describe("a table the gate found says what it is not showing", () => {
     await expect(table.locator("caption"),
                  "a table drawing every column is announcing a truncation that did not happen")
       .toHaveCount(0);
+  });
+
+  test("the contract panel's issues can all be read, and it says when the contract kept fewer", async ({ page }) => {
+    // 130 rejected rows, one missing `name` each: past the twenty-five the call
+    // site kept, past the forty the table renders, and past the 100 violations
+    // the contract carries. The old build shows twenty-five rows and no caption.
+    // A build that removed only the call-site cut captions 100 and says nothing
+    // of the other thirty.
+    const graphName = await rejectingContract(page, 130);
+    await page.goto("/workspace/pipeline");
+    await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+    await page.getByRole("button", { name: /Contract ontology output \d+ rows ontology_output/ }).click();
+    const contract = page.getByRole("region", { name: "Ontology output contract" });
+    const issues = contract.locator("details").filter({ has: page.locator("summary", { hasText: "contract issues" }) });
+    await expect(issues.locator("summary")).toHaveText("100 contract issues");
+
+    await expect(issues.locator("tbody tr")).toHaveCount(40);
+    await expect(issues.locator("caption"),
+                 "the panel cut its issues before the table saw them, so the table had nothing to count")
+      .toHaveText("Showing 1–40 of 100 rows");
+    await issues.getByRole("button", { name: "Next rows" }).click();
+    await issues.getByRole("button", { name: "Next rows" }).click();
+    await expect(issues.locator("caption"), "the last issue the contract carries cannot be reached")
+      .toHaveText("Showing 81–100 of 100 rows");
+
+    await expect(issues.getByRole("note"),
+                 "130 rows were rejected and the contract carries 100, and nothing says so")
+      .toHaveText("Listing the issues of the first 100 of 130 rejected rows");
   });
 });

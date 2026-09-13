@@ -30,7 +30,7 @@ the function that happens to contain one.
 
 **It is accompanied** when the same component renders the length of the
 collection that was cut: `{issues.length}`, `{rows.length.toLocaleString()}`,
-or `${issues.length}` inside a template. Three refusals are deliberate:
+or `${issues.length}` inside a template. Four refusals are deliberate:
 
   - *The count of what was kept is not a count.* `const shown = rows.slice(0,
     40)` beside `{shown.length}` renders "40", which is the number the table
@@ -44,6 +44,15 @@ or `${issues.length}` inside a template. Three refusals are deliberate:
     shows twenty-five, and truthfully says nothing. That is this gate's
     equivalent of the empty handler in `audit_inert_controls`, and it is what
     the operations feed was already doing when this was written.
+  - *A count does not bring back rows the table was never given.* `DataTable`
+    and `DataGrid` page whatever they receive, so rows cut on the way in are
+    hidden rather than paged, however truthfully the total is written beside
+    them: `{issues.length} contract issues` over `rows={issues.slice(0, 25)}`
+    names every issue and lets a person read twenty-five. N9 of the goal. The
+    N7d census found it, and this gate had listed that site as counted. A cut
+    into a paging table is silent whether or not its total is rendered. A
+    counted cut into a plain `<table>` or a `role="table"` element, neither of
+    which pages, is still accompanied.
 
 What this does not see, stated rather than implied:
 
@@ -96,6 +105,10 @@ _DECLARATION = re.compile(
 # `DataTable` because a call-site cut into either is the same evasion: the
 # component captions what it is given and cannot caption what it never received.
 _TABLE = re.compile(r"<(DataTable|DataGrid|table)\b|\brole=[\"'](?:table|grid)[\"']")
+# The tables that page what they are given. A cut on the way into one of these
+# hides rows the component would have paged, so no count beside it can make them
+# reachable.
+_PAGING = ("DataTable", "DataGrid")
 
 # `.slice(` and the index filter. The first two groups mark where the argument
 # list opens.
@@ -202,7 +215,7 @@ def table_extents(text: str) -> List[Tuple[int, int]]:
         # through to the `role=` branch, which looks backwards for the element's
         # opening `<`, and a call-site cut into the grid read as outside any table.
         # The test that asserts that cut is refused is what found it.
-        if match.group(1) in ("DataTable", "DataGrid"):
+        if match.group(1) in _PAGING:
             extents.append((match.start(), _tag_end(text, match.end())))
         elif match.group(1) == "table":
             extents.append((match.start(), _element_end(text, match.start(), "table")))
@@ -212,6 +225,12 @@ def table_extents(text: str) -> List[Tuple[int, int]]:
             if tag:
                 extents.append((start, _element_end(text, start, tag.group(1))))
     return extents
+
+
+def paging_extents(text: str) -> List[Tuple[int, int]]:
+    """The tags of the tables that page: the subset of `table_extents` a cut hides rows from."""
+    return [(match.start(), _tag_end(text, match.end()))
+            for match in _TABLE.finditer(text) if match.group(1) in _PAGING]
 
 
 def _statement_end(text: str, index: int) -> int:
@@ -324,6 +343,7 @@ def cuts_in(text: str) -> List[Dict[str, Any]]:
     for start, end, name in _declarations(text):
         body = text[start:end]
         extents = table_extents(body)
+        paging = paging_extents(body)
         for match in _CUT.finditer(body):
             opening = match.start(1) if match.group(1) else match.start(2)
             begins, receiver = _receiver(body, match.start())
@@ -338,9 +358,15 @@ def cuts_in(text: str) -> List[Dict[str, Any]]:
                 "spelling": "slice" if match.group(1) else "index filter",
                 "how": how,
                 "table": _reaches(body, match.start(), extents),
+                "paging": _reaches(body, match.start(), paging),
                 "counted": _renders_total(body, source),
             })
     return cuts
+
+
+def _silent(cut: Dict[str, Any]) -> bool:
+    """A cut reaching a table with no true count, or cut before a table that pages."""
+    return cut["table"] and (not cut["counted"] or cut["paging"])
 
 
 def scan() -> Dict[str, Any]:
@@ -361,21 +387,22 @@ def scan() -> Dict[str, Any]:
 def totals(found: Dict[str, Any]) -> Tuple[int, int, int]:
     """(tables, truncations reaching a table, of those the silent ones)."""
     reaching = [c for f in found["files"].values() for c in f["cuts"] if c["table"]]
-    return found["tables"], len(reaching), sum(1 for c in reaching if not c["counted"])
+    return found["tables"], len(reaching), sum(1 for c in reaching if _silent(c))
 
 
 def silent_per_file(found: Dict[str, Any]) -> Dict[str, int]:
     return {name: n for name, entry in sorted(found["files"].items())
-            if (n := sum(1 for c in entry["cuts"] if c["table"] and not c["counted"]))}
+            if (n := sum(1 for c in entry["cuts"] if _silent(c)))}
 
 
 def _cut_rows(cuts: List[Tuple[str, Dict[str, Any]]], emphasise: bool) -> List[str]:
-    lines = ["| File | Line | In | Cuts | How | True count rendered |",
-             "| --- | --- | --- | --- | --- | --- |"]
+    lines = ["| File | Line | In | Cuts | How | Into a paging table | True count rendered |",
+             "| --- | --- | --- | --- | --- | --- | --- |"]
     for name, cut in cuts:
         counted = "yes" if cut["counted"] else ("**no**" if emphasise else "no")
+        paging = ("**yes**" if emphasise else "yes") if cut["paging"] else "no"
         lines.append(f"| `{name}` | {cut['line']} | `{cut['declaration']}` | "
-                     f"`{cut['source']}` ({cut['spelling']}) | {cut['how']} | {counted} |")
+                     f"`{cut['source']}` ({cut['spelling']}) | {cut['how']} | {paging} | {counted} |")
     return lines
 
 
@@ -390,14 +417,16 @@ def render(found: Dict[str, Any]) -> str:
         "Generated by `oms/audit_table_truncation.py`. Do not edit by hand — the gate",
         "regenerates this and fails if it disagrees with the source.",
         "",
-        f"**{silent} of {reaching}** truncations that reach a table render no true count."
-        f" {tables} table elements",
+        f"**{silent} of {reaching}** truncations that reach a table are silent: they render no"
+        f" true count, or cut rows before a table that would have paged them. {tables} table elements",
         "(`<DataTable>`, `<table>`, `role=\"table\"` or `role=\"grid\"`) are written across the",
         "frontend.",
         "",
         "A table that renders forty of sixty rows and says nothing is read as sixty rows",
         "being forty. The rows are not pending; they are gone, and the screen does not say",
         "so. A count of what was kept does not fix that — only the length of what was cut.",
+        "And no count fixes rows cut before `DataTable` or `DataGrid`, which page what they",
+        "are given: the rows past the cut are named and cannot be reached.",
         "",
         "## Reaching a table",
         "",
@@ -432,7 +461,8 @@ def compare(found: Dict[str, Any],
         failures.append(
             f"{silent} silent table truncation(s), up from {ceiling}. A table that drops "
             f"rows or columns must render the length of what it cut -- not the length of "
-            f"what it kept.")
+            f"what it kept -- and rows for DataTable or DataGrid must not be cut at all: "
+            f"they page what they are given, so hand them every row.")
     elif silent < ceiling:
         notes.append(f"silent table truncations {ceiling} -> {silent}; re-run with --set-baseline")
 
