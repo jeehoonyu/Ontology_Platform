@@ -380,9 +380,18 @@ plan, and it is measured there.
     tool; it was read as documentation and not acted on.
   - **N7b — Resize, reorder and pin.** **Open** — each with a control that is not a drag.
   - **N7c — Filter and select.** **Open**.
-  - **N7d — Virtualized, and rolled out.** **Open** — virtualization replacing paging where a
-    table is long, and the remaining `DataTable` call sites moved across, with the
-    `DataGrid` user count as the ratchet.
+  - **N7d — Virtualized, and rolled out where sorting is needed.** **Open** — virtualization
+    replacing paging where a table is long, and the grid adopted by the `DataTable` call
+    sites whose rows a person needs to sort, with the `DataGrid` user count as the ratchet.
+
+    **Decided 2026-09-12, after the +44.0 KB measurement above: the grid goes only where
+    sorting is needed, and `DataTable` stays everywhere else.** The other two choices put to
+    the decision were rolling the grid out to every table, which would put it in the closure
+    all seventeen routes download, and reconsidering the library. So N7d is not "move the
+    remaining call sites". It is a census that names, for each of the 73 `DataTable` uses,
+    whether its rows need sorting and why, and it moves only those. A table in `App.tsx`
+    that needs sorting does not get the grid by a plain import, because that is the shared
+    closure; it needs the grid loaded on demand, or it stays a `DataTable` and the census says so.
 - **N8 — The two tables N4 found.** **Met** — the ceiling in
   `table-truncation-baseline.json` is **0 of 3**. The operations feed hands every loaded
   event to `DataTable`, whose own caption now reads `Showing 40 of N rows`; Object Explorer
