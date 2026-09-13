@@ -694,6 +694,15 @@ plan, and it is measured there.
     that needs sorting does not get the grid by a plain import, because that is the shared
     closure; it needs the grid loaded on demand, or it stays a `DataTable` and the census says so.
 
+    **Decided again 2026-09-13, on the grid's measured cost after N7c: the full grid at every
+    site the census names.** The first decision rested on N7a's +44.0 KB. By N7c the grid
+    cost more. The data-media route went from 452,017 bytes before N7a to 528,411 after N7c,
+    about +75 KB, and the grid is most of that. The owner was offered three choices: a
+    lighter sort-only grid at the census's sites, with width, order, pin and filter kept on
+    the records table; the full grid everywhere; or pausing N7d. The owner chose the full
+    grid everywhere. Four routes pay it: ControlPanel, OntologyManager, PipelineBuilder and
+    OpsWorkspace. Each route's ceiling is raised to its measured number as the grid reaches it.
+
     **The census is taken: `docs/GRID_SORT_CENSUS.md`.** All 73 uses were classified from
     the source, with no count mismatch against a search: **7 need sorting, 9 are unclear,
     57 do not**. A second reader tried to refute each verdict and changed five. None of the
