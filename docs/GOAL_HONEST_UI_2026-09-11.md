@@ -332,14 +332,15 @@ plan, and it is measured there.
   renderers for declared types would have a caller.
 - **N7 — The full grid.** **Open** — column visibility, reorder, resize, pin, sort,
   filter, selection, virtualization, rolled out behind the `audit_ui_primitives` user
-  count. Not started until N2 through N5 are met, which they now are.
+  count. N7a through N7d are met. N7e, virtualization, is the one step open, and it waits on a
+  measured long table. Selection was deferred by the decision under N7c.
 
   **Built on `@tanstack/react-table` and `@tanstack/react-virtual`**, chosen on 2026-09-12
   over growing `DataTable` by hand: both are headless, so the product's own markup and
   styles stay, and they come from the family whose query library the app already uses.
   The cost is payload, and it is recorded route by route as the grid reaches each one. Four
   steps, each a condition of its own, because "the full grid" in one commit is a large
-  change nobody could review:
+  change nobody could review. A fifth, N7e, came when virtualization was split out:
 
   - **N7a — A grid that sorts and hides columns, on one screen.** **Met** — `DataGrid`, in
     its own module, adopted by the data-media records table. It keeps what N3 and N5 made
