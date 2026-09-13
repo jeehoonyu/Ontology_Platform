@@ -515,7 +515,8 @@ plan, and it is measured there.
     record action on the data-media screen (create, upload, download) acts on a whole
     dataset. No frontend API takes a subset of records. The only server write that does,
     `POST /datasets/{id}/transactions`, reads as unsafe on a dataset with no snapshot,
-    and is filed as its own task. A checkbox column shipped now would be this goal's
+    and is filed as its own task, since met: see the transactions record below. A
+    checkbox column shipped now would be this goal's
     first defect: a control that does nothing. `audit_inert_controls` would not catch it,
     because it scans only buttons and links. So selection becomes its own condition, opened
     when a screen names a use for selected rows. The owner was offered copying or
@@ -624,7 +625,7 @@ plan, and it is measured there.
     `Filter rows` entry, real `<label>`s, and every filter control and sentence outside the
     columns disclosure. Reading the API also turned up `POST /datasets/{id}/transactions` as
     emptying a dataset that has no snapshot. That is filed as its own task and is not changed
-    here.
+    here; the transactions record below fixes it.
 
     **Then a review, before the commit.** Five reviewers, one lens each, read a snapshot, and a
     skeptic per lens tried to refute every finding. **Sixteen were confirmed and four refuted.**
@@ -1653,6 +1654,59 @@ plan, and it is measured there.
   - **The server gaining a word the feed lacks:** the map and feed blocks failed, and so did the
     unknown-word guard, since `notice` was no longer unknown.
   - Restored: 41 pass, and both sources are byte for byte what they were.
+
+  **Then the transactions route that emptied a dataset, filed under N7c.** `POST
+  /datasets/{id}/transactions` rebuilt the dataset's rows as the fold of its transaction log, and
+  the fold starts from nothing. A dataset made by `POST /data-assets` has rows and no log. So APPEND
+  left only the appended rows, UPDATE left only the patch fields, and DELETE of one row emptied the
+  dataset, while the 201 reply reported only the payload's size. A dataset with a snapshot was not
+  safe either: an upload, a connector sync or a pipeline run writes rows outside the log, and the next
+  transaction dropped them. A branch of a dataset with no log seeded no rows.
+
+  **Reconcile, never discard.** Before a transaction or a branch folds over master, the new
+  `_reconcile_master` compares the log's fold with the dataset's rows. When they differ it records the
+  rows as a baseline SNAPSHOT, so the caller's transaction starts from them, and it audits that as
+  `dataset.transaction.baseline_recorded` with the reason: no history, or rows changed outside the
+  log. A SNAPSHOT still replaces, but the rows it replaced stay reachable with `as_of_seq`. The
+  committed audit entry now says how many rows the dataset holds. On a dataset with rows the log never
+  saw, the caller's first transaction takes seq 1 instead of 0; nothing in the repo reads that seq.
+  The route fetches the dataset once instead of twice, so the tenancy census falls from 361 unscoped
+  reads to 360, and its recorded ceiling is lowered to match. No response shape, route or screen
+  changes.
+
+  Five neighbours are left as their own tasks: the pipeline builder's own snapshot commit, which
+  replaces by design; a transaction on a branch that was never created; assets whose rows live in a
+  parquet snapshot; the seq race, since nothing makes (dataset, branch, seq) unique; and project
+  scoping in `datasets_ext`. N7c's row selection stays deferred: this fix names no use for selected
+  rows.
+
+  **The proof.** `oms/test_dataset_transaction_base.py` runs nine blocks, each on its own, and prints
+  every failure. Datasets are made by `POST /data-assets` with two rows. APPEND must keep both. DELETE
+  of one must leave the other. UPDATE of one field must keep the row's other fields. A SNAPSHOT must
+  replace the rows but keep them at `as_of_seq=0`. A row uploaded after a SNAPSHOT must survive the
+  next APPEND. A branch must seed both rows. The baseline must be audited once, with its reason, and
+  the committed entry must say how many rows the dataset holds. Two guards pass on the old code by
+  design: a dataset whose every write went through the log gets no baseline and applies nothing
+  twice, and a write to another branch leaves master alone. Run against the committed route, seven
+  blocks failed, each with the loss it guards: APPEND left ids [3], DELETE left [], UPDATE left
+  `[{'id': 1, 'v': 99}]`, `as_of_seq=0` gave `[{'id': 9}]`, the uploaded row was dropped (ids [1, 3]),
+  the branch seeded 0 rows, and no baseline was audited. On the fix, 80 assertions pass. So do the six
+  scripts over the same routes: data integration, uploads, the deep Foundry programs, asynchronous
+  pipeline execution, the datasets and connectivity extension, and the tenancy census, now at 360.
+
+  **Negative runs,** one mutation at a time:
+  - **No baseline ever written:** the same seven blocks failed as on the committed route.
+  - **A baseline only when the log is empty:** only the drift blocks failed, ids [1, 3] and no drift
+    baseline audited, which is what separates this fix from the weaker rule.
+  - **A baseline on every transaction:** the in-sync guard failed on a log of six entries where three
+    were written, and `test_data_integration` failed at its time travel, `as_of_seq=0` giving 0 rows.
+  - **A branch seeded from the log alone:** only the branch block failed, 0 rows.
+  - **Other branches reconciling master:** only the other-branch guard failed, master gaining id 3.
+  - **A flush, then folding the log again:** the caller's transaction applied twice, ids
+    [1, 2, 3, 3], and `test_data_integration` failed the same way.
+  - **A SNAPSHOT exempt from the baseline:** only the history block failed.
+  - **The baseline not audited:** only the audit block failed.
+  - Restored: 80 pass, data integration passes, and the source is byte for byte what it was.
 
 ## Order and size
 

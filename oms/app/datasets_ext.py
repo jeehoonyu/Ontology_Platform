@@ -7,6 +7,9 @@ versioned: every change is an atomic **transaction** (SNAPSHOT / APPEND / UPDATE
 DELETE), changes live on **branches**, and the current rows are the fold of the
 transaction log (enabling **time-travel** and **incremental** deltas). This module
 adds that model additively over existing `data_assets` ids. Deterministic; local.
+Rows written to `records` outside the log (`POST /data-assets`, an upload, a sync, a
+pipeline run) are recorded as a SNAPSHOT the first time a transaction or a branch reads
+master, so no transaction starts from rows the log never saw.
 """
 import copy
 import csv
@@ -162,30 +165,60 @@ def _next_seq(db: Session, dataset_id: str, branch: str) -> int:
     return (last.seq + 1) if last else 0
 
 
+def _reconcile_master(db: Session, asset: models.DataAsset, primary_key: Optional[str]) -> List[DatasetTransaction]:
+    """Master's log, with a baseline SNAPSHOT added when its fold is not the dataset's rows.
+
+    The fold starts from nothing, so rows the log never saw were dropped by the next
+    transaction: APPEND kept only the appended rows and DELETE emptied the dataset. The
+    baseline is pending, not flushed: with autoflush off, a later query cannot return it
+    or the caller's transaction, which is why `base + [txn]` applies each exactly once.
+    """
+    txns = _txns_for(db, asset.id, "master")
+    live = list(asset.records or [])
+    if _fold(txns) == live:
+        return txns
+    baseline = DatasetTransaction(
+        id=uuid.uuid4().hex, dataset_id=asset.id, branch="master", txn_type="SNAPSHOT",
+        primary_key=primary_key or "id", records=copy.deepcopy(live), row_count=len(live),
+        status="COMMITTED", seq=(txns[-1].seq + 1) if txns else 0, created_at=_now(),
+    )
+    db.add(baseline)
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="dataset.transaction.baseline_recorded",
+                                  subject_type="dataset", subject_id=asset.id,
+                                  payload={"branch": "master", "rows": len(live), "seq": baseline.seq,
+                                           "reason": "no_history" if not txns else "records_changed_outside_log"}))
+    return txns + [baseline]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.post("/datasets/{dataset_id}/transactions", response_model=TransactionRead, status_code=201)
 def create_transaction(dataset_id: str, body: TransactionCreate, db: Session = Depends(get_db)):
-    if not db.get(models.DataAsset, dataset_id):
+    asset = db.get(models.DataAsset, dataset_id)
+    if not asset:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
     if body.txn_type not in TXN_TYPES:
         raise HTTPException(status_code=422, detail=f"txn_type must be one of {sorted(TXN_TYPES)}")
-    seq = _next_seq(db, dataset_id, body.branch)
+    base = _reconcile_master(db, asset, body.primary_key) if body.branch == "master" else None
+    if base is None:
+        seq = _next_seq(db, dataset_id, body.branch)
+    else:
+        seq = (base[-1].seq + 1) if base else 0
     txn = DatasetTransaction(
         id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.branch, txn_type=body.txn_type,
         primary_key=body.primary_key, records=body.records, row_count=len(body.records),
         status="COMMITTED", seq=seq, created_at=_now(),
     )
     db.add(txn)
+    committed = {"txn_type": body.txn_type, "branch": body.branch, "rows": len(body.records)}
     # keep the DataAsset.records mirror in sync with the master branch view
-    if body.branch == "master":
-        asset = db.get(models.DataAsset, dataset_id)
-        asset.records = _fold(_txns_for(db, dataset_id, "master") + [txn])
+    if base is not None:
+        asset.records = _fold(base + [txn])
         asset.updated_at = _now()
+        committed["dataset_rows"] = len(asset.records)
     db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="dataset.transaction.committed",
-                                  subject_type="dataset", subject_id=dataset_id,
-                                  payload={"txn_type": body.txn_type, "branch": body.branch, "rows": len(body.records)}))
+                                  subject_type="dataset", subject_id=dataset_id, payload=committed))
     db.commit(); db.refresh(txn)
     return txn
 
@@ -223,13 +256,18 @@ def dataset_changes(dataset_id: str, branch: str = Query(default="master"),
 
 @router.post("/datasets/{dataset_id}/branches", status_code=201)
 def create_branch(dataset_id: str, body: BranchCreate, db: Session = Depends(get_db)):
-    if not db.get(models.DataAsset, dataset_id):
+    asset = db.get(models.DataAsset, dataset_id)
+    if not asset:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
     branch = DatasetBranch(id=uuid.uuid4().hex, dataset_id=dataset_id, name=body.name,
                            base_branch=body.base_branch, created_at=_now())
     db.add(branch)
-    # seed the new branch with a SNAPSHOT of the base branch's current view
-    base_rows = _fold(_txns_for(db, dataset_id, body.base_branch))
+    # seed the new branch with a SNAPSHOT of the base branch's current view; master's
+    # view is its real rows, recorded first if the log never saw them
+    if body.base_branch == "master":
+        base_rows = _fold(_reconcile_master(db, asset, "id"))
+    else:
+        base_rows = _fold(_txns_for(db, dataset_id, body.base_branch))
     db.add(DatasetTransaction(id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.name, txn_type="SNAPSHOT",
                               primary_key="id", records=base_rows, row_count=len(base_rows), status="COMMITTED",
                               seq=0, created_at=_now()))
