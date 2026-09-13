@@ -392,6 +392,12 @@ plan, and it is measured there.
     whether its rows need sorting and why, and it moves only those. A table in `App.tsx`
     that needs sorting does not get the grid by a plain import, because that is the shared
     closure; it needs the grid loaded on demand, or it stays a `DataTable` and the census says so.
+
+    **The census is taken: `docs/GRID_SORT_CENSUS.md`.** All 73 uses were classified from
+    the source, with no count mismatch against a search: **7 need sorting, 9 are unclear,
+    57 do not**. A second reader tried to refute each verdict and changed five. None of the
+    seven is in `App.tsx`, so no on-demand loading is needed. The one `App.tsx` table left
+    unclear, the connector fetch evidence, stays a `DataTable` until its evidence is in.
 - **N8 — The two tables N4 found.** **Met** — the ceiling in
   `table-truncation-baseline.json` is **0 of 3**. The operations feed hands every loaded
   event to `DataTable`, whose own caption now reads `Showing 40 of N rows`; Object Explorer
@@ -439,6 +445,27 @@ plan, and it is measured there.
   drift left by N2 — `.button-row` stopped being used in `Workbench.tsx` and started in
   `PipelineBuilder.tsx` — which is not new coupling, and is recorded here rather than
   folded in unmentioned.
+- **N9 — The contract issues nobody can reach.** **Open** — found by the N7d census, not by
+  a gate. The pipeline builder's ontology contract panel summarises `{issues.length} contract
+  issues` and hands the table `issues.slice(0, 25)` (`PipelineBuilder.tsx:701` at `33508ae`).
+  Given 25 rows, the table shows all 25 and no caption, so a preview with 120 issues names
+  120 and shows the first 25, with no control to reach the rest. N5 made every row of a
+  table reachable, and this call site undoes that.
+
+  **`audit_table_truncation` reads this cut as counted, and by its own rule it is.** The
+  total is rendered beside the cut. The gate asks whether the true count is shown, not whether
+  the rows behind it can be reached. `TABLE_TRUNCATION.md` lists the site as `passed as rows`,
+  `True count rendered: yes`. That is a second hole in the gate, next to the one N8 found, and
+  the fix has to either close it or write it into the gate's list of what it does not see.
+
+  **There is a second cut underneath, on the server**, as N8 found for the events feed. The
+  contract keeps at most 100 violations (`pipeline_builder_ops.py:1624`,
+  `industrial_workflow.py:766` and `805`), and one violation can hold several errors. With
+  the call-site cut gone, the table would page through the issues of the first 100 rejected
+  rows while `rejected_rows` counts them all. Met when every loaded issue is reachable in
+  the table, and the panel says when `rejected_rows` exceeds the violations that arrived.
+  The 422 raised when `on_error` is `fail` carries only 25 violations (`:1544`); whether
+  the panel ever shows that response is part of the census the fix begins with.
 
 ## Order and size
 
@@ -452,6 +479,7 @@ plan, and it is measured there.
 | N6 | the sixteen call-site files, or `DataDisplay.tsx` | 1–2 |
 | N7 | a new grid component, then rollout | 3+ |
 | N8 | `OpsWorkspace.tsx`, `ObjectExplorer.tsx`, two fixtures, spec, baseline | 1 |
+| N9 | `PipelineBuilder.tsx`, `audit_table_truncation.py` or its docstring, a fixture past 100 rejected rows, spec | 1 |
 
 Every test is run once against a build with the thing it defends removed before it is
 believed. That discipline has now caught a bug in four consecutive pieces of work,
