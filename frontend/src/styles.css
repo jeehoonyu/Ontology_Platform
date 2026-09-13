@@ -6450,6 +6450,13 @@ pre {
   color: #4d5b64;
 }
 
+/* The other two sit inside the 12px column disclosure; this one sits outside it, and
+   took the page's 16px, louder than the table it qualifies and four lines in a narrow
+   pane. It matches the rows status instead. */
+.grid-sort-scope {
+  font-size: 12px;
+}
+
 .grid-sort {
   all: unset;
   cursor: pointer;

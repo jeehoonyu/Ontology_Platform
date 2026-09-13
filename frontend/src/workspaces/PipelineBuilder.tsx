@@ -1,7 +1,8 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, useDraggable, type DragEndEvent } from "@dnd-kit/core";
 import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../components/dnd/DragKit";
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
+import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
 import { postJson } from "../api";
 import {
@@ -671,13 +672,17 @@ export function PipelineBuilder() {
 }
 
 function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyContract | null; mode: string }) {
-  if (!contract) return <EmptyState inline>Configure the ontology output to preview its data contract.</EmptyState>;
-  const issues = contract.violations.flatMap((violation) => violation.errors.map((error) => ({
+  // Memoized, and above the early return so the hooks run in the same order on every
+  // render. The builder polls a running job every 1.5 s and re-renders this panel each
+  // time without changing the contract; a new array on every tick would withdraw the
+  // grid's status sentence while a person was reading it.
+  const issues = useMemo(() => (contract?.violations ?? []).flatMap((violation) => violation.errors.map((error) => ({
     row: violation.row_index + 1,
     object: violation.object_id || "Not resolved",
     field: error.field,
     issue: error.message
-  })));
+  }))), [contract]);
+  if (!contract) return <EmptyState inline>Configure the ontology output to preview its data contract.</EmptyState>;
   const lineage = contract.field_lineage.map((field) => ({
     source: field.source_field,
     ontology_property: field.target_property,
@@ -707,7 +712,18 @@ function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyC
         <details open>
           <summary>{issues.length} contract issue{issues.length === 1 ? "" : "s"}</summary>
           {contract.rejected_rows > contract.violations.length ? <p className="table-truncated" role="note">Listing the issues of the first {contract.violations.length.toLocaleString()} of {contract.rejected_rows.toLocaleString()} rejected rows</p> : null}
-          <DataTable rows={issues} />
+          {/* N7d: a grid, so issues can be sorted by field or by row. Keyed by the contract,
+              so a sort made on one output's contract does not carry into another's. When the
+              contract kept fewer rows than were rejected, a sort ranks only the rows it kept,
+              and the grid says so beside the sort. */}
+          <DataGrid
+            key={`${mode}:${contract.node_id}:${contract.id ?? ""}`}
+            rows={issues}
+            label="Contract issues"
+            sortScope={contract.rejected_rows > contract.violations.length
+              ? `the issues of the first ${contract.violations.length.toLocaleString()} of ${contract.rejected_rows.toLocaleString()} rejected rows`
+              : undefined}
+          />
         </details>
       ) : <p className="contract-success">All preview rows satisfy the ontology contract.</p>}
       {lineage.length ? <details><summary>Mapped field lineage ({lineage.length})</summary><DataTable rows={lineage} /></details> : null}

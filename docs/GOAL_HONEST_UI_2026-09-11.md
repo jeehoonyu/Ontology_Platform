@@ -883,6 +883,74 @@ plan, and it is measured there.
       resolved to 2 elements.
     - Restored: the twenty-six pass again, and both mutated sources are byte for byte what they were.
 
+    **Then the pipeline contract's issues.** The contract panel's issues table in the pipeline
+    builder is a grid, keyed by the contract (mode, output node and contract id), so a sort made on
+    one output's contract does not carry into another's. N9's note stays above it, byte for byte.
+    The issues are memoized, above the panel's early return so the hooks keep their order. The
+    builder polls a running job every 1.5 s, and an unmemoized list would hand the grid a new array
+    on each tick and withdraw its status sentence. **That part is not provable in the browser**
+    without holding a job RUNNING, so it is stated here rather than tested vacuously. The key is not
+    separately tested either: it would take two contracts with issues in one graph.
+
+    **A sort of the issues says what it ranks.** The contract carries at most 100 violations (N9).
+    When more rows were rejected, the grid gets `sortScope`, so a descending sort by `row` that puts
+    row 100 on top reads "Sorted by row: this orders only the issues of the first 100 of 130
+    rejected rows." A contract that carries every rejected row passes no scope and says nothing.
+
+    **N9's test needed its summary scoped.** The grid nests its `Filter rows` and `Columns`
+    disclosures inside the issues `<details>`, so `issues.locator("summary")` matched three. It now
+    reads `:scope > summary`. Its other checks pass unchanged: forty rows, the caption, paging to
+    81–100, and the note.
+
+    **The panel's styles reach into the grid.** The grid scrolls inside the same `.table-wrap` the
+    table used, so `.ontology-contract-panel .table-wrap` still caps it at 230px with its own scroll.
+    The panel's `summary` rule, meant for the issues and lineage disclosures, now also styles the
+    grid's `Filter rows` and `Columns` summaries inside it. No gate sees either.
+
+    T8 now saves a screenshot of the issues (`test-results/screenshots/contract-issues-grid.png`).
+    At desktop-1280, where the Outputs pane is about 180px wide, it showed three things.
+    - **Only the `row` column fits.** Every grid column starts at 180px, so reading an issue takes a
+      sideways scroll. This is the risk the design named for wide fixed tables, and hiding or
+      pinning columns is the way round it. The pager's second button is cut at the pane's edge too.
+    - **N9's note is cut off after "of",** hiding the "130 rejected rows" it exists to state,
+      because `.table-truncated` does not wrap. That predates this commit and is flagged as a task
+      of its own.
+    - **A slip from commit 2.** The sort sentence rendered at the page's 16px, four lines deep in
+      this pane. It shared a rule with two lines that sit inside the grid's 12px column disclosure,
+      and it set no size of its own, so on every grid site it alone took the page's size. It is
+      12px now, like the rows status beside it, and reads in three lines.
+
+    **Payload, measured.** The pipeline-builder route measures **552,973 bytes** against a ceiling of
+    471,270, and the ceiling is raised to the measured number. The closure every route shares
+    measures 445,486 bytes, 32 of them the sort sentence's font-size rule. That is inside the
+    tolerance, and no other ceiling changed. `UI_PRIMITIVES.md` counts `DataGrid` in four files,
+    adding PipelineBuilder. `DataTable` stays in fourteen, because the panel's lineage table keeps it.
+
+    **Route cost, measured again.** Pipeline went from 13 to **15 requests** on open, and from
+    491,397 to 566,186 bytes, +74,789. The two requests are the grid's own chunk, `DataGrid-*.js`,
+    and `with-selector-*.js`, the helper the table library shares with the graph library, which the
+    pipeline route had never loaded. The build manifest lists both among PipelineBuilder's imports,
+    the same pair that took control-panel from 13 to 15 in commit 2. Every other route measured at
+    its recorded request count, each 36 bytes heavier, 32 of them the font-size rule. The baseline
+    is re-recorded for pipeline's two requests.
+
+    Tests: T8 in `truncation-sites.spec.ts`, "contract issues sort, and say they rank only the issues
+    the contract carries". On the final build, with the font-size rule, thirty-five pass on
+    desktop-1280: all of `truncation-sites.spec.ts`, `data-grid.spec.ts`, `data-table.spec.ts` and
+    `grid-sites.spec.ts`, whose sort sentences the rule restyles. So do the evaluator's contract and
+    registry tests and the accessibility sweeps of the pipeline, ontology and control-panel routes
+    at all four widths: 14 passed, 6 skipped by design.
+
+    **Negative runs,** each on a rebuilt `dist`:
+    - **C4a,** the issues back in a `DataTable`: T8 timed out at its first press, waiting for the
+      `row` header's sort button, which a `DataTable` does not draw.
+    - **C4b,** `sortScope` not passed: the descending sort put row 100 on top, and
+      `.grid-sort-scope` was not found where "Sorted by row: this orders only the issues of the first
+      100 of 130 rejected rows." was expected.
+    - **C4c,** N9's summary check unscoped again: strict mode, `summary` resolved to 3 elements.
+    - Restored: thirty pass on desktop-1280, the contract test and the pipeline sweep pass (5 passed,
+      3 skipped by design), and both mutated sources are byte for byte what they were.
+
   - **N7e — Virtualization replacing paging where a table is measured long.** **Open**, not
     started. It opens when a site has a measured row count at which a forty-row page costs
     something. It brings a truncation-gate spelling for a virtualized draw, captions for a

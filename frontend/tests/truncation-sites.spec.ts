@@ -1,4 +1,4 @@
-import { expect, test, type APIResponse, type Page } from "@playwright/test";
+import { expect, test, type APIResponse, type Locator, type Page } from "@playwright/test";
 
 /**
  * The two tables `audit_table_truncation` found cutting in silence.
@@ -52,6 +52,13 @@ async function eventsHeld(page: Page) {
 
 function feedTable(page: Page) {
   return page.locator(".panel").filter({ has: page.getByRole("heading", { name: FEED }) });
+}
+
+/** The text of one grid column's cells, in the order they are drawn. */
+async function valuesOf(scope: Locator, column: string) {
+  const headers = await scope.locator("thead .grid-sort").evaluateAll((buttons) =>
+    buttons.map((button) => (button.textContent || "").replace(/[▲▼]/g, "").trim()));
+  return scope.locator("tbody tr").evaluateAll((rows, at) => rows.map((row) => row.children[at]?.textContent || ""), headers.indexOf(column));
 }
 
 /** A published object type requiring `name`, and a graph feeding it rows with none. */
@@ -209,7 +216,8 @@ test.describe("a table the gate found says what it is not showing", () => {
     await page.getByRole("button", { name: /Contract ontology output \d+ rows ontology_output/ }).click();
     const contract = page.getByRole("region", { name: "Ontology output contract" });
     const issues = contract.locator("details").filter({ has: page.locator("summary", { hasText: "contract issues" }) });
-    await expect(issues.locator("summary")).toHaveText("100 contract issues");
+    // Its own summary: the grid nests its filter and column disclosures inside.
+    await expect(issues.locator(":scope > summary")).toHaveText("100 contract issues");
 
     await expect(issues.locator("tbody tr")).toHaveCount(40);
     await expect(issues.locator("caption"),
@@ -223,5 +231,36 @@ test.describe("a table the gate found says what it is not showing", () => {
     await expect(issues.getByRole("note"),
                  "130 rows were rejected and the contract carries 100, and nothing says so")
       .toHaveText("Listing the issues of the first 100 of 130 rejected rows");
+  });
+
+  test("contract issues sort, and say they rank only the issues the contract carries", async ({ page }) => {
+    // The same 130 rejected rows. The contract carries the issues of the first 100, so
+    // a descending sort by row puts row 100 on top, where it reads as the last rejected
+    // row unless something says thirty more were rejected after it.
+    const graphName = await rejectingContract(page, 130);
+    await page.goto("/workspace/pipeline");
+    await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+    await page.getByRole("button", { name: /Contract ontology output \d+ rows ontology_output/ }).click();
+    const contract = page.getByRole("region", { name: "Ontology output contract" });
+    const issues = contract.locator("details").filter({ has: page.locator("summary", { hasText: "contract issues" }) });
+    const rowHeader = issues.locator("thead th").filter({ has: page.getByRole("button", { name: "row", exact: true }) });
+    const scope = issues.locator(".grid-sort-scope");
+    await expect(issues.locator("tbody tr")).toHaveCount(40);
+    await expect(scope, "an unsorted grid has no sort to qualify").toHaveCount(0);
+
+    await rowHeader.getByRole("button").click();
+    await expect(rowHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect.poll(async () => (await valuesOf(issues, "row"))[0]).toBe("1");
+    await rowHeader.getByRole("button").click();
+    await expect(rowHeader).toHaveAttribute("aria-sort", "descending");
+    await expect.poll(async () => (await valuesOf(issues, "row"))[0], "the issues do not sort by row").toBe("100");
+    await expect(scope, "a sort of the 100 issues the contract kept does not say it ranks only those")
+      .toHaveText("Sorted by row: this orders only the issues of the first 100 of 130 rejected rows.");
+    // No gate sees how the contract panel's own styles land on the grid inside it.
+    await issues.screenshot({ path: "test-results/screenshots/contract-issues-grid.png" });
+
+    await rowHeader.getByRole("button").click();
+    await expect(rowHeader).toHaveAttribute("aria-sort", "none");
+    await expect(scope, "the sentence outlived the sort it described").toHaveCount(0);
   });
 });
