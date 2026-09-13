@@ -1249,7 +1249,12 @@ test("ontology relationship designer creates a governed link by connecting ports
   const sourceHandle = canvas.locator(`.react-flow__node[data-id="${openPair?.source}"] .react-flow__handle.source`);
   const targetHandle = canvas.locator(`.react-flow__node[data-id="${openPair?.target}"] .react-flow__handle.target`);
   await sourceHandle.dragTo(targetHandle, { force: true });
-  await expect(page.getByRole("status")).toContainText("Relationship created and audited");
+  // Scoped to the designer. Since the ontology manager moved onto panes its pane
+  // grips have a DndContext of their own, and dnd-kit's live region is a second
+  // `role="status"` on the page -- an accessibility region every drag surface
+  // carries, and the reason an unscoped `getByRole("status")` became ambiguous.
+  await expect(page.locator(".ontology-relationship-designer").getByRole("status"))
+    .toContainText("Relationship created and audited");
   await expect(canvas.locator(".react-flow__edge")).not.toHaveCount(0);
   const actionName = `Review asset ${Date.now()}`;
   await page.getByLabel("New action name").fill(actionName);

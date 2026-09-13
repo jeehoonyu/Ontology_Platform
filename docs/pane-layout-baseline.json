@@ -1,11 +1,11 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-12T23:48:55Z"
+    "recorded_at": "2026-09-13T00:01:00Z"
   },
   "note": "Pane regions per screen, and how many a person can move. The movable count is a floor, not a ceiling: it may rise and must never fall.",
-  "regions": 23,
-  "movable": 8,
+  "regions": 24,
+  "movable": 11,
   "screens": {
     "App.tsx": {
       "fixed": [
@@ -59,12 +59,13 @@
       "resizable": false
     },
     "workspaces/OntologyManager.tsx": {
-      "fixed": [
-        "resource-nav",
-        "walkthrough-panel"
+      "fixed": [],
+      "movable": [
+        "resources",
+        "surface",
+        "walkthrough"
       ],
-      "movable": [],
-      "resizable": false
+      "resizable": true
     },
     "workspaces/OntologyRegistryPanel.tsx": {
       "fixed": [

@@ -13,7 +13,9 @@ import {
 } from "@xyflow/react";
 import { DndContext, closestCenter, useDraggable, useDroppable } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { DragHandle, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { DragHandle, slotAwareCollision, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { PaneHost, usePaneLayout } from "../components/layout/Pane";
+import type { PaneSpec } from "../lib/paneLayout";
 import { api, postJson } from "../api";
 import {
   addOntologyProperty,
@@ -58,6 +60,25 @@ interface DataAssetsResponseItem extends TableRow {
 const BASE_TYPE_OPTIONS = ["string", "integer", "number", "boolean", "date", "timestamp", "json", "geometry", "geoshape", "array"];
 const STATUS_OPTIONS = ["active", "experimental", "deprecated"];
 
+/**
+ * The ontology manager's panes. Second half of M7 of GOAL_PANES_2026-09-11: a
+ * fixed grid of a 360px walkthrough rail, a 250px resource list and the object
+ * type surface, none of which could be moved, resized or hidden.
+ *
+ * The walkthrough starts across the bottom, not in a side column. The first
+ * version put it on the right, and at 1280px that left the object type surface
+ * about half the width the old grid gave it -- which at that width had already
+ * moved the walkthrough into a strip above the surface for exactly this reason.
+ * The relationship designer inside the surface then clipped its third and fourth
+ * object types, and a browser test that connects two of them failed. A person who
+ * wants the walkthrough beside the surface has `Move to…`.
+ */
+const ONTOLOGY_PANES: PaneSpec[] = [
+  { id: "resources", title: "Resources", slot: "left", width: 260 },
+  { id: "surface", title: "Object type", slot: "center", anchored: true },
+  { id: "walkthrough", title: "Walkthrough", slot: "bottom" }
+];
+
 export function OntologyManager() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [assetId, setAssetId] = useState("");
@@ -69,6 +90,12 @@ export function OntologyManager() {
   const state = useAsyncState<OntologyUiState>(getOntologyState, [refreshKey]);
   const assets = useAsyncState<DataAssetsResponseItem[]>(() => api<DataAssetsResponseItem[]>("/data-assets"), [refreshKey]);
   const drafts = useAsyncState<TableRow[]>(() => api<TableRow[]>("/ontology-generator/drafts"), [refreshKey]);
+  // The pane grips' own context. The field-mapping and property-order drags keep
+  // theirs, nested inside the surface: each is a self-contained list whose
+  // draggables and droppables never cross a pane, which is the case M2 found
+  // nesting safe for.
+  const paneSensors = useWorkspaceSensors("slots");
+  const paneState = usePaneLayout("ontology", ONTOLOGY_PANES);
 
   useEffect(() => {
     if (!selectedId && state.value?.selected_object_type?.object_type.id) {
@@ -197,9 +224,12 @@ export function OntologyManager() {
           <a className="legacy-button compact" href="/workspace/ontology?legacy=1">Legacy</a>
         </div>
       </header>
-      <div className="ontology-layout">
-        <WalkthroughRail walkthrough={walkthrough} />
-        <aside className="resource-nav manager-resource-nav">
+      <div className="ontology-panes">
+        <DndContext sensors={paneSensors} collisionDetection={slotAwareCollision} onDragEnd={(event) => { paneState.handleDragEnd(event); }}>
+        <PaneHost state={paneState} render={(pane) => {
+          if (pane === "walkthrough") return <WalkthroughRail walkthrough={walkthrough} />;
+          if (pane === "resources") return (
+        <div className="resource-nav manager-resource-nav">
           <Panel title="Discover">
             {(state.value?.object_types || []).map((objectType) => (
               <button key={objectType.id} className={classNames("resource-row", selectedId === objectType.id && "selected")} onClick={() => {
@@ -233,8 +263,10 @@ export function OntologyManager() {
             ))}
           </Panel>
           <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} />
-        </aside>
-        <section className="manager-surface">
+        </div>
+          );
+          return (
+        <div className="manager-surface">
           {manager && selectedSection === "releases" ? (
             <OntologyReleasePanel objectTypeId={manager.object_type.id} onBack={() => setSelectedSection("overview")} />
           ) : manager && selectedSection === "health_center" ? (
@@ -258,7 +290,10 @@ export function OntologyManager() {
           ) : (
             <EmptyState inline>Generate or select an object type to inspect manager details.</EmptyState>
           )}
-        </section>
+        </div>
+          );
+        }} />
+        </DndContext>
       </div>
     </section>
   );
@@ -266,7 +301,7 @@ export function OntologyManager() {
 
 function WalkthroughRail({ walkthrough }: { walkthrough: OntologyWalkthrough | null }) {
   return (
-    <aside className="walkthrough-panel">
+    <div className="walkthrough-panel">
       <h2>{walkthrough?.title || "Build ontology workflow"}</h2>
       <p>Guided evidence from pipeline output into object type review.</p>
       <ol>
@@ -283,7 +318,7 @@ function WalkthroughRail({ walkthrough }: { walkthrough: OntologyWalkthrough | n
       <div className="walkthrough-links">
         {(walkthrough?.links || []).map((link) => <a key={link.path} href={link.path}>{link.label}</a>)}
       </div>
-    </aside>
+    </div>
   );
 }
 

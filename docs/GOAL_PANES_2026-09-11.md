@@ -322,9 +322,10 @@ count upward and refuses a new fixed-track pane in a screen already on `Pane`.
   participants whose selection could be drawn. The design's drag overlay that names the
   holder during the drag is not built; the badge is visible before the drag starts, which is
   the moment the condition is about.
-- **M7 — Every builder is on `Pane`, and the count cannot fall.** **Open** — the four
-  visual-builder artifact types, then the ontology manager. The rollout is the
-  `audit_ui_primitives` user count for `Pane` and the `audit_pane_layout` movable ratchet.
+- **M7 — Every builder is on `Pane`, and the count cannot fall.** **Met** — the pipeline
+  builder, the four visual-builder artifact types and the ontology manager. The rollout is
+  the `audit_ui_primitives` user count for `PaneHost`, now **3** screens, and the
+  `audit_pane_layout` movable ratchet, now **11 of 24** regions with a floor to match.
 
   **The four artifact canvases are on `Pane`.** Workshop, AIP Logic, Investigations and
   Entity Resolution share one screen component, which was a fixed three-column grid — a
@@ -369,7 +370,46 @@ count upward and refuses a new fixed-track pane in a screen already on `Pane`.
   size, and the others still hold their ceilings. `UI_PRIMITIVES.md` now lists `PaneHost` with
   two users.
 
-  The ontology manager is next; M7 is met when it moves too.
+  **The ontology manager is on `Pane`.** It was a fixed grid of a walkthrough rail, a
+  resource list and the object type surface. It is `Resources` on the left, `Object type` in
+  the centre and anchored, and `Walkthrough` across the bottom. Proven by two tests in
+  `pane-layout.spec.ts`, operated without a drag — the resource list moved and still there
+  after a reload; the surface offering no way to hide or move itself, which a build with
+  `anchored` removed failed at `Hide Object type`, `Received: 1`.
+
+  **The walkthrough's first position was wrong, and a browser test said so before anyone
+  looked.** Put on the right, it left the object type surface 370 pixels wide at 1280, where
+  the old grid had deliberately laid the walkthrough out as a strip above the surface to
+  keep it wide. `ontology relationship designer creates a governed link by connecting ports`
+  failed. A probe measured why rather than guessing twice: the designer's canvas was 308
+  pixels, and two of its six object types — `technician` and `part` — had their handles
+  outside it, so the test's connect drag landed on nothing. The walkthrough starts across the
+  bottom now, and moved to a side it lists its steps in a column rather than a strip.
+
+  **That exposed a defect in `Pane` itself.** With the walkthrough gone from the right, the
+  surface only grew to 465 pixels: an empty side slot kept its 220-pixel CSS width. Every
+  screen had it — move the pipeline's `Outputs` to the bottom and the canvas lost 220 pixels
+  to an empty column. An empty side slot is a 14-pixel strip now, still a droppable a pane
+  can be dragged into and still a rectangle the keyboard slot getter finds. Proven by
+  `moving the only pane out of a side slot widens the canvas`; a build that never marks a
+  slot empty failed at `Received: 220`.
+
+  Three smaller things, each named. **The designer test's status assertion was scoped**:
+  the pane grips' `DndContext` renders dnd-kit's live region, a second `role="status"` on the
+  page, and an unscoped `getByRole("status")` became ambiguous — the region is correct, the
+  locator was too wide. **The release sections' CSS no longer hides the walkthrough and the
+  resource list**, because hiding a pane's content leaves an empty pane frame; a person can
+  hide either pane instead. **The route's payload ceiling was raised for that route alone**,
+  8.3 KB, for the pane code the other two builder routes already carry.
+
+  Two tests failed once in a combined run and passed on their own, and both are named rather
+  than re-run until green: `one arrow key carries a pane to the next slot`, the
+  timing-sensitive keyboard test M4 already records, five of five alone on the final build;
+  and `ontology maps dataset fields with hydrated preview`, which passed alone and in an
+  identical re-run of the combined set. The final build ran the pipeline, artifact canvas and
+  ontology pane tests, the held-by and drag-affordance tests, every evaluator ontology
+  workflow, and the render sweep of the pipeline, ontology and four artifact screens at four
+  widths.
 - **M8 — Floating panes, if the layouts ask for them.** **Open** — last, optional, and
   only on `DragKit` through a portal. Not started until M1–M7 are met.
 

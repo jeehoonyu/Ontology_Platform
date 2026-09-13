@@ -205,19 +205,26 @@ function Splitter({ slot, size, onResize, onStart, onPreview, onCommit, onCancel
   );
 }
 
-function Slot({ name, size, children }: {
+function Slot({ name, size, empty, children }: {
   name: SlotName;
   size?: number;
+  /** No visible pane in it. A side slot then gives its width back to the centre. */
+  empty?: boolean;
   children: ReactNode;
 }) {
   const droppable = useDroppable({ id: `${SLOT_PREFIX}${name}` });
+  // An empty side slot kept its 220px: the ontology manager's right slot, empty
+  // once its walkthrough started across the bottom, still took 228px from the
+  // object type surface, and the relationship designer inside it clipped two of
+  // its six object types. It stays a thin droppable strip, so a pane can still be
+  // dragged into it and the keyboard slot getter still finds it. M7.
   return (
     <div
       ref={droppable.setNodeRef}
-      className={`pane-slot pane-slot-${name}${droppable.isOver ? " drag-active" : ""}`}
+      className={`pane-slot pane-slot-${name}${empty ? " pane-slot-empty" : ""}${droppable.isOver ? " drag-active" : ""}`}
       data-slot={name}
-      style={name === "center" || !size ? undefined
-                                        : { flexBasis: `${size}px`, width: `${size}px` }}
+      style={name === "center" || !size || empty ? undefined
+                                                 : { flexBasis: `${size}px`, width: `${size}px` }}
     >{children}</div>
   );
 }
@@ -354,7 +361,7 @@ export function PaneHost({ state, render }: {
           {(["left", "center", "right"] as SlotName[]).map((slot) => (
             <Fragment key={slot}>
             {slot === "right" && occupied("right") ? splitter("right") : null}
-            <Slot name={slot} size={layout.sizes[slot]}>
+            <Slot name={slot} size={layout.sizes[slot]} empty={slot !== "center" && !occupied(slot)}>
               {layout.slots[slot].filter((id) => !layout.hidden.includes(id)).map((id) => {
                 const spec = byId.get(id);
                 if (!spec) return null;

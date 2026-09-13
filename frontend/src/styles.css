@@ -2582,6 +2582,13 @@ pre {
   min-height: 0;
 }
 
+/* A side slot with no pane in it: a strip a pane can still be dropped into, not a
+   220px column taken from the canvas. M7 of GOAL_PANES_2026-09-11. */
+.pane-slot-left.pane-slot-empty,
+.pane-slot-right.pane-slot-empty {
+  width: 14px;
+}
+
 .pane-slot.drag-active {
   outline: 2px dashed #6b8ba4;
   outline-offset: -2px;
@@ -2931,11 +2938,6 @@ pre {
   word-break: break-word;
 }
 
-.ontology-layout {
-  display: grid;
-  grid-template-columns: 330px 250px minmax(0, 1fr);
-  gap: 12px;
-}
 
 .walkthrough-panel {
   background: #17232d;
@@ -3632,15 +3634,29 @@ pre {
   font-size: 12px;
 }
 
-.ontology-workbench-page .ontology-layout {
-  grid-template-columns: 360px 250px minmax(0, 1fr);
-  gap: 0;
-  min-height: calc(100vh - 86px);
+
+/* The ontology manager on panes: M7 of GOAL_PANES_2026-09-11. The walkthrough no
+   longer sizes itself to the viewport, because it is one pane among several. */
+.ontology-panes {
+  min-width: 0;
+}
+
+/* Across the bottom, the walkthrough reads as a strip of steps, as the old grid
+   laid it out between 1101 and 1500px. Moved to a side, it lists them in a column. */
+.pane-slot-bottom .walkthrough-panel h2,
+.pane-slot-bottom .walkthrough-panel p {
+  display: inline-block;
+  margin: 0 16px 10px 0;
+}
+
+.pane-slot-bottom .walkthrough-panel ol {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
 }
 
 .ontology-workbench-page .walkthrough-panel {
   border-radius: 0;
-  min-height: calc(100vh - 86px);
+  min-height: 0;
   overflow: auto;
 }
 
@@ -3701,13 +3717,7 @@ pre {
   min-width: 0;
 }
 
-.ontology-workbench-page.release-mode .walkthrough-panel {
-  display: none;
-}
 
-.ontology-workbench-page.release-mode .ontology-layout {
-  grid-template-columns: 250px minmax(0, 1fr);
-}
 
 .ontology-release-header {
   margin-bottom: 0;
@@ -4728,9 +4738,6 @@ pre {
 }
 
 @media (max-width: 1500px) and (min-width: 1101px) {
-  .ontology-workbench-page .ontology-layout {
-    grid-template-columns: 230px minmax(0, 1fr);
-  }
 
   .ontology-workbench-page .walkthrough-panel {
     grid-column: 1 / -1;
@@ -4738,16 +4745,6 @@ pre {
     padding: 12px 14px;
   }
 
-  .ontology-workbench-page .walkthrough-panel h2,
-  .ontology-workbench-page .walkthrough-panel p {
-    display: inline-block;
-    margin: 0 16px 10px 0;
-  }
-
-  .ontology-workbench-page .walkthrough-panel ol {
-    grid-template-columns: repeat(6, minmax(120px, 1fr));
-    gap: 8px;
-  }
 
   .ontology-workbench-page.release-mode .registry-summary-grid,
   .ontology-workbench-page.release-mode .registry-main-grid {
@@ -4957,8 +4954,6 @@ pre {
   .builder-shell,
   .pipeline-body,
   .pipeline-workbench-page .pipeline-body,
-  .ontology-layout,
-  .ontology-workbench-page .ontology-layout,
   .manager-topbar,
   .drawer-split,
   .property-add-row,
@@ -4999,14 +4994,10 @@ pre {
     grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr);
   }
 
-  .ontology-workbench-page.release-mode .ontology-layout,
   .ontology-change-form {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .ontology-workbench-page.release-mode .manager-resource-nav {
-    display: none;
-  }
 
   .ontology-change-form .release-checkbox {
     padding-top: 0;

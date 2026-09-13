@@ -204,3 +204,67 @@ test.describe("an artifact canvas's panes rearrange without a drag", () => {
     await expect(page.getByLabel("Move Canvas to")).toHaveCount(0);
   });
 });
+
+/**
+ * The ontology manager on panes: the second half of M7. It was a fixed grid of a
+ * walkthrough rail, a resource list and the object type surface.
+ */
+test.describe("the ontology manager's panes rearrange without a drag", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280",
+              "Runs once; this file sets its own viewport and touch emulation.");
+    await page.goto("/workspace/ontology");
+    await expect(page.locator(".manager-resource-nav")).toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).tap();
+  });
+
+  test("the resources pane moves to another slot and is still there after a reload", async ({ page }) => {
+    const slotOf = () => page.locator(".pane").filter({ has: page.locator(".manager-resource-nav") }).first()
+      .evaluate((el) => el.closest(".pane-slot")?.getAttribute("data-slot") || "");
+    expect(await slotOf(), "the resource list does not start on the left").toBe("left");
+
+    await page.getByLabel("Move Resources to").selectOption("right");
+    await expect.poll(slotOf, { message: "choosing a slot did not move the resource list" }).toBe("right");
+
+    await page.reload();
+    await expect(page.locator(".manager-resource-nav")).toBeVisible();
+    await expect.poll(slotOf, { message: "the ontology manager's layout did not survive a reload" }).toBe("right");
+  });
+
+  test("the object type surface is anchored and offers no way to hide itself", async ({ page }) => {
+    await expect(page.locator(".manager-surface")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Hide Object type" })).toHaveCount(0);
+    await expect(page.getByLabel("Move Object type to")).toHaveCount(0);
+  });
+});
+
+test.describe("an empty side slot gives its width back", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280",
+              "Runs once; needs the side-by-side layout, so it opens its own desktop context.");
+  });
+
+  test("moving the only pane out of a side slot widens the canvas", async ({ browser }) => {
+    // Desktop, because below 700px the slots stack and have no width to give.
+    // Measured before this: the ontology manager's empty right slot kept 228px
+    // and the relationship designer clipped two of its six object types.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    try {
+      await page.goto("/workspace/pipeline");
+      await page.getByRole("button", { name: "Reset panes" }).click();
+      const canvasWidth = () => page.locator(".pane-slot-center").evaluate((el) => el.getBoundingClientRect().width);
+      const before = await canvasWidth();
+
+      await page.getByLabel("Move Outputs to").selectOption("bottom");
+      await expect.poll(() => page.locator(".pane-slot-right .pane").count()).toBe(0);
+
+      const rightWidth = await page.locator(".pane-slot-right").evaluate((el) => el.getBoundingClientRect().width);
+      expect(rightWidth, "the empty right slot still holds a column's width").toBeLessThan(30);
+      await expect.poll(canvasWidth, { message: "the canvas did not get the empty slot's width back" })
+        .toBeGreaterThan(before + 150);
+    } finally {
+      await context.close();
+    }
+  });
+});
