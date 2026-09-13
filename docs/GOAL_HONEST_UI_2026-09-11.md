@@ -2154,6 +2154,82 @@ plan, and it is measured there.
   tenancy census holds at 360: the counts run on the same accessible queries as the rows, and a scoped
   viewer's incidents are read through the rule that already scoped them.
 
+  **Then the gate, which had three holes the sweep walked through.** `audit_table_truncation` dropped any
+  cut it could not place: the Drafts list's `(allDrafts ? draftList : draftList.slice(0, 6)).map(` left
+  the scan and the reference without a word. It gated only cuts reaching a table, so every list, canvas
+  and chip cut was reported and never refused; the map's feature list read as counted because a length
+  appeared elsewhere on the screen, and nothing past the twelfth feature could be reached. And it read
+  `.tsx` files only, and no limit a request sends or a server keeps, so every screen fixed in this sweep
+  had been a window the gate could not see.
+
+  **A cut is placed, classified, or gated by name.** A cut in one branch of a condition whose group is
+  consumed is placed, and read as "all on request" when the other branch is the whole source. A slice that
+  is not a collection is read from a closed, tested set: text, a prefix dropped, a last item dropped, or a
+  request payload built inside a handler. Anything else is recorded as not placed and gated by name. Every
+  `.slice(` in `.ts` and `.tsx` is accounted for: 35 calls, of which 11 are placed as collection cuts, 16
+  are text, 5 drop a prefix, 1 drops a last item, 1 builds a request payload, and 1, the App's recent
+  views, is not placed and is declared not a list with its reason.
+
+  **A list cut is stated by a note and a way to the rest.** A `role="note"` element must render the
+  source's length, or a name bound to an expression that includes it, and the cut must be taken only
+  behind a `useState` value whose setter a `<button>` calls. A count in a button's label does not count as
+  the note, and a note with no control does not make the rest reachable.
+
+  **Loaded windows are a census and a registry.** The gate reads every request limit a screen sends, every
+  server default a request reaches by leaving the limit out, and every fixed cap (`.limit(N)`, or
+  `NAME[:N]` in a returned value) on a route a screen calls, following a helper that posts its caller's
+  body and up to three same-module calls below a route. Keys name what a window is, never a line. Each is
+  claimed by one entry in `WINDOWS`: stated by a named browser test and the text of the note, caption or
+  summary that states it, a gap held by name, or not applicable with a reason. A new n/a is refused, as
+  `audit_movement_contract` refuses one. The census finds 35 windows: 16 stated, each a screen this goal
+  fixed; 8 gaps; and 11 not applicable, each a limit on something no screen draws as a set -- a batch
+  size, a generated name, fields typed and never rendered.
+
+  **What the census found.** Beyond the windows this sweep fixed, it named windows nobody had filed: the
+  Command Center's Open alerts, Open approvals and incident counts stop at the 20 the scenario loads; Data
+  Onboarding's validation warnings come from the latest 50 import jobs; Latest incidents lists up to 10
+  with nothing said; each pipeline node's latest contract run comes from the 50 newest runs; Pipeline
+  Outputs draws the 5 builds the canvas loads; an object profile counts its linked objects from the 50
+  returned; and a Visual Builder preview keeps 20 nodes and lists 6. Each is a gap held by name, with
+  Object Explorer's result count, left under N5's cost decision.
+
+  **The baseline names what is left.** `table-truncation-baseline.json` now holds `unfixed`, the sorted
+  `unfixed_names`, `per_file` and `na`, and no longer the `tables`, `reaching` and `silent` it never
+  compared. A name the baseline does not hold fails even when the total is level. Recorded after every fix
+  in this sweep landed, it lists exactly 13 names: five list cuts -- the pipeline mini-graph's `nodes` and
+  `edges`, the Risk Board's `drivers`, and Visual Builder's `participants` and `sample_output` -- and
+  eight gap windows, `artifact-preview`, `command-center-counts`, `contract-run-history`,
+  `explorer-objects`, `imports-warnings`, `object-profile-links`, `ops-latest-incidents` and
+  `pipeline-output-builds`. Twelve more are declared not applicable, each with its reason in the
+  reference.
+
+  **The proof.** `test_table_truncation_audit.py` now runs 228 assertions, each over the real scanner.
+  Synthetic components test every rule: the Drafts shape placed and stated; both branches cut; the note
+  removed while the button's label keeps the length; the control removed, or moved to a span; the map's
+  shape, a count with no way to the rest; the shipped Drafts list with its note and then its toggle taken
+  out; eight slices that are not collections and three evasions of them; every `.slice(` in `.ts` and
+  `.tsx` accounted for; unplaced and declared cuts by name; eight request spellings; a route module's
+  default spellings, caps and helper; linking, omission, a helper's caller and a limit with no route; the
+  registry's malformed, missing and stale states; every stated window with its statement taken out of its
+  screen; and a gap declared away, a test borrowed, a window removed, invented or claimed twice.
+
+  **Negative runs,** each a mutation of `oms/audit_table_truncation.py` with the test run against it. All
+  17 failed, and the audit restored byte for byte to 228 passing assertions. The test stops at its first
+  failure, so each was refused by the first assertion it broke: placing a grouped cut (T1), the button in
+  the reach rule (the shipped Drafts list with its toggle removed, T7), the note's markup (T3), recording
+  every unplaced slice (the string-cut assertion that predates this change), the payload rule's setter
+  guard (T8), scanning `.tsx` alone (T10, 32 of 35 slices), comparing names (T11), refusing a new n/a
+  (T12), reporting a limit with no route (T15), the proof check (T16), the statement check (T17) and the
+  claim check (T18). Resolving a parameter's default, the router prefix, following helpers, linking an
+  omitted limit and naming gap windows were each refused first by the live tree failing its own baseline,
+  where the census lost a window the registry claims. `verify.py --fast` passes 23 of 23 on the new
+  baseline.
+
+  **What it still does not see:** the legacy `oms/app/ui/app.js`; a cap computed by an expression or taken
+  from a variable; a cap in another module's helper, or written into a value before the return; a request
+  whose path or body is assembled away from the call; and whether a note's condition matches its window,
+  which each named browser test proves.
+
 ## Order and size
 
 | Step | Touches | Commits |

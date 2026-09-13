@@ -1,11 +1,42 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-12T22:02:10Z"
+    "recorded_at": "2026-09-13T21:28:55Z"
   },
-  "note": "Collection truncations that reach a table and render no true count. A ceiling, not a floor: the count may fall and must never rise.",
-  "tables": 86,
-  "reaching": 3,
-  "silent": 0,
-  "per_file": {}
+  "note": "Truncations left unfixed, by name: a table cut with no true count or before a table that pages, a list cut that does not say how much it shows and let the rest be reached, and a cut nobody placed. The count may fall and must never rise, and a name not held here fails. A name under `na` was declared not a list on purpose.",
+  "unfixed": 13,
+  "unfixed_names": [
+    "cut:DecisionWorkspace.tsx::RiskBoard::finding.risk.drivers",
+    "cut:PipelineCanvas.tsx::MiniGraph::edges",
+    "cut:PipelineCanvas.tsx::MiniGraph::nodes",
+    "cut:VisualBuilder.tsx::VisualBuilder::collaborators.data.participants",
+    "cut:VisualBuilder.tsx::VisualBuilder::preview.sample_output",
+    "window:artifact-preview",
+    "window:command-center-counts",
+    "window:contract-run-history",
+    "window:explorer-objects",
+    "window:imports-warnings",
+    "window:object-profile-links",
+    "window:ops-latest-incidents",
+    "window:pipeline-output-builds"
+  ],
+  "per_file": {
+    "components/canvas/PipelineCanvas.tsx": 2,
+    "workspaces/DecisionWorkspace.tsx": 1,
+    "workspaces/VisualBuilder.tsx": 2
+  },
+  "na": [
+    "cut:App.tsx::App::[nextView, ...recentViews.filter((item) => item !== nextView)]",
+    "window:agent-runs",
+    "window:alert-evaluation",
+    "window:generated-name",
+    "window:geofence",
+    "window:imports-evidence-links",
+    "window:modelops-summary",
+    "window:ops-summary-unrendered",
+    "window:pipeline-plan-execute",
+    "window:reliability-summary-unrendered",
+    "window:transform-preview-rows",
+    "window:workflow-audit-rows"
+  ]
 }

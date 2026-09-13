@@ -138,7 +138,7 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "runs_in": "suite",
     },
     "audit_table_truncation": {
-        "purpose": "no table shows part of what it was given without saying how much",
+        "purpose": "no screen shows part of a set without saying how much and letting the rest be reached",
         "runs_in": "suite",
     },
     "audit_movement_contract": {
