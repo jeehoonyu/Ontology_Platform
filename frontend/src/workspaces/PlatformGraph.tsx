@@ -24,7 +24,16 @@ interface GraphOverview {
   summary: Record<string, number>;
   nodes: TableRow[];
   edges: TableRow[];
+  limit?: number;
+  totals?: Record<string, number>;
+  loaded?: Record<string, number>;
 }
+
+// The server's kinds, named as a sentence says them. A dataset node is counted with the data
+// assets, and also stands for assets that objects and pipelines name, so its chip gets no total.
+const KIND_NOUNS: Record<string, string> = {
+  object_type: "object types", object: "objects", object_link: "links", data_asset: "data assets", pipeline: "pipelines", incident: "incidents"
+};
 
 const KIND_COLORS: Record<string, string> = {
   dataset: "#607d8b",
@@ -103,6 +112,8 @@ export function PlatformGraphWorkspace() {
   const visibleIds = useMemo(() => new Set(visibleNodes.map((node) => node.id)), [visibleNodes]);
   const visibleEdges = useMemo(() => edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)), [edges, visibleIds]);
   const selected = nodes.find((node) => node.id === selectedId);
+  // The kinds the server loaded only part of.
+  const cuts = Object.entries(graph.value?.totals || {}).filter(([kind, total]) => total > (graph.value?.loaded?.[kind] ?? total));
 
   const onNodesChange = useCallback((changes: NodeChange<Node<JsonObject>>[]) => {
     setNodes((current) => applyNodeChanges(changes, current));
@@ -146,16 +157,17 @@ export function PlatformGraphWorkspace() {
       {graph.loading ? <LoadingState label="Loading platform graph..." /> : null}
       <div className="platform-graph-toolbar" role="toolbar" aria-label="Platform graph controls">
         <label className="graph-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search nodes" /></label>
-        <button onClick={() => setNeighborhoodOnly((value) => !value)} disabled={!selectedId}><Expand size={15} />{neighborhoodOnly ? "Show all" : "Neighbors"}</button>
+        <button onClick={() => setNeighborhoodOnly((value) => !value)} disabled={!selectedId}><Expand size={15} />{neighborhoodOnly ? "Show all loaded nodes" : "Neighbors"}</button>
         <button onClick={autoLayout}><LocateFixed size={15} />Auto layout</button>
         <button onClick={saveView}><Save size={15} />Save positions on this device</button>
         <span>{visibleNodes.length} nodes / {visibleEdges.length} edges</span>
       </div>
       {notice ? <div className="inline-success" role="status">{notice}</div> : null}
+      {cuts.length ? <p className="table-truncated" role="note">Loaded {cuts.map(([kind, total]) => `${(graph.value?.loaded?.[kind] ?? 0).toLocaleString()} of ${total.toLocaleString()} ${KIND_NOUNS[kind] || kind}`).join(", ")}. The canvas, type counts, search and connections cover only what was loaded.</p> : null}
       <div className="platform-graph-kinds" role="group" aria-label="Resource type filters">
         {Object.entries(graph.value?.summary || {}).map(([kind, count]) => (
           <button key={kind} className={visibleKinds.has(kind) ? "active" : ""} onClick={() => toggleKind(kind)}>
-            <span style={{ background: KIND_COLORS[kind] || "#77838d" }} />{kind.replace(/_/g, " ")} <small>{count}</small>
+            <span style={{ background: KIND_COLORS[kind] || "#77838d" }} />{kind.replace(/_/g, " ")} <small>{count.toLocaleString()}{cuts.some(([cut]) => cut === kind) ? ` of ${(graph.value?.totals?.[kind] ?? count).toLocaleString()}` : ""}</small>
           </button>
         ))}
       </div>
@@ -178,7 +190,7 @@ export function PlatformGraphWorkspace() {
               <MiniMap pannable zoomable nodeColor={(node) => KIND_COLORS[asString(node.data?.kind)] || "#77838d"} />
               <Controls showInteractive={false} />
             </ReactFlow>
-          ) : <EmptyState title="No graph nodes match" description="Clear search text or enable another resource type." />}
+          ) : <EmptyState title="No graph nodes match" description={cuts.length ? "Search covers only the loaded resources. Clear search text or enable another resource type." : "Clear search text or enable another resource type."} />}
         </section>
         <Panel title="Selected Resource">
           {selected ? (

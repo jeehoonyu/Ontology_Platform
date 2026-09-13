@@ -671,9 +671,21 @@ def _graph_overview(db: Session, limit: int, principal: Optional[production_auth
         if source in nodes and target in nodes:
             edges.append({"source": source, "target": target, "kind": kind, "label": label or kind})
 
-    for ot in semantic_scope.accessible_query(db, principal, models.ObjectType).limit(limit).all():
+    # Each kind is loaded up to `limit`, and how many there are is kept beside it, so the screen
+    # can say which kinds it drew only part of. Below the limit the rows loaded are all of them,
+    # so the count runs only when a kind reached it.
+    totals: Dict[str, int] = {}
+    loaded: Dict[str, int] = {}
+
+    def window(kind: str, query: Any) -> List[Any]:
+        rows = query.limit(limit).all()
+        loaded[kind] = len(rows)
+        totals[kind] = len(rows) if len(rows) < limit else query.count()
+        return rows
+
+    for ot in window("object_type", semantic_scope.accessible_query(db, principal, models.ObjectType)):
         add_node("object_type", ot.id, ot.display_name or ot.id)
-    visible_objects = semantic_scope.accessible_query(db, principal, models.ObjectInstance).limit(limit).all()
+    visible_objects = window("object", semantic_scope.accessible_query(db, principal, models.ObjectInstance))
     visible_object_ids = {obj.id for obj in visible_objects}
     for obj in visible_objects:
         label = (obj.properties or {}).get("name") or (obj.properties or {}).get("title") or obj.id
@@ -682,11 +694,11 @@ def _graph_overview(db: Session, limit: int, principal: Optional[production_auth
         if obj.source_asset_id:
             add_node("dataset", obj.source_asset_id, obj.source_asset_id)
             add_edge(f"dataset:{obj.source_asset_id}", f"object:{obj.id}", "hydrates")
-    for link in semantic_scope.accessible_query(db, principal, models.LinkInstance).limit(limit).all():
+    for link in window("object_link", semantic_scope.accessible_query(db, principal, models.LinkInstance)):
         add_edge(f"object:{link.source_object_id}", f"object:{link.target_object_id}", "object_link", link.link_type_id)
-    for asset in semantic_scope.accessible_query(db, principal, models.DataAsset).limit(limit).all():
+    for asset in window("data_asset", semantic_scope.accessible_query(db, principal, models.DataAsset)):
         add_node("dataset", asset.id, asset.display_name or asset.id, {"kind": asset.kind})
-    for pipeline in semantic_scope.accessible_query(db, principal, models.PipelineDefinition).limit(limit).all():
+    for pipeline in window("pipeline", semantic_scope.accessible_query(db, principal, models.PipelineDefinition)):
         add_node("pipeline", pipeline.id, pipeline.display_name or pipeline.id)
         add_node("dataset", pipeline.input_asset_id, pipeline.input_asset_id)
         add_edge(f"dataset:{pipeline.input_asset_id}", f"pipeline:{pipeline.id}", "pipeline_input")
@@ -695,10 +707,23 @@ def _graph_overview(db: Session, limit: int, principal: Optional[production_auth
             add_edge(f"pipeline:{pipeline.id}", f"dataset:{pipeline.output_asset_id}", "pipeline_output")
     ops_control._ensure_tables(db)
     accessible_projects = tenancy.accessible_project_ids(db, semantic_scope.effective_principal(principal), "view")
-    for incident in db.query(ops_control.Incident).limit(limit).all():
-        linked_ids = {str(ref.get("object_id")) for ref in (incident.linked_objects or []) if ref.get("object_id")}
-        if accessible_projects is not None and (not linked_ids or not linked_ids.intersection(visible_object_ids)):
-            continue
+    incident_query = db.query(ops_control.Incident)
+    if accessible_projects is None:
+        incidents = window("incident", incident_query)
+    else:
+        # A scoped viewer sees an incident only when it links an object they loaded. The limit
+        # was applied before that rule, so fewer showed than they could see; every incident is
+        # read now, the visible ones kept up to the limit and all of them counted.
+        incidents, visible = [], 0
+        for incident in incident_query.yield_per(500):
+            linked_ids = {str(ref.get("object_id")) for ref in (incident.linked_objects or []) if ref.get("object_id")}
+            if not linked_ids or not linked_ids.intersection(visible_object_ids):
+                continue
+            visible += 1
+            if len(incidents) < limit:
+                incidents.append(incident)
+        loaded["incident"], totals["incident"] = len(incidents), visible
+    for incident in incidents:
         add_node("incident", incident.id, incident.display_name, {"severity": incident.severity, "status": incident.status})
         for ref in incident.linked_objects or []:
             add_edge(f"incident:{incident.id}", f"object:{ref.get('object_id')}", "incident_object")
@@ -707,8 +732,14 @@ def _graph_overview(db: Session, limit: int, principal: Optional[production_auth
         "node_count": len(nodes),
         "edge_count": len(edges),
         "nodes": list(nodes.values()),
-        "edges": edges[: max(1, min(limit * 3, 1000))],
+        # Every edge between loaded nodes. The list was cut at three times the limit in the
+        # order edges were added, so links, pipeline and incident edges went first, and a
+        # pipeline's connections could be empty under any count beside them.
+        "edges": edges,
         "summary": dict(Counter(node["kind"] for node in nodes.values())),
+        "limit": limit,
+        "totals": totals,
+        "loaded": loaded,
     }
 
 

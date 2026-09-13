@@ -972,6 +972,68 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(page.locator(".map-layer-rail").getByRole("button", { name: /^Show all/ })).toHaveCount(0);
   });
 
+  test("the platform graph says which kinds it loaded only part of", async ({ page }) => {
+    test.setTimeout(240_000);
+    // The graph asked for 500 of each kind and read what came back as the platform: the kind
+    // chips counted loaded nodes, and nothing said a kind had more. Here 501 objects of a new
+    // type, so the objects reach the limit whatever else the database holds.
+    const suffix = `${Date.now()}`;
+    const typeId = `graph_window_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/object-types", { data: { id: typeId, display_name: `Graph window ${suffix}`, description: "Graph window", properties: { name: { type: "string" } } } }), "object type");
+    const records = Array.from({ length: 501 }, (unused, index) => ({ id: `${typeId}_${String(index).padStart(3, "0")}`, name: `Graph ${index}` }));
+    await settled(await page.request.post("/data-assets", { data: { id: `${typeId}_feed`, display_name: `Graph window feed ${suffix}`, kind: "dataset", asset_schema: {}, records } }), "feed");
+    await settled(await page.request.post("/pipelines", { data: {
+      id: `${typeId}_hydrate`, display_name: `Graph window hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+      steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id", property_map: { name: "$name" }, omit_nulls: true }]
+    } }), "pipeline");
+    const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+    expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+
+    const overview = page.waitForResponse((response) => response.url().includes("/graph/overview"));
+    await page.goto("/workspace/graph");
+    const body = await (await overview).json() as { limit: number; totals: Record<string, number>; loaded: Record<string, number>; edges: unknown[]; edge_count: number };
+    expect(body.loaded.object).toBe(500);
+    expect(body.totals.object).toBeGreaterThanOrEqual(501);
+    expect(body.edges.length, "the graph cut its edges").toBe(body.edge_count);
+    const nouns: Record<string, string> = { object_type: "object types", object: "objects", object_link: "links", data_asset: "data assets", pipeline: "pipelines", incident: "incidents" };
+    const expected = await page.evaluate(([totals, loaded, names]) => Object.entries(totals).filter(([kind, total]) => total > (loaded[kind] ?? total))
+      .map(([kind, total]) => `${(loaded[kind] ?? 0).toLocaleString()} of ${total.toLocaleString()} ${names[kind] || kind}`).join(", "), [body.totals, body.loaded, nouns] as const);
+    const note = page.getByRole("note").filter({ hasText: "cover only what was loaded" });
+    await expect(note, "the graph loaded part of a kind and does not say so")
+      .toHaveText(`Loaded ${expected}. The canvas, type counts, search and connections cover only what was loaded.`);
+    await expectUnclipped(note, "the graph's note is cut off, hiding how many resources there are");
+    const objectTotal = await page.evaluate((total) => total.toLocaleString(), body.totals.object);
+    await expect(page.getByRole("group", { name: "Resource type filters" }).getByRole("button", { name: `object 500 of ${objectTotal}` }),
+      "the object chip counts the loaded nodes as all of them").toBeVisible();
+
+    await page.locator(".platform-graph-node").first().click();
+    await page.getByRole("button", { name: "Neighbors" }).click();
+    await expect(page.getByRole("button", { name: "Show all loaded nodes" }), "the toggle says Show all while the graph is partial").toBeVisible();
+  });
+
+  test("a platform graph that loaded every resource says nothing about windows", async ({ page }) => {
+    // A resource of its own, so there are kind chips to read on a database no other test has filled:
+    // run alone, this test found an empty graph and never reached its note.
+    const suffix = `${Date.now()}`;
+    const created = await page.request.post("/object-types", { data: { id: `graph_whole_${suffix}`, display_name: `Graph whole ${suffix}`, description: "Graph whole", properties: { name: { type: "string" } } } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    // The real reply, with each kind's total set to what was loaded.
+    await page.route((url) => url.pathname === "/graph/overview", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as { totals?: Record<string, number>; loaded?: Record<string, number> };
+      await route.fulfill({ response, json: { ...body, totals: { ...(body.loaded || {}) } } });
+    });
+    await page.goto("/workspace/graph");
+    await expect(page.locator(".platform-graph-kinds button").first()).toBeVisible();
+    await expect(page.getByRole("note").filter({ hasText: "cover only what was loaded" }), "a whole graph is not a window").toHaveCount(0);
+    await expect(page.locator(".platform-graph-kinds small").filter({ hasText: " of " })).toHaveCount(0);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

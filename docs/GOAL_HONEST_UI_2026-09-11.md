@@ -2110,6 +2110,50 @@ plan, and it is measured there.
   which the committed gate cannot place and so drops, the first of the holes the gate record below
   closes. The tenancy census holds at 360.
 
+  **Then the platform graph.** The graph asked for 500 of each kind and read what came back as the
+  platform. Its kind chips counted the loaded nodes and nothing said a kind had more; its edges were cut
+  at three times the limit in the order they were added, so a pipeline's connections could be empty; and
+  a scoped viewer's incidents were limited before the rule that hides the ones they cannot see, so fewer
+  showed than they could see.
+
+  **The graph says which kinds it loaded only part of, and keeps every edge between loaded nodes.**
+  `/graph/overview` returns `loaded` and `totals` per kind, counting a kind only when it reached the
+  limit, and every edge between the nodes it loaded. The screen reads "Loaded 500 of 501 objects. The
+  canvas, type counts, search and connections cover only what was loaded."; a partial kind's chip reads
+  "500 of 501"; an empty search says it covered only loaded resources; and the neighborhood toggle reads
+  "Show all loaded nodes".
+
+    **The proof.** A new `test_graph_overview_totals.py` creates three objects and three assets and
+  requires a graph of one per kind to report `loaded` 1 and `totals` 3 for each, and its edge list to
+  equal its edge count; at the default limit it requires totals equal to what was loaded. In
+  `truncation-sites.spec.ts`, a new browser test hydrates 501 objects, reads the real overview, and
+  requires the note to name every partial kind from its totals, not cut off, the object chip to read "500
+  of N", and the neighborhood toggle to read "Show all loaded nodes"; a second fulfils the real reply with
+  each total set to what was loaded and requires no note and no chip total. The second creates an object
+  type of its own first: run alone, as its negative run ran it, it found an empty graph with no kind chips
+  and never reached its note, and it had passed only after the first test filled the database. They pass
+  on the fix, the second alone as well, with the platform graph evaluator test and six backend scripts,
+  the tenancy census among them.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, totals that are what loaded:** the backend script failed on totals of 1 where 3 exist.
+  - **N1, the server's totals that are what loaded:** the browser test failed at the reply, `Expected:
+    >= 501`, `Received: 500`.
+  - **N2, the edges cut again:** it failed at the edges, `Expected: 1001`, `Received: 1000`.
+  - **N3, the note removed:** it failed at the note, element not found.
+  - **N4, the chips without totals:** it failed at the object chip, element not found.
+  - **N5, the old toggle label:** it failed at the toggle, element not found.
+  - **N6, the note shown whenever totals exist:** the whole-graph test, run alone, failed at the note, one
+    where it requires none. Its first two runs failed earlier, on the empty graph the test's own fixture now fills.
+  - Restored: the three platform graph browser tests and six backend scripts pass, and both sources are
+    byte for byte what they were.
+
+    **The references.** The platform graph opens with 14 requests at 635 KB, no more than before and
+  within its payload ceiling. `.table-truncated` reaches `PlatformGraph.tsx`, a thirteenth file, and the
+  style-scope baseline records it. Neither `TABLE_TRUNCATION.md` nor `INERT_CONTROLS.md` moves. The
+  tenancy census holds at 360: the counts run on the same accessible queries as the rows, and a scoped
+  viewer's incidents are read through the rule that already scoped them.
+
 ## Order and size
 
 | Step | Touches | Commits |
