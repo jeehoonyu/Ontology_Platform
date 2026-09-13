@@ -1755,6 +1755,50 @@ plan, and it is measured there.
   with the shared closure of 436 KB, under its ceiling. No class became shared: the card's footer
   class is the explorer's own, and `.table-truncated` was already used in this file.
 
+  **Then Vertex's seed list.** "Seed from object type" asked `/objects/{type}` for 50 objects, which
+  returns a bare list with no total and no order, and drew the first 24 as buttons. Past the 24th, no
+  object of a type could be picked from the panel, and nothing said the type held more.
+
+  **The list now pages through the type with a true total.** The panel asks the existing
+  `/object-sets/search` for 24 objects at an offset, with `with_total`, so no route or response
+  changes. It draws every object it is given. When the type holds more, a note reads "Showing 1–24 of
+  N objects", and Previous objects and Next objects buttons, disabled at the ends and while a page
+  loads, reach the rest. The wording says which objects by position, never "latest": the search has no
+  `ORDER BY`, and pages follow insertion order.
+
+  **The first build's note ran ahead of its objects.** The note was counted from the offset asked for,
+  so pressing Next changed it to "Showing 25–48" at once, while the buttons were still the first 24
+  until the page arrived. The browser test caught it: the text and the counts matched at every step,
+  and paging reached only 36 distinct objects of 60, because the second page's ids were read before
+  they had replaced the first. The note and the buttons now count from the page on screen, which the
+  search result carries. The test holds the next page's response back with `page.route` and requires
+  the note to still read "Showing 1–24 of 60 objects" while it waits.
+
+  **The proof.** In `truncation-sites.spec.ts`, a new browser test hydrates 60 objects of a fresh type,
+  opens Vertex, and picks the type under "Seed from object type". The panel draws 24 buttons and reads
+  "Showing 1–24 of 60 objects" without being cut off, with Previous objects disabled. Holding the next
+  page's response back, it presses Next objects and requires Next to be disabled and the note to still
+  read "Showing 1–24 of 60 objects" while the page loads; released, the second page reads "Showing
+  25–48 of 60 objects" with 24 buttons, and the third "Showing 49–60 of 60 objects" with 12 and Next
+  disabled. The ids read across the three pages are the 60 created, each once. It passes on the fixed
+  build.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the committed view and client:** it failed at the note, element not found, with 24 of the 50
+    buttons drawn.
+  - **N2, the total taken from the page:** a page read as the type, and the note was not found.
+  - **N3, a Next button that does not move the offset:** no page was asked for, and it failed at Next,
+    still enabled.
+  - **N4, the note counted from the offset asked for:** it failed while the page was held,
+    `Received: "Showing 25–48 of 60 objects"` over the first 24 objects.
+  - Restored: the test passes, and both sources are byte for byte what they were.
+
+  **The references.** `TABLE_TRUNCATION.md` drops the Vertex row, since the cut moved from the client
+  to the server's page. `INERT_CONTROLS.md` counts the two new buttons: 0 of 331. `.table-truncated`
+  is now used in nine files, Vertex the ninth, and the style-scope baseline is re-recorded to match.
+  The Vertex route's chunk measures 452 KB with the shared closure of 436 KB, under its ceiling;
+  the route is not among the sixteen route cost measures.
+
 ## Order and size
 
 | Step | Touches | Commits |

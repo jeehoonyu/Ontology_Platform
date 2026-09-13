@@ -554,6 +554,71 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(sites.getByRole("note"), "the note still says seven are shown when every value is").toHaveCount(0);
   });
 
+  test("Vertex's seed list says how many objects the type holds and reaches every one", async ({ page }) => {
+    test.setTimeout(120_000);
+    // The panel asked for 50 objects with no total and drew 24 of them as buttons. Past the
+    // 24th, no object of a type could be picked from here, and nothing said the type held
+    // more. Here 60 objects: three pages of 24, 24 and 12.
+    const suffix = `${Date.now()}`;
+    const typeId = `vertex_seeds_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/object-types", { data: {
+      id: typeId, display_name: `Vertex seeds ${suffix}`, description: "Vertex seed cut", properties: { name: { type: "string" } }
+    } }), "object type");
+    const records = Array.from({ length: 60 }, (unused, index) => ({ id: `${typeId}_${String(index + 1).padStart(2, "0")}`, name: `Seed ${index + 1}` }));
+    await settled(await page.request.post("/data-assets", { data: {
+      id: `${typeId}_feed`, display_name: `Vertex seeds feed ${suffix}`, kind: "dataset", asset_schema: {}, records
+    } }), "feed");
+    await settled(await page.request.post("/pipelines", { data: {
+      id: `${typeId}_hydrate`, display_name: `Vertex seeds hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+      steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id", property_map: { name: "$name" }, omit_nulls: true }]
+    } }), "pipeline");
+    const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+    expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+
+    await page.goto("/workspace/vertex");
+    await page.getByLabel("Seed from object type").selectOption(typeId);
+    const seeds = page.getByRole("button", { name: new RegExp(`^\\+ ${typeId}_`) });
+    const note = page.getByRole("note").filter({ hasText: "objects" });
+    const next = page.getByRole("button", { name: "Next objects" });
+    const seen = new Set<string>();
+    const collect = async () => { for (const label of await seeds.allTextContents()) seen.add(label.replace(/^\+\s*/, "").trim()); };
+
+    await expect(seeds, "the panel no longer draws a full page of 24").toHaveCount(24);
+    await expect(note, "the type holds 60 objects and the panel does not say so").toHaveText("Showing 1–24 of 60 objects");
+    await expectUnclipped(note, "the seed note is cut off, hiding how many objects the type holds");
+    await expect(page.getByRole("button", { name: "Previous objects" })).toBeDisabled();
+    await collect();
+    // The note must change with the objects, not ahead of them: while a page loads, the
+    // buttons are still the last page's, so a note counted from the page asked for would
+    // name objects that are not the ones listed.
+    let firstOnPage = await seeds.first().textContent();
+    // Hold the next page back, so the screen can be read while it loads.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route("**/object-sets/search", async (route) => { await held; await route.continue(); }, { times: 1 });
+    await next.click();
+    await expect(next, "Next objects stays enabled while its page loads").toBeDisabled();
+    await expect(note, "the note names the next page while the last page is still listed").toHaveText("Showing 1–24 of 60 objects");
+    release();
+    await expect(seeds.first(), "the next page's objects never arrived").not.toHaveText(firstOnPage || "");
+    await expect(note).toHaveText("Showing 25–48 of 60 objects");
+    await expect(seeds).toHaveCount(24);
+    await collect();
+    firstOnPage = await seeds.first().textContent();
+    await next.click();
+    await expect(seeds.first(), "the last page's objects never arrived").not.toHaveText(firstOnPage || "");
+    await expect(note).toHaveText("Showing 49–60 of 60 objects");
+    await expect(seeds).toHaveCount(12);
+    await expect(next, "the last page still offers more").toBeDisabled();
+    await collect();
+    expect(seen.size, "paging did not reach every object exactly once").toBe(60);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

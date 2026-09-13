@@ -36,6 +36,5 @@ alert taken as a default is not a hidden row.
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | no | no |
 | `workspaces/MapWorkspace.tsx` | 248 | `MapWorkspace` | `collection.features` (slice) | mapped | no | yes |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` (slice) | mapped | no | no |
-| `workspaces/Vertex.tsx` | 295 | `Vertex` | `seedObjects.value` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 700 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 804 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | no | no |

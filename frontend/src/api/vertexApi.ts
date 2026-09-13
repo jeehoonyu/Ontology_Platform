@@ -132,8 +132,15 @@ export function listObjectTypes(): Promise<VertexObjectType[]> {
   return api<VertexObjectType[]>("/object-types");
 }
 
-export function listObjects(objectTypeId: string, limit = 50): Promise<VertexObjectInstance[]> {
-  return api<VertexObjectInstance[]>(`/objects/${encodeURIComponent(objectTypeId)}?limit=${limit}`);
+// A page of a type's objects to seed a graph from, with how many the type holds. The
+// list endpoint returned 50 with no total, and the panel drew 24 of them: past the 24th,
+// no object of a type could be picked from here, and nothing said so.
+export const SEED_PAGE = 24;
+
+export function searchSeedObjects(objectTypeId: string, offset: number): Promise<{ objects: VertexObjectInstance[]; total: number | null; offset: number }> {
+  return postJson<{ objects: VertexObjectInstance[]; total?: number | null }>("/object-sets/search", {
+    object_type_id: objectTypeId, limit: SEED_PAGE, offset, with_total: true, include_lineage: false
+  }).then((page) => ({ objects: page.objects || [], total: typeof page.total === "number" ? page.total : null, offset }));
 }
 
 export function listLinkTypes(): Promise<VertexLinkType[]> {

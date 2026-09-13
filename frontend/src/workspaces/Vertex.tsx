@@ -7,7 +7,8 @@ import {
   layoutVertexGraph,
   listLinkTypes,
   listObjectTypes,
-  listObjects,
+  searchSeedObjects,
+  SEED_PAGE,
   listVertexGraphs,
   mergeVertexLinks,
   VERTEX_AGGREGATIONS,
@@ -104,6 +105,7 @@ export function Vertex() {
   const [seedIdsText, setSeedIdsText] = useState("");
   const [createLayout, setCreateLayout] = useState<VertexLayout>("auto");
   const [seedObjectTypeId, setSeedObjectTypeId] = useState("");
+  const [seedOffset, setSeedOffset] = useState(0);
 
   // Explore controls.
   const [exploreLinkTypeId, setExploreLinkTypeId] = useState("");
@@ -122,10 +124,16 @@ export function Vertex() {
   const graphs = useAsyncState<VertexGraph[]>(listVertexGraphs, [refreshKey]);
   const objectTypes = useAsyncState<VertexObjectType[]>(listObjectTypes, []);
   const linkTypes = useAsyncState<VertexLinkType[]>(listLinkTypes, []);
-  const seedObjects = useAsyncState<VertexObjectInstance[]>(
-    () => (seedObjectTypeId ? listObjects(seedObjectTypeId) : Promise.resolve([])),
-    [seedObjectTypeId]
+  const seedPage = useAsyncState<{ objects: VertexObjectInstance[]; total: number | null; offset: number }>(
+    () => (seedObjectTypeId ? searchSeedObjects(seedObjectTypeId, seedOffset) : Promise.resolve({ objects: [], total: 0, offset: 0 })),
+    [seedObjectTypeId, seedOffset]
   );
+  const seedObjects = seedPage.value?.objects || [];
+  const seedTotal = seedPage.value?.total ?? seedObjects.length;
+  // The page on screen, not the one asked for: while the next page loads, the buttons are
+  // still the last page's, and a note counted from the requested offset named objects
+  // that were not the ones listed.
+  const seedShownOffset = seedPage.value?.offset ?? 0;
 
   useEffect(() => {
     if (!selectedGraphId && graphs.value && graphs.value.length) {
@@ -281,7 +289,7 @@ export function Vertex() {
           <div className="section-card-grid">
             <label>
               <span>Seed from object type</span>
-              <select value={seedObjectTypeId} onChange={(event) => setSeedObjectTypeId(event.target.value)}>
+              <select value={seedObjectTypeId} onChange={(event) => { setSeedObjectTypeId(event.target.value); setSeedOffset(0); }}>
                 <option value="">Choose object type</option>
                 {(objectTypes.value || []).map((objectType) => (
                   <option key={objectType.id} value={objectType.id}>{objectType.display_name || objectType.id}</option>
@@ -289,17 +297,30 @@ export function Vertex() {
               </select>
             </label>
           </div>
+          {seedObjectTypeId && seedTotal > seedObjects.length ? (
+            // In the order the objects were stored: the search has no ORDER BY, so "first"
+            // is the honest word and "latest" would not be.
+            <p className="table-truncated" role="note">
+              Showing {(seedShownOffset + 1).toLocaleString()}–{(seedShownOffset + seedObjects.length).toLocaleString()} of {seedTotal.toLocaleString()} objects
+            </p>
+          ) : null}
           {seedObjectTypeId ? (
             <div className="button-row">
-              {seedObjects.loading ? <span>Loading objects...</span> : null}
-              {(seedObjects.value || []).slice(0, 24).map((object) => (
+              {seedPage.loading ? <span>Loading objects...</span> : null}
+              {seedObjects.map((object) => (
                 <button key={object.id} onClick={() => addSeed(object.id)} title={`Add ${object.id} to seeds`}>
                   + {object.id}
                 </button>
               ))}
-              {!seedObjects.loading && !(seedObjects.value || []).length ? (
+              {!seedPage.loading && !seedObjects.length ? (
                 <span>No objects for this type.</span>
               ) : null}
+            </div>
+          ) : null}
+          {seedObjectTypeId && seedTotal > seedObjects.length ? (
+            <div className="button-row">
+              <button type="button" onClick={() => setSeedOffset(Math.max(0, seedShownOffset - SEED_PAGE))} disabled={seedPage.loading || seedShownOffset === 0}>Previous objects</button>
+              <button type="button" onClick={() => setSeedOffset(seedShownOffset + SEED_PAGE)} disabled={seedPage.loading || seedShownOffset + seedObjects.length >= seedTotal}>Next objects</button>
             </div>
           ) : null}
         </Panel>
