@@ -24,7 +24,13 @@ from .database import Base, get_db
 router = APIRouter(tags=["ops_control"])
 
 
-SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "warn": 2, "high": 3, "critical": 4}
+SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "warn": 2, "warning": 2, "high": 3, "error": 3, "critical": 4}
+
+
+def severity_rank(value: Any, unknown: int) -> int:
+    """The owner's ranking (GOAL_HONEST_UI N7d): `warning` ranks with `warn`, `error` with
+    `high`. Words compare trimmed and lowercased; a word not in the map ranks `unknown`."""
+    return SEVERITY_RANK.get(str(value or "").strip().lower(), unknown)
 
 
 def _now() -> int:
@@ -475,7 +481,7 @@ def _matches_rule(event: OpsEvent, rule: AlertRule) -> bool:
         return False
     if rule.object_type_id and rule.object_type_id != event.object_type_id:
         return False
-    if SEVERITY_RANK.get(event.severity, 0) < SEVERITY_RANK.get(rule.min_severity, 3):
+    if severity_rank(event.severity, 0) < severity_rank(rule.min_severity, 3):
         return False
     return _matches_expression(event, rule.expression or {})
 

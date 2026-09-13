@@ -1602,6 +1602,58 @@ plan, and it is measured there.
   widths, 220 ran, 388 skipped by design, 0 failed and 0 flaky, from a bundle built from the current
   source, and its baseline is written with the one known failure still listed.
 
+  **Then the server's severity ranking, filed at N7d.** The operations feed ranks `warning` with
+  `warn` and `error` with `high`, as the owner decided. The server did not. `ops_control.py` and
+  `platform_core.py` each kept an identical map with neither word, so both ranked with `info`. The
+  platform's own emitters send exactly those words: a job that runs out of retries says `error`, a
+  failed connection sync says `error`, stream backpressure and quarantine say `warning`, and an SLO
+  breach says `warning` or `error`. A rule at minimum high, the default for a new rule, the React
+  form and the reliability scenario, therefore raised no alert and no inbox notification for any of
+  them, and a rule at minimum medium missed every warning. Event subscriptions missed the same events.
+
+  **One map, read through one helper.** `ops_control.SEVERITY_RANK` gains the two words, and
+  `severity_rank(value, unknown)` compares them trimmed and lowercased. `platform_core` drops its copy
+  and reads through the helper; it already imported `ops_control`, so there is no cycle. The alert
+  rule's threshold is now lowercased too, as the subscription's already was, so a stored "Critical"
+  means critical. A critical rule still does not fire on `error`, which ranks with high. Each path
+  keeps its default for a word in no rank: an unknown rule threshold still acts as high, an unknown
+  subscription threshold still matches everything, and an unknown event word still ranks as info.
+  Rejecting unknown words with a 422, or giving both paths one default, would change stored rules and
+  subscriptions nobody has reviewed, so both are known and not fixed. Only the feed's comment changes
+  in the frontend, since its map was already the owner's; it now names the test that holds the two
+  equal. Existing databases will show more alerts once someone presses "Evaluate alerts", because old
+  warning and error events will match rules they always should have.
+
+  **The proof.** `oms/test_ops_severity_rank.py` runs five blocks, each on its own, and prints every
+  failure. Rules and events go through the real routes. On an `ERROR` event there are rules at
+  high, critical and "Critical", and on a `warning` event rules at medium and high. The alerts raised
+  must be exactly the high rule on the error and the medium rule on the warning. The same thresholds
+  as subscriptions must match 1, 0, 1 and 0. One block requires one map and a helper that trims and
+  lowercases. Another reads the feed's map out of `OpsWorkspace.tsx` and requires it to equal the
+  server's. The last guards the kept defaults for unknown words. Run against the committed server,
+  four blocks failed: the map lacked both words, the feed's map differed from it, no alert was raised
+  at all, and all four subscriptions matched nothing. The unknown-word guard passed, as it should. On
+  the fix, 41 assertions pass. So do the four scripts that exercise these routes: ops and
+  reliability, the unified platform, operational-plane tenancy, and the asynchronous job runtime.
+
+  **Negative runs,** one mutation at a time:
+  - **`error` dropped from the map:** only the medium rule fired; `sub_e_high` matched 0.
+  - **`warning` dropped:** only the high rule on the error fired; `sub_w_medium` matched 0.
+  - **`error` ranked 4:** the critical and "Critical" rules fired on the error; `sub_e_crit` matched 1.
+  - **`warning` ranked 3:** the high rule fired on the warning; `sub_w_high` matched 1.
+  - **The rule threshold not lowercased:** "Critical" fell to the unknown default, high, and fired on
+    the error. Only the alert block failed.
+  - **Subscriptions reading the old map:** every subscription matched 0. Only that block failed.
+  - **An unknown rule threshold defaulting to info, an unknown subscription threshold to high, an
+    unknown event word to low:** each failed only the unknown-word guard, at its own assertion.
+  - **A second copy of the map in `platform_core`:** only the one-map block failed, although every
+    alert and subscription still came out right.
+  - **The helper not trimming:** " Warning " ranked unknown.
+  - **`error: 3` dropped from the feed's map:** only the feed block failed.
+  - **The server gaining a word the feed lacks:** the map and feed blocks failed, and so did the
+    unknown-word guard, since `notice` was no longer unknown.
+  - Restored: 41 pass, and both sources are byte for byte what they were.
+
 ## Order and size
 
 | Step | Touches | Commits |

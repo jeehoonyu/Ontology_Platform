@@ -36,7 +36,6 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "warn": 2, "high": 3, "critical": 4}
 POLICY_EFFECTS = {"ALLOW", "DENY", "MASK", "ROW_FILTER", "REQUIRE_APPROVAL"}
 
 
@@ -323,7 +322,7 @@ def _matches_event_filters(event: Dict[str, Any], filters: Dict[str, Any]) -> bo
         if expected is not None and event.get(field) != expected:
             return False
     min_severity = filters.get("min_severity")
-    if min_severity and SEVERITY_RANK.get(str(event.get("severity", "info")).lower(), 0) < SEVERITY_RANK.get(str(min_severity).lower(), 0):
+    if min_severity and ops_control.severity_rank(event.get("severity", "info"), 0) < ops_control.severity_rank(min_severity, 0):
         return False
     return _matches_expression(event, filters.get("expression") or {})
 

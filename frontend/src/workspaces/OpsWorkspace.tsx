@@ -35,9 +35,9 @@ export function OpsWorkspace() {
   </Page>;
 }
 
-// N7d. Severity ranked by meaning, so a sort puts the worst first. The server's own
-// rank (`SEVERITY_RANK` in ops_control.py) has neither `warning` nor `error`; the owner
-// placed them beside `warn` and `high`. A severity in no rank sorts below every one.
+// N7d. Severity ranked by meaning, so a sort puts the worst first. This is the server's
+// rank (`SEVERITY_RANK` in ops_control.py), where the owner placed `warning` and `error`
+// beside `warn` and `high`; test_ops_severity_rank.py holds the two equal. Unranked sorts last.
 const SEVERITY_RANK: Readonly<Record<string, number>> = { info: 0, low: 1, medium: 2, warn: 2, warning: 2, high: 3, error: 3, critical: 4 };
 // Module level: the grid rebuilds its columns whenever this object changes identity.
 const FEED_COLUMNS: Readonly<Record<string, GridColumnSpec>> = {
