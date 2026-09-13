@@ -155,4 +155,67 @@ test.describe("the census sites sort the way the census said a person needs", ()
     await expect(costHeader).toHaveAttribute("aria-sort", "none");
     await expect(scope, "the sentence outlived the sort").toHaveCount(0);
   });
+
+  test("the compatibility grid puts every BREAKING change first, and a new comparison starts unsorted", async ({ page }) => {
+    const suffix = `${Date.now()}`;
+    const objectTypeId = `grid_registry_${suffix}`;
+    const displayName = `Grid Registry ${suffix}`;
+    // A channel of its own, so the comparison is against this test's baseline only.
+    const channel = `grid-${suffix}`;
+    await settled(await page.request.post("/object-types", { data: {
+      id: objectTypeId, display_name: displayName, description: "Grid registry contract",
+      properties: { assetId: { type: "string" }, name: { type: "string" }, note: { type: "string" } }
+    } }));
+    await settled(await page.request.put(`/ontology/object-types/${objectTypeId}/profile`, { data: {
+      api_name: `GridRegistry${suffix}`, primary_key: "assetId", title_key: "name",
+      properties: { assetId: { base_type: "string", required: true }, name: { base_type: "string", required: true }, note: { base_type: "string", required: false } }
+    } }));
+    const publishRevision = async (title: string, changes: object[], source: { base_revision_id: string } | { capture_current: true }) => {
+      const change = await settled(await page.request.post("/ontology/change-sets", { data: {
+        project_id: "default", title, ...source, changes
+      } })) as { id: string };
+      await settled(await page.request.post(`/ontology/change-sets/${change.id}/validate`));
+      await settled(await page.request.post(`/ontology/change-sets/${change.id}/decision`, { data: { approve: true } }));
+      // Archiving a property is a breaking change, which publishes only when acknowledged.
+      const published = await settled(await page.request.post(`/ontology/change-sets/${change.id}/publish`, { data: { environment: "production", allow_breaking: true } })) as { revision: { id: string } };
+      return published.revision.id;
+    };
+    // The baseline has to carry the object type. A revision is its base plus its changes,
+    // and the base is production's current revision when there is one, which predates
+    // the type. Capturing the live ontology carries it whether or not production has a
+    // revision yet, so this does not depend on another test having published one.
+    const baseline = await publishRevision(`Grid registry baseline ${suffix}`, [], { capture_current: true });
+    await settled(await page.request.post("/ontology/registry/publish", { data: {
+      project_id: "default", revision_id: baseline, version: `1.0.${suffix}`, channel, allow_breaking: true
+    } }));
+    // Archiving a property breaks consumers; adding an optional one does not.
+    const next = await publishRevision(`Grid registry change ${suffix}`, [
+      { operation: "archive_property", object_type_id: objectTypeId, property_name: "note" },
+      { operation: "add_property", object_type_id: objectTypeId, property_name: "extra", spec: { base_type: "string", required: false } }
+    ], { base_revision_id: baseline });
+
+    await page.goto("/workspace/ontology");
+    await page.locator(".manager-resource-nav .resource-row").filter({ hasText: displayName }).click();
+    await page.getByRole("button", { name: /^schema registry$/i }).click();
+    const registry = page.getByRole("region", { name: "Ontology schema registry" });
+    await registry.getByLabel("Channel").fill(channel);
+    const baselineEntry = registry.getByRole("button", { name: new RegExp(`1\\.0\\.${suffix} ${channel}`) });
+    await expect(baselineEntry).toBeVisible();
+    await registry.getByLabel("Published revision").selectOption(next);
+    await registry.getByRole("button", { name: "Check compatibility" }).click();
+    await expect(registry.locator('.registry-status[role="status"]')).toContainText("Compatibility result: BREAKING");
+
+    const panel = panelTitled(page, "Semantic Compatibility");
+    const classification = header(panel, "classification");
+    await classification.getByRole("button").click();
+    await expect.poll(async () => (await valuesOf(panel, "classification"))[0],
+                      { message: "sorting by classification did not put a BREAKING change first" }).toBe("BREAKING");
+    expect(await valuesOf(panel, "classification"), "the comparison is not mixed, so this proves nothing").toContain("NON_BREAKING");
+    await classification.getByRole("button").click();
+    await expect.poll(async () => (await valuesOf(panel, "classification"))[0]).toBe("NON_BREAKING");
+
+    await baselineEntry.click();
+    await expect(header(panel, "classification"), "the last comparison's sort carried into a different comparison")
+      .toHaveAttribute("aria-sort", "none");
+  });
 });

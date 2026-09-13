@@ -14,7 +14,8 @@ import {
   type OntologyRevisionSummary,
   type RegistryCompatibility
 } from "../api/ontologyRegistryApi";
-import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { DataGrid } from "../components/data/DataGrid";
 
 export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
   const [state, setState] = useState<OntologyRegistryState | null>(null);
@@ -179,8 +180,17 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
           </> : <EmptyState inline>Select a published version to inspect its contract.</EmptyState>}
         </Panel>
       </div>
+      {/* N7d: the grid, where a person sorts by classification to put every BREAKING
+          change on the first page before publishing. Keyed by comparison, so a sort or a
+          page from the last comparison does not hide this one's breaking rows. Checking
+          the same revision again keeps the key, and with it the sort. */}
       <Panel title="Semantic Compatibility">
-        <DataTable rows={compatibilityRows} empty="No semantic changes for the selected comparison." />
+        <DataGrid
+          key={compatibility ? `check:${compatibility.revision_id}` : `entry:${selected?.id ?? "none"}`}
+          rows={compatibilityRows}
+          label="Semantic compatibility changes"
+          empty="No semantic changes for the selected comparison."
+        />
       </Panel>
     </section>
   );

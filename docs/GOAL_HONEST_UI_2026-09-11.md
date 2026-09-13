@@ -832,6 +832,57 @@ plan, and it is measured there.
     Tests: four in `grid-sites.spec.ts`. Thirty pass on one build: those four, the two evaluator
     tests that open these panels, and the twenty-four grid and table tests. Negative runs:
     seven builds, and every one failed at the assertion it breaks. Each of the three simple sites put back to `DataTable` timed out at the grid's `Filter rows` disclosure, which the old table does not have. The telemetry note removed failed at `Loaded the latest 50 of 51 jobs`, `element(s) not found`. The evaluator's `exact` removed failed in strict mode, with the grid's `revoked` header as the second `Revoke`. `sortScope` not passed, and the sentence kept after the sort cleared, first failed early, at the flaky fixture above. Run again against the fixed test, they failed at `a sort of the loaded window does not say it ranks only the window` and at `the sentence outlived the sort`, `Received: 1`. Restored, thirty passed, with the sources restored byte for byte.
+    **Then the registry's compatibility table.** `Semantic Compatibility` in the schema registry
+    is a grid, keyed by comparison: the revision checked, or the published entry selected. The
+    census's task there is to put every BREAKING change on the first page before publishing, and a
+    sort or a page carried over from the last comparison could hide this one's. Checking the same
+    revision again keeps the key, and with it the sort, which is stated in the component.
+
+    The test in `grid-sites.spec.ts` builds a mixed comparison on a channel of its own. It creates an
+    object type with an optional `note`. The baseline revision captures the live ontology, so it
+    carries that type, and is published to the registry. A second revision archives `note`, which is
+    breaking, and adds an optional `extra`, which is not. Checking it and pressing `classification`
+    puts `BREAKING` first, and a second press puts `NON_BREAKING` first. Choosing the published
+    baseline entry returns the header to `aria-sort="none"`.
+
+    **The fixture was wrong three times before it held.** The server said why the first two times.
+    A baseline from an empty change set did not contain the new type: a revision is its base plus its
+    changes, and the base was production's current revision, which predates the type. And a breaking
+    revision does not publish without `allow_breaking`, which the fixture now sends. **The third came
+    from the negative runs.** The fixture then added the type on top of production's current revision,
+    which a fresh database does not have. It had passed only because the evaluator test, running
+    first, published one. So the first run of C3a and C3b failed at the fixture's "no production
+    revision" check, not at the break each was meant to show, and neither counted. The baseline now
+    sets `capture_current`, which carries the type whether or not production has a revision. The test
+    passes alone on a fresh database, and after the evaluator test has published a production
+    revision first.
+
+    **The existing registry test needed its status checks scoped.** A grid with rows carries a
+    second `role="status"`, its rows status, so `registry.getByRole("status")` became ambiguous
+    whenever the comparison had rows. The three checks now read `.registry-status`, the way the
+    relationship designer's check was scoped when the manager moved onto panes.
+
+    **Payload, measured.** The ontology-manager route went from 703,043 to **777,219 bytes,
+    +74,176**, and its ceiling is raised to that. The registry panel's only `DataTable` went, so
+    `UI_PRIMITIVES.md` counts `DataTable` in fourteen files, one fewer, and `DataGrid` in three.
+
+    **Route cost, measured again.** Ontology went from 19 to 20 requests on open, and the one it gained
+    is the grid's chunk: the build manifest lists `DataGrid` among OntologyManager's imports. It
+    was already loading the `with-selector` chunk (commit 2's record). The baseline is re-recorded
+    for that one request, and every other route measured at its recorded number.
+
+    Tests: one in `grid-sites.spec.ts`. Twenty-six pass on one build: it, the registry evaluator
+    test, and the twenty-four grid and table tests. **Negative runs,** each on a rebuilt `dist`, run
+    again after the fixture fix:
+    - **C3a,** the registry table back to `DataTable`: timed out at the first press, waiting for the
+      `classification` header's sort button, which a `DataTable` does not draw.
+    - **C3b,** the `key` removed: choosing the baseline entry left the header at
+      `aria-sort="descending"` where `none` was expected. The last comparison's sort carried into a
+      different comparison.
+    - **C3c,** the evaluator test's status check unscoped again: strict mode, `getByRole('status')`
+      resolved to 2 elements.
+    - Restored: the twenty-six pass again, and both mutated sources are byte for byte what they were.
+
   - **N7e — Virtualization replacing paging where a table is measured long.** **Open**, not
     started. It opens when a site has a measured row count at which a forty-row page costs
     something. It brings a truncation-gate spelling for a virtualized draw, captions for a

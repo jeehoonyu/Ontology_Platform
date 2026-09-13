@@ -896,9 +896,12 @@ test("ontology schema registry publishes a revision and downloads source and an 
   await registry.getByLabel("Published revision").selectOption(revisionId);
   await registry.getByLabel("Semantic version").fill(version);
   await registry.getByRole("button", { name: "Check compatibility" }).click();
-  await expect(registry.getByRole("status")).toContainText(/Compatibility result: (NON_BREAKING|NO_CHANGE)/);
+  // Scoped to the registry's own status line: since N7d the compatibility table is a
+  // grid, and a grid with rows carries a second `role="status"`, its rows status.
+  const registryStatus = registry.locator('.registry-status[role="status"]');
+  await expect(registryStatus).toContainText(/Compatibility result: (NON_BREAKING|NO_CHANGE)/);
   await registry.getByRole("button", { name: "Publish registry" }).click();
-  await expect(registry.getByRole("status")).toContainText(`Published production registry version ${version}`);
+  await expect(registryStatus).toContainText(`Published production registry version ${version}`);
   await expect(registry.getByRole("button", { name: new RegExp(`${version} production`) })).toBeVisible();
   const sourceDownloadPromise = page.waitForEvent("download");
   await registry.getByRole("button", { name: "TypeScript source" }).click();
@@ -912,7 +915,7 @@ test("ontology schema registry publishes a revision and downloads source and an 
   await packageButton.click();
   const packageDownload = await packageDownloadPromise;
   expect(packageDownload.suggestedFilename()).toBe(`ontologyos-default-production-${version}.tgz`);
-  await expect(registry.getByRole("status")).toContainText("Downloaded installable @ontologyos/default-production");
+  await expect(registryStatus).toContainText("Downloaded installable @ontologyos/default-production");
 });
 
 test("pipeline creates a graph and accepts a dragged node", async ({ page }, testInfo) => {

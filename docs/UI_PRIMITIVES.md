@@ -16,12 +16,12 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `ErrorBanner` | `components/data/DataDisplay.tsx` | **17** — App, AgentRuntimePanel, Analytics, Automate, and 13 more |
 | `KeyValueGrid` | `components/data/DataDisplay.tsx` | **17** — App, Analytics, Automate, ControlPanel, and 13 more |
 | `LoadingState` | `components/data/DataDisplay.tsx` | **16** — App, Analytics, Automate, ControlPanel, and 12 more |
-| `DataTable` | `components/data/DataDisplay.tsx` | **15** — App, AgentRuntimePanel, Analytics, Automate, and 11 more |
+| `DataTable` | `components/data/DataDisplay.tsx` | **14** — App, AgentRuntimePanel, Analytics, Automate, and 10 more |
 | `Page` | `components/workbench/Workbench.tsx` | **13** — App, Analytics, Automate, ControlPanel, and 9 more |
 | `Metric` | `components/data/DataDisplay.tsx` | **12** — App, Analytics, Automate, ControlPanel, and 8 more |
 | `DeveloperEvidence` | `components/data/DataDisplay.tsx` | **5** — App, DataMedia, Delivery, Security, and 1 more |
+| `DataGrid` | `components/data/DataGrid.tsx` | **3** — ControlPanel, DataMedia, OntologyRegistryPanel |
 | `PaneHost` | `components/layout/Pane.tsx` | **3** — OntologyManager, PipelineBuilder, VisualBuilder |
-| `DataGrid` | `components/data/DataGrid.tsx` | **2** — ControlPanel, DataMedia |
 | `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
