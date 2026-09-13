@@ -651,7 +651,13 @@ def reliability_summary(db: Session = Depends(get_db)):
     return {
         **snapshot.metrics,
         "status": snapshot.status,
-        "latest_contract_runs": [_run_dict(run) for run in latest_contract_runs[:8]],
+        # The status counts and the posture come from the latest 25 runs, and the list
+        # carried 8 of them; nothing said either. Every run the counts came from is
+        # listed now, with how many runs exist. Response only: the snapshot row keeps
+        # its shape.
+        "contract_runs": db.query(DataQualityRun).count(),
+        "contract_run_window": len(latest_contract_runs),
+        "latest_contract_runs": [_run_dict(run) for run in latest_contract_runs],
         "latest_backfills": [_backfill_dict(plan) for plan in latest_backfills],
         "latest_impacts": [_impact_dict(run) for run in latest_impacts],
     }

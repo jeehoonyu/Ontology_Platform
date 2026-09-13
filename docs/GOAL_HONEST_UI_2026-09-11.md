@@ -1799,6 +1799,44 @@ plan, and it is measured there.
   The Vertex route's chunk measures 452 KB with the shared closure of 436 KB, under its ceiling;
   the route is not among the sixteen route cost measures.
 
+  **Then the Reliability tab.** `GET /reliability/summary` read the 25 newest data contract runs, built
+  its status counts and the posture's PASS, WARN or FAIL from them, and returned 8 of the 25. The tab
+  showed the counts beside a "Data contracts" metric that counts every contract, and listed the 8
+  under "Latest Data Contract Runs". Nothing said the counts covered 25 runs, or that the list was 8 of
+  them.
+
+  **Every run the counts came from is listed, and both panels say what they cover.** The summary now
+  returns all the runs it read, with `contract_runs`, a count of every run, and
+  `contract_run_window`, how many it read. Both are in the response only, so the snapshot row each
+  call writes keeps its shape, and the posture's meaning is unchanged: it is still the latest 25, now
+  said. When more runs exist, the posture reads "Status counts cover the latest 25 of N contract runs"
+  and the table "Loaded the latest 25 of N contract runs".
+
+  **The proof.** `test_ops_investigations_reliability.py` now runs its contract 26 more times and requires
+  the summary's `contract_runs` to equal the contract's own run list, more than 25, and the runs it lists
+  to number 25, equal to `contract_run_window`. In `truncation-sites.spec.ts`, a new browser test runs one
+  contract 26 times, reads the true count from the summary, and opens the Operations Reliability tab: the
+  table lists 25 runs, it reads "Loaded the latest 25 of N contract runs", and the posture reads "Status
+  counts cover the latest 25 of N contract runs", neither cut off. Both pass on the fix: 65 backend
+  assertions and the browser test.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B1, the list cut to eight again:** the backend script failed reading 8 runs where the counts came
+    from 25.
+  - **B2, the total counted from the runs read:** it failed reading 25 where 27 exist.
+  - **N1, the server listing eight with both notes kept:** the browser test failed at the table,
+    `Expected: 25`, `Received: 8`.
+  - **N2, the table's note removed:** it failed at that note, element not found.
+  - **N3, the posture's note removed:** it failed at that note, element not found.
+  - **N4, the committed server and screen:** it failed at the fixture's check, the summary reporting no
+    `contract_runs`.
+  - Restored: the Reliability test and the operations feed tests pass, the backend script passes, and all
+    three sources are byte for byte what they were.
+
+  **The references.** The operations route still opens with 20 requests, at 523 KB, and its chunk
+  measures 521 KB with the shared closure of 436 KB, under its ceiling. `.table-truncated` was already
+  used in `OpsWorkspace.tsx`, and neither `TABLE_TRUNCATION.md` nor `INERT_CONTROLS.md` moves.
+
 ## Order and size
 
 | Step | Touches | Commits |

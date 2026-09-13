@@ -153,6 +153,15 @@ backfill_run = ok(client.post(f"/reliability/backfills/{backfill['id']}/run", js
 assert backfill_run["status"] == "SUCCESS", backfill_run
 reliability = ok(client.get("/reliability/summary"), "reliability summary")
 assert reliability["data_contracts"] == 1 and reliability["backfills"] == 1, reliability
+# The posture counts the latest 25 contract runs. The summary lists every one of them and
+# says how many runs exist, so the screen can say what its counts cover.
+for _ in range(26):
+    ok(client.post(f"/reliability/data-contracts/{contract['id']}/run", json={}), "run data contract again")
+all_runs = ok(client.get(f"/reliability/data-contracts/{contract['id']}/runs"), "list data contract runs")
+past_window = ok(client.get("/reliability/summary"), "reliability summary past its window")
+assert past_window.get("contract_runs") == len(all_runs) and len(all_runs) > 25, (past_window.get("contract_runs"), len(all_runs))
+assert len(past_window["latest_contract_runs"]) == past_window.get("contract_run_window") == 25, (
+    len(past_window["latest_contract_runs"]), past_window.get("contract_run_window"))
 
 investigation = ok(client.post("/investigations", json={
     "id": "asset_case",

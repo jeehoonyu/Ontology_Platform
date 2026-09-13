@@ -619,6 +619,47 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     expect(seen.size, "paging did not reach every object exactly once").toBe(60);
   });
 
+  test("the Reliability tab says what its counts cover and lists every run it loaded", async ({ page }) => {
+    test.setTimeout(120_000);
+    // The posture's status counts came from the latest 25 contract runs, and the table listed
+    // 8 of them, with nothing said about either. Here one contract runs 26 times, so the
+    // database holds more runs than the 25 the summary reads, whatever ran before.
+    const suffix = `${Date.now()}`;
+    const assetId = `reliability_runs_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: `Reliability runs ${suffix}`, kind: "dataset", asset_schema: {},
+      records: [{ id: 1 }, { id: 2 }, { id: 3 }]
+    } }), "asset");
+    const contract = await settled(await page.request.post("/reliability/data-contracts", { data: {
+      display_name: `Reliability runs ${suffix}`, asset_id: assetId, checks: []
+    } }), "contract") as { id: string };
+    for (let run = 0; run < 26; run += 1) {
+      await settled(await page.request.post(`/reliability/data-contracts/${contract.id}/run`, { data: {} }), `run ${run}`);
+    }
+    const summary = await settled(await page.request.get("/reliability/summary"), "summary");
+    expect(typeof summary.contract_runs, "the summary does not report how many contract runs exist").toBe("number");
+    const held = summary.contract_runs as number;
+    expect(held, "the fixture did not reach past the 25 runs the summary reads").toBeGreaterThan(25);
+    const heldText = await page.evaluate((total) => total.toLocaleString(), held);
+
+    await page.goto("/workspace/ops");
+    await page.getByRole("navigation", { name: "Operational control views" }).getByRole("button", { name: "Reliability", exact: true }).click();
+    const table = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Latest Data Contract Runs", exact: true }) });
+    await expect(table.locator("tbody tr"), "the table lists fewer runs than the counts came from").toHaveCount(25);
+    await expect(table.getByRole("note"), "the table lists 25 of more runs and does not say so")
+      .toHaveText(`Loaded the latest 25 of ${heldText} contract runs`);
+    await expectUnclipped(table.getByRole("note"), "the runs note is cut off, hiding how many runs exist");
+    const posture = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Reliability Posture", exact: true }) });
+    await expect(posture.getByRole("note"), "the status counts cover 25 runs and read as all of them")
+      .toHaveText(`Status counts cover the latest 25 of ${heldText} contract runs`);
+    await expectUnclipped(posture.getByRole("note"), "the posture note is cut off, hiding how many runs exist");
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

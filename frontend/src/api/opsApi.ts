@@ -9,7 +9,7 @@ export type Runbook = { id: string; display_name: string; description?: string |
 export type RunbookExecution = { id: string; runbook_id: string; incident_id?: string | null; actor: string; status: string; step_results: JsonObject[]; created_at: number; completed_at?: number | null };
 export type OpsNotification = { id: string; severity: string; title: string; message?: string | null; source: string; status: string; created_at: number };
 export type OpsSummary = { events: number; open_alerts: number; open_incidents: number; runbooks: number; pending_approvals: number; unread_notifications: number; severity_counts: Record<string, number>; latest_events: OpsEvent[]; latest_alerts: AlertEvent[]; latest_incidents: Incident[] };
-export type ReliabilitySummary = { status: string; data_contracts: number; latest_contract_status: Record<string, number>; backfills: number; lineage_impact_runs: number; latest_contract_runs: JsonObject[] };
+export type ReliabilitySummary = { status: string; data_contracts: number; latest_contract_status: Record<string, number>; backfills: number; lineage_impact_runs: number; latest_contract_runs: JsonObject[]; contract_runs?: number; contract_run_window?: number };
 
 export const getOpsSummary = () => api<OpsSummary>("/ops/summary");
 export const listOpsEvents = () => api<OpsEvent[]>("/ops/events?limit=250");
