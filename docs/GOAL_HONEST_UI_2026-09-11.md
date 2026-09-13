@@ -378,7 +378,135 @@ plan, and it is measured there.
 
     The package README carries an instruction addressed to coding agents to install a further
     tool; it was read as documentation and not acted on.
-  - **N7b — Resize, reorder and pin.** **Open** — each with a control that is not a drag.
+  - **N7b — Resize, reorder and pin.** **Met** — each from a control that is not a drag. Every
+    column has a row in the grid's `Columns` disclosure:
+    - a width select with four presets, `Narrow · 100px` to `Widest · 400px`;
+    - `Earlier` and `Later` buttons;
+    - a `Pin` checkbox that pins the column to the start.
+
+    `Reset columns` puts back width, place, pin and visibility, and leaves sorting alone,
+    which its name does not claim. A polite status line says what each press did:
+    `name moved, column 2 of 3`. The grid registers `columnSizingFeature`,
+    `columnOrderingFeature` and `columnPinningFeature`. It does not register
+    `columnResizingFeature`, whose only entry point is a drag.
+
+    **No drag handle.** The condition asks for a control that is not a drag, and nothing in
+    the goal asks for a drag now. The library's resize handler also attaches its move
+    listeners to `document`, inside `node_modules`, where `audit_drag_affordances` cannot see
+    them, and it has no Escape. So the drag census and the movement contract are unchanged,
+    at 20 gaps, and a drag on the grid is left to a condition of its own. That condition
+    starts by teaching `_POINTER` to match `getResizeHandler(`.
+
+    **Pinned columns stay in view only while there is room.** A pinned header and its cells
+    are `position: sticky`, offset by `column.getStart("start")`, and opaque, so the columns
+    scrolling under them do not show through. That holds only while one default column still
+    has room to scroll beside the pins: `getStartTotalSize() + 180` within the wrap's width,
+    measured by a `ResizeObserver`. Past that, the pins scroll with the grid and a note says
+    why, because otherwise they would cover the grid they are meant to anchor.
+    - Widths are set on a `<colgroup>`, and the table takes the sum of them instead of
+      stretching to its panel. **A grid narrower than its panel no longer fills it**, which
+      is what makes the offsets exact.
+    - The truncation caption's text sits in a sticky `<span>`. Measured in Chromium, a sticky
+      caption scrolled away at `x = −899`, because it is as wide as its table.
+    - A header focused while it sits under the pins is scrolled clear of them. It is already
+      inside the scrollport, so the browser does not scroll it, and the pins hid the button
+      and its focus ring.
+
+    **The arrangement is not saved,** in `localStorage` or on the server. A saved arrangement
+    is a saved view, which the research document names as its own scope and GOAL_MOVEMENT
+    lists under "Deliberately not here". **The grid is keyed by dataset** in `DataMedia.tsx`,
+    so a pin made on one dataset does not reorder the next. That also means switching
+    dataset now starts the next one's sort, visibility and page afresh, which N7a carried
+    over.
+
+    **Payload, measured.** The data-media route went from 497,083 to **515,663 bytes, +18,580
+    (+18.1 KB)**. The ceiling was raised for that route alone, to the measured number. The
+    library features alone measured +12,750 bytes in scratch builds with the repo's own
+    esbuild, and +12,850 with Vite; the rest is the component. The design estimated +15 to
+    +17 KB before the review's fixes added to the component, and this time the estimate was
+    written down as one and replaced by the measurement. The closure every route downloads
+    measures 445,164 bytes against a recorded 442,846. That 2,318 is mostly N7b's CSS and
+    leaves 5,874 bytes of the 8 KB tolerance.
+
+    **How it was designed.** Three designs were written from different angles: plain controls
+    in each column's row; a drag handle with non-drag parity; and a column menu in each header.
+    Three judges scored them, each through one lens: the source, accessibility, and scope. Two
+    picked the plain controls and one the menu, and all three put the drag last. The judges
+    checked the designs' claims against the installed source and found several false:
+    - that focus survives a keyed row being moved;
+    - that `columnResizeMode` defaults to `"onChange"`; it is `"onEnd"`;
+    - that a `<th>` width needs `box-sizing`; `styles.css` already sets `border-box`
+      everywhere;
+    - two negative runs that could not fail as written.
+
+    The built design is the plain controls, with the menu design's corrections: moves swap
+    only with shown columns in the same pin region, and a position is counted per region.
+    **`column.getIndex()` with no argument is not split by pin region,** so every call passes
+    the region.
+
+    **The first round of negative runs removed code.** Twenty builds, each with one defended
+    behaviour broken. Nineteen failed where predicted. The twentieth removed the effect that
+    put focus back on a pressed button after React moved its row, and every focus assertion
+    still passed, in both the reorder test and the unpin test. The judges' claim that
+    Chromium drops focus when React moves a keyed row was read, not observed, and here it did
+    not happen. The effect went. The focus assertions stay as regression checks on the
+    behaviour, not as proof of a mechanism.
+
+    **Then a review, before the commit.** Five reviewers, one lens each, read a snapshot of the
+    change, and a skeptic per lens tried to refute every finding. **Fourteen were confirmed and
+    one refuted.** Fixed in this commit:
+    - **The status line told untrue things.** It rebuilt an old notice from the current state
+      on every render. So after `rank is hidden; show it to move it`, showing rank left the
+      sentence standing. And hiding another column rewrote `name moved, column 2 of 3` into
+      `name moved, column 1 of 2`, which a screen reader then announced. Each sentence is now
+      worked out once, in the render its action produced. Hiding and showing a column are
+      announced as themselves.
+    - **A second press at an edge announced nothing,** because a polite live region does not
+      re-read unchanged text. Each notice is now a new node.
+    - **A pin on a hidden column was announced as staying in view.**
+    - **A move followed by a move back stored a column order anyway,** and that order overrode
+      a replacement file that listed its fields differently. When a move lands back on the
+      dataset's own order, no order is stored.
+    - **An arrangement outlived the fields it named.** The grid stays mounted when its own
+      dataset reloads. A pin on a field a replacement file dropped kept `Reset columns`
+      offering to undo something nobody could see, and pinned the field again when a later
+      file brought it back. Ids that no longer exist are now dropped when the fields change.
+    - **A focused header could sit wholly under the pins.** Fixed as above.
+    - **Four test gaps:**
+      - the 375px step could not fail on a grid that measured its width once;
+      - no test ever pressed `Earlier` or `Later` on a pinned column;
+      - nothing checked that pinned cells are opaque;
+      - nothing checked the header hidden under the pins.
+    - **`audit_inert_controls` read `aria-disabled` as `disabled`.** A hyphen is a word
+      boundary, so `\bdisabled\b` matched inside it. An aria-disabled button stays focusable
+      and clickable, so without a handler it is exactly the control that gate exists to find.
+      It now matches only the attribute. Three new assertions hold that, 34 in all, and the
+      census is unchanged at 0 inert of 326, so no existing button was hiding behind the old
+      rule.
+
+    **Tests:** `data-grid.spec.ts` holds eleven, N7a's two and nine for N7b. All eleven, with
+    the three `data-table.spec.ts` tests, pass on one build: fourteen. Playwright refuses to
+    click an `aria-disabled` element, though a browser delivers the click, so the tests press
+    those buttons from the keyboard.
+
+    **Second round of negative runs,** on the source after the fixes: twenty-eight builds, and every one failed at the assertion expected of it. Eighteen re-broke the first round's behaviours on the final source, and ten broke the review's fixes: the frozen sentence, a hide announced as itself, a new node per notice, the hidden pin, no order stored after a move back, stale ids dropped, the focused header scrolled clear, the width re-measured when the window changes, a pinned move writing the pin order, and opaque pinned cells. Restored, all fourteen passed, with the sources restored byte for byte. Two first-round breaks were not re-run: the focus effect they removed no longer exists, and the raw-state read of `Reset columns` is covered by the paragraph below. One break failed earlier than its target: without its `aria-label`, the width control failed the test's own count of named controls before axe ran.
+
+    **Not separately provable, and said so.** `Reset columns` decides whether anything changed
+    by reading the columns that exist rather than raw state. Two other fixes each also make
+    that reading true: storing no order after a move back, and dropping stale ids. So no one
+    build breaks it alone, and it has no negative run of its own.
+
+    References regenerated: `INERT_CONTROLS.md`, 323 to 326 controls; `TABLE_TRUNCATION.md`,
+    where only the DataGrid line moved. `route-payload-baseline.json` changed for DataMedia
+    only.
+
+    Out of scope, and whose it is:
+    - any drag on the grid;
+    - end pinning;
+    - continuous widths;
+    - persistence and saved views;
+    - N7c's filter and selection, measured at about +16.9 KB over N7b;
+    - N7d's rollout to the seven sites the census names.
   - **N7c — Filter and select.** **Open**.
   - **N7d — Virtualized, and rolled out where sorting is needed.** **Open** — virtualization
     replacing paging where a table is long, and the grid adopted by the `DataTable` call

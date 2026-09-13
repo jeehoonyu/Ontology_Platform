@@ -214,7 +214,8 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
       <div className="two-col">
         <Panel title={selectedAsset ? `Records — ${selectedAsset.display_name || selectedAsset.id}` : "Records"}>
           {selectedAsset ? (
-            <DataGrid rows={records} label="Dataset records" empty="No records yet. Upload a file to populate this dataset." />
+            // Keyed by dataset, so a column arrangement made on one does not reorder the next.
+            <DataGrid key={selectedAsset.id} rows={records} label="Dataset records" empty="No records yet. Upload a file to populate this dataset." />
           ) : (
             <EmptyState title="No dataset selected" />
           )}

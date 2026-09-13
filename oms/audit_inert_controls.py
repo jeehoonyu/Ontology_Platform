@@ -94,9 +94,16 @@ def _tags(text: str):
 # What makes a control do something. `disabled` is here on purpose: the review's
 # criterion is "work or explain why unavailable", and a disabled control is the
 # explanation.
+#
+# `aria-disabled` is not. It was, by accident: `\bdisabled\b` matched inside it,
+# because a hyphen is a word boundary. An aria-disabled button stays focusable and
+# clickable -- N7b's column controls use it so focus survives reaching an edge --
+# so it has to do something when pressed, and without a handler it is exactly the
+# control this gate exists to find. Found by the N7b review, which deleted a
+# handler from one and watched the census stay at zero.
 _WIRED = re.compile(
     r"\bonClick\b|\bonPointerDown\b|\bonMouseDown\b|\bonKeyDown\b|\bonSubmit\b"
-    r"|\bonChange\b|type=[\"']submit[\"']|\bhref=|\{\.\.\.|\bdisabled\b")
+    r"|\bonChange\b|type=[\"']submit[\"']|\bhref=|\{\.\.\.|(?<![-\w])disabled\b")
 
 # A handler whose body is empty. `onClick={() => {}}`, `onClick={()=>{ }}`,
 # `onClick={() => undefined}`, `onClick={noop}`.

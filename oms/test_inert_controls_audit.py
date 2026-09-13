@@ -73,6 +73,14 @@ check(not is_inert("<button {...listeners} {...attributes}>"),
       "make every grip in the product read as dead")
 check(not is_inert('<button disabled title="Select a dataset first">Run</button>'),
       "the criterion is 'works or explains why unavailable', and `disabled` explains")
+check(not is_inert("<button disabled={!ready}>Run</button>"), "an expression-valued disabled is not recognised")
+# `aria-disabled` leaves the control focusable and clickable, so it explains nothing
+# on its own: a press has to do something. The hyphen is a word boundary, and the
+# first version of the rule read `aria-disabled=` as `disabled`.
+check(is_inert("<button aria-disabled={atEdge}>Later</button>"),
+      "aria-disabled passes as wired, so a focusable button that does nothing when pressed is not counted")
+check(not is_inert("<button aria-disabled={atEdge} onClick={() => move(column, 1)}>Later</button>"),
+      "an aria-disabled button with a handler reads as inert")
 check(not is_inert("<button onPointerDown={start}>"), "onPointerDown is not recognised")
 
 # --- and the one edit that would make this gate lie ---------------------------
