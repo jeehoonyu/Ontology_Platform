@@ -681,7 +681,7 @@ plan, and it is measured there.
     - saving filters or saved views;
     - filtering on the server, or over records the page never loaded;
     - N7d's rollout.
-  - **N7d — Rolled out where sorting is needed.** **Open** — the grid adopted by the
+  - **N7d — Rolled out where sorting is needed.** **Met** — the grid adopted by the
     `DataTable` call sites whose rows a person needs to sort, with the `DataGrid` user count
     as the ratchet.
 
@@ -950,6 +950,103 @@ plan, and it is measured there.
     - **C4c,** N9's summary check unscoped again: strict mode, `summary` resolved to 3 elements.
     - Restored: thirty pass on desktop-1280, the contract test and the pipeline sweep pass (5 passed,
       3 skipped by design), and both mutated sources are byte for byte what they were.
+
+    **Then the operations feed, and N7d is met.** The Live Operational Feed is a grid, the last of
+    the census's seven sites, and it brings the one per-column API the rollout needed. `DataGrid`
+    takes `columns`, a module-level map from field name to a `GridColumnSpec`:
+    - `rank`, lowercased value to rank. A ranked value sorts above one with no rank, two ranked
+      values compare by rank, and two unranked values compare as values. Equal ranks return 0, so
+      the library keeps arrival order inside a rank whichever way the column sorts. The lookup is
+      own-keys only, so a value such as `constructor` is not read as a rank.
+    - `show: "epoch-seconds"`, which draws a number of seconds as local time, the same text the
+      feed drew before. The filter matches that text; the sort still compares the number.
+    - `firstSort`, the first header press, ascending unless the caller says otherwise.
+
+    The feed ranks severity `info` 0, `low` 1, `medium`, `warn` and `warning` 2, `high` and
+    `error` 3, `critical` 4, as the owner decided, and its first press puts the worst first.
+    `occurred` holds `created_at` as the number and shows it as before, so it sorts in time rather
+    than as text, where "1:00 PM" comes before "11:59 AM". Its first press is oldest first, because
+    the feed arrives newest first and a first press that changed nothing would look broken. The rows
+    are memoized. N8's note stays above the grid, and the grid gets `sortScope` when the server
+    holds more events than were loaded.
+
+    Tests, both in `grid-sites.spec.ts`:
+    - **T9, "the operations feed ranks severity, keeps arrival order within a rank, and returns to
+      it".** Nine events from a source of the test's own, one per severity word plus `notice`,
+      which no rank knows. Filtered to that source, the first press reads `aria-sort="descending"`
+      and the rank tiers read 4, 3, 3, 2, 2, 2, 1, 0 and then the unranked one. The second press
+      ascends. The third press returns `aria-sort="none"` and the order the rows arrived in.
+    - **T10, "occurred sorts in time across the 12 o'clock hour and a year boundary, and says what a
+      sort ranks".** The ingest endpoint stamps its own time, so this is the suite's first stubbed
+      response, as the owner allowed: `/ops/events` and `/ops/summary` are served, under
+      `locale: "en-US"` and `timezoneId: "UTC"`. Nine events from 23:00 on 2025-12-31 through
+      13:00 on 2026-01-01 sort in time both ways, read through titles that name each time so the
+      check does not depend on how the browser spaces "PM". The scope sentence reads "Sorted by
+      occurred: this orders only the latest 9 of 1,204 events." and goes with the sort.
+
+    On one build, thirty-seven pass on desktop-1280: all of `grid-sites.spec.ts`,
+    `truncation-sites.spec.ts`, `data-grid.spec.ts` and `data-table.spec.ts`. That includes N8's feed
+    test, unchanged, which hands the grid every loaded event and reads its caption. The evaluator's
+    operations workflow passes, and so does the ops route's accessibility sweep at all four widths
+    (5 passed, 3 skipped by design).
+
+    **Not re-recorded: `browser-evidence-baseline.json`.** No N7d commit changed it, and neither did
+    N7b's or N7c's. The fast tier does not gate it, and recording it takes a run of the whole browser
+    suite, so the grid tests these commits added are not yet in that record.
+
+    **Payload, measured.** The operations route measures **532,639 bytes** against a ceiling of
+    454,562, and the ceiling is raised to the measured number. The column specs made the grid's own
+    chunk heavier, so the four routes already carrying it each measured 507 to 545 bytes more:
+    - pipeline-builder 553,480 against 552,973;
+    - control-panel 566,010 against 565,465;
+    - ontology-manager 777,762 against 777,219;
+    - data-media 529,671 against 529,126.
+
+    All four are inside the 8 KB tolerance, and their ceilings are unchanged. `UI_PRIMITIVES.md`
+    counts `DataGrid` in five files. `TABLE_TRUNCATION.md` moved only by line numbers and still
+    counts no silent cut.
+
+    **Route cost, measured again.** Ops went from 18 to **20 requests** on open, and from 459,888 to
+    535,150 bytes, +75,262. The two requests are the grid's own chunk, `DataGrid-*.js`, and
+    `with-selector-*.js`, neither of which the ops route had loaded. The build manifest lists both
+    among OpsWorkspace's imports, the same pair control-panel and pipeline gained. Every other route
+    measured at its recorded request count. The three that already load the grid, control-panel,
+    ontology and pipeline, are 507 bytes heavier with its chunk, and the rest are 4 bytes heavier.
+    The baseline is re-recorded for ops' two requests.
+
+    **Negative runs,** each on a rebuilt `dist`:
+    - **C5a,** severity's rank removed: the tiers came out in the order of the words, not the
+      ranks, and failed "severity sorts as text, not by rank".
+    - **C5b,** `firstSort` removed: the first press read `aria-sort="ascending"` where
+      `descending` was expected.
+    - **C5c,** `enableSortingRemoval: false` passed to the table: the third press left
+      `aria-sort="descending"` where `none` was expected.
+    - **C5d,** the rows built from `toLocaleString()` again: `occurred` sorted as text, with 13:00 on
+      2026-01-01 first and 23:00 on 2025-12-31 after the new year's times.
+    - **C5e,** `sortScope` not passed: the sort ran with no `.grid-sort-scope` where "Sorted by
+      occurred: this orders only the latest 9 of 1,204 events." was expected.
+    - Restored: thirty-seven pass on desktop-1280, the operations workflow and the ops sweep pass
+      (5 passed, 3 skipped by design), and both mutated sources are byte for byte what they were.
+    - **Not separately provable:** the rows memo. Holding the rows' identity across a page
+      re-render would need a re-render that keeps the page mounted, and every action here unmounts it.
+
+    **Kept, not fixed.** Refresh, Evaluate alerts and every action on the operations page set it
+    loading, which unmounts it, so a sort or a filter on the feed is lost after each. The page reset
+    the same way under `DataTable`, but losing a sort is new. It shows as `aria-sort="none"`, and the
+    fix belongs to the page's loading state, not to the grid. Grid columns start 180px wide at every
+    site, so a narrow panel scrolls sideways, as commit 4's screenshot showed; hiding and pinning
+    columns are the way round it.
+
+    **N7d is met.** Every site the census named sorts, each proven on the site with a fixture of its
+    own:
+    - Users, Role Grants, API Tokens and Job Telemetry in the control panel;
+    - the registry's Semantic Compatibility;
+    - the pipeline contract's issues;
+    - the operations feed.
+
+    With the records grid from N7a, `DataGrid` is in five files and `DataTable` in fourteen, and
+    `UI_PRIMITIVES.md` holds that count as the ratchet. The nine sites the census left unclear, and
+    the 57 it said do not need sorting, stay `DataTable`. N7e, virtualization, stays open.
 
   - **N7e — Virtualization replacing paging where a table is measured long.** **Open**, not
     started. It opens when a site has a measured row count at which a forty-row page costs

@@ -1,74 +1,74 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-13T14:49:22Z"
+    "recorded_at": "2026-09-13T15:00:30Z"
   },
   "note": "What each workspace route costs to open, measured in a browser. Requests and bytes are gated; settled_ms is recorded and never gated, because two runs agreed on the first two for 16 of 16 routes and on timing for none of them.",
   "bytes_tolerance": 0.15,
   "routes": {
     "analytics": {
       "requests": 11,
-      "bytes": 458155
+      "bytes": 458159
     },
     "automate": {
       "requests": 11,
-      "bytes": 454786
+      "bytes": 454790
     },
     "command-center": {
       "requests": 11,
-      "bytes": 455210
+      "bytes": 455214
     },
     "control-panel": {
       "requests": 15,
-      "bytes": 567628
+      "bytes": 568135
     },
     "decision": {
       "requests": 13,
-      "bytes": 469793
+      "bytes": 469797
     },
     "delivery": {
       "requests": 16,
-      "bytes": 460541
+      "bytes": 460545
     },
     "graph": {
       "requests": 14,
-      "bytes": 647584
+      "bytes": 647588
     },
     "imports": {
       "requests": 12,
-      "bytes": 452661
+      "bytes": 452665
     },
     "map": {
       "requests": 25,
-      "bytes": 924832
+      "bytes": 924836
     },
     "models": {
       "requests": 15,
-      "bytes": 472851
+      "bytes": 472855
     },
     "object-explorer": {
       "requests": 13,
-      "bytes": 458248
+      "bytes": 458252
     },
     "ontology": {
       "requests": 20,
-      "bytes": 779984
+      "bytes": 780491
     },
     "ops": {
-      "requests": 18,
-      "bytes": 459888
+      "requests": 20,
+      "bytes": 535150
     },
     "pipeline": {
       "requests": 15,
-      "bytes": 566186
+      "bytes": 566693
     },
     "security": {
       "requests": 11,
-      "bytes": 471657
+      "bytes": 471661
     },
     "validation": {
       "requests": 12,
-      "bytes": 571370
+      "bytes": 571374
     }
   }
 }

@@ -34,6 +34,10 @@ function header(panel: Locator, column: string) {
   return panel.locator("thead th").filter({ has: panel.page().getByRole("button", { name: column, exact: true }) });
 }
 
+// The operations feed's severity ranks, restated so the test fails if the product's
+// change. A severity in no rank is -1.
+const SEVERITY_TIERS: Record<string, number> = { info: 0, low: 1, medium: 2, warn: 2, warning: 2, high: 3, error: 3, critical: 4 };
+
 test.describe("the census sites sort the way the census said a person needs", () => {
   test.beforeEach(async ({}, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
@@ -217,5 +221,88 @@ test.describe("the census sites sort the way the census said a person needs", ()
     await baselineEntry.click();
     await expect(header(panel, "classification"), "the last comparison's sort carried into a different comparison")
       .toHaveAttribute("aria-sort", "none");
+  });
+
+  test("the operations feed ranks severity, keeps arrival order within a rank, and returns to it", async ({ page }) => {
+    // Nine events from a source of this test's own. `warning` and `error` are words the
+    // server's own rank does not have; `notice` is in no rank at all.
+    const source = `grid-severity-${Date.now()}`;
+    const severities = ["info", "warn", "warning", "error", "medium", "high", "critical", "low", "notice"];
+    for (const severity of severities) {
+      await settled(await page.request.post("/ops/events/ingest", { data: {
+        source, event_type: "grid.severity", severity, title: `Severity ${severity}`
+      } }));
+    }
+    await page.goto("/workspace/ops");
+    const panel = panelTitled(page, "Live Operational Feed");
+    await filterTo(panel, "source", source);
+    await expect(panel.locator("tbody tr")).toHaveCount(severities.length);
+    const arrival = await valuesOf(panel, "title");
+    const tiers = async () => (await valuesOf(panel, "severity")).map((value) => SEVERITY_TIERS[value] ?? -1);
+    const severity = header(panel, "severity");
+
+    await severity.getByRole("button").click();
+    await expect(severity, "the first press on severity does not put the worst first").toHaveAttribute("aria-sort", "descending");
+    await expect.poll(tiers, { message: "severity sorts as text, not by rank" }).toEqual([4, 3, 3, 2, 2, 2, 1, 0, -1]);
+    await severity.getByRole("button").click();
+    await expect(severity).toHaveAttribute("aria-sort", "ascending");
+    await expect.poll(tiers).toEqual([-1, 0, 1, 2, 2, 2, 3, 3, 4]);
+    await severity.getByRole("button").click();
+    await expect(severity, "a third press does not take the sort off").toHaveAttribute("aria-sort", "none");
+    await expect.poll(() => valuesOf(panel, "title"), { message: "the feed did not return to the order it arrived in" }).toEqual(arrival);
+  });
+
+  test.describe("in one locale and zone, so a text sort of the times is wrong the same way every run", () => {
+    test.use({ locale: "en-US", timezoneId: "UTC" });
+
+    test("occurred sorts in time across the 12 o'clock hour and a year boundary, and says what a sort ranks", async ({ page }) => {
+      // The ingest endpoint stamps its own created_at, so these times can only be
+      // served. The suite's first stubbed responses: the events list and the summary
+      // it is counted against. Everything else on the page is the real server.
+      const at = (year: number, month: number, day: number, hour: number, minute: number) => Date.UTC(year, month - 1, day, hour, minute) / 1000;
+      const times: Array<[string, number]> = [
+        ["2025-12-31 23:00", at(2025, 12, 31, 23, 0)],
+        ["2026-01-01 00:30", at(2026, 1, 1, 0, 30)],
+        ["2026-01-01 01:00", at(2026, 1, 1, 1, 0)],
+        ["2026-01-01 09:15", at(2026, 1, 1, 9, 15)],
+        ["2026-01-01 10:00", at(2026, 1, 1, 10, 0)],
+        ["2026-01-01 11:59", at(2026, 1, 1, 11, 59)],
+        ["2026-01-01 12:00", at(2026, 1, 1, 12, 0)],
+        ["2026-01-01 12:30", at(2026, 1, 1, 12, 30)],
+        ["2026-01-01 13:00", at(2026, 1, 1, 13, 0)]
+      ];
+      const chronological = times.map(([title]) => title);
+      // Newest first, the way the server lists them.
+      const events = [...times].reverse().map(([title, created_at], index) => ({
+        id: `stub_event_${index}`, source: "grid-time-stub", event_type: "grid.time", severity: "medium", status: "OPEN", title, created_at
+      }));
+      await page.route((url) => url.pathname === "/ops/events", (route) => route.fulfill({ json: events }));
+      await page.route((url) => url.pathname === "/ops/summary", (route) => route.fulfill({ json: {
+        events: 1204, open_alerts: 0, open_incidents: 0, runbooks: 0, pending_approvals: 0, unread_notifications: 0,
+        severity_counts: {}, latest_events: [], latest_alerts: [], latest_incidents: []
+      } }));
+      await page.goto("/workspace/ops");
+      const panel = panelTitled(page, "Live Operational Feed");
+      await expect(panel.locator("tbody tr")).toHaveCount(times.length);
+      const arrival = await valuesOf(panel, "title");
+      const occurred = header(panel, "occurred");
+      const scope = panel.locator(".grid-sort-scope");
+
+      await occurred.getByRole("button").click();
+      await expect(occurred).toHaveAttribute("aria-sort", "ascending");
+      // Read through the titles, which name each time, so the check does not depend on
+      // how this browser's ICU spaces "PM".
+      await expect.poll(() => valuesOf(panel, "title"), { message: "occurred sorts as the text it shows, not as a time" }).toEqual(chronological);
+      await occurred.getByRole("button").click();
+      await expect(occurred).toHaveAttribute("aria-sort", "descending");
+      await expect.poll(() => valuesOf(panel, "title")).toEqual([...chronological].reverse());
+      await expect(scope, "a sort of the 9 loaded events does not say it ranks only those")
+        .toHaveText("Sorted by occurred: this orders only the latest 9 of 1,204 events.");
+
+      await occurred.getByRole("button").click();
+      await expect(occurred).toHaveAttribute("aria-sort", "none");
+      await expect.poll(() => valuesOf(panel, "title")).toEqual(arrival);
+      await expect(scope, "the sentence outlived the sort it described").toHaveCount(0);
+    });
   });
 });

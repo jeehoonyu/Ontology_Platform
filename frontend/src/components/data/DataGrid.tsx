@@ -75,8 +75,9 @@ import { EmptyState, TABLE_ROW_LIMIT } from "./DataDisplay";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
-  // No registered sort functions: every column sorts through `compareCells`, by the
-  // value it holds, so no column can name a sort by string and get another one.
+  // No registered sort functions: every column sorts through `compareCells`, or
+  // `compareRanked` when its caller ranks it, by the value it holds, so no column can
+  // name a sort by string and get another one.
   columnVisibilityFeature,
   columnSizingFeature,
   columnOrderingFeature,
@@ -123,6 +124,41 @@ function compareCells(rowA: GridRow, rowB: GridRow, id: string): number {
   return naturalText(rowA, rowB, id);
 }
 
+/** What a caller may say about one column beyond its values, by field name. */
+export type GridColumnSpec = {
+  /** Lowercased value -> rank. A value with no rank sorts below every ranked one. */
+  rank?: Readonly<Record<string, number>>;
+  /** How the value is shown, and so filtered. Sorting still compares the value. */
+  show?: "epoch-seconds";
+  /** The first header press. Default "asc". */
+  firstSort?: "asc" | "desc";
+};
+
+const SHOW: Record<NonNullable<GridColumnSpec["show"]>, (value: TableRow[string]) => string> = {
+  // The text the operations feed showed before it was a grid, byte for byte.
+  "epoch-seconds": (value) => (typeof value === "number" ? new Date(value * 1000).toLocaleString() : formatValue(value))
+};
+
+const NO_SPECS: Readonly<Record<string, GridColumnSpec>> = {};
+
+// N7d. An enum ranked by meaning rather than spelling: "critical" above "high", which
+// text order puts the other way round. Equal ranks return 0, and the library then keeps
+// arrival order inside a rank whichever way the column sorts, so a feed stays newest
+// first within each severity. Two values with no rank compare as values.
+function compareRanked(rowA: GridRow, rowB: GridRow, id: string, rank: Readonly<Record<string, number>>): number {
+  const rankOf = (value: unknown) => {
+    const key = String(value ?? "").toLowerCase();
+    // Own keys only, so a value such as "constructor" is not read as a rank.
+    return Object.prototype.hasOwnProperty.call(rank, key) ? rank[key] : undefined;
+  };
+  const a = rankOf(rowA.original[id]);
+  const b = rankOf(rowB.original[id]);
+  if (a !== undefined && b !== undefined) return a - b;
+  if (a !== undefined) return 1;
+  if (b !== undefined) return -1;
+  return compareCells(rowA, rowB, id);
+}
+
 // A fresh fallback array on every render would invalidate the row models each time.
 const NO_ROWS: TableRow[] = [];
 // Widths come only from these presets, so the select's value is always one of its options.
@@ -156,7 +192,7 @@ function keptFilters(filters: ColumnFiltersState, live: Set<string>): ColumnFilt
   return filters.every((filter) => live.has(filter.id)) ? filters : filters.filter((filter) => live.has(filter.id));
 }
 
-export function DataGrid({ rows, empty = "No records", label = "Scrollable data grid", sortScope }: {
+export function DataGrid({ rows, empty = "No records", label = "Scrollable data grid", sortScope, columns: columnSpecs = NO_SPECS }: {
   rows?: TableRow[];
   empty?: string;
   label?: string;
@@ -166,6 +202,11 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
    * are everything there is, so a complete list says nothing.
    */
   sortScope?: string;
+  /**
+   * Ranks, display and first direction for particular columns, by field name. Pass a
+   * module-level constant: a new object on every render rebuilds every column.
+   */
+  columns?: Readonly<Record<string, GridColumnSpec>>;
 }) {
   const data = rows || NO_ROWS;
   const keys = useMemo(() => {
@@ -175,20 +216,25 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
   }, [data]);
   // `helper.columns` is the library's own way to hand a column list to the table:
   // a plain array of string-valued accessors does not type-check against it.
-  const columns = useMemo(() => helper.columns(keys.map((key) => helper.accessor((row) => (row[key] == null ? undefined : formatValue(row[key])), {
-    id: key,
-    header: key,
-    sortFn: compareCells,
-    // An empty cell is `undefined`, so it goes last ascending and descending alike.
-    sortUndefined: "last",
-    // Always a boolean: the library otherwise starts a column whose first values are
-    // all empty on a descending press.
-    sortDescFirst: false,
-    filterFn: "includesString",
-    size: DEFAULT_COLUMN_PX,
-    minSize: COLUMN_WIDTHS[0][1],
-    maxSize: COLUMN_WIDTHS[COLUMN_WIDTHS.length - 1][1]
-  }))), [keys]);
+  const columns = useMemo(() => helper.columns(keys.map((key) => {
+    const spec = Object.prototype.hasOwnProperty.call(columnSpecs, key) ? columnSpecs[key] : undefined;
+    const show = spec?.show ? SHOW[spec.show] : formatValue;
+    const rank = spec?.rank;
+    return helper.accessor((row) => (row[key] == null ? undefined : show(row[key])), {
+      id: key,
+      header: key,
+      sortFn: rank ? (rowA: GridRow, rowB: GridRow, id: string) => compareRanked(rowA, rowB, id, rank) : compareCells,
+      // An empty cell is `undefined`, so it goes last ascending and descending alike.
+      sortUndefined: "last",
+      // Always a boolean: the library otherwise starts a column whose first values are
+      // all empty on a descending press. Descending first only when the caller asks.
+      sortDescFirst: spec?.firstSort === "desc",
+      filterFn: "includesString",
+      size: DEFAULT_COLUMN_PX,
+      minSize: COLUMN_WIDTHS[0][1],
+      maxSize: COLUMN_WIDTHS[COLUMN_WIDTHS.length - 1][1]
+    });
+  })), [keys, columnSpecs]);
   const table = useTable({ features, columns, data });
   // Clamped rather than reset, for the reason `DataTable` gives: callers that
   // rebuild `rows` every render would otherwise throw a reader back to page one.

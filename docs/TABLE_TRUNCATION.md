@@ -18,8 +18,8 @@ are given: the rows past the cut are named and cannot be reached.
 | File | Line | In | Cuts | How | Into a paging table | True count rendered |
 | --- | --- | --- | --- | --- | --- | --- |
 | `components/data/DataDisplay.tsx` | 131 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
-| `components/data/DataGrid.tsx` | 244 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
-| `components/data/DataGrid.tsx` | 240 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
+| `components/data/DataGrid.tsx` | 290 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
+| `components/data/DataGrid.tsx` | 286 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
 | `workspaces/ObjectExplorer.tsx` | 160 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
 
 ## Outside a table — reported, not gated
@@ -37,7 +37,7 @@ alert taken as a default is not a hidden row.
 | `workspaces/MapWorkspace.tsx` | 248 | `MapWorkspace` | `collection.features` (slice) | mapped | no | yes |
 | `workspaces/ObjectExplorer.tsx` | 191 | `ObjectExplorer` | `facet.buckets` (slice) | mapped | no | no |
 | `workspaces/OntologyManager.tsx` | 258 | `OntologyManager` | `drafts.value` (slice) | mapped | no | no |
-| `workspaces/OpsWorkspace.tsx` | 56 | `IncidentsTab` | `alerts` (slice) | mapped | no | no |
+| `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` (slice) | mapped | no | no |
 | `workspaces/Vertex.tsx` | 295 | `Vertex` | `seedObjects.value` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 700 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 804 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | no | no |

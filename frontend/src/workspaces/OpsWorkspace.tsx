@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Bell, BookOpenCheck, Check, CircleAlert, Play, Plus, RefreshCw, Siren } from "lucide-react";
 import { DataTable, EmptyState, ErrorBanner, KeyValueGrid, LoadingState, Metric, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { DataGrid, type GridColumnSpec } from "../components/data/DataGrid";
 import { Page } from "../components/workbench/Workbench";
 import type { JsonObject, TableRow } from "../types";
 import { acknowledgeNotification, createAlertRule, createIncident, createRunbook, evaluateAlerts, executeRunbook, getOpsSummary, getReliabilitySummary, ingestOpsEvent, listAlertRules, listAlerts, listInbox, listIncidents, listOpsEvents, listRunbooks, updateIncident, type AlertEvent, type AlertRule, type Incident, type OpsEvent, type OpsNotification, type OpsSummary, type ReliabilitySummary, type Runbook } from "../api/opsApi";
@@ -34,6 +35,19 @@ export function OpsWorkspace() {
   </Page>;
 }
 
+// N7d. Severity ranked by meaning, so a sort puts the worst first. The server's own
+// rank (`SEVERITY_RANK` in ops_control.py) has neither `warning` nor `error`; the owner
+// placed them beside `warn` and `high`. A severity in no rank sorts below every one.
+const SEVERITY_RANK: Readonly<Record<string, number>> = { info: 0, low: 1, medium: 2, warn: 2, warning: 2, high: 3, error: 3, critical: 4 };
+// Module level: the grid rebuilds its columns whenever this object changes identity.
+const FEED_COLUMNS: Readonly<Record<string, GridColumnSpec>> = {
+  severity: { rank: SEVERITY_RANK, firstSort: "desc" },
+  // Held as epoch seconds and shown as local time, so it sorts in time and not as text,
+  // where "1:00 PM" comes before "11:59 AM". Oldest first on the first press: the feed
+  // arrives newest first, and a first press that changed nothing would look broken.
+  occurred: { show: "epoch-seconds" }
+};
+
 function CommandTab({ summary, events }: { summary: OpsSummary | null; events: OpsEvent[] }) {
   // Every loaded event goes to the table, and the table says how many it shows.
   // This cut them to twenty-five first, so DataTable received twenty-five,
@@ -41,9 +55,11 @@ function CommandTab({ summary, events }: { summary: OpsSummary | null; events: O
   // caption, found by `audit_table_truncation`. The list endpoint also stops at
   // 250, so when the server holds more than was loaded that is said as well: a
   // caption counting 250 would be the same silence one layer down.
-  const rows: TableRow[] = events.map((event) => ({ severity: event.severity, source: event.source, event: event.event_type, title: event.title, status: event.status, occurred: new Date(event.created_at * 1000).toLocaleString() }));
+  // N7d: now a grid, whose sort says it orders only the loaded events. The rows are
+  // memoized, so a re-render of the page does not withdraw the grid's status sentence.
+  const rows: TableRow[] = useMemo(() => events.map((event) => ({ severity: event.severity, source: event.source, event: event.event_type, title: event.title, status: event.status, occurred: event.created_at })), [events]);
   const held = summary?.events || 0;
-  return <div className="ops-command-layout"><Panel title="Live Operational Feed" action={<Activity size={16} />}>{held > events.length ? <p className="table-truncated" role="note">Loaded the latest {events.length.toLocaleString()} of {held.toLocaleString()} events</p> : null}<DataTable rows={rows} empty="No operational events yet" /></Panel><Panel title="Current Severity"><KeyValueGrid data={summary?.severity_counts || {}} /><h3>Latest incidents</h3><div className="ops-compact-list">{summary?.latest_incidents.map((item) => <article key={item.id}><span><strong>{item.display_name}</strong><small>{item.owner || "unassigned"}</small></span><StatusBadge value={item.severity} /></article>)}</div>{!summary?.latest_incidents.length ? <div className="empty">No open incidents.</div> : null}</Panel></div>;
+  return <div className="ops-command-layout"><Panel title="Live Operational Feed" action={<Activity size={16} />}>{held > events.length ? <p className="table-truncated" role="note">Loaded the latest {events.length.toLocaleString()} of {held.toLocaleString()} events</p> : null}<DataGrid rows={rows} label="Operational events" empty="No operational events yet" columns={FEED_COLUMNS} sortScope={held > events.length ? `the latest ${events.length.toLocaleString()} of ${held.toLocaleString()} events` : undefined} /></Panel><Panel title="Current Severity"><KeyValueGrid data={summary?.severity_counts || {}} /><h3>Latest incidents</h3><div className="ops-compact-list">{summary?.latest_incidents.map((item) => <article key={item.id}><span><strong>{item.display_name}</strong><small>{item.owner || "unassigned"}</small></span><StatusBadge value={item.severity} /></article>)}</div>{!summary?.latest_incidents.length ? <div className="empty">No open incidents.</div> : null}</Panel></div>;
 }
 
 function AlertsTab({ rules, alerts, busy, onCreate, onEvent }: { rules: AlertRule[]; alerts: AlertEvent[]; busy: string; onCreate: (body: { display_name: string; source?: string; event_type?: string; min_severity: string }) => void; onEvent: (body: { source: string; event_type: string; severity: string; title: string }) => void }) {
