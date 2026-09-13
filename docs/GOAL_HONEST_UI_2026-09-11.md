@@ -1928,7 +1928,7 @@ plan, and it is measured there.
   folder at the repository root that git does not ignore; `playwright.config.ts` now sends them under
   `oms/storage`, which it does.
 
-    **The proof.** `test_signed_plugin_runtime.py` now reads a window of one run and requires its `total`
+  **The proof.** `test_signed_plugin_runtime.py` now reads a window of one run and requires its `total`
   to equal the length of the whole list. In `truncation-sites.spec.ts`, a new browser test registers the
   extension, queues three runs, fulfils the run list with its `total` enlarged by 75, and requires the
   evidence panel to read "Loaded the latest 3 of 78 runs". They pass on the fix, with
@@ -1944,7 +1944,7 @@ plan, and it is measured there.
   - Restored: the four matching Control Panel, extension and evaluator browser tests pass, both plugin
     backend scripts pass, and the three sources are byte for byte what they were.
 
-    **The references.** The Control Panel still opens with 15 requests, at 556 KB, within its payload
+  **The references.** The Control Panel still opens with 15 requests, at 556 KB, within its payload
   ceiling. `.table-truncated` was already used in `ControlPanel.tsx`, and neither `TABLE_TRUNCATION.md`
   nor `INERT_CONTROLS.md` moves. The tenancy census holds at 360: the count runs on the project-scoped
   execution query.
@@ -1970,7 +1970,7 @@ plan, and it is measured there.
   the drawer spilled under the row above, where the click landed on the node library. Each part of the
   pane host now keeps its height.
 
-    **The proof.** A new `test_pipeline_node_preview_window.py` previews a 60-row input and requires 50
+  **The proof.** A new `test_pipeline_node_preview_window.py` previews a 60-row input and requires 50
   rows back with a row count of 60, and 3 rows for a limit of 3, while the canvas and node details keep
   every sample at 5. In `truncation-sites.spec.ts`, a new browser test builds the same graph, opens the
   drawer's preview tab, requires "Previewing the first 50 of 60 rows", not cut off, and pages the table
@@ -1992,7 +1992,7 @@ plan, and it is measured there.
   - Restored: the three matching browser tests and six backend scripts pass, and the four sources are
     byte for byte what they were.
 
-    **The references.** The Pipeline Builder opens with 15 requests, no more than before, at 555 KB,
+  **The references.** The Pipeline Builder opens with 15 requests, no more than before, at 555 KB,
   within its payload ceiling. `.table-truncated` reaches `PipelineCanvas.tsx`, an eleventh file, and the
   style-scope baseline records it. `TABLE_TRUNCATION.md` moves only by line: the canvas's two list cuts
   sit seven lines lower. `INERT_CONTROLS.md` does not move, and the tenancy census holds at 360.
@@ -2010,7 +2010,7 @@ plan, and it is measured there.
   The preview stops at 25, and this source does not say how many it holds." A preview that stops short
   of its limit is the whole source and says nothing.
 
-    **The proof.** In `truncation-sites.spec.ts`, a new browser test maps a 25-record dataset and requires
+  **The proof.** In `truncation-sites.spec.ts`, a new browser test maps a 25-record dataset and requires
   the drawer's summary to read "Hydrated object preview · the first 20 of 25 rows"; a second serves a
   live REST source of 30 records and requires "Showing the first 25 records. The preview stops at 25,
   and this source does not say how many it holds.", not cut off. The live connector test in
@@ -2026,7 +2026,7 @@ plan, and it is measured there.
   - **N4, the committed code:** both new tests failed at their statements.
   - Restored: the five matching browser tests pass, and both sources are byte for byte what they were.
 
-    **The references.** Ontology Manager opens with 20 requests at 764 KB and Data Onboarding with 12 at
+  **The references.** Ontology Manager opens with 20 requests at 764 KB and Data Onboarding with 12 at
   444 KB, no more than before and within their payload ceilings; the shared closure is 437 KB.
   `.table-truncated` was already used in both files, and neither `TABLE_TRUNCATION.md` nor
   `INERT_CONTROLS.md` moves. No server file changed.
@@ -2042,7 +2042,7 @@ plan, and it is measured there.
   filters a bin by its range, including the upper edge for the last bin and for a single-value bin, as
   the server counted them, and the filter chip names the range it holds.
 
-    **The proof.** A new `test_explorer_facet_filters.py` hydrates 23 objects whose highest score makes a
+  **The proof.** A new `test_explorer_facet_filters.py` hydrates 23 objects whose highest score makes a
   bin width of 13.7500001, so the value 13.75 falls in the first bin by the edges the counts used and in
   the second by rounded ones; it requires every score bin's range filter, and every value of a boolean
   facet, to return exactly the bucket's count, and the boolean buckets to send booleans. In
@@ -2065,7 +2065,7 @@ plan, and it is measured there.
   - Restored: the four Object Explorer browser tests and three backend scripts pass, and both sources
     are byte for byte what they were.
 
-    **The references.** Object Explorer opens with 13 requests at 450 KB, no more than before and within
+  **The references.** Object Explorer opens with 13 requests at 450 KB, no more than before and within
   its payload ceiling. No class became shared, `TABLE_TRUNCATION.md` moves only by line (the column cut
   sits 17 lines lower), `INERT_CONTROLS.md` does not move, and the tenancy census holds at 360.
 
@@ -2081,7 +2081,7 @@ plan, and it is measured there.
   on request. A geofence counts inside and outside over every object in the query, and its lists stay
   the objects it kept. The truncation gate's list cut in `MapWorkspace` closes with it.
 
-    **The proof.** `test_gis_runtime.py` now renders a window of one and requires `feature_count` 1 and
+  **The proof.** `test_gis_runtime.py` now renders a window of one and requires `feature_count` 1 and
   `total` 2, and evaluates a geofence with a limit of one and requires its summary to count both objects;
   `test_foundry_gis_features.py` requires a layer's `total`, including one rendered with room for no
   features. In `truncation-sites.spec.ts`, a new browser test hydrates 2,001 objects at one point and
@@ -2103,7 +2103,7 @@ plan, and it is measured there.
   - Restored: the three map browser tests and five backend scripts pass, and the three sources are byte
     for byte what they were.
 
-    **The references.** The Operational Map opens with 25 requests at 906 KB, no more than before and
+  **The references.** The Operational Map opens with 25 requests at 906 KB, no more than before and
   within its payload ceiling. `.table-truncated` reaches `MapWorkspace.tsx`, a twelfth file, and the
   style-scope baseline records it; `INERT_CONTROLS.md` counts the new Show all button among 332 wired
   controls. `TABLE_TRUNCATION.md` loses the map's feature-list row: the cut now sits in a condition,
@@ -2123,7 +2123,7 @@ plan, and it is measured there.
   "500 of 501"; an empty search says it covered only loaded resources; and the neighborhood toggle reads
   "Show all loaded nodes".
 
-    **The proof.** A new `test_graph_overview_totals.py` creates three objects and three assets and
+  **The proof.** A new `test_graph_overview_totals.py` creates three objects and three assets and
   requires a graph of one per kind to report `loaded` 1 and `totals` 3 for each, and its edge list to
   equal its edge count; at the default limit it requires totals equal to what was loaded. In
   `truncation-sites.spec.ts`, a new browser test hydrates 501 objects, reads the real overview, and
@@ -2148,7 +2148,7 @@ plan, and it is measured there.
   - Restored: the three platform graph browser tests and six backend scripts pass, and both sources are
     byte for byte what they were.
 
-    **The references.** The platform graph opens with 14 requests at 635 KB, no more than before and
+  **The references.** The platform graph opens with 14 requests at 635 KB, no more than before and
   within its payload ceiling. `.table-truncated` reaches `PlatformGraph.tsx`, a thirteenth file, and the
   style-scope baseline records it. Neither `TABLE_TRUNCATION.md` nor `INERT_CONTROLS.md` moves. The
   tenancy census holds at 360: the counts run on the same accessible queries as the rows, and a scoped
