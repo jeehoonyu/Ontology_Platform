@@ -6443,7 +6443,8 @@ pre {
 }
 
 .grid-columns-status,
-.grid-pin-note {
+.grid-pin-note,
+.grid-sort-scope {
   margin: 4px 0;
   min-height: 1.4em;
   color: #4d5b64;

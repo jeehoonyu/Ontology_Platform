@@ -1,74 +1,74 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-08-20T01:22:59Z"
+    "recorded_at": "2026-09-13T14:06:08Z"
   },
   "note": "What each workspace route costs to open, measured in a browser. Requests and bytes are gated; settled_ms is recorded and never gated, because two runs agreed on the first two for 16 of 16 routes and on timing for none of them.",
   "bytes_tolerance": 0.15,
   "routes": {
     "analytics": {
       "requests": 11,
-      "bytes": 451409
+      "bytes": 458117
     },
     "automate": {
       "requests": 11,
-      "bytes": 448040
+      "bytes": 454748
     },
     "command-center": {
       "requests": 11,
-      "bytes": 448464
+      "bytes": 455172
     },
     "control-panel": {
-      "requests": 13,
-      "bytes": 486066
+      "requests": 15,
+      "bytes": 567590
     },
     "decision": {
       "requests": 13,
-      "bytes": 463047
+      "bytes": 469755
     },
     "delivery": {
       "requests": 16,
-      "bytes": 453795
+      "bytes": 460503
     },
     "graph": {
-      "requests": 13,
-      "bytes": 640439
+      "requests": 14,
+      "bytes": 647546
     },
     "imports": {
       "requests": 12,
-      "bytes": 445915
+      "bytes": 452623
     },
     "map": {
       "requests": 25,
-      "bytes": 918294
+      "bytes": 924729
     },
     "models": {
       "requests": 15,
-      "bytes": 466105
+      "bytes": 472813
     },
     "object-explorer": {
       "requests": 13,
-      "bytes": 451357
+      "bytes": 458210
     },
     "ontology": {
-      "requests": 17,
-      "bytes": 692371
+      "requests": 19,
+      "bytes": 707238
     },
     "ops": {
       "requests": 18,
-      "bytes": 452967
+      "bytes": 459850
     },
     "pipeline": {
-      "requests": 12,
-      "bytes": 475717
+      "requests": 13,
+      "bytes": 491395
     },
     "security": {
       "requests": 11,
-      "bytes": 464911
+      "bytes": 471619
     },
     "validation": {
       "requests": 12,
-      "bytes": 564288
+      "bytes": 571332
     }
   }
 }

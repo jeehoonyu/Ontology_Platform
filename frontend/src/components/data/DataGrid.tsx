@@ -156,10 +156,16 @@ function keptFilters(filters: ColumnFiltersState, live: Set<string>): ColumnFilt
   return filters.every((filter) => live.has(filter.id)) ? filters : filters.filter((filter) => live.has(filter.id));
 }
 
-export function DataGrid({ rows, empty = "No records", label = "Scrollable data grid" }: {
+export function DataGrid({ rows, empty = "No records", label = "Scrollable data grid", sortScope }: {
   rows?: TableRow[];
   empty?: string;
   label?: string;
+  /**
+   * What the rows are, when they are a window rather than the whole set: "the latest
+   * 50 of 51 jobs". A sort then says it orders only that window. Left out when the rows
+   * are everything there is, so a complete list says nothing.
+   */
+  sortScope?: string;
 }) {
   const data = rows || NO_ROWS;
   const keys = useMemo(() => {
@@ -279,6 +285,12 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
   const filtered = filteredColumns.length > 0;
   const nameOf = (column: GridColumn) => (column.getIsVisible() ? column.id : `${column.id} (hidden)`);
   const filterNames = filteredColumns.map(nameOf).join(", ");
+  const sortedNames = table.state.sorting
+    .map((entry) => {
+      const column = leafColumns.find((item) => item.id === entry.id);
+      return column ? nameOf(column) : entry.id;
+    })
+    .join(", ");
   const onWhat = `the filter${filteredColumns.length === 1 ? "" : "s"} on ${filterNames}`;
   const hiddenFiltered = filteredColumns.filter((column) => !column.getIsVisible()).length;
   const filterPart = !filtered ? "" : ` · ${filteredColumns.length} filter${filteredColumns.length === 1 ? "" : "s"}`
@@ -495,6 +507,10 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
       <p className="grid-rows-status" role="status" aria-live="polite">
         {filterAnnounced.current.text ? <span key={filterAnnounced.current.seq}>{filterAnnounced.current.text}</span> : null}
       </p>
+      {/* N7d. Sorting a loaded window ranks only the window: the slowest of the latest 50
+          jobs is not the slowest job. Plain text, not a live region -- the press already
+          changes the header's aria-sort. */}
+      {sortScope && sortedNames ? <p className="grid-sort-scope">Sorted by {sortedNames}: this orders only {sortScope}.</p> : null}
       {startShown > 0 && wrapWidth > 0 && !sticky ? (
         <p className="grid-pin-note">Pinned columns leave no room to scroll beside them at this width, so they scroll with the grid. Unpin one or choose a narrower width to keep them in view.</p>
       ) : null}

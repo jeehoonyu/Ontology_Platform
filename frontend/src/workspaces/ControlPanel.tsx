@@ -9,6 +9,7 @@ import {
   Panel,
   StatusBadge
 } from "../components/data/DataDisplay";
+import { DataGrid } from "../components/data/DataGrid";
 import { Page } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { classNames } from "../utils/format";
@@ -329,8 +330,11 @@ function UsersSection() {
           <p className="notice">Tokens are invalid while an account is inactive.</p>
         </Panel>
       </div>
+      {/* N7d: the grid, where a person sorts by status to gather the inactive accounts.
+          `?? undefined`, not `|| []`: a fresh array each render would re-run the grid's
+          pruning before the first response. */}
       <Panel title="Users" action={<button onClick={reload}>Refresh</button>}>
-        <DataTable rows={users.value || []} empty="No users yet." />
+        <DataGrid rows={users.value ?? undefined} label="Users" empty="No users yet." />
       </Panel>
     </>
   );
@@ -568,7 +572,7 @@ function RolesSection() {
           </div>
         </Panel>
         <Panel title="Role Grants" action={<button onClick={reload}>Refresh</button>}>
-          <DataTable rows={grants.value || []} empty="No role grants yet." />
+          <DataGrid rows={grants.value ?? undefined} label="Role grants" empty="No role grants yet." />
         </Panel>
       </div>
       <div className="two-col">
@@ -739,7 +743,7 @@ function AuthSection() {
           <DataTable rows={serviceAccounts.value || []} empty="No service accounts yet." />
         </Panel>
         <Panel title="API Tokens" action={<div className="button-row"><select aria-label="Token to revoke" value={revokeTokenId} onChange={(event) => setRevokeTokenId(event.target.value)}><option value="">Choose token</option>{(tokens.value || []).filter((token) => !token.revoked).map((token) => <option key={token.id} value={token.id}>{token.token_prefix || token.id}</option>)}</select><button onClick={revokeWorkerToken} disabled={!revokeTokenId}>Revoke</button></div>}>
-          <DataTable rows={tokens.value || []} empty="No tokens issued yet." />
+          <DataGrid rows={tokens.value ?? undefined} label="API tokens" empty="No tokens issued yet." />
         </Panel>
       </div>
       <Panel title="OAuth Clients">
@@ -1345,6 +1349,13 @@ function RuntimeOperationsSection() {
   const pilotAvailability = pilotEvidence.value?.availability;
   const pilotRpo = pilotEvidence.value?.rpo;
   const pilotRto = pilotEvidence.value?.rto;
+  // The jobs list stops at the latest 50 (`listRuntimeJobs`); the summary counts every
+  // job in the project. Past 50, the table is a window, and says so.
+  const loadedJobs = jobs.value?.length ?? 0;
+  const heldJobs = summary.value?.total_jobs ?? 0;
+  const jobsWindow = heldJobs > loadedJobs
+    ? `the latest ${loadedJobs.toLocaleString()} of ${heldJobs.toLocaleString()} jobs`
+    : undefined;
   return (
     <>
       <ErrorBanner message={error || summary.error || pilotEvidence.error || jobs.error || budgets.error || slos.error || fleet.error} />
@@ -1420,7 +1431,9 @@ function RuntimeOperationsSection() {
         ) : <EmptyState title="Pilot observer is not collecting" description="Enable the pilot-observability deployment profile to begin a tamper-evident availability window." />}
       </Panel>
       <Panel title="Durable Job Telemetry">
-        <DataTable rows={jobs.value || []} empty="No durable jobs have run in this project." />
+        {jobsWindow ? <p className="table-truncated" role="note">Loaded {jobsWindow}</p> : null}
+        <DataGrid rows={jobs.value ?? undefined} label="Durable job telemetry"
+                  empty="No durable jobs have run in this project." sortScope={jobsWindow} />
       </Panel>
       <div className="two-col">
         <Panel title="Worker Fleet" action={<button onClick={saveWorker} disabled={!workerForm.worker_name.trim() || Number(workerForm.max_concurrency) < 1}>Register worker</button>}>

@@ -757,6 +757,81 @@ plan, and it is measured there.
     pass on one build. Negative runs: four builds. The text comparator failed at `numbers sorted as the text they show, not by value`. Without `sortUndefined` it failed at `empty cells sorted ahead of values descending`. Without `sortDescFirst` it failed at `Expected: "ascending"`, `Received: "descending"`. The fourth, an empty cell's accessor returning `""` instead of `undefined`, failed at the descending check, not the ascending one predicted: the value comparator already sorts a raw empty after numbers when ascending, so only the descending order depends on the accessor. Restored, twenty-four passed, and the source was restored byte for byte. The data-media route measures 528,734 bytes,
     323 more than after N7c, and its ceiling is set to that. Not tested: booleans, which the
     tokens table's `revoked` column exercises when it adopts the grid.
+    **Then the four control-panel tables.** Users, Role Grants, API Tokens and Durable Job
+    Telemetry are grids. The census gave each a reason to sort, and each has a test in
+    `grid-sites.spec.ts` that sorts by that reason on the site itself, with a fixture of its own
+    whose setup prints every response:
+    - **Users** sort by status, gathering the inactive accounts.
+    - **Role grants** sort by role, gathering who holds each.
+    - **Tokens** sort by `revoked`, false before true. This is the first proof on a real site
+      that booleans compare as booleans.
+    - **Job telemetry** sorts costs by value, and says what it holds.
+
+    **Job telemetry is a window, and now says so.** Its rows are the latest 50 jobs, while the
+    summary counts every job in the project. Nothing said that before. A note now reads
+    `Loaded the latest 50 of 51 jobs` whenever the project holds more. A sort over those rows
+    ranks only them, so the grid takes a `sortScope` from its caller. While any column is sorted
+    it says `Sorted by estimated_cost_usd: this orders only the latest 50 of 51 jobs.` and the
+    sentence goes when the sort does. It is plain text, not a live region, because the press
+    already changes the header's `aria-sort`. A caller whose rows are the whole set passes nothing
+    and the grid says nothing: N3's rule. The test's oldest job costs the most, and the descending
+    sort is held to the most expensive of the 50 that were loaded, `25`, and never the `99.5` the
+    window left out.
+
+    **That test's first fixture was flaky, and the negative run's restored build is what showed it.**
+    It queued all 51 jobs within a few seconds. `created_at` is whole seconds, and jobs queued in
+    the same second fall back to database order, so which job the latest-50 window left out was
+    down to the database. It passed thirty of thirty once, then failed on the restored build,
+    where a small-cost job had been left out. The same early failure had fired in two of the
+    breaks, so those breaks proved nothing about the assertions they were aimed at. The oldest job
+    is now queued a second before the other fifty, so it is strictly older and always the one
+    left out. The small costs were chosen so text order and value order disagree whatever the
+    window holds. The test then passed three runs in a row, and thirty of thirty on one build, and
+    the two breaks were run again.
+
+    **One existing test needed an edit, and the negative run shows why.** In
+    `evaluator.spec.ts`, the token test pressed `getByRole("button", { name: "Revoke" })`.
+    Playwright matches a name as a case-insensitive substring, so the grid's `revoked` column
+    header matched it too, and strict mode refused. The locator is now exact. The same test now
+    filters the grid to the token it issued before looking for its row. In a shared database
+    holding more than forty tokens, that token would otherwise be paged out of sight, with the
+    old table or the new one.
+
+    **Payload, measured.** The control-panel route went from 488,047 to **565,465 bytes,
+    +77,418**. All four grids pay that once, and its ceiling is raised to the measured number, as
+    the owner decided. Every other route rose by about 2.6 KB through the closure they share,
+    which now measures 445,448 bytes. That is still inside the tolerance, and no ceiling was
+    changed for it. The data-media ceiling is set to its measured 529,126.
+
+    **Route cost, measured and re-recorded, with two causes told apart.** Nobody had run
+    `measure_route_cost.py` since its baseline was recorded on 2026-08-20. Measured now, five
+    numbers were over, and one temporary spec that printed each route's requests on open (run once,
+    then deleted) named them by chunk:
+    - **control-panel went from 13 to 15 requests, and past its byte allowance, because of this
+      commit.** Its two new requests are the grid's own chunk, `DataGrid-*.js`, and
+      `with-selector-*.js`, the helper the table library shares with the graph library. The build
+      manifest lists both among ControlPanel's imports, as it does for DataMedia.
+    - **graph (13 to 14), ontology (17 to 19) and pipeline (12 to 13) are older drift,** found now
+      only because the measurement had not been taken. Graph and ontology load the same
+      `with-selector` chunk. It became a chunk of its own once N7a's grid was its second consumer
+      beside the graph library. Pipeline and ontology load `Pane-*.js`, the pane module the pane
+      goal shared between screens. That attribution comes from the chunk names and the
+      manifest; it was not measured at those commits.
+
+    The baseline is re-recorded from the measurement, with each change named here rather than
+    folded in unmentioned. Every route's bytes also rose by about 6.7 KB, inside the 15%
+    allowance, most of it the closure every route shares. This measurement carries no bundle stamp, because `vite build` alone
+    writes no `build-provenance.json`. So from now on the audit judges whatever
+    `frontend/route-cost.json` is on disk.
+
+    References regenerated: `UI_PRIMITIVES.md`, where `DataGrid` has two users, ControlPanel and
+    DataMedia; and `TABLE_TRUNCATION.md`, where only the grid's own lines moved. The call sites cut
+    nothing. The style-scope baseline was re-recorded for two moves it does not gate:
+    `.table-truncated` now appears in six files, and `.empty` in thirteen, one fewer.
+
+    Tests: four in `grid-sites.spec.ts`. Thirty pass on one build: those four, the two evaluator
+    tests that open these panels, and the twenty-four grid and table tests. Negative runs:
+    seven builds, and every one failed at the assertion it breaks. Each of the three simple sites put back to `DataTable` timed out at the grid's `Filter rows` disclosure, which the old table does not have. The telemetry note removed failed at `Loaded the latest 50 of 51 jobs`, `element(s) not found`. The evaluator's `exact` removed failed in strict mode, with the grid's `revoked` header as the second `Revoke`. `sortScope` not passed, and the sentence kept after the sort cleared, first failed early, at the flaky fixture above. Run again against the fixed test, they failed at `a sort of the loaded window does not say it ranks only the window` and at `the sentence outlived the sort`, `Received: 1`. Restored, thirty passed, with the sources restored byte for byte.
   - **N7e — Virtualization replacing paging where a table is measured long.** **Open**, not
     started. It opens when a site has a measured row count at which a forty-row page costs
     something. It brings a truncation-gate spelling for a virtualized draw, captions for a

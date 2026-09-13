@@ -603,7 +603,13 @@ test("control panel issues a one-time project worker token and revokes it", asyn
   const secret = await secretField.inputValue();
   const apiTokenPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "API Tokens" }) });
   await apiTokenPanel.getByLabel("Token to revoke").selectOption({ label: secret.slice(0, 12) });
-  await apiTokenPanel.getByRole("button", { name: "Revoke" }).click();
+  // Exact: since N7d the tokens table is a grid, and its `revoked` column header is a
+  // button whose name contains "Revoke".
+  await apiTokenPanel.getByRole("button", { name: "Revoke", exact: true }).click();
+  // Filtered to this token: in a shared database holding more than forty tokens, the one
+  // just issued would otherwise be paged out of sight.
+  await apiTokenPanel.locator("details.grid-filters summary").click();
+  await apiTokenPanel.getByRole("textbox", { name: "Rows where token_prefix contains", exact: true }).fill(secret.slice(0, 12));
   const revokedTokenRow = apiTokenPanel.getByRole("row").filter({ hasText: secret.slice(0, 12) });
   await expect(revokedTokenRow.getByRole("cell", { name: "true", exact: true })).toBeVisible();
   await page.reload();

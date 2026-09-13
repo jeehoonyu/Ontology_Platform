@@ -1,10 +1,10 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-13T00:21:21Z"
+    "recorded_at": "2026-09-13T14:02:55Z"
   },
   "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
-  "single_file_classes": 301,
+  "single_file_classes": 310,
   "shared": {
     "button-row": [
       "App.tsx",
@@ -42,7 +42,6 @@
       "App.tsx",
       "components/canvas/PipelineCanvas.tsx",
       "components/data/DataDisplay.tsx",
-      "components/data/DataGrid.tsx",
       "workspaces/Analytics.tsx",
       "workspaces/DataMedia.tsx",
       "workspaces/DecisionWorkspace.tsx",
@@ -192,8 +191,10 @@
     "table-truncated": [
       "components/data/DataDisplay.tsx",
       "components/data/DataGrid.tsx",
+      "workspaces/ControlPanel.tsx",
       "workspaces/ObjectExplorer.tsx",
-      "workspaces/OpsWorkspace.tsx"
+      "workspaces/OpsWorkspace.tsx",
+      "workspaces/PipelineBuilder.tsx"
     ],
     "table-wrap": [
       "components/data/DataDisplay.tsx",
