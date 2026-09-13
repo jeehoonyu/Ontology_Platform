@@ -135,6 +135,11 @@ class EntityResolutionJob(Base):
     objects_in_scope: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     objects_scanned: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_scanned_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # The exact pass over the whole type: how many objects it read, and how many shared values it
+    # left unpaired because more objects share them than ENTITY_EXACT_GROUP_CEILING. NULL on a job
+    # that ran before the pass existed.
+    exact_objects: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    exact_values_skipped: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class EntityCandidate(Base):
@@ -348,6 +353,9 @@ def _job_dict(job: EntityResolutionJob) -> Dict[str, Any]:
         "objects_in_scope": job.objects_in_scope,
         "objects_scanned": job.objects_scanned,
         "last_scanned_id": job.last_scanned_id,
+        "exact_objects": job.exact_objects,
+        "exact_values_skipped": job.exact_values_skipped,
+        "exact_group_ceiling": ENTITY_EXACT_GROUP_CEILING,
         "created_at": job.created_at,
         "completed_at": job.completed_at,
     }
@@ -416,10 +424,14 @@ def _get_object(db: Session, object_type_id: str, object_id: str, project_id: Op
 
 
 def _field_value(obj: models.ObjectInstance, field: Optional[str]) -> Any:
+    return _record_value(_object_dict(obj), field)
+
+
+def _record_value(record: Dict[str, Any], field: Optional[str]) -> Any:
+    """A field of an object already read by `_object_dict`, as `_field_value` reads it."""
     if not field:
         return None
     field = field[1:] if field.startswith("$") else field
-    record = _object_dict(obj)
     if field in record:
         return record[field]
     if field.startswith("properties."):
@@ -771,11 +783,17 @@ def _duplicate_coverage(db: Session, obj: models.ObjectInstance) -> Optional[Dic
             models.ObjectInstance.id == obj.id,
             models.ObjectInstance.id <= job.last_scanned_id,
         ).first() is not None
+    # The exact pass read every object the type held when the job ran, so such an object was
+    # checked for a value it shares with any other, though only the scan compared it with all.
+    exact_checked = job.exact_objects is not None and (obj.created_at or 0) <= (job.created_at or 0)
     return {
         "job_id": job.id,
         "compared": compared,
+        "exact_checked": exact_checked,
         "objects_scanned": job.objects_scanned,
         "objects_in_scope": job.objects_in_scope,
+        "exact_objects": job.exact_objects,
+        "exact_values_skipped": job.exact_values_skipped,
     }
 
 
@@ -973,6 +991,20 @@ def _entity_scan_limit(limit: int) -> int:
     return max(2, min(int(limit), ENTITY_SCAN_CEILING))
 
 
+# The exact pass reaches past the scan. It pairs objects anywhere in the type that share a value in
+# one of the job's fields, once case and punctuation are ignored, and scores each pair as the scan
+# does. A value more objects share than this is not paired past the scan -- that many objects would
+# be every pair again -- and the job counts those values, so the queue can say so.
+ENTITY_EXACT_GROUP_CEILING = 50
+# What `_object_dict` reads, as columns, so the pass over a whole type builds no ORM instance.
+_ENTITY_ROW_COLUMNS = (
+    models.ObjectInstance.id, models.ObjectInstance.object_type_id, models.ObjectInstance.properties,
+    models.ObjectInstance.lineage, models.ObjectInstance.source_asset_id, models.ObjectInstance.materialization_id,
+    models.ObjectInstance.is_active, models.ObjectInstance.retired_at, models.ObjectInstance.created_at,
+    models.ObjectInstance.updated_at,
+)
+
+
 def _build_entity_candidates(
     db: Session,
     job: EntityResolutionJob,
@@ -994,38 +1026,79 @@ def _build_entity_candidates(
     job.last_scanned_id = rows[-1].id if rows else None
     fields = job.fields or _default_resolution_fields(db, job.object_type_id)
     candidates: List[EntityCandidate] = []
-    for left_idx, left in enumerate(rows):
-        for right in rows[left_idx + 1:]:
-            field_scores = []
-            reasons = []
-            for field in fields:
-                score = _similarity(_field_value(left, field), _field_value(right, field))
-                field_scores.append(score)
-                if score >= threshold:
-                    reasons.append({
-                        "field": field,
-                        "score": score,
-                        "left": _field_value(left, field),
-                        "right": _field_value(right, field),
-                    })
-            if not field_scores:
+
+    def consider(left: Dict[str, Any], right: Dict[str, Any]) -> None:
+        field_scores = []
+        reasons = []
+        for field in fields:
+            left_value = _record_value(left, field)
+            right_value = _record_value(right, field)
+            score = _similarity(left_value, right_value)
+            field_scores.append(score)
+            if score >= threshold:
+                reasons.append({"field": field, "score": score, "left": left_value, "right": right_value})
+        if not field_scores:
+            return
+        score = int(round(sum(field_scores) / len(field_scores)))
+        if score < threshold:
+            return
+        candidate = EntityCandidate(
+            id=_new_id("candidate"),
+            project_id=job.project_id,
+            job_id=job.id,
+            object_type_id=job.object_type_id,
+            object_ids=[left["id"], right["id"]],
+            score=score,
+            reasons=reasons or [{"field": ",".join(fields), "score": score, "left": left["id"], "right": right["id"]}],
+            status="PENDING",
+            created_at=_now(),
+        )
+        db.add(candidate)
+        candidates.append(candidate)
+
+    records = [_object_dict(row) for row in rows]
+    for left_idx, left in enumerate(records):
+        for right in records[left_idx + 1:]:
+            consider(left, right)
+
+    # The exact pass, over every object in scope, streamed as columns. Objects are grouped by each
+    # field's normalized value; a group pairs only where a member lies past the scan, since the scan
+    # compared every pair inside it. A group that outgrows the ceiling is dropped and counted.
+    scanned = {record["id"] for record in records}
+    groups: Dict[Any, List[str]] = {}
+    crowded = set()
+    exact_objects = 0
+    stream = (scope.with_entities(*_ENTITY_ROW_COLUMNS).order_by(models.ObjectInstance.id.asc())
+              .execution_options(stream_results=True).yield_per(1000))
+    for row in stream:
+        exact_objects += 1
+        record = _object_dict(row)
+        for field in fields:
+            value = _normalize_text(_record_value(record, field))
+            key = (field, value)
+            if not value or key in crowded:
                 continue
-            score = int(round(sum(field_scores) / len(field_scores)))
-            if score < threshold:
-                continue
-            candidate = EntityCandidate(
-                id=_new_id("candidate"),
-                project_id=job.project_id,
-                job_id=job.id,
-                object_type_id=job.object_type_id,
-                object_ids=[left.id, right.id],
-                score=score,
-                reasons=reasons or [{"field": ",".join(fields), "score": score, "left": left.id, "right": right.id}],
-                status="PENDING",
-                created_at=_now(),
-            )
-            db.add(candidate)
-            candidates.append(candidate)
+            members = groups.setdefault(key, [])
+            members.append(row.id)
+            if len(members) > ENTITY_EXACT_GROUP_CEILING:
+                crowded.add(key)
+                del groups[key]
+    wanted = set()
+    for members in groups.values():
+        for index, left_id in enumerate(members):
+            for right_id in members[index + 1:]:
+                if left_id not in scanned or right_id not in scanned:
+                    wanted.add((left_id, right_id))
+    needed = sorted({object_id for pair in wanted for object_id in pair})
+    loaded: Dict[str, Dict[str, Any]] = {}
+    for start in range(0, len(needed), 500):
+        chunk = needed[start:start + 500]
+        for row in scope.with_entities(*_ENTITY_ROW_COLUMNS).filter(models.ObjectInstance.id.in_(chunk)):
+            loaded[row.id] = _object_dict(row)
+    for left_id, right_id in sorted(wanted):
+        consider(loaded[left_id], loaded[right_id])
+    job.exact_objects = exact_objects
+    job.exact_values_skipped = len(crowded)
     return candidates
 
 
@@ -1499,9 +1572,24 @@ def create_entity_resolution_job(body: EntityResolutionJobRequest, principal: pr
     _audit(db, "entity_resolution.job.completed", "entity_resolution_job", job.id, {
         "project_id": project_id, "candidate_count": len(candidates),
         "objects_in_scope": job.objects_in_scope, "objects_scanned": job.objects_scanned,
+        "exact_objects": job.exact_objects, "exact_values_skipped": job.exact_values_skipped,
     }, actor=principal.id)
     db.commit()
     db.refresh(job)
+    # The candidates, which the commit expired: one read, before anything reads one, rather than a
+    # refresh apiece. `candidates` holds each one, so what this read loads stays on them.
+    db.query(EntityCandidate).filter(EntityCandidate.project_id == project_id, EntityCandidate.job_id == job.id).all()
+    # The candidates' objects in one read per 500 ids, held in `loaded` until the response is built.
+    # The commit expired every object the scan held, and the exact pass read the rest as columns, so
+    # each `db.get` in `_candidate_dict` was a query of its own; and the session holds unmodified
+    # objects weakly, so a read whose result is not kept is gone before `db.get` looks.
+    candidate_ids = sorted({object_id for candidate in candidates for object_id in (candidate.object_ids or [])})
+    loaded = []
+    for start in range(0, len(candidate_ids), 500):
+        loaded += db.query(models.ObjectInstance).filter(
+            models.ObjectInstance.project_id == project_id,
+            models.ObjectInstance.id.in_(candidate_ids[start:start + 500]),
+        ).all()
     return {
         **_job_dict(job),
         "scan_order": "id",

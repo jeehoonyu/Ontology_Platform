@@ -1094,20 +1094,23 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expectUnclipped(note, "the ceiling note is cut off, hiding how many objects the scope holds");
   });
 
-  test("the Candidate Review Queue says how much of the type it compared, and Explain does not call an uncompared object clear", async ({ page }) => {
+  test("the Candidate Review Queue compares the first 1,000 in full, pairs every object on an exact value, and says so", async ({ page }) => {
     test.setTimeout(240_000);
-    // A job compares every pair among the objects it reads. It read at most 1,000, in no
-    // stated order, while the queue read as the whole duplicate list and Explain called any
-    // object with no pending candidate "clear". Here 1,100 objects: a duplicate pair at 1
-    // and 2, inside the scan, and another at 1,099 and 1,100, past it. The rest carry no
-    // name or serial number, so their pairs score nothing and write no candidate.
-    const pairs: Record<number, Record<string, string>> = {
+    // A job compares every pair among the first 1,000 objects by id, and pairs every object of the
+    // type that shares an exact name or serial number, ignoring case and punctuation. Here 1,100
+    // objects: a pair at 1 and 2 inside the scan; an exact pair at 1,099 and 1,100 past it, which
+    // only the exact pass reaches; a near pair at 1,097 and 1,098 past it, which nothing compares;
+    // and 51 objects from 1,001 sharing one name, more than a shared value is paired for. The rest
+    // carry no name or serial number, so their pairs score nothing and write no candidate.
+    const fixed: Record<number, Record<string, string>> = {
       1: { name: "Kestrel Valve", serial_number: "KV-1" }, 2: { name: "Kestrel Valve", serial_number: "KV-1" },
-      1099: { name: "Osprey Pump", serial_number: "OP-9" }, 1100: { name: "Osprey Pump", serial_number: "OP-9" }
+      1097: { name: "Heron Gate", serial_number: "HG-1" }, 1098: { name: "Heron Gates", serial_number: "HG-2" },
+      1099: { name: "Osprey Pump", serial_number: "OP-9" }, 1100: { name: "osprey pump", serial_number: "op 9" }
     };
+    const crowd = (index: number): Record<string, string> => (index >= 1001 && index <= 1051 ? { name: "Crowded Tank" } : {});
     const typeId = await entityType(page, (id) => Array.from({ length: 1100 }, (unused, offset) => {
       const index = offset + 1;
-      return { id: `${id}_${String(index).padStart(4, "0")}`, status: "RUNNING", ...(pairs[index] ?? {}) };
+      return { id: `${id}_${String(index).padStart(4, "0")}`, status: "RUNNING", ...crowd(index), ...(fixed[index] ?? {}) };
     }));
 
     await page.goto("/workspace/decision");
@@ -1119,19 +1122,25 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(page.getByRole("status")).toHaveText("Entity review queue generated", { timeout: 180_000 });
 
     const queue = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Candidate Review Queue", exact: true }) });
-    await expect(queue.locator("article strong").filter({ hasText: `${typeId}_0001 + ${typeId}_0002` }), "the pair inside the scan was not found").toHaveCount(1);
+    const pair = (left: number, right: number) => queue.locator("article strong").filter({ hasText: `${typeId}_${String(left).padStart(4, "0")} + ${typeId}_${String(right).padStart(4, "0")}` });
+    await expect(pair(1, 2), "the pair inside the scan was not found").toHaveCount(1);
+    await expect(pair(1099, 1100), "the exact pair past the scan was not reached").toHaveCount(1);
+    await expect(pair(1097, 1098), "a near pair past the scan was compared, though the note says only shared values were").toHaveCount(0);
     const [scanned, inScope, rest] = await page.evaluate(() => [(1000).toLocaleString(), (1100).toLocaleString(), (100).toLocaleString()]);
     const note = queue.getByRole("note");
-    await expect(note, "the queue compared 1,000 of 1,100 objects and does not say so")
-      .toHaveText(`Compared the first ${scanned} of ${inScope} objects, by id. Pairs involving the other ${rest} were not compared.`);
+    await expect(note, "the queue does not say what it compared, what it paired, and what it left")
+      .toHaveText(`Compared every pair among the first ${scanned} of ${inScope} objects, by id, and paired all ${inScope} on an exact name or serial_number, ignoring case and punctuation. Pairs involving the other ${rest} were compared only where they share such a value. 1 shared value held by more than 50 objects was not paired.`);
     await expectUnclipped(note, "the queue's note is cut off, hiding how many objects were compared");
 
-    await page.getByLabel("Decision object ID").fill(`${typeId}_1099`);
+    const badge = page.locator("h3", { hasText: "Duplicate warnings" }).locator("xpath=following-sibling::*[1]");
+    await page.getByLabel("Decision object ID").fill(`${typeId}_1010`);
     await views.getByRole("button", { name: "Explain Object" }).click();
     await page.getByRole("button", { name: "Explain selected object" }).click();
     await expect(page.getByRole("status")).toHaveText("Explanation loaded");
-    const badge = page.locator("h3", { hasText: "Duplicate warnings" }).locator("xpath=following-sibling::*[1]");
-    await expect(badge, "an object the job never read is called clear").toHaveText("not compared");
+    await expect(badge, "an object whose shared value was left unpaired is called clear, or said to have no exact match").toHaveText("not compared");
+    await page.getByLabel("Decision object ID").fill(`${typeId}_1099`);
+    await page.getByRole("button", { name: "Explain selected object" }).click();
+    await expect(badge, "the exact pair's object does not carry its warning").toHaveText("1 warnings");
   });
 
   test("an empty Candidate Review Queue says which objects it compared", async ({ page }) => {
@@ -1150,7 +1159,16 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(page.getByRole("status")).toHaveText("Entity review queue generated", { timeout: 120_000 });
 
     const queue = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Candidate Review Queue", exact: true }) });
-    const [scanned] = await page.evaluate(() => [(1000).toLocaleString()]);
-    await expect(queue.getByText(`No candidates among the first ${scanned} objects`), "the empty queue claims the whole type").toBeVisible();
+    const [scanned, all] = await page.evaluate(() => [(1000).toLocaleString(), (1002).toLocaleString()]);
+    await expect(queue.getByText(`No candidates among the first ${scanned} objects, or from an exact name or serial_number match across all ${all}`),
+      "the empty queue claims the whole type, or leaves out the exact pass").toBeVisible();
+
+    // Past the scan, with nothing shared and nothing left unpaired: the exact pass read it and paired it with nothing.
+    await page.getByLabel("Decision object ID").fill(`${typeId}_1002`);
+    await page.getByRole("navigation", { name: "Decision intelligence views" }).getByRole("button", { name: "Explain Object" }).click();
+    await page.getByRole("button", { name: "Explain selected object" }).click();
+    await expect(page.getByRole("status")).toHaveText("Explanation loaded");
+    const badge = page.locator("h3", { hasText: "Duplicate warnings" }).locator("xpath=following-sibling::*[1]");
+    await expect(badge, "an object the exact pass read and paired with nothing is called clear, or not compared").toHaveText("no exact-match candidate");
   });
 });

@@ -2244,6 +2244,110 @@ plan, and it is measured there.
   in and measured the same way, gives 41 and 25 again, and the fixed file is restored byte for byte. The
   reliability, operations, industrial and platform scripts that call the route pass.
 
+  **Then entity resolution's reach, which the owner decided.** A job compared every pair among the first
+  1,000 objects of its type by id and said so, and nothing reached the objects past them. Of the ways
+  offered, the owner chose to keep the full comparison of the first 1,000 and add an exact pass over the
+  whole type.
+
+  **Every pair among the first N, and every object paired on an exact value.** After the scan, the job
+  streams every object in scope as columns and groups them by each matching field's value, lowercased
+  with punctuation removed. A group pairs its members where at least one lies past the scan, since the
+  scan compared every pair inside it, and each such pair is scored exactly as the scan scores one, with
+  the same threshold. A value shared by more than `ENTITY_EXACT_GROUP_CEILING`, 50 objects, is not
+  paired past the scan, since that many would be every pair again, and the job counts those values. Two
+  new nullable columns, added by migration `0045_entity_exact_pass`, keep `exact_objects` and
+  `exact_values_skipped`; the job list, the create response, the audit entry and project snapshots carry
+  them, and a job from before the pass keeps both NULL. The results are a superset of the scan's. The
+  revision was first named `0045_entity_resolution_exact_pass`, 33 characters, and
+  `test_production_rehearsal_contract.py` refused it: `alembic_version` holds 32, so a production upgrade
+  would have failed writing the new head. The suite cost census ran that script and reported it exiting
+  non-zero, which is how it was found.
+
+  **The queue and Explain say which part found what.** A partial job's note reads "Compared every pair
+  among the first 1,000 of 1,100 objects, by id, and paired all 1,100 on an exact name or serial_number,
+  ignoring case and punctuation. Pairs involving the other 100 were compared only where they share such
+  a value.", and adds "1 shared value held by more than 50 objects was not paired." when one was. An
+  empty queue says it found nothing in either part. Explain's `duplicate_coverage` gains `exact_checked`:
+  the badge reads "clear" for an object the scan compared, "no exact-match candidate" for one the pass
+  read when no value was left unpaired, and "not compared" otherwise, including for an object made after
+  the job. The legacy shell's toast names the exact pass too.
+
+  **The proof.** `oms/test_entity_resolution_coverage.py` now holds five named objects past the scan of
+  1,000 fillers: an exact pair, a near pair that shares no value, and one object sharing an exact name
+  with the scan's first filler. A job at limit 1,000 must count 1,005 in scope, 1,000 compared and 1,005
+  read by the exact pass with no value skipped, and find exactly the exact pair and the pair across the
+  scan's edge, scored 100 on `name`, while the near pair stays uncompared; a reloaded job list must keep
+  all five facts. Explain must say an object past the scan was checked but not compared and carries its
+  warning, a scanned object was compared, and an object made after the job was neither. A job at limit
+  5,000 must find the near pair too. A second type of 51 objects sharing one name and two twins, run at
+  limit 2, must count one value unpaired and find only the scan's pair and the twins. The script passes
+  with 92 assertions, and `test_entity_resolution_exact_pass_migration.py` upgrades from 0044 with the two
+  columns removed, keeps a prior job's columns NULL, applies head twice, downgrades and upgrades again. The
+  Decision, snapshot, tenancy and industrial scripts that touch entity resolution pass, 12 in all.
+
+  In `truncation-sites.spec.ts`, the queue test builds 1,100 objects: a pair inside the scan, an exact
+  pair past it, a near pair past it, and 51 objects from 1,001 sharing one name. It requires both pairs
+  reached and the near pair absent, the note naming both parts and the unpaired value, not cut off, a
+  crowded object's badge reading "not compared" and the exact pair's reading "1 warnings". The empty-queue
+  test requires the title naming both parts and an object past the scan reading "no exact-match
+  candidate". Both pass, with the Decision workflow and accessibility tests.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B0, the committed server:** the backend script failed at the exact pass, every exact field `None`.
+  - **B1, the scan without `ORDER BY`:** it failed at the scan, the last id read filler 994 with three
+    candidates.
+  - **B2, exact pairs found but not scored:** it failed at the pairs, none found.
+  - **B3, pairs only where both lie past the scan:** it failed at the pairs, the pair across the scan's
+    edge missing.
+  - **B4, no ceiling:** it failed at the crowd, no value counted as unpaired.
+  - **B5, checked without the created-at test:** it failed at the object made after the job, called
+    checked.
+  - **N1, the committed Decision code:** the queue test failed at the exact pair past the scan, `Expected:
+    1`, `Received: 0`.
+  - **N2, the note without the exact pass,** and **N3, the unpaired value unsaid:** each failed at the
+    note, which read the old sentence, or the new one without its last.
+  - **N4, the badge ignoring unpaired values:** it failed at the crowded object, `Received: "no
+    exact-match candidate"`.
+  - **N5, the badge without the exact pass:** the empty-queue test failed at its object, `Received: "not
+    compared"`.
+  - **N6, the empty title without the exact pass:** the empty-queue test failed at its title, element not
+    found. Its first mutation did not compile and was replaced by one that does.
+  - Restored: the four Decision browser tests and three backend scripts pass, and the three sources are
+    byte for byte what they were.
+
+  **Creating a job read each candidate and its objects one at a time.** The commit expires every object
+  and candidate the job loaded, and the exact pass reads objects past the scan as columns, so building the
+  response refreshed each candidate and fetched each of its objects apart. The suite cost census found
+  `POST /entity-resolution/jobs` repeating one statement 6 times. The handler now reloads the job's
+  candidates in one read before anything reads one, and their objects in one read per 500 ids, keeping
+  that result referenced because the session holds unchanged objects only weakly; the first draft of the
+  preload threw its result away and changed nothing. On `test_entity_resolution_coverage.py` the route
+  falls from 20 statements with a shape repeated 6 times to 14 with none repeated. Measured the same way
+  with only the candidate reload removed it reads 15 statements with 3 repeats, and with both removed 20
+  and 6, and the file is restored byte for byte after each.
+
+  **The references.** The Decision route opens with 13 requests at 473 KB, within its ceiling; one
+  measurement in the gate run read 6, and two more read 13 each. `.table-truncated` gains no file and
+  `INERT_CONTROLS.md` does not move. `TABLE_TRUNCATION.md` changes only where the gate names the queue's
+  test, whose title moved, and still holds 13 unfixed. The tenancy census holds at 360: every read the
+  pass adds runs on the scan's project-scoped query.
+
+  **The migration head is now 0045, and re-earning its four baselines found two costs.** Query bounds
+  holds its ceiling of 0, and the browser evidence baseline records 234 passed, 0 failed and the new
+  tests. The suite cost census found the two costs: `GET /reliability/summary`, from the Reliability tab's
+  change and committed on its own before this record, and `POST /entity-resolution/jobs`, fixed here and
+  now repeating no statement. The census also runs every backend script, and three exited non-zero across
+  its runs. `test_production_rehearsal_contract.py` refused the 33-character revision id, above;
+  `test_iteration_state_audit.py` failed while the browser evidence baseline still named the old head, and
+  passes once it is re-recorded from a bundle built with provenance; and
+  `test_request_cost_concurrency.py` exits non-zero under the census's instrumentation and passes on its
+  own. Two routes' statement counts moved in both directions between runs,
+  `/runtime/observability/summary` from 91 to 80 to 107 and `/project/demo/reset` from 826 to 801 to 825,
+  and are reported and not gated. Request cost re-records 150 routes with no shape repeated more than 4
+  times, under its ceiling of 6. It reported three routes drifting by one to three statements,
+  `/imports/jobs`, `/reliability/summary` and `/ui-state/imports`, each a route an earlier change in this
+  goal counted or listed more of; drift is reported and not gated.
+
 ## Order and size
 
 | Step | Touches | Commits |

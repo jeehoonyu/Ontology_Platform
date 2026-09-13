@@ -1188,7 +1188,7 @@ WINDOWS: Dict[str, Dict[str, Any]] = {
     "entity-resolution": {
         "claims": ["request:api/decisionApi.ts::createEntityJob::POST /entity-resolution/jobs::limit"],
         "screen": "workspaces/DecisionWorkspace.tsx", "note": "Pairs involving the other",
-        "state": {"stated": "truncation-sites.spec.ts::the Candidate Review Queue says how much of the type it compared, and Explain does not call an uncompared object clear"}},
+        "state": {"stated": "truncation-sites.spec.ts::the Candidate Review Queue compares the first 1,000 in full, pairs every object on an exact value, and says so"}},
     "reliability-runs": {
         "claims": ["cap:reliability_ops.reliability_summary::.limit(25)"],
         "screen": "workspaces/OpsWorkspace.tsx", "note": "of {held.toLocaleString()} contract runs",

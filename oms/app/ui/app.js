@@ -3756,9 +3756,10 @@ async function runEntityResolution() {
   setDecisionTab("entity");
   renderDecisionWorkspace();
   const job = state.decision.entityJob;
-  // A job compares every pair among the first objects of its type by id; say how many.
+  // A job compares every pair among the first objects of its type by id, and pairs the rest where
+  // they share an exact value; say both.
   showToast(job.objects_scanned != null && job.objects_in_scope != null
-    ? `${state.decision.candidates.length} candidates from the first ${job.objects_scanned} of ${job.objects_in_scope} objects`
+    ? `${state.decision.candidates.length} candidates from the first ${job.objects_scanned} of ${job.objects_in_scope} objects${job.exact_objects != null ? `, and from exact matches across all ${job.exact_objects}` : ""}`
     : `${state.decision.candidates.length} candidates`);
 }
 

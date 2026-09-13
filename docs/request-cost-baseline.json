@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-09-13T19:32:07Z",
+    "recorded_at": "2026-09-13T23:01:54Z",
     "stale_after": "migration head",
-    "migration_head": "0044_entity_resolution_coverage"
+    "migration_head": "0045_entity_exact_pass"
   },
   "note": "Per-request database round-trips. Written by oms/audit_request_cost.py --write-baseline.",
   "repeat_ceiling": 6,
@@ -298,8 +298,8 @@
       "worst_repeat": 2
     },
     "/imports/jobs": {
-      "distinct_shapes": 10,
-      "queries": 10,
+      "distinct_shapes": 11,
+      "queries": 11,
       "worst_repeat": 0
     },
     "/imports/summary": {
@@ -623,8 +623,8 @@
       "worst_repeat": 0
     },
     "/reliability/summary": {
-      "distinct_shapes": 13,
-      "queries": 13,
+      "distinct_shapes": 14,
+      "queries": 14,
       "worst_repeat": 0
     },
     "/restricted-views": {
@@ -708,8 +708,8 @@
       "worst_repeat": 4
     },
     "/ui-state/imports": {
-      "distinct_shapes": 10,
-      "queries": 10,
+      "distinct_shapes": 13,
+      "queries": 13,
       "worst_repeat": 0
     },
     "/ui-state/ontology": {

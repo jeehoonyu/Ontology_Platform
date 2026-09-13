@@ -1,7 +1,7 @@
 {
   "provenance": {
-    "migration_head": "0044_entity_resolution_coverage",
-    "recorded_at": "2026-09-13T19:32:09Z",
+    "migration_head": "0045_entity_exact_pass",
+    "recorded_at": "2026-09-13T23:23:23Z",
     "stale_after": "migration head"
   },
   "repeat_ceiling": 6,
@@ -274,8 +274,8 @@
     },
     "GET /api/v1/plugins/{version_id}/executions": {
       "worst_repeat": 0,
-      "queries": 2,
-      "calls": 1
+      "queries": 3,
+      "calls": 2
     },
     "GET /api/v1/snapshot-cache/summary": {
       "worst_repeat": 0,
@@ -504,8 +504,8 @@
     },
     "GET /connections/sources/{source_id}/fetch-attempts": {
       "worst_repeat": 0,
-      "queries": 2,
-      "calls": 6
+      "queries": 3,
+      "calls": 7
     },
     "GET /connections/sources/{source_id}/runtime-credentials": {
       "worst_repeat": 0,
@@ -545,7 +545,7 @@
     "GET /data-assets/{asset_id}": {
       "worst_repeat": 0,
       "queries": 3,
-      "calls": 14
+      "calls": 29
     },
     "GET /data-assets/{dataset_id}/download": {
       "worst_repeat": 0,
@@ -560,17 +560,17 @@
     "GET /datasets/{dataset_id}/transactions": {
       "worst_repeat": 0,
       "queries": 1,
-      "calls": 1
+      "calls": 15
     },
     "GET /datasets/{dataset_id}/view": {
       "worst_repeat": 0,
       "queries": 2,
-      "calls": 7
+      "calls": 12
     },
     "GET /decision/objects/{object_type_id}/{object_id}/explain": {
       "worst_repeat": 2,
       "queries": 11,
-      "calls": 9
+      "calls": 10
     },
     "GET /decision/rules": {
       "worst_repeat": 2,
@@ -665,7 +665,7 @@
     "GET /graph/overview": {
       "worst_repeat": 12,
       "queries": 55,
-      "calls": 7
+      "calls": 9
     },
     "GET /health/live": {
       "worst_repeat": 0,
@@ -684,8 +684,8 @@
     },
     "GET /imports/jobs": {
       "worst_repeat": 2,
-      "queries": 15,
-      "calls": 7
+      "queries": 16,
+      "calls": 9
     },
     "GET /imports/jobs/{job_id}": {
       "worst_repeat": 0,
@@ -1110,7 +1110,7 @@
     "GET /ops/alerts": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 5
+      "calls": 7
     },
     "GET /ops/events": {
       "worst_repeat": 2,
@@ -1203,7 +1203,7 @@
       "calls": 36
     },
     "GET /project/readiness": {
-      "worst_repeat": 33,
+      "worst_repeat": 22,
       "queries": 1136,
       "calls": 57
     },
@@ -1227,10 +1227,15 @@
       "queries": 7,
       "calls": 4
     },
+    "GET /reliability/data-contracts/{contract_id}/runs": {
+      "worst_repeat": 0,
+      "queries": 7,
+      "calls": 1
+    },
     "GET /reliability/summary": {
       "worst_repeat": 0,
-      "queries": 16,
-      "calls": 5
+      "queries": 14,
+      "calls": 6
     },
     "GET /restricted-views": {
       "worst_repeat": 0,
@@ -1384,7 +1389,7 @@
     },
     "GET /ui-state/imports": {
       "worst_repeat": 0,
-      "queries": 10,
+      "queries": 13,
       "calls": 6
     },
     "GET /ui-state/ontology": {
@@ -1430,12 +1435,12 @@
     "GET /ui-state/pipeline/{graph_id}/canvas": {
       "worst_repeat": 3,
       "queries": 14,
-      "calls": 2
+      "calls": 3
     },
     "GET /ui-state/pipeline/{graph_id}/nodes/{node_id}/details": {
       "worst_repeat": 8,
       "queries": 33,
-      "calls": 1
+      "calls": 2
     },
     "GET /ui-state/pipeline/{graph_id}/ontology-contracts": {
       "worst_repeat": 0,
@@ -1569,7 +1574,7 @@
     },
     "POST /action-types": {
       "worst_repeat": 11,
-      "queries": 42,
+      "queries": 41,
       "calls": 23
     },
     "POST /actions/execute": {
@@ -2295,7 +2300,7 @@
     "POST /data-assets": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 84
+      "calls": 97
     },
     "POST /data-assets/{asset_id}/expectations/run": {
       "worst_repeat": 2,
@@ -2305,17 +2310,17 @@
     "POST /data-assets/{dataset_id}/upload": {
       "worst_repeat": 2,
       "queries": 7,
-      "calls": 5
+      "calls": 6
     },
     "POST /datasets/{dataset_id}/branches": {
       "worst_repeat": 0,
       "queries": 9,
-      "calls": 1
+      "calls": 2
     },
     "POST /datasets/{dataset_id}/transactions": {
-      "worst_repeat": 2,
-      "queries": 11,
-      "calls": 5
+      "worst_repeat": 0,
+      "queries": 9,
+      "calls": 16
     },
     "POST /decision/evaluate": {
       "worst_repeat": 2,
@@ -2373,9 +2378,9 @@
       "calls": 2
     },
     "POST /entity-resolution/jobs": {
-      "worst_repeat": 2,
+      "worst_repeat": 0,
       "queries": 15,
-      "calls": 7
+      "calls": 8
     },
     "POST /entity-resolution/objects/{object_id}/split": {
       "worst_repeat": 0,
@@ -2395,17 +2400,17 @@
     "POST /events/publish": {
       "worst_repeat": 3,
       "queries": 34,
-      "calls": 2
+      "calls": 4
     },
     "POST /events/subscriptions": {
       "worst_repeat": 2,
       "queries": 18,
-      "calls": 1
+      "calls": 6
     },
     "POST /events/subscriptions/{subscription_id}/evaluate": {
       "worst_repeat": 0,
       "queries": 13,
-      "calls": 1
+      "calls": 6
     },
     "POST /gis/feature-collection": {
       "worst_repeat": 0,
@@ -2480,7 +2485,7 @@
     "POST /imports/csv": {
       "worst_repeat": 3,
       "queries": 36,
-      "calls": 7
+      "calls": 58
     },
     "POST /imports/files": {
       "worst_repeat": 3,
@@ -2574,7 +2579,7 @@
     },
     "POST /jobs/claim": {
       "worst_repeat": 13,
-      "queries": 63,
+      "queries": 49,
       "calls": 47
     },
     "POST /jobs/{job_id}/cancel": {
@@ -2589,7 +2594,7 @@
     },
     "POST /jobs/{job_id}/fail": {
       "worst_repeat": 3,
-      "queries": 19,
+      "queries": 21,
       "calls": 5
     },
     "POST /jobs/{job_id}/heartbeat": {
@@ -2825,7 +2830,7 @@
     "POST /object-explorer/query": {
       "worst_repeat": 2,
       "queries": 9,
-      "calls": 3
+      "calls": 14
     },
     "POST /object-explorer/single-statistic": {
       "worst_repeat": 0,
@@ -2865,7 +2870,7 @@
     "POST /object-types": {
       "worst_repeat": 7,
       "queries": 30,
-      "calls": 75
+      "calls": 78
     },
     "POST /object-types/{object_type_id}/implement-interface": {
       "worst_repeat": 4,
@@ -2875,7 +2880,7 @@
     "POST /objects": {
       "worst_repeat": 3,
       "queries": 25,
-      "calls": 109
+      "calls": 165
     },
     "POST /observability/checks/build-status": {
       "worst_repeat": 0,
@@ -3014,7 +3019,7 @@
     },
     "POST /ontology/environments/{environment_name}/rollback": {
       "worst_repeat": 5,
-      "queries": 48,
+      "queries": 47,
       "calls": 2
     },
     "POST /ontology/health/run": {
@@ -3100,7 +3105,7 @@
     "POST /ops/alert-rules": {
       "worst_repeat": 0,
       "queries": 17,
-      "calls": 4
+      "calls": 12
     },
     "POST /ops/alerts/evaluate": {
       "worst_repeat": 9,
@@ -3110,7 +3115,7 @@
     "POST /ops/events/ingest": {
       "worst_repeat": 2,
       "queries": 28,
-      "calls": 4
+      "calls": 9
     },
     "POST /ops/inbox/{notification_id}/ack": {
       "worst_repeat": 0,
@@ -3145,7 +3150,7 @@
     "POST /pipeline-builder/graphs": {
       "worst_repeat": 0,
       "queries": 5,
-      "calls": 39
+      "calls": 40
     },
     "POST /pipeline-builder/graphs/{graph_id}/deliver": {
       "worst_repeat": 5,
@@ -3170,7 +3175,7 @@
     "POST /pipeline-builder/graphs/{graph_id}/nodes/{node_id}/preview": {
       "worst_repeat": 2,
       "queries": 9,
-      "calls": 1
+      "calls": 3
     },
     "POST /pipeline-builder/graphs/{graph_id}/nodes/{node_id}/suggestions": {
       "worst_repeat": 3,
@@ -3194,18 +3199,18 @@
     },
     "POST /pipeline-builder/workers/run-next": {
       "worst_repeat": 1004,
-      "queries": 4204,
+      "queries": 4203,
       "calls": 44
     },
     "POST /pipelines": {
       "worst_repeat": 2,
       "queries": 12,
-      "calls": 14
+      "calls": 15
     },
     "POST /pipelines/{pipeline_id}/run": {
       "worst_repeat": 4,
       "queries": 69,
-      "calls": 9
+      "calls": 10
     },
     "POST /policies": {
       "worst_repeat": 2,
@@ -3229,7 +3234,7 @@
     },
     "POST /project/demo/reset": {
       "worst_repeat": 49,
-      "queries": 826,
+      "queries": 825,
       "calls": 1
     },
     "POST /project/import": {
@@ -3285,7 +3290,7 @@
     "POST /reliability/data-contracts/{contract_id}/run": {
       "worst_repeat": 2,
       "queries": 30,
-      "calls": 2
+      "calls": 28
     },
     "POST /reliability/lineage-impact": {
       "worst_repeat": 0,

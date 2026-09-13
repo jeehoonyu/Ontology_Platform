@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-09-13T19:32:01Z",
+    "recorded_at": "2026-09-13T23:01:40Z",
     "stale_after": "migration head",
-    "migration_head": "0044_entity_resolution_coverage"
+    "migration_head": "0045_entity_exact_pass"
   },
   "note": "Ratchet. This count may fall and must never rise. A new call site on an unbounded primitive fails the build.",
   "unbounded_call_sites_ceiling": 0
