@@ -13,7 +13,8 @@ import {
   sortFn_alphanumeric,
   tableFeatures,
   useTable,
-  type ColumnFiltersState
+  type ColumnFiltersState,
+  type Row
 } from "@tanstack/react-table";
 import { formatValue } from "../../utils/format";
 import type { TableRow } from "../../types";
@@ -74,9 +75,8 @@ import { EmptyState, TABLE_ROW_LIMIT } from "./DataDisplay";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
-  // Natural order, so "10" sorts after "9": cells are compared as the text they
-  // display, which is what a person sorting by eye expects.
-  sortFns: { alphanumeric: sortFn_alphanumeric },
+  // No registered sort functions: every column sorts through `compareCells`, by the
+  // value it holds, so no column can name a sort by string and get another one.
   columnVisibilityFeature,
   columnSizingFeature,
   columnOrderingFeature,
@@ -91,6 +91,38 @@ const features = tableFeatures({
 });
 
 const helper = createColumnHelper<typeof features, TableRow>();
+
+// N7d. The grid sorted the text a cell shows, which put 0.1 before 0.05 and 2.5 before
+// 2.25 -- a confident wrong answer to "the most expensive job". A cell still shows,
+// and filters on, its text; a sort compares the value underneath. Numbers compare as
+// numbers and booleans false before true. Everything else compares as its text, in
+// natural order, so "10" still sorts after "9" -- and a decimal held as a string,
+// "2.5" against "2.25", still misorders, because strings are never parsed. A column
+// mixing types orders numbers, then booleans, then the rest. Empty cells never reach
+// this: they are `undefined`, which the column puts last whichever way it sorts.
+const TYPE_ORDER = { number: 0, boolean: 1, other: 2 } as const;
+
+type GridRow = Row<typeof features, TableRow>;
+// The library's natural text order, which reads the text a cell shows. It is typed
+// for any table, and a row's type is invariant in its table's features, so it is
+// narrowed to this grid's rows once, here.
+const naturalText = sortFn_alphanumeric as unknown as (rowA: GridRow, rowB: GridRow, columnId: string) => number;
+
+function typeOf(value: unknown): keyof typeof TYPE_ORDER {
+  if (typeof value === "number" && Number.isFinite(value)) return "number";
+  return typeof value === "boolean" ? "boolean" : "other";
+}
+
+function compareCells(rowA: GridRow, rowB: GridRow, id: string): number {
+  const a = rowA.original[id];
+  const b = rowB.original[id];
+  const kindA = typeOf(a);
+  const kindB = typeOf(b);
+  if (kindA !== kindB) return TYPE_ORDER[kindA] - TYPE_ORDER[kindB];
+  if (kindA === "number" || kindA === "boolean") return a === b ? 0 : (a as number) < (b as number) ? -1 : 1;
+  return naturalText(rowA, rowB, id);
+}
+
 // A fresh fallback array on every render would invalidate the row models each time.
 const NO_ROWS: TableRow[] = [];
 // Widths come only from these presets, so the select's value is always one of its options.
@@ -137,10 +169,15 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
   }, [data]);
   // `helper.columns` is the library's own way to hand a column list to the table:
   // a plain array of string-valued accessors does not type-check against it.
-  const columns = useMemo(() => helper.columns(keys.map((key) => helper.accessor((row) => formatValue(row[key]), {
+  const columns = useMemo(() => helper.columns(keys.map((key) => helper.accessor((row) => (row[key] == null ? undefined : formatValue(row[key])), {
     id: key,
     header: key,
-    sortFn: "alphanumeric",
+    sortFn: compareCells,
+    // An empty cell is `undefined`, so it goes last ascending and descending alike.
+    sortUndefined: "last",
+    // Always a boolean: the library otherwise starts a column whose first values are
+    // all empty on a descending press.
+    sortDescFirst: false,
     filterFn: "includesString",
     size: DEFAULT_COLUMN_PX,
     minSize: COLUMN_WIDTHS[0][1],

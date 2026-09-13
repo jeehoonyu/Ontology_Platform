@@ -681,9 +681,28 @@ plan, and it is measured there.
     - saving filters or saved views;
     - filtering on the server, or over records the page never loaded;
     - N7d's rollout.
-  - **N7d — Virtualized, and rolled out where sorting is needed.** **Open** — virtualization
-    replacing paging where a table is long, and the grid adopted by the `DataTable` call
-    sites whose rows a person needs to sort, with the `DataGrid` user count as the ratchet.
+  - **N7d — Rolled out where sorting is needed.** **Open** — the grid adopted by the
+    `DataTable` call sites whose rows a person needs to sort, with the `DataGrid` user count
+    as the ratchet.
+
+    **Decided 2026-09-13: virtualization is split out, as N7e.** This condition first read
+    "Virtualized, and rolled out where sorting is needed". The owner agreed to split it on
+    five findings, each checked in the source:
+    - No census site loads a long table. Job telemetry is capped at 50, the operations feed
+      at 250 and a contract's violations at 100, and the other endpoints hold none or one row
+      in every local database. Paging at forty already makes every row reachable (N5).
+    - Virtualizing would replace the `.slice` that `audit_table_truncation` holds to the
+      caption, so the gate needs a new spelling of its own.
+    - It would rewrite, in the commit that moves the sites, the N5, N8 and N9 paging tests
+      whose unchanged pass is the proof the rollout kept them.
+    - `useVirtualizer` measured 25,465 bytes minified, a cost nobody has approved.
+    - It reopens N7b's layout: a scroll box inside a scrolling page, and pins on both axes.
+
+    Two more answers the rollout needed. For sorting, the operations feed ranks `warning`
+    with `warn` and `error` with `high`; the server's own ranking has neither word, which is
+    filed as its own task. One test may stub the operations API, the suite's first
+    `page.route`, to prove the event time sorts across the noon hour and a year boundary,
+    since the server stamps event times itself.
 
     **Decided 2026-09-12, after the +44.0 KB measurement above: the grid goes only where
     sorting is needed, and `DataTable` stays everywhere else.** The other two choices put to
@@ -708,6 +727,41 @@ plan, and it is measured there.
     57 do not**. A second reader tried to refute each verdict and changed five. None of the
     seven is in `App.tsx`, so no on-demand loading is needed. The one `App.tsx` table left
     unclear, the connector fetch evidence, stays a `DataTable` until its evidence is in.
+    **First, before any site moves: a grid sorts a cell by its value.** The design pass for the
+    rollout ran the grid's own sort over the census sites' real value types, and found it
+    ordering the text a cell shows. Job costs sorted `0.1, 0.05, 1e-7, 2.5, 2.25, 10.25`, a
+    confident wrong answer to the census's "most expensive job". Empty cells sorted first, so
+    the soonest-expiring token sorted below every token that never expires. `DataGrid` now
+    compares the value underneath: numbers as numbers, booleans false before true, and anything
+    else as its text in the same natural order as before, so `"10"` still follows `"9"`. A
+    column mixing types orders numbers, then booleans, then the rest. The cell still shows, and
+    filters on, its text. An empty cell is `undefined`, which the library puts last in both
+    directions, and every column starts ascending: left to itself, the library starts a column
+    whose first values are all empty on a descending press. The registered sort-function slot
+    is gone, so no column can name a sort by string and get another one.
+
+    **What stays wrong, and is said in the component:** a decimal held as a string, `"2.5"`
+    against `"2.25"`, still misorders, because strings are never parsed as numbers. Parsing
+    them would put version strings `1.9` and `1.10` in the wrong order instead.
+
+    **The first build did not type-check, and still ran the tests.** The build command piped
+    `tsc` into `head`, so the pipe reported `head`'s success. Vite built anyway, and 24 tests
+    passed on a component `tsc` had refused: the library's text comparator is typed for any
+    table, and a row's type is invariant in its table's features. It is now narrowed to the
+    grid's rows once. The build is run with `tsc`'s exit status checked. The negative-run
+    scripts had always chained `tsc && vite build` without a pipe, so their builds were real.
+
+    Two tests in `data-grid.spec.ts`: a numeric column sorts by value (its fixture first reads the
+    stored records back and fails unless the costs arrived as numbers), and empty cells sort last
+    both ways while a column with no values starts ascending. All twenty-four grid and table tests
+    pass on one build. Negative runs: four builds. The text comparator failed at `numbers sorted as the text they show, not by value`. Without `sortUndefined` it failed at `empty cells sorted ahead of values descending`. Without `sortDescFirst` it failed at `Expected: "ascending"`, `Received: "descending"`. The fourth, an empty cell's accessor returning `""` instead of `undefined`, failed at the descending check, not the ascending one predicted: the value comparator already sorts a raw empty after numbers when ascending, so only the descending order depends on the accessor. Restored, twenty-four passed, and the source was restored byte for byte. The data-media route measures 528,734 bytes,
+    323 more than after N7c, and its ceiling is set to that. Not tested: booleans, which the
+    tokens table's `revoked` column exercises when it adopts the grid.
+  - **N7e — Virtualization replacing paging where a table is measured long.** **Open**, not
+    started. It opens when a site has a measured row count at which a forty-row page costs
+    something. It brings a truncation-gate spelling for a virtualized draw, captions for a
+    window that scrolls, a rewrite of the paging tests, and a payload decision of its own.
+    `@tanstack/react-virtual` stays installed and imported by nothing until then.
 - **N8 — The two tables N4 found.** **Met** — the ceiling in
   `table-truncation-baseline.json` is **0 of 3**. The operations feed hands every loaded
   event to `DataTable`, whose own caption now reads `Showing 40 of N rows`; Object Explorer

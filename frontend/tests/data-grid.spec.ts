@@ -12,9 +12,12 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
  * N7b asks for each operation from a control that is not a drag (WCAG 2.5.7), so
  * every test below uses a select, a button or a checkbox, and none drags.
  */
-async function createDataset(page: Page, name: string, records: Array<Record<string, string>>) {
+type Cell = string | number | boolean | null;
+
+async function createDataset(page: Page, name: string, records: Array<Record<string, Cell>>) {
+  const id = `grid_${Date.now()}_${Math.round(Math.random() * 1e6)}`;
   const created = await page.request.post("/data-assets", { data: {
-    id: `grid_${Date.now()}_${Math.round(Math.random() * 1e6)}`,
+    id,
     project_id: "default",
     display_name: name,
     kind: "dataset",
@@ -22,14 +25,19 @@ async function createDataset(page: Page, name: string, records: Array<Record<str
     records
   } });
   expect(created.ok(), await created.text()).toBeTruthy();
+  return id;
 }
 
 function recordsPanel(page: Page, name: string) {
   return page.locator(".panel").filter({ has: page.getByRole("heading", { name: `Records — ${name}` }) });
 }
 
-async function openDataset(page: Page, name: string, records: Array<Record<string, string>>) {
+async function openDataset(page: Page, name: string, records: Array<Record<string, Cell>>) {
   await createDataset(page, name, records);
+  return openExisting(page, name);
+}
+
+async function openExisting(page: Page, name: string) {
   await page.goto("/workspace/data-media");
   const row = page.getByRole("button", { name });
   await row.click();
@@ -44,6 +52,10 @@ const headerTexts = (table: Locator) => table.locator("thead .grid-sort").evalua
 const headerCell = (table: Locator, name: string) =>
   table.locator("thead th").filter({ has: table.page().getByRole("button", { name, exact: true }) });
 const firstRowCells = (table: Locator) => table.locator("tbody tr").first().locator("td").allTextContents();
+const columnValuesOf = async (table: Locator, id: string) => {
+  const index = (await headerTexts(table)).indexOf(id);
+  return table.locator("tbody tr").evaluateAll((rows, at) => rows.map((row) => row.children[at]?.textContent || ""), index);
+};
 const xInWrap = (cell: Locator) => cell.evaluate((element) =>
   element.getBoundingClientRect().left - element.closest(".table-wrap")!.getBoundingClientRect().left);
 // Which header a person hitting the middle of this one would actually hit.
@@ -97,6 +109,56 @@ test.describe("the records grid sorts and hides columns", () => {
     await expect(rankHeader).toHaveAttribute("aria-sort", "descending");
     await expect.poll(ranks, { message: "a second click did not reverse the order" })
       .toEqual(["22", "10", "3", "2", "1"]);
+  });
+
+  test("a numeric column sorts by value, not by the text it shows", async ({ page }) => {
+    // N7d. Sorted as text, these misorder: "0.1" before "0.05", "2.5" before "2.25".
+    const name = `Numeric sort fixture ${Date.now()}`;
+    const id = await createDataset(page, name, [
+      { name: "a", cost: 2.5 }, { name: "b", cost: 10.25 }, { name: "c", cost: 2.25 },
+      { name: "d", cost: 0.1 }, { name: "e", cost: 0.05 }, { name: "f", cost: 1e-7 }
+    ]);
+    const stored = await page.request.get(`/data-assets/${id}`);
+    const storedBody = await stored.text();
+    expect(stored.ok(), storedBody).toBeTruthy();
+    const firstCost = (JSON.parse(storedBody) as { records: Array<{ cost: unknown }> }).records[0].cost;
+    expect(typeof firstCost, `the fixture's costs were not stored as numbers, so this proves nothing: ${storedBody.slice(0, 300)}`).toBe("number");
+
+    const panel = await openExisting(page, name);
+    const table = panel.locator("table");
+    const costHeader = headerCell(table, "cost");
+    const costs = () => table.locator("tbody tr").evaluateAll((rows, index) =>
+      rows.map((row) => row.children[index]?.textContent || ""), 1);
+    expect((await headerTexts(table))[1]).toBe("cost");
+
+    await costHeader.getByRole("button").click();
+    await expect(costHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect.poll(costs, { message: "numbers sorted as the text they show, not by value" })
+      .toEqual(["1e-7", "0.05", "0.1", "2.25", "2.5", "10.25"]);
+    await costHeader.getByRole("button").click();
+    await expect.poll(costs).toEqual(["10.25", "2.5", "2.25", "0.1", "0.05", "1e-7"]);
+  });
+
+  test("empty cells sort last whichever way, and a column with no values still sorts ascending first", async ({ page }) => {
+    const panel = await openDataset(page, `Empty sort fixture ${Date.now()}`, [
+      { name: "a", expires: 30, note: null }, { name: "b", expires: null, note: null },
+      { name: "c", expires: 10, note: null }, { name: "d", note: null }
+    ]);
+    const table = panel.locator("table");
+    const expiresHeader = headerCell(table, "expires");
+    const expires = () => columnValuesOf(table, "expires");
+
+    await expiresHeader.getByRole("button").click();
+    await expect(expiresHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect.poll(expires, { message: "empty cells sorted ahead of values ascending" }).toEqual(["10", "30", "", ""]);
+    await expiresHeader.getByRole("button").click();
+    await expect(expiresHeader).toHaveAttribute("aria-sort", "descending");
+    await expect.poll(expires, { message: "empty cells sorted ahead of values descending" }).toEqual(["30", "10", "", ""]);
+
+    const noteHeader = headerCell(table, "note");
+    await noteHeader.getByRole("button").click();
+    await expect(noteHeader, "a column with no values sorted descending on its first press")
+      .toHaveAttribute("aria-sort", "ascending");
   });
 
   test("a hidden column leaves the grid, and the grid says how many it is showing", async ({ page }) => {
