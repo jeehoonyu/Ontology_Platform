@@ -1223,6 +1223,80 @@ plan, and it is measured there.
   bytes heavier, a net 40 bytes on each route that carries the grid. Every route stays inside its
   tolerance, no ceiling moved, and route cost reports no route over its requests or bytes.
 
+  **Then the Outputs pane's other counts.** The sweep above left two there, both estimated, and
+  they were measured before anything changed.
+
+  A probe, run once and deleted, measured them on the unfixed build at all four widths and at the
+  pane's `Narrow · 160px` width. The graph was real, and only the counts in three responses were
+  enlarged, taken from the real reply: 12,345 field lineage rows, 1,234 execution events, 100
+  partition jobs, 130 mapped lineage rows, and a contract of 12,345 accepted and 3,456 rejected
+  rows.
+  - **The field lineage caption was cut.** Paged to "Showing 81–120 of 12,345 rows", it ran 13px
+    past the table's scroll area at the tablet, desktop and wide widths, and 73px at the narrow
+    width. On its first page it reached the edge within 1px.
+  - **The contract row's counts were cut.** "12345 accepted / 3456 rejected" needed 153px in a
+    122px column, so 31px went behind the ellipsis, and 89px at the narrow width, the rejected
+    count first. The same squeeze took the node name beside it down to no width at all.
+  - **The execution events, partition jobs and mapped lineage captions measured whole** at every
+    width. At mobile the panes stack, nothing ran past its right edge, and there is no narrow
+    width to choose.
+
+  **The fix.**
+  - `DataTable`'s caption now holds its words in a sticky span, as the grid's does, kept to the
+    width its scroll area shows. The width tracking moved out of `DataGrid` into one hook in
+    `DataDisplay.tsx`, `useScrollAreaWidth`, which both tables use, with `captionFit` for the
+    span's style. The CSS rule for that span now reads `.table-truncated > span`, so it covers
+    both tables' captions.
+  - Each Ontology Contracts row puts its counts on a line of their own across the row, where they
+    wrap, and formats them with `toLocaleString` as the note does. The counts come after the status
+    badge, as before, so the row's accessible name reads in the same order. Only the object type
+    and node names above them can still be cut.
+
+  **The first build of this fix still cut the counts at the narrow width, by 50px.** The row is a
+  `<button>`, and every button in the product sets `white-space: nowrap`, so the counts took their
+  new line but never wrapped on it. A diagnostic, run once and deleted, showed the line 72px wide
+  holding 157px of text. At the default width that overflowed the row by 15px and stayed inside the
+  rail; at 160px it ran 50px past the rail's edge, the test's own figure. The line now sets
+  `white-space: normal`. The same diagnostic settled a probe reading: at the narrow width the lineage
+  caption's span is held to 70px of a 90px scroll area. The probe's 47px there was measured before
+  the pane had finished resizing, which the test's polling check does not do.
+
+  **Proven by one test in `truncation-sites.spec.ts`,** "the Outputs pane keeps a table's
+  caption and a contract's counts in view, at its default and narrow widths". Its lineage is real:
+  an input over one record of 1,200 fields gives 1,200 lineage rows, and the test pages the caption
+  to "Showing 81–120 of 1,200 rows". The contract counts come from the real contracts reply with
+  only its counts enlarged, to 12,345 accepted and 3,456 rejected, because counts that large need a
+  run over that many rows. The test holds the caption and the counts to the note's measure,
+  `hiddenPx`, now taken from the statement's own box outwards, first at the default width and then
+  at `Narrow · 160px`. The expected numbers are formatted by the browser, since no locale is pinned.
+
+  On the fixed build the four desktop specs pass, 38 tests with this one, among them the grid's
+  sticky caption test and the filtered caption check, unchanged after the grid moved onto the shared
+  hook. The pipeline route's accessibility sweep passes at all four widths, with the pipeline
+  preview, deploy and ontology contract tests: 7 passed, 9 skipped by design. On the build just
+  before the counts' `white-space` line, the sweeps of all sixteen routes passed at all four widths
+  (67 passed, 9 skipped by design), and so did the legacy render sweep, 4 of 4. That one declaration
+  touches only the contract rows, and the pipeline sweep ran again after it.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the `DataTable` caption without its width cap:** the test failed at the caption, 7px past
+    the scroll area.
+  - **N2, the counts moved back beside the badge, formatted the same:** it failed at the counts, 35px
+    behind the ellipsis.
+  - **N3, the span rule scoped to the grid again:** `DataTable`'s span went inline, its cap did
+    nothing, and the test failed at the caption, 7px.
+  - **N4, the counts without `white-space: normal`:** they kept their own line, inherited the
+    button's `nowrap`, and the test failed at the narrow width, 50px.
+  - Restored: 38 pass on desktop-1280, and all three mutated sources are byte for byte what they
+    were.
+
+  **Payload and route cost hold.** The shared closure is 382 bytes heavier, now holding the hook
+  and the caption rule, and the grid's chunk is 162 bytes lighter for losing its own copy of the
+  hook. So each route with a grid is 220 bytes heavier, the pipeline builder 283 with its row
+  markup, and a route without a grid by the closure's 382. Every route stays inside its tolerance,
+  no ceiling moved, and route cost reports no route over its requests or bytes.
+  `TABLE_TRUNCATION.md` moved only by line numbers.
+
 ## Order and size
 
 | Step | Touches | Commits |

@@ -622,7 +622,8 @@ export function PipelineBuilder() {
                 {contracts.sections.latest.map((contract) => (
                   <button key={contract.id || contract.node_id} className="ontology-contract-row" onClick={() => setSelectedNodeId(contract.node_id)}>
                     <span><strong>{contract.object_type_id}</strong><small>{contract.node_id}</small></span>
-                    <span><StatusBadge value={contract.status} /><small>{contract.accepted_rows} accepted / {contract.rejected_rows} rejected</small></span>
+                    <span><StatusBadge value={contract.status} /></span>
+                    <small className="contract-row-counts">{contract.accepted_rows.toLocaleString()} accepted / {contract.rejected_rows.toLocaleString()} rejected</small>
                   </button>
                 ))}
               </div>

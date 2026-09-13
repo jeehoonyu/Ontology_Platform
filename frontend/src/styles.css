@@ -3450,7 +3450,7 @@ pre {
 }
 
 .ontology-contract-row strong,
-.ontology-contract-row small {
+.ontology-contract-row > span small {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3461,6 +3461,16 @@ pre {
 .contract-mode {
   color: #65737d;
   font-size: 11px;
+}
+
+/* A contract's counts, on a line of their own across the row, wrapping rather than cut.
+   Beside the status badge, in the auto column of a 220px pane, an ellipsis took the
+   rejected count first. The names above them may still be cut; a count may not. The row
+   is a button, and buttons do not wrap, so this line has to say it does: without it the
+   counts kept their own line and ran 50px past the pane's edge at the narrow width. */
+.contract-row-counts {
+  grid-column: 1 / -1;
+  white-space: normal;
 }
 
 .ontology-contract-panel {
@@ -6486,7 +6496,10 @@ pre {
   max-width: none;
 }
 
-.grid-table caption > span {
+/* A caption's words, in `DataTable` and `DataGrid` alike: sticky, so they stay in view
+   while the columns scroll, and held by the component to the scroll area's width, so
+   they wrap there instead of running past its edge. */
+.table-truncated > span {
   position: sticky;
   left: 8px;
   display: inline-block;

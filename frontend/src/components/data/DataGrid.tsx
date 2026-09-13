@@ -18,7 +18,7 @@ import {
 } from "@tanstack/react-table";
 import { formatValue } from "../../utils/format";
 import type { TableRow } from "../../types";
-import { EmptyState, TABLE_ROW_LIMIT } from "./DataDisplay";
+import { EmptyState, TABLE_ROW_LIMIT, captionFit, useScrollAreaWidth } from "./DataDisplay";
 
 /**
  * The product's grid: a table a person can sort, trim, widen, reorder, pin and filter.
@@ -249,15 +249,7 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
   const lastFilterAnnounced = useRef<Record<string, string>>({});
   const filterSummary = useRef<HTMLElement>(null);
   // A callback ref, because the wrap mounts only once an empty grid gets rows.
-  const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
-  const [wrapWidth, setWrapWidth] = useState(0);
-
-  useEffect(() => {
-    if (!wrap) return;
-    const observer = new ResizeObserver(() => setWrapWidth(wrap.clientWidth));
-    observer.observe(wrap);
-    return () => observer.disconnect();
-  }, [wrap]);
+  const [setWrap, wrapWidth, wrap] = useScrollAreaWidth();
 
   // The grid stays mounted when its dataset reloads, and a replacement file can
   // drop fields. An arrangement or a filter naming a field that is gone would apply
@@ -286,9 +278,9 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
   const allRows = table.getRowModel().rows;
   // The caption's words sit in a sticky span as wide as the words, inside a caption as
   // wide as the table, so wrapping alone never happens. Held to the width the scroll
-  // area shows, less the caption's padding, the span wraps there instead of running past
-  // the edge, where a filtered caption in a 180px pane lost "100 rows in all".
-  const captionFit = wrapWidth > 20 ? { maxWidth: wrapWidth - 20 } : undefined;
+  // area shows, the span wraps there instead of running past the edge, where a filtered
+  // caption in a 180px pane lost "100 rows in all". `DataTable` does the same.
+  const captionStyle = captionFit(wrapWidth);
   const pages = Math.ceil(allRows.length / TABLE_ROW_LIMIT);
   const current = Math.min(page, pages - 1);
   const first = current * TABLE_ROW_LIMIT;
@@ -572,11 +564,11 @@ export function DataGrid({ rows, empty = "No records", label = "Scrollable data 
             // it has no room to stick itself, and would scroll away with the columns.
             <caption className="table-truncated">
               {filtered && pages > 1 ? (
-                <span style={captionFit}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} matching rows · {total.length.toLocaleString()} rows in all · filtered on {filterNames}</span>
+                <span style={captionStyle}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} matching rows · {total.length.toLocaleString()} rows in all · filtered on {filterNames}</span>
               ) : filtered ? (
-                <span style={captionFit}>{allRows.length.toLocaleString()} of {total.length.toLocaleString()} rows match {onWhat}</span>
+                <span style={captionStyle}>{allRows.length.toLocaleString()} of {total.length.toLocaleString()} rows match {onWhat}</span>
               ) : (
-                <span style={captionFit}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} rows</span>
+                <span style={captionStyle}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {allRows.length.toLocaleString()} rows</span>
               )}
             </caption>
           ) : null}

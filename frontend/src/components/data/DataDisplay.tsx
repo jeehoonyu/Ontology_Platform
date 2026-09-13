@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
 import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
@@ -91,6 +91,30 @@ export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
   );
 }
 
+/**
+ * The width a scroll area shows, kept current as it changes. A caption is as wide as its
+ * table, and a table can be far wider than the pane it sits in, so a caption's words can
+ * run past what its scroll area shows. `DataTable` and `DataGrid` hold them to this width.
+ * A callback ref, because the area may mount only once there are rows. The area itself is
+ * returned too, for a caller that scrolls it.
+ */
+export function useScrollAreaWidth(): [(area: HTMLDivElement | null) => void, number, HTMLDivElement | null] {
+  const [area, setArea] = useState<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!area) return;
+    const observer = new ResizeObserver(() => setWidth(area.clientWidth));
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, [area]);
+  return [setArea, width, area];
+}
+
+/** A caption's words held to the scroll area's width, less the caption's padding. */
+export function captionFit(areaWidth: number) {
+  return areaWidth > 20 ? { maxWidth: areaWidth - 20 } : undefined;
+}
+
 export const TABLE_ROW_LIMIT = 40;
 
 /**
@@ -124,6 +148,7 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   // feed does, and it polls -- and a reset there would throw a reader back to the
   // first page every few seconds.
   const [page, setPage] = useState(0);
+  const [setArea, areaWidth] = useScrollAreaWidth();
   if (!safeRows.length) return <div className="empty">{empty}</div>;
   const pages = Math.ceil(safeRows.length / TABLE_ROW_LIMIT);
   const current = Math.min(page, pages - 1);
@@ -131,7 +156,7 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   const shown = safeRows.slice(first, first + TABLE_ROW_LIMIT);
   return (
     <>
-      <div className="table-wrap" tabIndex={0} role="region" aria-label="Scrollable data table">
+      <div className="table-wrap" ref={setArea} tabIndex={0} role="region" aria-label="Scrollable data table">
         <table>
           {/* A limit a person can see is a limit; a limit a person cannot see is
               a wrong answer. This comes from the component rather than from each
@@ -140,7 +165,10 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
               and nobody will know which. */}
           {shown.length < safeRows.length ? (
             <caption className="table-truncated">
-              Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {safeRows.length.toLocaleString()} rows
+              {/* In a sticky span held to what the scroll area shows. The caption is as wide
+                  as a table of at least 620px, so in the pipeline builder's Outputs pane its
+                  words ran past the visible edge and scrolled away with the columns. */}
+              <span style={captionFit(areaWidth)}>Showing {(first + 1).toLocaleString()}–{(first + shown.length).toLocaleString()} of {safeRows.length.toLocaleString()} rows</span>
             </caption>
           ) : null}
           <thead>

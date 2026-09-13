@@ -62,8 +62,8 @@ async function valuesOf(scope: Locator, column: string) {
 }
 
 /**
- * How far a statement's text runs past the nearest box that clips it: the pane, the
- * table's scroll area, or the window. A caption's words are measured in the span that
+ * How far a statement's text runs past the nearest box that clips it: its own, the pane,
+ * the table's scroll area, or the window. A caption's words are measured in the span that
  * holds them. `scrollWidth` cannot see this for that span, which is as wide as its words
  * wherever they end up, so the words themselves are measured.
  */
@@ -71,7 +71,9 @@ async function hiddenPx(statement: Locator) {
   return statement.evaluate((element) => {
     const target = element.tagName === "CAPTION" && element.firstElementChild ? element.firstElementChild : element;
     let limit = document.documentElement.clientWidth;
-    for (let node = target.parentElement; node; node = node.parentElement) {
+    // From the statement's own box outwards: a line cut behind its own ellipsis hides its
+    // count as surely as a pane's edge does.
+    for (let node: Element | null = target; node; node = node.parentElement) {
       if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(node).overflowX)) limit = Math.min(limit, node.getBoundingClientRect().right);
     }
     const range = document.createRange();
@@ -295,5 +297,64 @@ test.describe("a table the gate found says what it is not showing", () => {
     await rowHeader.getByRole("button").click();
     await expect(rowHeader).toHaveAttribute("aria-sort", "none");
     await expect(scope, "the sentence outlived the sort it described").toHaveCount(0);
+  });
+
+  test("the Outputs pane keeps a table's caption and a contract's counts in view, at its default and narrow widths", async ({ page }) => {
+    // The pane is 220px wide by default and 160px at its narrowest. A table's caption there
+    // sits in a table at least 620px wide, and a contract row kept its counts in a narrow
+    // column behind an ellipsis. Measured before the fix, with 12,345 lineage rows: the
+    // caption, paged past row 80, ran 13px past its scroll area and 73px at the narrow
+    // width; the counts lost 31px, and 89px narrow.
+    //
+    // The lineage is real. An input's field lineage has a row per field, so one record of
+    // 1,200 fields gives 1,200 rows. Counts in the thousands come only from a run over that
+    // many rows, so the contracts reply is the real one with just its counts enlarged.
+    const suffix = `${Date.now()}`;
+    const assetId = `outputs_lineage_${suffix}`;
+    const graphName = `Outputs lineage ${suffix}`;
+    const wideRecord = Object.fromEntries(Array.from({ length: 1200 }, (unused, index) => [`f${String(index + 1).padStart(4, "0")}`, "v"]));
+    const asset = await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: graphName, kind: "dataset", asset_schema: {}, records: [wideRecord]
+    } });
+    expect(asset.ok(), await asset.text()).toBeTruthy();
+    const graph = await page.request.post("/pipeline-builder/graphs", { data: {
+      id: `outputs_lineage_graph_${suffix}`, display_name: graphName,
+      nodes: [{ id: "input", type: "input_dataset", label: "Lineage input", position: { x: 80, y: 120 }, config: { asset_id: assetId } }],
+      edges: []
+    } });
+    expect(graph.ok(), await graph.text()).toBeTruthy();
+    await page.route((url) => /\/ui-state\/pipeline\/[^/]+\/ontology-contracts$/.test(url.pathname), async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const contract = {
+        field_lineage: [], violations: [], input_rows: 15801, created_objects: 0, updated_objects: 0, unchanged_objects: 0,
+        ...(body.sections?.latest?.[0] ?? {}),
+        node_id: "ontology", object_type_id: "enlarged_counts", status: "PARTIAL", accepted_rows: 12345, rejected_rows: 3456
+      };
+      body.sections = { ...body.sections, latest: [contract] };
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto("/workspace/pipeline");
+    await page.locator(".output-rail .resource-row").filter({ hasText: graphName }).click();
+    // Chosen by name: switching graphs does not clear the node selected on the last one.
+    await page.getByRole("button", { name: /Lineage input \d+ rows input_dataset/ }).click();
+
+    // No locale is pinned, so the numbers are formatted the way this browser formats them.
+    const [total, accepted, rejected] = await page.evaluate(() => [(1200).toLocaleString(), (12345).toLocaleString(), (3456).toLocaleString()]);
+    const lineage = page.locator(".pipeline-lineage-details");
+    await lineage.locator("summary").click();
+    await lineage.getByRole("button", { name: "Next rows" }).click();
+    await lineage.getByRole("button", { name: "Next rows" }).click();
+    const caption = lineage.locator("caption");
+    await expect(caption).toHaveText(`Showing 81–120 of ${total} rows`);
+    const counts = page.locator(".ontology-contract-row small", { hasText: "accepted" });
+    await expect(counts).toHaveText(`${accepted} accepted / ${rejected} rejected`);
+
+    await expectUnclipped(caption, "the lineage caption runs past the table's scroll area, hiding how many rows there are");
+    await expectUnclipped(counts, "the contract's counts are cut off, hiding how many rows were rejected");
+
+    await page.getByLabel("Width of right pane").selectOption({ label: "Narrow · 160px" });
+    await expectUnclipped(caption, "at the pane's narrow width the lineage caption runs past the table's scroll area");
+    await expectUnclipped(counts, "at the pane's narrow width the contract's counts are cut off");
   });
 });
