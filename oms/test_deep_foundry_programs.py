@@ -88,6 +88,13 @@ query = ok(client.post("/object-explorer/query", json={
 }), "object explorer query")
 assert query["result_count"] == 2, query
 assert len(query["facets"]) == 2 and query["selected_objects"][0]["object"]["id"] == "asset_1", query
+# A value list says how many values it holds, so a card can say what it does not show.
+for facet in query["facets"]:
+    if facet["type"] == "listogram":
+        distinct = {str(obj["properties"].get(facet["field"])) for obj in query["objects"]
+                    if obj["properties"].get(facet["field"]) is not None}
+        assert facet.get("distinct_count") == len(distinct), facet
+        assert len(facet["buckets"]) == min(20, len(distinct)), facet
 assert any(action["id"] == "flag_asset" for action in query["available_actions"]), query["available_actions"]
 saved = ok(client.post("/object-explorer/explorations", json={
     "id": "critical_asset_exploration",

@@ -191,6 +191,10 @@ def _facet(field: str, objects: List[Dict[str, Any]], bins: int = 8) -> Dict[str
     return {
         "field": field,
         "type": "listogram",
+        # The buckets stop at the twenty most common; this says how many values there
+        # were, so a card can say what it is not showing. It costs nothing: `counts`
+        # already holds every one.
+        "distinct_count": len(counts),
         "buckets": [
             {"value": key, "label": key, "count": count}
             for key, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:20]

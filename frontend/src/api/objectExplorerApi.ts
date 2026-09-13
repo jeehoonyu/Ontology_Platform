@@ -19,7 +19,7 @@ export type ObjectTypeSummary = {
 };
 
 export type FacetBucket = { value?: Primitive; label?: string; count: number; range?: [number, number] };
-export type ExplorerFacet = { field: string; type: "histogram" | "listogram"; buckets: FacetBucket[] };
+export type ExplorerFacet = { field: string; type: "histogram" | "listogram"; buckets: FacetBucket[]; distinct_count?: number };
 export type ExplorerAction = { id: string; display_name: string; description?: string | null; parameters: JsonObject };
 export type ExplorerQuery = {
   object_type_id: string;

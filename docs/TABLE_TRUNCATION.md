@@ -20,7 +20,7 @@ are given: the rows past the cut are named and cannot be reached.
 | `components/data/DataDisplay.tsx` | 156 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 287 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 278 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
-| `workspaces/ObjectExplorer.tsx` | 160 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
+| `workspaces/ObjectExplorer.tsx` | 186 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
 
 ## Outside a table — reported, not gated
 
@@ -35,7 +35,6 @@ alert taken as a default is not a hidden row.
 | `components/canvas/PipelineCanvas.tsx` | 298 | `MiniGraph` | `edges` (slice) | mapped | no | no |
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | no | no |
 | `workspaces/MapWorkspace.tsx` | 248 | `MapWorkspace` | `collection.features` (slice) | mapped | no | yes |
-| `workspaces/ObjectExplorer.tsx` | 191 | `ObjectExplorer` | `facet.buckets` (slice) | mapped | no | no |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` (slice) | mapped | no | no |
 | `workspaces/Vertex.tsx` | 295 | `Vertex` | `seedObjects.value` (slice) | mapped | no | no |
 | `workspaces/VisualBuilder.tsx` | 700 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | no | no |

@@ -41,6 +41,32 @@ function parameterNames(action: ExplorerAction): string[] {
   return Object.keys(value || {}).filter((name) => !name.endsWith("_ids"));
 }
 
+// A value list's short view. The card drew the first seven buckets of any facet: a
+// histogram's eighth bin, which holds the maximum, never showed, and a value list
+// never said it had more. A histogram now draws every bin; a value list shows the seven
+// most common, says how many values there are, and shows the rest on request.
+const FACET_SHORT = 7;
+
+function FacetCard({ facet, onApply }: { facet: ExplorerFacet; onApply: (value: FilterValue) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const listogram = facet.type === "listogram";
+  const total = facet.distinct_count ?? facet.buckets.length;
+  const shown = listogram && !expanded ? facet.buckets.slice(0, FACET_SHORT) : facet.buckets;
+  const max = Math.max(...facet.buckets.map((item) => item.count), 1);
+  const toggleLabel = expanded
+    ? `Show only the ${FACET_SHORT} most common`
+    : facet.buckets.length === total ? `Show all ${total.toLocaleString()} values` : `Show the ${facet.buckets.length.toLocaleString()} most common`;
+  return <section className="facet-card-react">
+    <header><strong>{facet.field}</strong><small>{facet.type}</small></header>
+    {listogram && shown.length < total ? <p className="table-truncated" role="note">Showing the {shown.length.toLocaleString()} most common of {total.toLocaleString()} values</p> : null}
+    {shown.map((bucket, index) => {
+      const value = bucket.value ?? bucket.label ?? index;
+      return <button key={`${String(value)}-${index}`} onClick={() => onApply(value as FilterValue)}><span>{bucket.label || String(bucket.value)}</span><i style={{ width: `${Math.max(5, bucket.count / max * 100)}%` }} /><b>{bucket.count}</b></button>;
+    })}
+    {listogram && facet.buckets.length > FACET_SHORT ? <footer className="facet-card-footer"><button type="button" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{toggleLabel}</button></footer> : null}
+  </section>;
+}
+
 export function ObjectExplorer() {
   const requestedType = new URLSearchParams(window.location.search).get("type") || "";
   const [types, setTypes] = useState<ObjectTypeSummary[]>([]);
@@ -188,7 +214,7 @@ export function ObjectExplorer() {
             <div className="filter-chip-list">{Object.entries(filters).map(([field, value]) => <button key={field} onClick={() => { const next = { ...filters }; delete next[field]; setFilters(next); void runQuery(objectTypeId, next, search); }} title="Remove filter"><span>{field}: {String(value)}</span><X size={12} /></button>)}</div>
             {!Object.keys(filters).length ? <div className="empty compact">Select a facet value to filter results.</div> : null}
           </Panel>
-          <div className="facet-stack">{query?.facets.map((facet) => <section className="facet-card-react" key={facet.field}><header><strong>{facet.field}</strong><small>{facet.type}</small></header>{facet.buckets.slice(0, 7).map((bucket, index) => { const value = bucket.value ?? bucket.label ?? index; const max = Math.max(...facet.buckets.map((item) => item.count), 1); return <button key={`${String(value)}-${index}`} onClick={() => applyFacet(facet, value as FilterValue)}><span>{bucket.label || String(bucket.value)}</span><i style={{ width: `${Math.max(5, bucket.count / max * 100)}%` }} /><b>{bucket.count}</b></button>; })}</section>)}</div>
+          <div className="facet-stack">{query?.facets.map((facet) => <FacetCard key={`${query.object_type_id}:${facet.field}`} facet={facet} onApply={(value) => applyFacet(facet, value)} />)}</div>
         </aside>
 
         <main className="explorer-results-panel">

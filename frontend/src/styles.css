@@ -5628,6 +5628,16 @@ pre {
   text-transform: uppercase;
 }
 
+.facet-card-footer {
+  margin-top: 6px;
+}
+
+.facet-card-footer button {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .facet-card-react > button {
   position: relative;
   width: 100%;

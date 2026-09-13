@@ -494,6 +494,66 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(rows).toHaveCount(6);
   });
 
+  test("Object Explorer facets draw every bin, and a value list says how many values it holds", async ({ page }) => {
+    test.setTimeout(120_000);
+    // A facet card drew its first seven buckets whatever the facet: a histogram has eight,
+    // and the eighth holds the maximum, so the top of every distribution was missing; a
+    // value list kept 7 of the server's 20 of however many there were, with nothing said.
+    // Here 23 objects: 23 names, 10 sites, and scores 0 to 110 in eight bins.
+    const suffix = `${Date.now()}`;
+    const typeId = `facets_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/object-types", { data: {
+      id: typeId, display_name: `Facets ${suffix}`, description: "Explorer facet cuts",
+      properties: { name: { type: "string" }, score: { type: "number" }, site: { type: "string" } }
+    } }), "object type");
+    const records = Array.from({ length: 23 }, (unused, index) => ({
+      id: `${typeId}_${String(index + 1).padStart(2, "0")}`, name: `n${String(index + 1).padStart(2, "0")}`,
+      score: index * 5, site: `site_${index % 10}`
+    }));
+    await settled(await page.request.post("/data-assets", { data: {
+      id: `${typeId}_feed`, display_name: `Facets feed ${suffix}`, kind: "dataset", asset_schema: {}, records
+    } }), "feed");
+    await settled(await page.request.post("/pipelines", { data: {
+      id: `${typeId}_hydrate`, display_name: `Facets hydrate ${suffix}`, input_asset_id: `${typeId}_feed`,
+      steps: [{ operation: "map_to_ontology", object_type_id: typeId, object_id_field: "id",
+                property_map: { name: "$name", score: "$score", site: "$site" }, omit_nulls: true }]
+    } }), "pipeline");
+    const run = await settled(await page.request.post(`/pipelines/${typeId}_hydrate/run?actor=test`), "hydrate");
+    expect(run.status, JSON.stringify(run).slice(0, 500)).toBe("SUCCESS");
+
+    await page.goto(`/workspace/object-explorer?type=${typeId}`);
+    const card = (field: string) => page.locator(".facet-card-react").filter({ has: page.locator("header strong").getByText(field, { exact: true }) });
+    const buckets = (field: string) => card(field).locator(":scope > button");
+
+    await expect(buckets("score"), "a histogram's eighth bin, the one holding the maximum, is not drawn").toHaveCount(8);
+    await expect(buckets("score").last()).toContainText("110");
+    await expect(card("score").getByRole("note"), "a histogram draws every bin and has nothing to say").toHaveCount(0);
+
+    const names = card("name");
+    await expect(buckets("name")).toHaveCount(7);
+    await expect(names.getByRole("note"), "the name facet shows 7 of 23 values and does not say so")
+      .toHaveText("Showing the 7 most common of 23 values");
+    await expectUnclipped(names.getByRole("note"), "the facet note is cut off, hiding how many values there are");
+    await names.getByRole("button", { name: "Show the 20 most common" }).click();
+    await expect(buckets("name"), "the values past the seventh cannot be reached").toHaveCount(20);
+    await expect(names.getByRole("button", { name: "Show only the 7 most common" })).toHaveAttribute("aria-expanded", "true");
+    await expect(names.getByRole("note"), "the server kept 20 of 23 and the card does not say so")
+      .toHaveText("Showing the 20 most common of 23 values");
+    await names.getByRole("button", { name: "Show only the 7 most common" }).click();
+    await expect(buckets("name")).toHaveCount(7);
+
+    const sites = card("site");
+    await expect(sites.getByRole("note")).toHaveText("Showing the 7 most common of 10 values");
+    await sites.getByRole("button", { name: "Show all 10 values" }).click();
+    await expect(buckets("site")).toHaveCount(10);
+    await expect(sites.getByRole("note"), "the note still says seven are shown when every value is").toHaveCount(0);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

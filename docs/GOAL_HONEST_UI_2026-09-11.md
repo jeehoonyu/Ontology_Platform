@@ -1708,6 +1708,53 @@ plan, and it is measured there.
   - **The baseline not audited:** only the audit block failed.
   - Restored: 80 pass, data integration passes, and the source is byte for byte what it was.
 
+  **Then the Object Explorer's facet cards, the first of the smaller lists.** Each card drew the first
+  seven buckets of its facet, whatever the facet was. A histogram always has eight bins, and the last
+  one holds the maximum, so the top of every numeric distribution was missing. A value list kept the
+  seven most common of the twenty the server sends, of however many values there were, and said
+  nothing about either cut.
+
+  **A histogram draws every bin; a value list says how many values it holds.** The server's value
+  lists now carry `distinct_count`, which costs nothing, since the counts it sorts already hold every
+  value; the twenty-value cap stays. A new `FacetCard` draws every histogram bin. A value list shows
+  the seven most common, and when that is fewer than it holds, a note reads "Showing the 7 most common
+  of N values". Its toggle, with `aria-expanded`, reads "Show all N values" when the server sent every
+  value, "Show the 20 most common" when it kept twenty, and "Show only the 7 most common" to fold back.
+  A value list the card shows whole says nothing. The counts cover the loaded page of up to 500
+  objects, as the facets always have; that the page reads as the set stays filed on its own.
+
+  **The proof.** `test_deep_foundry_programs.py` now requires every value list in its explorer query
+  to carry `distinct_count` equal to the distinct values among the returned objects, and to keep
+  twenty at most. Run against the committed server, it failed at the first value list, which had no
+  `distinct_count`. In `truncation-sites.spec.ts`, a new browser test builds 23 objects: 23 names, 10
+  sites, and scores 0 to 110. The score card draws 8 bins, the last holding 110, with no note. The name
+  card draws 7 and reads "Showing the 7 most common of 23 values" without being cut off; "Show the 20
+  most common" draws 20 with `aria-expanded` true and reads "Showing the 20 most common of 23 values";
+  "Show only the 7 most common" folds back. The site card reads "Showing the 7 most common of 10
+  values", and "Show all 10 values" draws 10 and removes the note. It passes on the fixed build with
+  the Object Explorer workflow test and the explorer columns test.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, histograms cut to seven again:** it failed at the score card, `Expected: 8`, `Received: 7`.
+  - **N2, the note removed:** it failed at the name card's note, element not found.
+  - **N3, the total taken from the kept buckets:** it failed at the note, `Received: "Showing the 7 most
+    common of 20 values"`.
+  - **N4, a toggle that does nothing:** it failed at the name card, `Expected: 20`, `Received: 7`.
+  - **N5, the server without `distinct_count`:** the card fell back to the twenty it was sent and failed
+    the same way, "of 20 values".
+  - Restored: the three explorer tests pass, the backend script passes, and both sources are byte for
+    byte what they were.
+
+  **The truncation reference lost the facet cut, the Drafts hole again.** `TABLE_TRUNCATION.md` no
+  longer lists `facet.buckets (slice)`. The cut is now bound to a name, `shown`, and mapped, but the
+  binding holds a condition: `listogram && !expanded ? facet.buckets.slice(...) : facet.buckets`.
+  `_how` follows a cut only when it is the whole right side of `const x =`, or is mapped at once, so a
+  cut behind a condition is not followed. That is the gap the gate task at the end of this list
+  closes, and this cut is one it must find. The inert-control reference counts the toggle: 0 of 329.
+  The Object Explorer route still opens with 13 requests, at 449 KB, and its chunk measures 447 KB
+  with the shared closure of 436 KB, under its ceiling. No class became shared: the card's footer
+  class is the explorer's own, and `.table-truncated` was already used in this file.
+
 ## Order and size
 
 | Step | Touches | Commits |
