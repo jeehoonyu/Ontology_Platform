@@ -630,7 +630,10 @@ export function PipelineBuilder() {
             ) : <EmptyState inline>Deploy an ontology output to record reconciliation and quarantine evidence.</EmptyState>}
           </Panel>
           <Panel title="Pipeline Outputs" action={<button onClick={() => insertAfter("dataset_output")}>Add</button>}>
-            <input className="compact-input" placeholder="Search outputs..." />
+            {/* No search box. It had no state and no handler, so it searched nothing and lost
+                its text whenever this pane moved; and what this lists is the graph's output
+                nodes and the five builds the canvas loads, so a search here would read as a
+                search of every build. V12 of GOAL_MOVEMENT_2026-09-12. */}
             <div className="cards tight">
               {outputRows.map((node) => (
                 <article key={asString(node.id)} className="resource-card">

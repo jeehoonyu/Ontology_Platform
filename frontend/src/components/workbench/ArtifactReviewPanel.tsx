@@ -14,18 +14,35 @@ import {
 } from "../../api/artifactApi";
 import { ErrorBanner, StatusBadge } from "../data/DataDisplay";
 
+/**
+ * What a person has typed here and not sent. Held by the caller, keyed by artifact,
+ * because this panel sits in the artifact canvases' Inspector pane: a pane moved to
+ * another slot is a new parent, React remounts what it holds, and a typed comment and
+ * proposal title went with it. The tab is not held; it is where the person was
+ * looking, not something they wrote. V12 of GOAL_MOVEMENT_2026-09-12.
+ */
+export interface ReviewDraft {
+  commentBody: string;
+  proposalTitle: string;
+}
+
+export const NEW_REVIEW_DRAFT: ReviewDraft = { commentBody: "", proposalTitle: "" };
+
 interface ArtifactReviewPanelProps {
   artifact: PlatformArtifact;
   selectedNodeId?: string;
   pendingCommands: BuilderCommand[];
   onApplied: (artifact: PlatformArtifact) => void;
+  draft: ReviewDraft;
+  onDraft: (update: (current: ReviewDraft) => ReviewDraft) => void;
 }
 
-export function ArtifactReviewPanel({ artifact, selectedNodeId, pendingCommands, onApplied }: ArtifactReviewPanelProps) {
+export function ArtifactReviewPanel({ artifact, selectedNodeId, pendingCommands, onApplied, draft, onDraft }: ArtifactReviewPanelProps) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"comments" | "proposals">("comments");
-  const [commentBody, setCommentBody] = useState("");
-  const [proposalTitle, setProposalTitle] = useState("");
+  const { commentBody, proposalTitle } = draft;
+  const setCommentBody = (value: string) => onDraft((current) => ({ ...current, commentBody: value }));
+  const setProposalTitle = (value: string) => onDraft((current) => ({ ...current, proposalTitle: value }));
   const comments = useQuery({
     queryKey: ["artifact-comments", artifact.id],
     queryFn: () => listArtifactComments(artifact.id)

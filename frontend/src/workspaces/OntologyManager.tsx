@@ -36,7 +36,7 @@ import { DataTable, EmptyState, KeyValueGrid, Panel, RelationshipStrip, StatusBa
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
 import { navigate } from "../utils/navigation";
-import { OntologyPackagePanel } from "./OntologyPackagePanel";
+import { NEW_PACKAGE_FORM, OntologyPackagePanel, type PackageForm } from "./OntologyPackagePanel";
 import { OntologyReleasePanel } from "./OntologyReleasePanel";
 import { OntologyHealthPanel } from "./OntologyHealthPanel";
 import { OntologyRegistryPanel } from "./OntologyRegistryPanel";
@@ -90,11 +90,29 @@ export function OntologyManager() {
   const [walkthrough, setWalkthrough] = useState<OntologyWalkthrough | null>(null);
   const [sectionState, setSectionState] = useState<OntologySectionState | null>(null);
   const [allDrafts, setAllDrafts] = useState(false);
+  // The package panel's choices and typing, held here and handed back in. The panel
+  // sits in the Resources pane, and a pane moved to another slot is a new parent:
+  // React remounts what it holds, and a typed version, a namespace and every select
+  // in the panel went back to their defaults. V12 of GOAL_MOVEMENT_2026-09-12, the
+  // fix V9 made for the pipeline node form.
+  const [packageForm, setPackageForm] = useState<PackageForm>(NEW_PACKAGE_FORM);
+  // What the top bar's search holds. It was an input with no value, no handler and
+  // no form, under a placeholder that promised a search. V12.
+  const [resourceQuery, setResourceQuery] = useState("");
   const state = useAsyncState<OntologyUiState>(getOntologyState, [refreshKey]);
   const assets = useAsyncState<DataAssetsResponseItem[]>(() => api<DataAssetsResponseItem[]>("/data-assets"), [refreshKey]);
   const drafts = useAsyncState<TableRow[]>(() => api<TableRow[]>("/ontology-generator/drafts"), [refreshKey]);
   // Every draft the server holds, newest first: the endpoint neither pages nor caps them.
   const draftList = drafts.value || [];
+  // Discover lists every object type this person can see, uncapped: the ontology's
+  // resources, where Drafts holds generator drafts not yet applied and Resource
+  // Navigation one type's sections. So the search narrows Discover, by name or id.
+  const needle = resourceQuery.trim().toLowerCase();
+  const allTypes = state.value?.object_types || [];
+  const matchingTypes = needle
+    ? allTypes.filter((objectType) => objectType.display_name.toLowerCase().includes(needle)
+        || objectType.id.toLowerCase().includes(needle))
+    : allTypes;
   // The pane grips' own context. The field-mapping and property-order drags keep
   // theirs, nested inside the surface: each is a self-contained list whose
   // draggables and droppables never cross a pane, which is the case M2 found
@@ -222,7 +240,7 @@ export function OntologyManager() {
           <strong>Ontology Manager</strong>
           <span>local deterministic ontology</span>
         </div>
-        <input className="compact-input" placeholder="Search resources..." />
+        <input className="compact-input" aria-label="Search object types" placeholder="Search object types..." value={resourceQuery} onChange={(event) => setResourceQuery(event.target.value)} />
         <div className="button-row">
           <button onClick={markIndexed} disabled={!selectedId}>Index</button>
           <button onClick={() => navigate("pipeline")}>Open Pipeline</button>
@@ -236,7 +254,8 @@ export function OntologyManager() {
           if (pane === "resources") return (
         <div className="resource-nav manager-resource-nav">
           <Panel title="Discover">
-            {(state.value?.object_types || []).map((objectType) => (
+            {needle && matchingTypes.length ? <p className="table-truncated" role="note">Showing {matchingTypes.length.toLocaleString()} of {allTypes.length.toLocaleString()} object types</p> : null}
+            {matchingTypes.map((objectType) => (
               <button key={objectType.id} className={classNames("resource-row", selectedId === objectType.id && "selected")} onClick={() => {
                 setSelectedId(objectType.id);
                 setSelectedSection("overview");
@@ -245,6 +264,7 @@ export function OntologyManager() {
                 <span>{objectType.property_count} properties</span>
               </button>
             ))}
+            {needle && !matchingTypes.length ? <EmptyState inline>No object type matches "{resourceQuery.trim()}"</EmptyState> : null}
           </Panel>
           <Panel title="Resource Navigation">
             {Array.from(new Set([...(manager?.navigation || []), "health_center", "releases", "schema_registry"])).map((item) => (
@@ -280,7 +300,7 @@ export function OntologyManager() {
               </button>
             ) : null}
           </Panel>
-          <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} />
+          <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} form={packageForm} onForm={setPackageForm} />
         </div>
           );
           return (

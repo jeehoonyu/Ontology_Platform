@@ -14,31 +14,68 @@ import {
 } from "../api/ontologyPackageApi";
 import { Panel, StatusBadge } from "../components/data/DataDisplay";
 
+/**
+ * What a person has chosen and typed in this panel and not yet sent.
+ *
+ * Held by the screen and handed back in, because this panel sits in the ontology
+ * manager's Resources pane: a pane moved to another slot is a new parent, React
+ * remounts what it holds, and all of this went with it -- a typed version back to
+ * `1.0.0`, a namespace back to `operations`, each select back to the first entry
+ * the reload found. V12 of GOAL_MOVEMENT_2026-09-12; V9 did the same for the
+ * pipeline node form.
+ *
+ * `selectedPackageId` is `null` until something is chosen. `Create a package` is
+ * the empty string, a real choice, and a reload must not read it as none.
+ */
+export interface PackageForm {
+  selectedPackageId: string | null;
+  projectId: string;
+  targetProjectId: string;
+  version: string;
+  namespace: string;
+}
+
+export const NEW_PACKAGE_FORM: PackageForm = {
+  selectedPackageId: null,
+  projectId: "",
+  targetProjectId: "",
+  version: "1.0.0",
+  namespace: "operations"
+};
+
 interface OntologyPackagePanelProps {
   objectTypeId: string;
   objectTypeName: string;
+  form: PackageForm;
+  onForm: (update: (current: PackageForm) => PackageForm) => void;
 }
 
-export function OntologyPackagePanel({ objectTypeId, objectTypeName }: OntologyPackagePanelProps) {
+export function OntologyPackagePanel({ objectTypeId, objectTypeName, form, onForm }: OntologyPackagePanelProps) {
   const [projects, setProjects] = useState<TenancyProject[]>([]);
   const [packages, setPackages] = useState<OntologyPackageSummary[]>([]);
-  const [selectedPackageId, setSelectedPackageId] = useState("");
   const [detail, setDetail] = useState<OntologyPackageSummary | null>(null);
-  const [projectId, setProjectId] = useState("");
-  const [targetProjectId, setTargetProjectId] = useState("");
-  const [version, setVersion] = useState("1.0.0");
-  const [namespace, setNamespace] = useState("operations");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const { selectedPackageId, projectId, targetProjectId, version, namespace } = form;
+  const setSelectedPackageId = (value: string) => onForm((current) => ({ ...current, selectedPackageId: value }));
+  const setProjectId = (value: string) => onForm((current) => ({ ...current, projectId: value }));
+  const setTargetProjectId = (value: string) => onForm((current) => ({ ...current, targetProjectId: value }));
+  const setVersion = (value: string) => onForm((current) => ({ ...current, version: value }));
+  const setNamespace = (value: string) => onForm((current) => ({ ...current, namespace: value }));
 
   async function reload() {
     const nextProjects = await listTenancyProjects();
     const nextPackages = await listOntologyPackages();
     setProjects(nextProjects);
     setPackages(nextPackages);
-    setProjectId((current) => current || nextProjects[0]?.id || "");
-    setTargetProjectId((current) => current || nextProjects[0]?.id || "");
-    setSelectedPackageId((current) => current || nextPackages[0]?.id || "");
+    // A default only for what has not been chosen. A remount reloads as well, and by
+    // then the person's choices are already in `form`.
+    onForm((current) => ({
+      ...current,
+      projectId: current.projectId || nextProjects[0]?.id || "",
+      targetProjectId: current.targetProjectId || nextProjects[0]?.id || "",
+      selectedPackageId: current.selectedPackageId ?? (nextPackages[0]?.id || null)
+    }));
   }
 
   useEffect(() => {
@@ -83,7 +120,7 @@ export function OntologyPackagePanel({ objectTypeId, objectTypeName }: OntologyP
         ) : (
           <>
             <label>Owning project<select value={projectId} onChange={(event) => setProjectId(event.target.value)}>{projects.map((project) => <option value={project.id} key={project.id}>{project.display_name}</option>)}</select></label>
-            <label>Package<select value={selectedPackageId} onChange={(event) => setSelectedPackageId(event.target.value)}><option value="">Create a package</option>{packages.map((item) => <option value={item.id} key={item.id}>{item.display_name}</option>)}</select></label>
+            <label>Package<select value={selectedPackageId ?? ""} onChange={(event) => setSelectedPackageId(event.target.value)}><option value="">Create a package</option>{packages.map((item) => <option value={item.id} key={item.id}>{item.display_name}</option>)}</select></label>
             {!selectedPackageId ? <button disabled={busy || !selectedProject || !objectTypeId} onClick={() => {
               const packageId = `${objectTypeId}_package`.replace(/[^A-Za-z0-9_.-]/g, "_");
               run(async () => {

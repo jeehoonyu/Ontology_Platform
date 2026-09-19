@@ -1,7 +1,7 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-13T21:22:14Z"
+    "recorded_at": "2026-09-19T02:41:04Z"
   },
   "note": "Classes used by more than one file. Growing this set couples screens, so a new entry is an edit someone makes on purpose.",
   "single_file_classes": 312,
@@ -31,8 +31,7 @@
     "compact-input": [
       "workspaces/DataMedia.tsx",
       "workspaces/Fusion.tsx",
-      "workspaces/OntologyManager.tsx",
-      "workspaces/PipelineBuilder.tsx"
+      "workspaces/OntologyManager.tsx"
     ],
     "developer-evidence": [
       "components/data/DataDisplay.tsx",

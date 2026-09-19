@@ -896,6 +896,239 @@ test.describe("resetting the panes touches only the panes", () => {
 });
 
 /**
+ * A pane that moves keeps what was typed into it. V12 of the goal. V9 kept the
+ * pipeline node form's draft above the panes and recorded that any other component
+ * holding unsaved state in a pane would lose it on a move the same way: a pane moved
+ * to another slot is a new parent, and React remounts what it holds. The census of
+ * the three pane screens found three more -- the ontology manager's package form, the
+ * artifact review compose boxes and the AIP Logic agent runtime -- and two search
+ * boxes wired to nothing.
+ */
+test.describe("a pane that moves keeps what was typed into it", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  const settled = async (response: { ok(): boolean; text(): Promise<string> }, label: string) => {
+    const text = await response.text();
+    expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+    return JSON.parse(text || "null");
+  };
+
+  const slotHolding = (page: Page, inside: string) => page.locator(".pane").filter({ has: page.locator(inside) }).first()
+    .evaluate((element) => element.closest(".pane-slot")?.getAttribute("data-slot") || "");
+
+  /**
+   * Two published packages in the default project, so the install form shows. With
+   * nothing chosen the panel selects the first package the list returns, so the test
+   * picks the other one: a choice that survived is then told apart from a default
+   * that happened to agree with it.
+   */
+  async function packageFixture(page: Page) {
+    const suffix = Date.now();
+    const typeId = `moved_pane_type_${suffix}`;
+    await settled(await page.request.post("/object-types", { data: {
+      id: typeId, display_name: `Moved pane type ${suffix}`, description: "V12 package fixture",
+      properties: { asset_id: { type: "string", required: true } }
+    } }), "object type");
+    const { project } = await settled(await page.request.post("/tenancy/bootstrap", { data: {} }), "tenancy bootstrap");
+    const ids = [`moved_pane_a_${suffix}`, `moved_pane_b_${suffix}`];
+    for (const id of ids) {
+      await settled(await page.request.post("/ontology-packages", { data: {
+        id, organization_id: project.organization_id, owning_project_id: project.id, display_name: id
+      } }), `package ${id}`);
+      const captured = await settled(await page.request.post(`/ontology-packages/${id}/versions/capture`, { data: {
+        version: "1.0.0", object_type_ids: [typeId]
+      } }), `capture ${id}`);
+      await settled(await page.request.post(`/ontology-packages/${id}/versions/1.0.0/publish`, { data: {
+        expected_checksum: captured.checksum
+      } }), `publish ${id}`);
+    }
+    const listed: Array<{ id: string }> = await settled(await page.request.get("/ontology-packages"), "package list");
+    const picked = ids.find((id) => id !== listed[0]?.id) as string;
+    return { picked, suffix };
+  }
+
+  /** Opens the ontology manager, picks the package and types into its form. */
+  async function typeIntoPackageForm(page: Page, picked: string, namespace: string) {
+    await page.goto("/workspace/ontology");
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    const panel = page.locator(".ontology-package-panel");
+    await panel.getByLabel("Package").selectOption(picked);
+    await expect(panel.getByLabel("Namespace"), "the picked package's install form did not load").toBeVisible();
+    await panel.getByLabel("New version").fill("2.7.1");
+    await panel.getByLabel("Namespace").fill(namespace);
+    return panel;
+  }
+
+  test("the package form keeps its choices and typing when the Resources pane moves", async ({ page }) => {
+    const { picked, suffix } = await packageFixture(page);
+    const panel = await typeIntoPackageForm(page, picked, `moved_${suffix}`);
+
+    // `Move to…`, the single-pointer way to move a pane.
+    await page.getByLabel("Move Resources to").selectOption("right");
+    await expect.poll(() => slotHolding(page, ".ontology-package-panel")).toBe("right");
+    // The selects render only once the remounted panel's reload has landed, so every
+    // value below is read after any default that reload would have put back.
+    await expect(panel.getByLabel("New version"), "moving the pane threw away a version that had not been sent")
+      .toHaveValue("2.7.1");
+    await expect(panel.getByLabel("Namespace"), "moving the pane threw away a namespace that had not been sent")
+      .toHaveValue(`moved_${suffix}`);
+    await expect(panel.getByLabel("Package"), "moving the pane put back the default package")
+      .toHaveValue(picked);
+
+    // `Create a package` is the empty string and a real choice. A reload after the
+    // remount must not read it as no choice and select the first package again.
+    await panel.getByLabel("Package").selectOption("");
+    await page.getByLabel("Move Resources to").selectOption("left");
+    await expect.poll(() => slotHolding(page, ".ontology-package-panel")).toBe("left");
+    await expect(panel.getByLabel("Package"), "moving the pane took back the choice to create a package")
+      .toHaveValue("");
+    await expect(panel.getByRole("button", { name: "Create from selected type" })).toBeVisible();
+  });
+
+  test("the package form keeps its typing when the Resources pane is dragged to another slot", async ({ page }) => {
+    const { picked, suffix } = await packageFixture(page);
+    const panel = await typeIntoPackageForm(page, picked, `dragged_${suffix}`);
+
+    // A real drag by the grip onto the centre slot, proven over it before release.
+    // Not the right slot: empty, it is a 14px strip flush with `.workspace`'s right
+    // edge, inside dnd-kit's auto-scroll zone (the outer 20% of the scroll container).
+    // Carried that far, the pane's transform overflows `.workspace`, the workspace
+    // scrolls right under a still pointer, and dnd-kit's scroll-adjusted slot rects
+    // leave the pointer within a few ticks -- the drop lands on nothing.
+    const grip = page.getByRole("button", { name: "Reorder Resources", exact: true });
+    await grip.scrollIntoViewIfNeeded();
+    const from = await grip.boundingBox();
+    const onto = await page.locator(".pane-slot-center").boundingBox();
+    expect(from && onto, "the grip or the centre slot has no layout").toBeTruthy();
+    const startX = from!.x + from!.width / 2;
+    const startY = from!.y + from!.height / 2;
+    const targetX = onto!.x + onto!.width / 2;
+    const targetY = Math.min(Math.max(startY + 40, onto!.y + 20, 240), onto!.y + onto!.height - 20);
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    for (let step = 1; step <= 12; step += 1) {
+      await page.mouse.move(startX + ((targetX - startX) * step) / 12, startY + ((targetY - startY) * step) / 12);
+      await page.waitForTimeout(16);
+    }
+    await expect(page.locator("[id^='DndLiveRegion']").filter({ hasText: /pane:/ }),
+                 "the drag was not over the centre slot when it was released")
+      .toContainText(/moved over droppable area slot:center/);
+    await page.mouse.up();
+
+    await expect.poll(() => slotHolding(page, ".ontology-package-panel"), { message: "the drag did not move the pane" })
+      .toBe("center");
+    await expect(panel.getByLabel("New version"), "dragging the pane threw away a version that had not been sent")
+      .toHaveValue("2.7.1");
+    await expect(panel.getByLabel("Namespace"), "dragging the pane threw away a namespace that had not been sent")
+      .toHaveValue(`dragged_${suffix}`);
+    await expect(panel.getByLabel("Package"), "dragging the pane put back the default package")
+      .toHaveValue(picked);
+  });
+
+  test("an unsent review comment and proposal title survive the Inspector moving", async ({ page }) => {
+    await page.goto("/workspace/workshop");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const review = page.locator(".artifact-review-panel");
+    await expect(review, "the Inspector's review panel did not render").toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    const suffix = Date.now();
+    await review.getByPlaceholder("Add review context or a question").fill(`Unsent comment ${suffix}`);
+    await review.getByRole("tab", { name: /Proposals/ }).click();
+    await review.getByPlaceholder("Proposal title").fill(`Unsent proposal ${suffix}`);
+
+    await page.getByLabel("Move Inspector to").selectOption("bottom");
+    await expect.poll(() => slotHolding(page, ".artifact-review-panel")).toBe("bottom");
+
+    // The tab is where the person was looking, and starts again on Comments; what was
+    // written under each tab does not.
+    await review.getByRole("tab", { name: /Proposals/ }).click();
+    await expect(review.getByPlaceholder("Proposal title"), "moving the pane threw away a proposal title that had not been sent")
+      .toHaveValue(`Unsent proposal ${suffix}`);
+    await review.getByRole("tab", { name: /Comments/ }).click();
+    await expect(review.getByPlaceholder("Add review context or a question"), "moving the pane threw away a comment that had not been sent")
+      .toHaveValue(`Unsent comment ${suffix}`);
+  });
+
+  test("an unsent agent instruction and its parameters survive Run results moving", async ({ page }) => {
+    const suffix = Date.now();
+    const agentId = `moved_pane_agent_${suffix}`;
+    await settled(await page.request.post("/agents", { data: { id: agentId, display_name: `Moved pane agent ${suffix}` } }), "agent");
+    await page.goto("/workspace/aip");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const runtime = page.locator(".agent-runtime-panel");
+    await expect(runtime, "the agent runtime did not render in Run results").toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    await runtime.getByLabel("Agent", { exact: true }).selectOption(agentId);
+    await runtime.getByLabel("Execution mode").selectOption("single");
+    await runtime.getByLabel("Instruction").fill(`Unsent instruction ${suffix}`);
+    await runtime.getByRole("button", { name: "Add parameter" }).click();
+    await runtime.getByLabel("Parameter 1 name").fill("incident_id");
+    await runtime.getByLabel("Parameter 1 value").fill(`incident_${suffix}`);
+
+    await page.getByLabel("Move Run results to").selectOption("right");
+    await expect.poll(() => slotHolding(page, ".agent-runtime-panel")).toBe("right");
+    await expect(runtime.getByLabel("Instruction"), "moving the pane threw away an instruction that had not been run")
+      .toHaveValue(`Unsent instruction ${suffix}`);
+    await expect(runtime.getByLabel("Parameter 1 value"), "moving the pane threw away a parameter that had not been run")
+      .toHaveValue(`incident_${suffix}`);
+    await expect(runtime.getByLabel("Execution mode"), "moving the pane put back the default execution mode")
+      .toHaveValue("single");
+    await expect(runtime.getByLabel("Agent", { exact: true }), "moving the pane put back the default agent")
+      .toHaveValue(agentId);
+  });
+
+  test("the object type search narrows the Resources list, and says when nothing matches", async ({ page }) => {
+    // Discover lists every object type the person can see, uncapped. The box above it
+    // had no value, no handler and no form: it took text and did nothing with it.
+    const suffix = Date.now();
+    for (const [id, name] of [[`searchable_type_${suffix}`, `Searchable ${suffix}`], [`unrelated_type_${suffix}`, `Unrelated ${suffix}`]]) {
+      await settled(await page.request.post("/object-types", { data: {
+        id, display_name: name, properties: { name: { type: "string" } }
+      } }), `object type ${id}`);
+    }
+    await page.goto("/workspace/ontology");
+    const discover = page.locator(".manager-resource-nav .panel")
+      .filter({ has: page.getByRole("heading", { name: "Discover", exact: true }) });
+    const rows = discover.locator(".resource-row");
+    await expect(rows.filter({ hasText: `Searchable ${suffix}` })).toHaveCount(1);
+    await expect(rows.filter({ hasText: `Unrelated ${suffix}` })).toHaveCount(1);
+    const search = page.getByLabel("Search object types");
+
+    await search.fill(`Searchable ${suffix}`);
+    await expect(rows, "the search did not narrow the object types to the one that matches").toHaveCount(1);
+    await expect(rows.first()).toContainText(`Searchable ${suffix}`);
+    await expect(discover.getByRole("note"), "a narrowed list reads as every object type")
+      .toHaveText(/^Showing 1 of [\d,]+ object types$/);
+
+    await search.fill(`unrelated_type_${suffix}`);
+    await expect(rows, "the search did not match an object type by its id").toHaveCount(1);
+    await expect(rows.first()).toContainText(`Unrelated ${suffix}`);
+
+    await search.fill(`No such type ${suffix}`);
+    await expect(rows, "a search that matches nothing still lists object types").toHaveCount(0);
+    await expect(discover, "a search that matched nothing left the list empty without saying so")
+      .toContainText(`No object type matches "No such type ${suffix}"`);
+  });
+
+  test("the Outputs pane holds no search box wired to nothing", async ({ page }) => {
+    // Pipeline Outputs lists the graph's output nodes and the five builds the canvas
+    // loads, so a search there would read as a search of every build. It searched
+    // nothing, and lost its text whenever the pane moved.
+    await page.goto("/workspace/pipeline");
+    const outputs = page.locator(".output-rail");
+    await expect(outputs, "the Outputs pane did not render").toBeVisible();
+    await expect(outputs.locator("input[placeholder^='Search']"), "a search box wired to nothing is back in the Outputs pane")
+      .toHaveCount(0);
+  });
+});
+
+/**
  * A pipeline node picked up on a canvas already scrolled sideways. V10 of the goal,
  * found while V8 was verified: the node was displaced by the canvas's scroll
  * offset before any key was pressed, and the drop committed it -- scrolled 103px

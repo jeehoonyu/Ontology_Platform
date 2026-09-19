@@ -13,24 +13,55 @@ import { getJob } from "../api/jobApi";
 import { DataTable, ErrorBanner, StatusBadge } from "../components/data/DataDisplay";
 import type { AgentRunResult, PlatformJob } from "../types";
 
-interface ParameterRow {
+export interface ParameterRow {
   id: string;
   name: string;
   value: string;
 }
+
+/**
+ * What a person has chosen and typed here and not yet run. In AIP Logic this panel
+ * sits in the Run results pane, and a pane moved to another slot is a new parent:
+ * React remounts what it holds, and the agent, the execution mode, the instruction
+ * and every parameter went back to their defaults. The builder holds it and hands
+ * it back. The Decision workspace renders the panel in no pane and passes nothing,
+ * so the panel keeps its own there. V12 of GOAL_MOVEMENT_2026-09-12.
+ */
+export interface AgentDraft {
+  agentId: string;
+  prompt: string;
+  parameters: ParameterRow[];
+  executionMode: "graph" | "single";
+}
+
+export const NEW_AGENT_DRAFT: AgentDraft = {
+  agentId: "",
+  prompt: "Inspect current operational risk and propose the safest next action.",
+  parameters: [],
+  executionMode: "graph"
+};
 
 function resultFromJob(job: PlatformJob | null): AgentRunResult | null {
   if (!job?.result || typeof job.result !== "object" || !("run_id" in job.result)) return null;
   return job.result as unknown as AgentRunResult;
 }
 
-export function AgentRuntimePanel() {
+export function AgentRuntimePanel({ draft: held, onDraft }: {
+  /** Held by a caller whose pane can move, so a remount reads it back. */
+  draft?: AgentDraft;
+  onDraft?: (update: (current: AgentDraft) => AgentDraft) => void;
+}) {
   const agents = useQuery({ queryKey: ["aip-agents"], queryFn: listAgents });
-  const [agentId, setAgentId] = useState("");
-  const [prompt, setPrompt] = useState("Inspect current operational risk and propose the safest next action.");
-  const [parameters, setParameters] = useState<ParameterRow[]>([]);
+  const [own, setOwn] = useState<AgentDraft>(NEW_AGENT_DRAFT);
+  const draft = held ?? own;
+  const setDraft: (update: (current: AgentDraft) => AgentDraft) => void = onDraft ?? setOwn;
+  const { agentId, prompt, parameters, executionMode } = draft;
+  const setAgentId = (value: string) => setDraft((current) => ({ ...current, agentId: value }));
+  const setPrompt = (value: string) => setDraft((current) => ({ ...current, prompt: value }));
+  const setParameters = (update: (rows: ParameterRow[]) => ParameterRow[]) =>
+    setDraft((current) => ({ ...current, parameters: update(current.parameters) }));
+  const setExecutionMode = (value: "graph" | "single") => setDraft((current) => ({ ...current, executionMode: value }));
   const [job, setJob] = useState<PlatformJob | null>(null);
-  const [executionMode, setExecutionMode] = useState<"graph" | "single">("graph");
   const [graphStages, setGraphStages] = useState<PlatformJob[]>([]);
   const [result, setResult] = useState<AgentRunResult | null>(null);
   const [busy, setBusy] = useState(false);

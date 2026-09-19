@@ -39,9 +39,9 @@ way to the rest names items nobody can reach.
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 223 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 72 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
-| `workspaces/OntologyManager.tsx` | 271 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
-| `workspaces/VisualBuilder.tsx` | 700 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
-| `workspaces/VisualBuilder.tsx` | 804 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
+| `workspaces/OntologyManager.tsx` | 291 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
+| `workspaces/VisualBuilder.tsx` | 706 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 810 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
 
 ## Found and not placed
 
@@ -114,19 +114,19 @@ test that reads its note; whether that note's condition matches the limit is the
 | `lib/builderKernel.ts` | 22 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `workspaces/Analytics.tsx` | 62 | `truncate` | `text` | text |
 | `workspaces/Automate.tsx` | 312 | `Automate` | `run.id` | text |
-| `workspaces/OntologyManager.tsx` | 486 | `ActionTypeEditor` | ``${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")` | text |
-| `workspaces/OntologyManager.tsx` | 734 | `OntologyRelationshipDesigner` | ``${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_")` | text |
-| `workspaces/OntologyPackagePanel.tsx` | 118 | `PackageVersionRow` | `version.checksum` | text |
+| `workspaces/OntologyManager.tsx` | 506 | `ActionTypeEditor` | ``${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")` | text |
+| `workspaces/OntologyManager.tsx` | 754 | `OntologyRelationshipDesigner` | ``${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_")` | text |
+| `workspaces/OntologyPackagePanel.tsx` | 155 | `PackageVersionRow` | `version.checksum` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 151 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` | request payload |
 | `workspaces/PipelineBuilder.tsx` | 365 | `PipelineBuilder` | `current` | last dropped |
 | `workspaces/PipelineBuilder.tsx` | 393 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 460 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/VisualBuilder.tsx` | 503 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 596 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 601 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 706 | `VisualBuilder` | `participant.display_name` | text |
+| `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 712 | `VisualBuilder` | `participant.display_name` | text |
 
 ## What this does not see
 

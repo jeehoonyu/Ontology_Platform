@@ -462,6 +462,96 @@ Three things in that table are the defect the research describes:
   single pointer and no drag; no Undo for a palette add, a field mapping, a property order, or an
   arrangement on either graph; and the xyflow cancels on the ontology designer and the platform graph,
   which V5 fixed in `VisualBuilder` and not in the library. None of them is a stage that works unmeasured.
+- **V12 — A pane that moves keeps what was typed into it, on every screen with panes.**
+  **Met** — the ontology manager's package form, the artifact review compose boxes and the
+  AIP Logic agent runtime keep what was chosen and typed when their pane moves, the way V9
+  made the pipeline node form keep it. Proven by six tests in `movement-contract.spec.ts`
+  under `a pane that moves keeps what was typed into it`: the package form moved with
+  `Move to…` and dragged by its grip, a review comment and proposal title, an agent
+  instruction with its parameters, and one for each of the two search boxes below.
+
+  **V9 left this open, and said so.** It fixed the one form it had measured and recorded
+  that any other component holding unsaved state of its own, placed in a pane, would lose it
+  on a move the same way. `PaneHost` renders one `Slot` per slot and each pane inside the
+  slot it is in, so a pane that changes slot changes parent and React mounts what it holds
+  afresh. This is the census V9 did not take, read from the source for every component the
+  three `PaneHost` screens render inside a pane that can move; anchored panes cannot, and
+  are left out.
+
+  | Screen | Pane | Unsent input, and where it lived | On a move |
+  | --- | --- | --- | --- |
+  | Ontology Manager | Resources | package, owning and target project, new version, namespace — `OntologyPackagePanel` | **lost** |
+  | Ontology Manager | Resources | dataset to generate from, all drafts shown — the screen | kept |
+  | Workshop, AIP Logic, Investigations, Entity Resolution | Inspector | a review comment, a proposal title — `ArtifactReviewPanel` | **lost** |
+  | the same four | Inspector, Node library | node name, description and fields; the library search — the screen | kept |
+  | AIP Logic | Run results | agent, execution mode, instruction, parameters — `AgentRuntimePanel` | **lost** |
+  | Pipeline Builder | Outputs | node label and fields (V9); execution policy — the screen | kept |
+  | Pipeline Builder | Outputs | `Search outputs...`, an input with no state and no handler | **lost**, and it searched nothing |
+
+  A tab, a table page or an open disclosure in a moved pane starts again where it starts.
+  Those are where a person was looking rather than something they wrote, and none is held.
+
+  **The fix is V9's, three more times.** Each component's unsent input lives in the screen,
+  above the panes, and is handed back in, so a remount reads it instead of its defaults. The
+  package form is one object; its reload still picks a first project and a first package,
+  but only for what nobody has chosen, and `Create a package` — the empty string, and a
+  real choice — is no longer read as no choice. A review draft is keyed by artifact, so a
+  comment belongs to the artifact it was typed for. The agent runtime keeps its own when a
+  caller passes nothing, because the Decision workspace renders it outside any pane.
+  `Reset panes`, a hide and a collapse unmount the same way and read the same held state
+  back; none of the three is separately asserted.
+
+  **The two search boxes were decided by what their panes list.** The ontology manager's
+  `Search resources...` sat in the top bar, outside the panes, with no value, no handler and
+  no form: it kept its text through a move and did nothing with it. Discover lists every
+  object type the person can see, uncapped — the ontology's resources, where Drafts holds
+  generator drafts not yet applied — so the box now narrows Discover by name or id, is
+  labelled `Search object types`, and says when nothing matches. Pipeline Outputs lists the
+  graph's output nodes and the five builds the canvas loads, a window `TABLE_TRUNCATION.md`
+  already holds as a gap, so a search there would read as a search of every build; it is
+  gone. `audit_inert_controls` counts buttons and links, and could see neither.
+
+  Still not gated, as V9 said: a component with unsaved state of its own, placed in a pane,
+  loses it on a move. This census is a reading, taken once.
+
+  **The proof.** The six tests pass on the desktop-1280 project. On the same build, so do the four
+  tests nearest the change: `Reset panes leaves the graph and unsent input exactly as they were`,
+  `ontology manager publishes and installs a governed package`, `a property row reorders without a
+  drag` and `a released pointer resize is kept and survives a reload`. The search test finds one object
+  type by its name and another by its id.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the package panel keeping its own state again:** the move test failed at `moving the pane
+    threw away a version that had not been sent`, `Expected: "2.7.1"`, `Received: "1.0.0"`.
+  - **N2, the panel holding the form itself instead of the screen:** the drag test failed at `dragging
+    the pane threw away a version that had not been sent`, with the same values.
+  - **N3, a reload reading `Create a package` as no choice:** the move test failed at `moving the pane
+    took back the choice to create a package`, because the reload had chosen the first package.
+  - **N4, the review panel keeping its own draft:** the review test failed at `moving the pane threw
+    away a proposal title that had not been sent`, `Received: ""`.
+  - **N5, the agent runtime ignoring the draft it is handed:** the agent test failed at `moving the
+    pane threw away an instruction that had not been run`, which received the default instruction.
+  - **N6, a search that narrows nothing:** the search test failed at `the search did not narrow the
+    object types to the one that matches`, with two rows where one was expected.
+  - **N7, the Outputs search box put back:** the Outputs test failed at `a search box wired to nothing
+    is back in the Outputs pane`, `Expected: 0`, `Received: 1`.
+  - **N8, no note over a narrowed list:** the search test failed at `a narrowed list reads as every
+    object type`, because it found no note.
+  - **N9, a search by name only:** the search test failed at `the search did not match an object type
+    by its id`, `Expected: 1`, `Received: 0`.
+  - Restored: the ten tests pass, and the six sources are byte for byte what they were.
+
+  N6 and N9 ran in a second pass. N6 was written against the filter before it matched name and id
+  separately, so the first pass did not apply it. The id assertion and N9 were added in the second
+  pass.
+
+  **Gates.**
+  - `TABLE_TRUNCATION.md` was regenerated. Only line numbers moved, and it still names 12 unfixed.
+  - The style-scope baseline records `.compact-input` in three files, not four, because the Outputs
+    box is gone.
+  - `audit_inert_controls` still finds no inert control, and tenancy holds at 360.
+  - No route exceeds its payload ceiling or sends more requests when it opens.
+  - The fast tier passes 23 of 23.
 
 ## Order and size
 
@@ -476,6 +566,7 @@ Three things in that table are the defect the research describes:
 | V9 | spec | 1 |
 | V10 | `components/canvas/PipelineCanvas.tsx`, `styles.css`, spec, truncation reference | 1 |
 | V11 | `oms/audit_movement_contract.py`, spec, reference, baseline | 1 |
+| V12 | `OntologyPackagePanel.tsx`, `OntologyManager.tsx`, `ArtifactReviewPanel.tsx`, `AgentRuntimePanel.tsx`, `VisualBuilder.tsx`, `PipelineBuilder.tsx`, spec, truncation reference, style-scope baseline | 1 |
 
 Every test is run once against a build with the thing it defends removed, and every cancel
 test first proves the drag was live.

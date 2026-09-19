@@ -62,9 +62,9 @@ import {
   type PlatformArtifact
 } from "../api/artifactApi";
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
-import { ArtifactReviewPanel } from "../components/workbench/ArtifactReviewPanel";
+import { ArtifactReviewPanel, NEW_REVIEW_DRAFT, type ReviewDraft } from "../components/workbench/ArtifactReviewPanel";
 import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
-import { AgentRuntimePanel } from "./AgentRuntimePanel";
+import { AgentRuntimePanel, NEW_AGENT_DRAFT, type AgentDraft } from "./AgentRuntimePanel";
 
 /**
  * The artifact canvases' panes. M7 of GOAL_PANES_2026-09-11: Workshop, AIP Logic,
@@ -177,6 +177,12 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
+  // Typed into a pane and not yet sent, held here because a pane moved to another
+  // slot is a new parent and React remounts what it holds: the review panel's comment
+  // and proposal title, keyed by the artifact they were typed for, and the AIP Logic
+  // agent runtime's choices, instruction and parameters. V12 of GOAL_MOVEMENT_2026-09-12.
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
+  const [agentDraft, setAgentDraft] = useState<AgentDraft>(NEW_AGENT_DRAFT);
   // One context for the screen, as the pipeline builder has, because a pane grip
   // and a library entry now share it; "slots" jumps a pane between slots from the
   // keyboard and hands every other drag to dnd-kit's own default.
@@ -807,7 +813,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
                 <p>Select Preview to validate the current revision and inspect deterministic execution evidence.</p>
               )}
             </div>
-            {artifactType === "aip_logic" ? <AgentRuntimePanel /> : null}
+            {artifactType === "aip_logic" ? <AgentRuntimePanel draft={agentDraft} onDraft={setAgentDraft} /> : null}
           </div>
           );
           return (
@@ -826,6 +832,8 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
             artifact={artifact}
             selectedNodeId={selectedNodeId}
             pendingCommands={pendingCommands}
+            draft={reviewDrafts[artifact.id] ?? NEW_REVIEW_DRAFT}
+            onDraft={(update) => setReviewDrafts((current) => ({ ...current, [artifact.id]: update(current[artifact.id] ?? NEW_REVIEW_DRAFT) }))}
             onApplied={async (appliedArtifact) => {
               setDirty(false);
               dirtyRef.current = false;
