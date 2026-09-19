@@ -384,6 +384,84 @@ Three things in that table are the defect the research describes:
   step was a probe, and the probe found the defect. V6 and V7 now start from an unscrolled
   canvas and say why. Proven, when met, by a pick-up and drop with no movement on a canvas
   scrolled sideways, which must leave the node where it was.
+- **V11 — Every stage that already works is measured.** **Met** — `MOVEMENT_CONTRACT.md` falls
+  from **20 gaps to 12**, and no product source changed: eight cells were recorded as gaps for
+  behaviour the product already had, and each is now held by a named test that can fail. Per stage:
+  cancel 2 gaps, recover 5, alternative 5. V1 made the count a ceiling, and nothing since has re-read a gap's reason, so a stage
+  that began working, or had always worked, could stay in the reference as a gap with nothing due to
+  notice. This condition is where the count is kept.
+
+  **One of the eight was never a gap.** `ontology-field-map`'s alternative said *the `Map <property>`
+  select exists and no browser test operates it*, and `drag-affordances.spec.ts` had operated it since
+  19 August, more than three weeks before the census wrote the sentence. `a source field maps onto a
+  property without a drag` chooses a field the property does not hold, on a 390-pixel touch viewport,
+  and asserts the select now holds it. It can hold it only if `mapField` ran -- the function the drop
+  calls -- because the select is controlled from the mappings and snaps back otherwise. A native select
+  chosen without a drag is the standard V3's width select was met by. The census counted the control
+  and did not search the specs for it.
+
+  **The other seven were not measured, and the code already did them.** dnd-kit answers Escape by
+  calling `onDragCancel`, and none of the five contexts involved -- the pipeline screen's, the artifact
+  screen's, the inspector's field list, the ontology field mapping and the ontology property list -- has
+  one, so a cancelled drag reaches no handler that commits anything; the pipeline canvas's monitor only
+  clears its carried-selection preview. A library entry's click and its drop both go through `addNode`,
+  which records one history entry, and a field reorder goes through `updateSelected`, which records one.
+  Seven tests in `movement-contract.spec.ts`, each of which first asserts what only a live drag over its
+  target has -- the palette entry's `dragging` class and the pipeline canvas's `drag-active`; the
+  artifact canvas's `drag-active`; the second field or property row moved up to make room for the first;
+  the mapping target's `drag-active` -- and only then presses Escape or lets go:
+
+  - `Escape during a palette drag onto the pipeline canvas adds no node and writes nothing`
+  - `Escape during a library drag onto an artifact canvas adds no node and records nothing`
+  - `one Undo takes back a node dropped from the library`
+  - `Escape during a field reorder keeps the order and records nothing`
+  - `one Undo takes back one field reorder`
+  - `Escape during a field-mapping drag maps nothing and writes nothing`
+  - `Escape during a property-row drag keeps the order and writes nothing`
+
+  The palette and ontology tests read the requests before the screen: each of those drops writes at
+  once -- a node, a mapping preview, a saved order -- and draws only when the server answers, so a
+  request is the witness that cannot arrive late. The artifact screen's two cancels prove *records
+  nothing* the way V5 does, not with a request count, because the autosave of an earlier edit can land
+  during the drag: a node is added by click first, and after the cancel one Undo must remove that node.
+  The two Undo tests add the earlier entry for the opposite reason: an Undo that took back more than the
+  one move shows.
+
+  **Both Undo tests first failed, and the product was not why.** After a drop the library test's one
+  Undo left the dropped node in place, and the next autosave wrote it into a revision; the field test's
+  Undo left the fields reordered. A build that logged every change xyflow reported showed one history
+  entry for the drop and nothing after it, so the entry Undo needed was there. The Undo never ran: an
+  activated dnd-kit sensor stops the propagation of the click that follows a drop until its listeners
+  detach, 50 ms after the drag ends (`@dnd-kit/core`, `core.esm.js:1479` and `:1506`), and the tests
+  pressed Undo 22 to 26 ms after releasing. No person clicks that fast. Both tests now wait 150 ms, and
+  say why.
+
+  **The proof.** The seven tests pass on the desktop-1280 project, with the existing field-map test.
+  `MOVEMENT_CONTRACT.md` reads **12 gaps** across 11 surfaces, 19 met and 2 not applicable, and
+  `test_movement_contract_audit.py` passes with 58 assertions. No product source changed, so the tenancy,
+  inert-control, truncation, style-scope and route-cost gates see nothing new.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, an `onDragCancel` on the pipeline screen that commits the drop:** the palette test failed at
+    `a cancelled palette drag sent a write to the server`.
+  - **N2, the same on the artifact screen:** the library cancel test failed, a node added on release.
+  - **N3, `addNode` recording no history entry:** the library Undo test failed, its Undo button disabled.
+  - **N4, a field-list `onDragCancel` that reorders:** the field cancel test failed, the order changed on
+    release.
+  - **N5, a reorder recording no history entry:** the field Undo test failed, its Undo taking back the
+    node's addition instead.
+  - **N6, the `Map <property>` select mapping nothing:** the existing field-map test failed, `Expected:
+    "asset_class"`, `Received: "name"`.
+  - **N7, a field-mapping `onDragCancel` that maps:** the mapping test failed, a write sent.
+  - **N8, a property-list `onDragCancel` that saves the order:** the property test failed, a write sent.
+  - Restored: the thirteen matching browser tests and the audit test pass, and the three sources are byte
+    for byte what they were.
+
+  **What is left is 12, and they are behaviour that does not exist.** No way to move a node on the
+  pipeline, artifact, ontology or platform canvas, or a configuration field in the inspector, with a
+  single pointer and no drag; no Undo for a palette add, a field mapping, a property order, or an
+  arrangement on either graph; and the xyflow cancels on the ontology designer and the platform graph,
+  which V5 fixed in `VisualBuilder` and not in the library. None of them is a stage that works unmeasured.
 
 ## Order and size
 
@@ -396,6 +474,8 @@ Three things in that table are the defect the research describes:
 | V7 | `components/canvas/PipelineCanvas.tsx`, spec | 1 |
 | V8 | `PipelineBuilder.tsx`, `PlatformGraph.tsx`, `OntologyManager.tsx`, spec | 1–2 |
 | V9 | spec | 1 |
+| V10 | `components/canvas/PipelineCanvas.tsx`, `styles.css`, spec, truncation reference | 1 |
+| V11 | `oms/audit_movement_contract.py`, spec, reference, baseline | 1 |
 
 Every test is run once against a build with the thing it defends removed, and every cancel
 test first proves the drag was live.

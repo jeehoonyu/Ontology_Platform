@@ -67,6 +67,53 @@ test.describe("a cancelled drag leaves everything where it was", () => {
       .toBe(stored);
   });
 
+  test("Escape during a palette drag onto the pipeline canvas adds no node and writes nothing", async ({ page }) => {
+    // V11. The palette rides the pipeline node's sensor on a different draggable, and
+    // its drop is a server write: `addNodeAtDrop` posts the node the moment it lands.
+    await page.getByRole("button", { name: "New pipeline" }).click();
+    await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+    const canvas = page.locator(".pipeline-canvas");
+    await expect(canvas.locator(".pipeline-node"), "a new pipeline did not start empty").toHaveCount(0);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+    const entry = page.getByRole("button", { name: "Input Dataset input" });
+    const from = await entry.boundingBox();
+    const onto = await canvas.boundingBox();
+    expect(from && onto, "the palette entry or the canvas has no layout").toBeTruthy();
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    });
+
+    // Across to the middle of the canvas and a third of the way down, where the palette
+    // drop in `evaluator.spec.ts` aims, in real steps: dnd-kit waits for 8px of movement.
+    const x = from!.x + from!.width / 2;
+    const y = from!.y + from!.height / 2;
+    const targetX = onto!.x + onto!.width / 2;
+    const targetY = onto!.y + onto!.height / 3;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (let step = 1; step <= 12; step += 1) {
+      await page.mouse.move(x + ((targetX - x) * step) / 12, y + ((targetY - y) * step) / 12);
+      await page.waitForTimeout(16);
+    }
+    // Live, and over the canvas: the entry carries dnd-kit's `dragging` class and the
+    // canvas marks itself as the drop target. Released here instead, this adds a node.
+    await expect(entry, "the palette drag never started").toHaveClass(/\bdragging\b/);
+    await expect(canvas, "the palette drag was not over the canvas when Escape was pressed")
+      .toHaveClass(/\bdrag-active\b/);
+
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+
+    // The requests first: a drop posts the node at once and draws it only when the
+    // server answers, so the request is the witness that cannot arrive late.
+    expect(writes, "a cancelled palette drag sent a write to the server").toEqual([]);
+    await expect(canvas.locator(".pipeline-node"), "Escape did not cancel the palette drag; a node was added on release")
+      .toHaveCount(0);
+  });
+
   test("Escape during a pipeline node drag restores it and saves nothing", async ({ page }) => {
     await page.getByRole("button", { name: "New pipeline" }).click();
     await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
@@ -284,6 +331,151 @@ test.describe("a graph node move is one entry, and Escape takes it back", () => 
     await expect(nodes(page), "the cancelled drag left a history entry behind").toHaveCount(index);
   });
 
+  // V11. Two more DragKit drags on this screen, neither of which needed product code:
+  // dnd-kit answers Escape with `onDragCancel` and neither context has one, a library
+  // entry's click and its drop both go through `addNode`, and a field reorder goes
+  // through `updateSelected`; each records one history entry. The census had all four
+  // stages as not measured, and a stage nobody has operated is not one that works.
+  const ids = (page: Page) => nodes(page).evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-id") || "").sort());
+  const labels = (page: Page) =>
+    page.locator(".node-inspector-form .config-field-row .config-field-label strong").allTextContents();
+
+  /** Carries the first library entry over the canvas, leaving the pointer held. Asserts it is live. */
+  async function carryFromLibrary(page: Page) {
+    const entry = page.locator(".node-library-list button").first();
+    const canvas = page.locator(".visual-flow-canvas");
+    const from = await entry.boundingBox();
+    const onto = await canvas.boundingBox();
+    expect(from && onto, "the library entry or the canvas has no layout").toBeTruthy();
+    const x = from!.x + from!.width / 2;
+    const y = from!.y + from!.height / 2;
+    const targetX = onto!.x + onto!.width / 2;
+    const targetY = onto!.y + onto!.height / 3;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(50);
+    for (let step = 1; step <= 12; step += 1) {
+      await page.mouse.move(x + ((targetX - x) * step) / 12, y + ((targetY - y) * step) / 12);
+      await page.waitForTimeout(20);
+    }
+    // Live, and over the canvas: the drop target marks itself. Released here, this adds a node.
+    await expect(canvas, "the library drag never reached the canvas").toHaveClass(/\bdrag-active\b/);
+  }
+
+  /**
+   * Adds a node whose configuration has fields, and returns its index and the fields' labels.
+   * The builder catalog carries the fields; the library drawn before it arrives has none.
+   */
+  async function nodeWithFields(page: Page) {
+    await expect(page.locator(".node-library-list button").first(),
+                 "the builder catalog, which carries each node's fields, has not loaded").toContainText("·");
+    const index = await addNode(page);
+    await expect(page.locator(".node-inspector-form"), "the new node's settings are not showing").toBeVisible();
+    const before = await labels(page);
+    expect(before.length, "the new node has fewer than two fields to reorder").toBeGreaterThanOrEqual(2);
+    expect(before[0], "the first two fields cannot be told apart").not.toBe(before[1]);
+    return { index, before };
+  }
+
+  /** Picks the first field up by its grip and carries it over the second, leaving the pointer held. */
+  async function carryField(page: Page) {
+    const rows = page.locator(".node-inspector-form .config-field-row");
+    // Centred, so the pointer stays clear of the edges where dnd-kit scrolls the pane under it.
+    await rows.nth(1).evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(200);
+    const first = await rows.nth(0).boundingBox();
+    const grip = await rows.nth(0).locator(".drag-grip").boundingBox();
+    const second = await rows.nth(1).boundingBox();
+    expect(first && grip && second, "the field rows have no layout to drag across").toBeTruthy();
+    const x = grip!.x + grip!.width / 2;
+    const y = grip!.y + grip!.height / 2;
+    // The first row's centre carried a quarter of a row past the second's, so the second
+    // is the nearest and the third is not.
+    const distance = second!.y + second!.height * 0.75 - (first!.y + first!.height / 2);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(50);
+    for (let step = 1; step <= 10; step += 1) {
+      await page.mouse.move(x, y + (distance * step) / 10);
+      await page.waitForTimeout(20);
+    }
+    // Live, and over the second field: that row has moved up to make room, which it does
+    // only while a drag holding the first is over it.
+    await expect.poll(() => rows.nth(1).evaluate((element) => (element as HTMLElement).style.transform),
+                      { message: "the field drag never reached the second field" })
+      .toMatch(/translate3d\(0px, -/);
+  }
+
+  test("Escape during a library drag onto an artifact canvas adds no node and records nothing", async ({ page }) => {
+    // A node added by click first, so the most recent history entry is known.
+    const index = await addNode(page);
+    const kept = await ids(page);
+
+    await carryFromLibrary(page);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+
+    expect(await ids(page), "Escape did not cancel the library drag; a node was added on release").toEqual(kept);
+    // Records nothing, proven as V5 proves it: the add's autosave can land during the
+    // drag, so a request count says nothing here and the history does. One Undo must
+    // still take back the add.
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(nodes(page), "the cancelled library drag left a history entry behind").toHaveCount(index);
+  });
+
+  test("one Undo takes back a node dropped from the library", async ({ page }) => {
+    // An earlier entry first, so an Undo that took back more than the drop would show.
+    await addNode(page);
+    const kept = await ids(page);
+
+    await carryFromLibrary(page);
+    await page.mouse.up();
+    // dnd-kit swallows the click that follows a drop: it stops the click's propagation until its
+    // listeners detach, 50 ms after the drag ends (@dnd-kit/core, core.esm.js:1479, 1506). An Undo
+    // pressed sooner never runs, which no person does and a test does without this.
+    await page.waitForTimeout(150);
+    await expect(nodes(page), "the drop placed no node").toHaveCount(kept.length + 1);
+
+    const undo = page.getByRole("button", { name: "Undo" });
+    await expect(undo, "the dropped node left nothing to undo").toBeEnabled();
+    await undo.click();
+    await expect.poll(() => ids(page), { message: "one Undo did not take back exactly the dropped node" })
+      .toEqual(kept);
+  });
+
+  test("Escape during a field reorder keeps the order and records nothing", async ({ page }) => {
+    const { index, before } = await nodeWithFields(page);
+
+    await carryField(page);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    expect(await labels(page), "Escape did not cancel the field drag; the order changed on release").toEqual(before);
+    // The most recent entry must still be the node's addition.
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(nodes(page), "the cancelled field drag left a history entry behind").toHaveCount(index);
+  });
+
+  test("one Undo takes back one field reorder", async ({ page }) => {
+    const { index, before } = await nodeWithFields(page);
+
+    await carryField(page);
+    await page.mouse.up();
+    // dnd-kit swallows the click that follows a drop: it stops the click's propagation until its
+    // listeners detach, 50 ms after the drag ends (@dnd-kit/core, core.esm.js:1479, 1506). An Undo
+    // pressed sooner never runs, which no person does and a test does without this.
+    await page.waitForTimeout(150);
+    await expect.poll(() => labels(page), { message: "the drag did not reorder the fields" })
+      .toEqual([before[1], before[0], ...before.slice(2)]);
+
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect.poll(() => labels(page), { message: "one Undo did not take back one reorder" }).toEqual(before);
+    await expect(nodes(page), "one Undo took back more than the reorder").toHaveCount(index + 1);
+  });
+
   test("a click on an artifact node records nothing (guard)", async ({ page }) => {
     // A guard, measured true before V4: clicking selects and must not snapshot.
     // Kept because moving the history entry to drag start is exactly the change
@@ -300,6 +492,112 @@ test.describe("a graph node move is one entry, and Escape takes it back", () => 
  * the goal. Before it, nothing could take a committed move back: the census
  * recorded the drop saving positions and no control of any kind reversing one.
  */
+test.describe("an ontology drag that is cancelled changes nothing", () => {
+  // V11. The field mapping and the property order ride the same dnd-kit sensor as the pipeline
+  // and artifact drags, and neither context has an `onDragCancel`, so Escape ends the drag with
+  // nothing committed. Both commit by writing -- a mapping refreshes its preview on the server and
+  // a reorder saves the order -- so a request the drag sends is the witness that it committed.
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful and the drags need the side-by-side layout.");
+  });
+
+  const writesFrom = (page: Page) => {
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    });
+    return writes;
+  };
+
+  /** Presses on `from`'s centre and carries it to `to` in real steps: dnd-kit waits for 8px of movement. */
+  async function carry(page: Page, from: { x: number; y: number; width: number; height: number }, to: { x: number; y: number }) {
+    const x = from.x + from.width / 2;
+    const y = from.y + from.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(50);
+    for (let step = 1; step <= 12; step += 1) {
+      await page.mouse.move(x + ((to.x - x) * step) / 12, y + ((to.y - y) * step) / 12);
+      await page.waitForTimeout(20);
+    }
+  }
+
+  test("Escape during a field-mapping drag maps nothing and writes nothing", async ({ page }) => {
+    const bootstrap = await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} });
+    expect(bootstrap.ok(), "the scenario that provides datasets did not bootstrap").toBeTruthy();
+    await page.goto("/workspace/ontology");
+    const panel = page.locator(".ontology-mapping-panel");
+    await panel.getByLabel("Source dataset").selectOption({ index: 1 });
+    await panel.getByRole("button", { name: "Preview objects" }).click();
+    const target = panel.locator(".mapping-target").first();
+    await expect(target).toBeVisible();
+    const chooser = target.locator("select");
+    await expect.poll(() => chooser.locator("option").count(), { message: "the preview offered no source fields" }).toBeGreaterThan(2);
+    const held = await chooser.inputValue();
+    const names = await panel.locator(".mapping-source-list button strong").allTextContents();
+    const name = names.find((value) => value !== held);
+    expect(name, "the dataset offers no field the first property does not already hold").toBeTruthy();
+    const field = panel.locator(".mapping-source-list button").filter({ has: page.getByText(name as string, { exact: true }) }).first();
+    await panel.locator(".ontology-mapping-grid").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    const from = await field.boundingBox();
+    const onto = await target.boundingBox();
+    expect(from && onto, "the field or the property has no layout").toBeTruthy();
+    const writes = writesFrom(page);
+
+    await carry(page, from!, { x: onto!.x + onto!.width / 2, y: onto!.y + onto!.height / 2 });
+    // Live, and over the property: only a drag holding a field over it marks it.
+    await expect(target, "the field drag was not over the property when Escape was pressed").toHaveClass(/\bdrag-active\b/);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+
+    expect(writes, "a cancelled field drag sent a write to the server").toEqual([]);
+    await expect(chooser, "Escape did not cancel the field drag; the property was mapped on release").toHaveValue(held);
+  });
+
+  test("Escape during a property-row drag keeps the order and writes nothing", async ({ page }) => {
+    const suffix = Date.now();
+    const displayName = `Cancelled Order ${suffix}`;
+    const created = await page.request.post("/object-types", { data: {
+      id: `cancelled_order_${suffix}`,
+      display_name: displayName,
+      description: "Browser evidence that Escape cancels a property reorder",
+      properties: { alpha_reading: { type: "string", required: true }, beta_reading: { type: "string" }, gamma_reading: { type: "string" } }
+    } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    await page.goto("/workspace/ontology");
+    await page.locator(".manager-resource-nav .resource-row").filter({ hasText: displayName }).click();
+    await page.getByRole("button", { name: "Edit fields" }).click();
+    const rows = page.locator(".property-field-list .property-field-row");
+    await expect(rows.nth(1)).toBeVisible();
+    const names = () => rows.evaluateAll((articles) => articles.map((article) => article.querySelector("input")?.value || ""));
+    const before = await names();
+    expect(before.length, "the object type rendered fewer than two property rows").toBeGreaterThanOrEqual(2);
+    // Centred, so the pointer stays clear of the edges where dnd-kit scrolls the pane under it.
+    await rows.nth(1).evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(200);
+    const grip = await rows.nth(0).locator(".drag-handle").boundingBox();
+    const first = await rows.nth(0).boundingBox();
+    const second = await rows.nth(1).boundingBox();
+    expect(grip && first && second, "the property rows have no layout to drag across").toBeTruthy();
+    const writes = writesFrom(page);
+
+    // The first row's centre carried a quarter of a row past the second's, so the second is nearest.
+    const distance = second!.y + second!.height * 0.75 - (first!.y + first!.height / 2);
+    await carry(page, grip!, { x: grip!.x + grip!.width / 2, y: grip!.y + grip!.height / 2 + distance });
+    // Live, and over the second row: it has moved up to make room, which it does only mid-drag.
+    await expect.poll(() => rows.nth(1).evaluate((element) => (element as HTMLElement).style.transform),
+                      { message: "the property drag never reached the second row" }).toMatch(/translate3d\(0px, -/);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+
+    expect(writes, "a cancelled property drag sent a write to the server").toEqual([]);
+    await expect.poll(names, { message: "Escape did not cancel the property drag; the order changed on release" }).toEqual(before);
+  });
+});
+
 test.describe("a committed pipeline move can be taken back", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");

@@ -100,36 +100,42 @@ SURFACES: Dict[str, Dict[str, Any]] = {
     "pipeline-palette": {
         "file": "workspaces/PipelineBuilder.tsx", "mechanism": "dnd-kit",
         "moves": "a node type from the palette onto the pipeline canvas",
-        "cancel": {"gap": "the same sensor as the pipeline node, and not measured"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during a palette drag onto the pipeline "
+                           "canvas adds no node and writes nothing"},
         "recover": {"gap": "an added node can be deleted with `Delete node`; nothing undoes the add"},
         "alternative": {"test": "touch-authoring.spec.ts::a touch user can add the first node to a pipeline"},
     },
     "visual-library": {
         "file": "workspaces/VisualBuilder.tsx", "mechanism": "dnd-kit",
         "moves": "a node type from the library onto an artifact canvas",
-        "cancel": {"gap": "not measured"},
-        "recover": {"gap": "the census probe saw one Undo remove an added node; no test holds it"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during a library drag onto an artifact "
+                           "canvas adds no node and records nothing"},
+        "recover": {"test": "movement-contract.spec.ts::one Undo takes back a node dropped from the library"},
         "alternative": {"test": "drag-affordances.spec.ts::a library node reaches the canvas without a drag"},
     },
     "visual-field-order": {
         "file": "workspaces/VisualBuilder.tsx", "mechanism": "dnd-kit",
         "moves": "a configuration field up or down in the inspector",
-        "cancel": {"gap": "not measured"},
-        "recover": {"gap": "not measured"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during a field reorder keeps the order "
+                           "and records nothing"},
+        "recover": {"test": "movement-contract.spec.ts::one Undo takes back one field reorder"},
         "alternative": {"gap": "the grip is the only control; it sorts from the keyboard and there "
                                "is no Up or Down"},
     },
     "ontology-field-map": {
         "file": "workspaces/OntologyManager.tsx", "mechanism": "dnd-kit",
         "moves": "a source dataset field onto a property",
-        "cancel": {"gap": "not measured"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during a field-mapping drag maps nothing "
+                           "and writes nothing"},
         "recover": {"gap": "the mapping panel has no undo"},
-        "alternative": {"gap": "the `Map <property>` select exists and no browser test operates it"},
+        "alternative": {"test": "drag-affordances.spec.ts::a source field maps onto a property "
+                                "without a drag"},
     },
     "ontology-property-order": {
         "file": "workspaces/OntologyManager.tsx", "mechanism": "dnd-kit",
         "moves": "a property row up or down",
-        "cancel": {"gap": "not measured"},
+        "cancel": {"test": "movement-contract.spec.ts::Escape during a property-row drag keeps the order "
+                           "and writes nothing"},
         "recover": {"gap": "the property list has no undo"},
         "alternative": {"test": "drag-affordances.spec.ts::a property row reorders without a drag"},
     },
