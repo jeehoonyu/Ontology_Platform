@@ -2348,6 +2348,74 @@ plan, and it is measured there.
   `/imports/jobs`, `/reliability/summary` and `/ui-state/imports`, each a route an earlier change in this
   goal counted or listed more of; drift is reported and not gated.
 
+  **Then the Command Center's counts.** `_open_alerts`, `_open_approvals` and `_incidents` in
+  `asset_reliability_scenario.py` each load the 20 newest rows, and `_summarize` counted those lists: Open
+  alerts and Open approvals were their lengths, the approval card's open incidents were the unclosed among
+  the 20 most recently updated incidents, and the report card's incident count was `len(incidents)`. With
+  25 open alerts the screen read 20. The legacy shell's Command Center and the exported report print the
+  same counts.
+
+  **Every count is over every matching row, and the lists stay the 20 newest.** Each loader now returns its
+  list and how many rows match. A list shorter than 20 is every row, so its length is the count; one that
+  reaches 20 is counted in SQL on the query that loaded it, the way the platform graph counts a kind that
+  reached its limit, and open incidents keep the same `!= "CLOSED"` test in SQL. The incident total becomes
+  a KPI the report card reads. The section cards draw their metrics and never their rows, so the screen
+  draws one thing from the loaded lists: Governed Approval and Action shows the newest pending approval,
+  and when more are open it now reads "Showing the newest of N open approvals". The legacy shell and the
+  report's two count lines read the same KPIs and change with them. Bootstrap and triage read the alerts
+  through the same loader and still take its 20.
+
+  **Not fixed here.** Bootstrap and triage link the pump's incident to the 20 newest open alerts in the
+  database, of any project or subject, so Operations' incident queue counts only alerts that were among
+  the newest 20 at some run, and a first bootstrap fails with 422 when one of them belongs to another
+  project. The report's evidence ids list the 20 loaded approvals and incidents with nothing said, and the
+  legacy shell's recommendation card names the newest approval as the approval. Open incidents counts a
+  RESOLVED incident as open, where Operations counts OPEN, TRIAGE and INVESTIGATING. And the scenario's
+  three reads name no project, as the tenancy census already records.
+
+  **The proof.** A new `oms/test_command_center_counts.py` bootstraps the scenario beside one closed
+  incident and requires, below the 20 the scenario loads, that Open alerts, Open approvals, the approval
+  card's open incidents and the report card's incident count each equal what `/ops/alerts`, `/approvals`
+  and `/ops/incidents` list. It then adds 25 open alerts, 25 pending approvals and 24 incidents, 2 of them
+  closed, runs triage, and requires the same four counts past the window, 28, 26, 23 and 26, with each
+  list still the 20 newest; the summary the legacy shell reads and the exported report's two count lines
+  must agree. The script passes with 137 assertions. `test_asset_reliability_command_center.py`,
+  `test_maintenance_summary_cost.py`, with 1 count statement on the route under its 6,
+  `test_human_ui_readiness.py` and `test_ui_alignment_acceptance.py` pass.
+
+  In `truncation-sites.spec.ts`, the new test adds 21 open alerts, pending approvals and open incidents
+  through the API, reads the true counts from the routes that list every row, and requires Open alerts,
+  Open approvals, the approval card's two counts and the report card's incident count to read them, and
+  Governed Approval and Action to read "Showing the newest of N open approvals", not cut off. It reads the
+  industrial workflow as unset, because an earlier evaluator test configures one on this project and its
+  approval then takes the panel. It passes, with the three Command Center tests in `evaluator.spec.ts`. A second new test serves the scenario's own
+  reply with one open approval and requires the panel to show it with no note.
+
+  **Negative runs,** each on a rebuilt `dist` where the browser is involved:
+  - **B0, the committed server:** the backend script failed at the counts past the window, `open_alerts`
+    reading `(20, 28)`, after 123 assertions.
+  - **B1, open alerts counted from the loaded list:** it failed at the same check, `(20, 28)`.
+  - **B2, open approvals counted from the loaded list:** it failed at `open_approvals`, `(20, 26)`.
+  - **B3, the report card's count from the loaded list:** it failed at `incident_count`, `(20, 26)`.
+  - **B4, open incidents counted over the 20 loaded:** it failed at `open_incidents`, `(18, 23)`.
+  - **B5, the SQL count without its CLOSED test:** it failed at `open_incidents`, `(26, 23)`.
+  - **B6, closed incidents counted as open below the window:** it failed below the window, `(2, 1)`,
+    after 11 assertions.
+  - **N1, open alerts from the loaded list:** the browser test failed at Open alerts, `Expected: "21"`, `Received: "20"`.
+  - **N2, the note removed:** it failed at the panel's note, element not found.
+  - **N3, the committed server:** it failed at Open alerts, `Received: "20"`.
+  - **N4, the note shown for one approval:** the one-approval test failed, one note where it requires none.
+  - Restored: the five matching browser tests and three backend scripts pass, and both sources are byte
+    for byte what they were.
+
+  **The references.** The tenancy census holds at 360: each loader keeps its one read and counts on the
+  query it built. `TABLE_TRUNCATION.md` reads 12 unfixed, 5 of 12 truncations and 7 of 35 loaded windows,
+  and names the new test for `command-center-counts`; `test_table_truncation_audit.py` runs 232
+  assertions. `.table-truncated` gains no file and `INERT_CONTROLS.md` does not move. Below the window
+  `/ui-state/command-center` issues the same 74 statements; past it, 4 more (72 to 76), and triage 5 more
+  (296 to 301), with no shape repeated more often than before. The Command Center opens with 11
+  requests at 447 KB.
+
 ## Order and size
 
 | Step | Touches | Commits |

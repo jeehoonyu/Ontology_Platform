@@ -391,6 +391,7 @@ function CommandCenter() {
   const workflow = ui.value?.workflow || null;
   const summary: CommandCenterSummary = workflow?.summary || {};
   const kpis = summary.kpis || {};
+  const openApprovals = Number(kpis.open_approvals ?? 0);
   const highRisk = summary.high_risk_assets || [];
   const evaluatorSummary = ui.value?.evaluator_summary || {};
   const approval = activeApproval || industrialWorkflow?.summary.latest_approval || summary.approvals?.[0] || summary.latest_approval || null;
@@ -730,6 +731,7 @@ function CommandCenter() {
       <Panel title="Governed Approval and Action" action={<StatusBadge value={actionMatchesApproval ? "EXECUTED" : approval?.status || "NOT_STAGED"} />}>
         {approval ? (
           <div className="governed-action-panel">
+            {approval.id === summary.approvals?.[0]?.id && openApprovals > 1 ? <p className="table-truncated" role="note">Showing the newest of {openApprovals.toLocaleString()} open approvals</p> : null}
             <div className="governed-action-summary">
               <div><span>Action</span><strong>{approval.action_type_id}</strong></div>
               <div><span>Requested by</span><strong>{approval.requester}</strong></div>

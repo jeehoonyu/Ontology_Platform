@@ -1236,8 +1236,8 @@ WINDOWS: Dict[str, Dict[str, Any]] = {
         "claims": ["cap:asset_reliability_scenario._open_alerts::.limit(20)",
                    "cap:asset_reliability_scenario._open_approvals::.limit(20)",
                    "cap:asset_reliability_scenario._incidents::.limit(20)"],
-        "screen": "App.tsx",
-        "state": {"gap": "Open alerts, Open approvals and the section cards' incident counts count the 20 the scenario loads, so none reads past 20"}},
+        "screen": "App.tsx", "note": "of {openApprovals.toLocaleString()} open approvals",
+        "state": {"stated": "truncation-sites.spec.ts::the Command Center counts every open alert, approval and incident, and says its panel shows the newest approval"}},
     "imports-warnings": {
         "claims": ["cap:imports_ops.imports_ui_state::.limit(50)"],
         "screen": "App.tsx",

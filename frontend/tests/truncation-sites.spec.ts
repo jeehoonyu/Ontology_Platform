@@ -1034,6 +1034,91 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(page.locator(".platform-graph-kinds small").filter({ hasText: " of " })).toHaveCount(0);
   });
 
+  test("the Command Center counts every open alert, approval and incident, and says its panel shows the newest approval", async ({ page }) => {
+    test.setTimeout(120_000);
+    // Open alerts, Open approvals and the section cards' incident counts were the lengths of the 20
+    // newest rows the scenario loads, so none read past 20. Here 21 more open alerts, pending
+    // approvals and open incidents, so every count passes 20 whatever ran before.
+    const suffix = `${Date.now()}`;
+    const source = `cc_counts_${suffix}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    await settled(await page.request.post("/ops/alert-rules", { data: {
+      id: `${source}_rule`, display_name: `Command Center counts ${suffix}`, source, min_severity: "high"
+    } }), "alert rule");
+    await settled(await page.request.post("/action-types", { data: {
+      id: `${source}_escalate`, display_name: `Command Center counts ${suffix}`, parameters: {}, rules: { requires_approval: true }
+    } }), "action type");
+    for (let index = 0; index < 21; index += 1) {
+      await settled(await page.request.post("/ops/events/ingest", { data: {
+        source, event_type: "fixture.alert", severity: "high", title: `Counts alert ${index}`
+      } }), `alert ${index}`);
+      const staged = await settled(await page.request.post("/actions/execute", { data: {
+        action_type_id: `${source}_escalate`, parameters: {}, idempotency_key: `${source}_${index}`
+      } }), `approval ${index}`) as { status: string };
+      expect(staged.status, `approval ${index} was not staged`).toBe("REQUIRES_APPROVAL");
+      await settled(await page.request.post("/ops/incidents", { data: {
+        display_name: `Counts incident ${suffix} ${index}`, severity: "medium"
+      } }), `incident ${index}`);
+    }
+    // The routes that list every row, so the true counts are known whatever ran before.
+    const openAlerts = (await settled(await page.request.get("/ops/alerts?status=OPEN"), "open alerts") as unknown[]).length;
+    const openApprovals = (await settled(await page.request.get("/approvals?status=PENDING"), "pending approvals") as unknown[]).length;
+    const incidents = await settled(await page.request.get("/ops/incidents"), "incidents") as Array<{ status: string }>;
+    const openIncidents = incidents.filter((incident) => incident.status !== "CLOSED").length;
+    for (const [label, count] of [["alerts", openAlerts], ["approvals", openApprovals], ["incidents", openIncidents]] as const) {
+      expect(count, `the fixture did not reach past the 20 ${label} the scenario loads`).toBeGreaterThan(20);
+    }
+
+    // An earlier test may have run the industrial workflow on this project, and its latest approval
+    // then takes the panel. This test reads the scenario's own panel, so that workflow reads as unset.
+    await page.route((url) => url.pathname === "/api/v1/industrial/workflows/asset-reliability/workflow-state", (route) =>
+      route.fulfill({ json: { project_id: "default", status: "NOT_CONFIGURED", steps: [], evidence_links: [], summary: { object_count: 0 } } }));
+    const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/ui-state/command-center");
+    await page.goto("/workspace/command-center");
+    const state = await (await loaded).json() as { workflow: { summary: Record<string, unknown[]> } };
+
+    const metric = (label: string) => page.locator(".grid.metrics .metric-card")
+      .filter({ has: page.locator("span", { hasText: new RegExp(`^${label}$`) }) }).locator("strong");
+    await expect(metric("Open alerts"), "Open alerts counts only the 20 alerts the scenario loads").toHaveText(String(openAlerts));
+    await expect(metric("Open approvals"), "Open approvals counts only the 20 approvals the scenario loads").toHaveText(String(openApprovals));
+    const card = (title: string, key: string) => page.locator(".section-card").filter({ has: page.locator("strong", { hasText: title }) })
+      .locator(".kv-grid > div").filter({ has: page.locator("dt", { hasText: new RegExp(`^${key}$`) }) }).locator("dd");
+    await expect(card("Approval and action", "open approvals"), "the approval card counts only the 20 approvals loaded").toHaveText(String(openApprovals));
+    await expect(card("Approval and action", "open incidents"), "the approval card counts open incidents among the 20 loaded").toHaveText(String(openIncidents));
+    await expect(card("Incident and report", "incident count"), "the report card counts only the 20 incidents loaded").toHaveText(String(incidents.length));
+
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Governed Approval and Action", exact: true }) });
+    const approvalsText = await page.evaluate((count) => count.toLocaleString(), openApprovals);
+    await expect(panel.getByRole("note"), "the panel shows one of many open approvals and does not say so")
+      .toHaveText(`Showing the newest of ${approvalsText} open approvals`);
+    await expectUnclipped(panel.getByRole("note"), "the approvals note is cut off, hiding how many approvals are open");
+    for (const key of ["alerts", "approvals", "incidents"]) {
+      expect(state.workflow.summary[key], `the scenario no longer loads the 20 newest ${key}`).toHaveLength(20);
+    }
+  });
+
+  test("the Governed Approval panel says nothing about other approvals when only one is open", async ({ page }) => {
+    // The scenario's own reply, with its approvals set to one and its count to one, so the panel shows
+    // every open approval there is. The industrial workflow reads as unset, as in the test above.
+    await page.route((url) => url.pathname === "/api/v1/industrial/workflows/asset-reliability/workflow-state", (route) =>
+      route.fulfill({ json: { project_id: "default", status: "NOT_CONFIGURED", steps: [], evidence_links: [], summary: { object_count: 0 } } }));
+    await page.route((url) => url.pathname === "/ui-state/command-center", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as { workflow: { summary: { kpis?: Record<string, unknown>; approvals?: unknown[] } } };
+      body.workflow.summary.approvals = [{ id: "cc_counts_only", action_type_id: "cc_counts_only", requester: "fixture", parameters: {}, status: "PENDING", created_at: 1 }];
+      body.workflow.summary.kpis = { ...(body.workflow.summary.kpis || {}), open_approvals: 1 };
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto("/workspace/command-center");
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Governed Approval and Action", exact: true }) });
+    await expect(panel.getByText("cc_counts_only", { exact: true }), "the panel does not show the only open approval").toBeVisible();
+    await expect(panel.getByRole("note"), "one open approval is said to be one of many").toHaveCount(0);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The

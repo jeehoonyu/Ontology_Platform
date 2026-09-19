@@ -12,7 +12,7 @@ import time
 import uuid
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -823,27 +823,31 @@ def _risk_findings(db: Session) -> List[Dict[str, Any]]:
     return findings
 
 
-def _open_alerts(db: Session) -> List[Dict[str, Any]]:
+# Each loader keeps the 20 newest rows as its list and returns how many rows match. A list shorter
+# than 20 is every matching row, so its length is the count; one that reaches 20 is counted in SQL on
+# the query that loaded it, the way `platform_core._graph_overview` counts a kind that reached its limit.
+def _open_alerts(db: Session) -> Tuple[List[Dict[str, Any]], int]:
     ops_control._ensure_tables(db)
-    return [
-        ops_control._alert_dict(row)
-        for row in db.query(ops_control.AlertEvent).filter(ops_control.AlertEvent.status == "OPEN").order_by(ops_control.AlertEvent.created_at.desc()).limit(20).all()
-    ]
+    query = db.query(ops_control.AlertEvent).filter(ops_control.AlertEvent.status == "OPEN")
+    rows = query.order_by(ops_control.AlertEvent.created_at.desc()).limit(20).all()
+    return [ops_control._alert_dict(row) for row in rows], (len(rows) if len(rows) < 20 else query.count())
 
 
-def _open_approvals(db: Session) -> List[Dict[str, Any]]:
-    return [
-        _approval_dict(row)
-        for row in db.query(models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value).order_by(models_action.ApprovalRequest.created_at.desc()).limit(20).all()
-    ]
+def _open_approvals(db: Session) -> Tuple[List[Dict[str, Any]], int]:
+    query = db.query(models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value)
+    rows = query.order_by(models_action.ApprovalRequest.created_at.desc()).limit(20).all()
+    return [_approval_dict(row) for row in rows], (len(rows) if len(rows) < 20 else query.count())
 
 
-def _incidents(db: Session) -> List[Dict[str, Any]]:
+def _incidents(db: Session) -> Tuple[List[Dict[str, Any]], int, int]:
+    """The 20 most recently updated incidents, how many there are, and how many are not closed."""
     ops_control._ensure_tables(db)
-    return [
-        ops_control._incident_dict(row)
-        for row in db.query(ops_control.Incident).order_by(ops_control.Incident.updated_at.desc()).limit(20).all()
-    ]
+    query = db.query(ops_control.Incident)
+    rows = query.order_by(ops_control.Incident.updated_at.desc()).limit(20).all()
+    incidents = [ops_control._incident_dict(row) for row in rows]
+    if len(rows) < 20:
+        return incidents, len(rows), sum(1 for row in rows if row.status != "CLOSED")
+    return incidents, query.count(), query.filter(ops_control.Incident.status != "CLOSED").count()
 
 
 def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
@@ -856,8 +860,8 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
     ]
     data_contract_run = _latest_data_contract_run(db)
     monitor_run = _latest_monitor_run(db)
-    alerts = _open_alerts(db)
-    approvals = _open_approvals(db)
+    alerts, open_alert_count = _open_alerts(db)
+    approvals, open_approval_count = _open_approvals(db)
     latest_approval_row = db.query(models_action.ApprovalRequest).filter(
         models_action.ApprovalRequest.project_id == "default",
         models_action.ApprovalRequest.action_type_id == "escalate_work_order",
@@ -872,7 +876,7 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
         models_action.OutboxEvent.project_id == "default",
         models_action.OutboxEvent.action_type_id == "escalate_work_order",
     ).order_by(models_action.OutboxEvent.created_at.desc()).first()
-    incidents = _incidents(db)
+    incidents, incident_count, open_incident_count = _incidents(db)
     timeline = platform_core._build_timeline(
         db,
         subject_type=None,
@@ -895,9 +899,10 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
             "asset_count": maintenance["object_counts"]["asset"],
             "open_work_orders": len(maintenance.get("open_work_orders", [])),
             "high_risk_assets": len(high_risk_assets),
-            "open_alerts": len(alerts),
-            "open_approvals": len(approvals),
-            "open_incidents": sum(1 for item in incidents if item.get("status") != "CLOSED"),
+            "open_alerts": open_alert_count,
+            "open_approvals": open_approval_count,
+            "open_incidents": open_incident_count,
+            "incident_count": incident_count,
             "data_contract_status": (data_contract_run or {}).get("status", "NOT_RUN"),
             "model_monitor_status": (monitor_run or {}).get("status", "NOT_RUN"),
         },
@@ -1144,7 +1149,7 @@ def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID)
             "title": "Incident and report",
             "status": _step_status(workflow, "report"),
             "description": "Export the decision narrative with linked evidence IDs.",
-            "metrics": {"incident_count": len(incidents), "latest_report": report.get("id")},
+            "metrics": {"incident_count": kpis.get("incident_count", 0), "latest_report": report.get("id")},
             "rows": incidents[:6],
             "href": "/scenarios/asset-reliability/report?format=markdown",
         },
@@ -1462,7 +1467,7 @@ def bootstrap_asset_reliability(
     )
     db.commit()
     _ensure_investigation(db)
-    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db)])
+    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db)[0]])
     _add_investigation_evidence(db, title="Bootstrap reliability evidence", payload={"decision_event_id": decision_event.id, "data_contract_status": data_contract_run["status"], "monitor_status": monitor_run["status"]}, tags=["bootstrap", "risk"])
     report = investigations.create_report(INVESTIGATION_ID, investigations.ReportRequest(title="Asset Reliability Bootstrap Report"), db)
 
@@ -1474,7 +1479,7 @@ def bootstrap_asset_reliability(
         "risk_findings": decision_result.get("findings", []),
         "data_contract_run": data_contract_run,
         "model_monitor_run": monitor_run,
-        "alerts": _open_alerts(db),
+        "alerts": _open_alerts(db)[0],
         "incident": incident,
         "report": report,
         "summary": _summarize(db),
@@ -1582,7 +1587,7 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
         policy_decision=policy_decision,
     )
     approval = _stage_escalation_approval(db, actor=body.actor, work_order_id=body.work_order_id, reason=reason)
-    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db)], approval_ids=[approval["id"]])
+    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db)[0]], approval_ids=[approval["id"]])
     evidence = _add_investigation_evidence(
         db,
         title="Triage run evidence",
