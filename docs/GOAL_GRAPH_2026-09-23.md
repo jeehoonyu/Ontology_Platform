@@ -387,9 +387,84 @@ and the count is a button that lists them.
   - **N4, a search that selects nothing:** failed at `the search did not select the node it
     matched`.
   - Restored, the ten tests pass, and the two sources are byte for byte what they were.
-- **X5 — Nodes copy and paste, within and across pipelines, as one batch.** **Open** —
+- **X5 — Nodes copy and paste, within and across pipelines, as one batch.** **Met** —
   proven by `three copied nodes paste into a second pipeline with their edges`, counting
   the command batch and the nodes after.
+
+  **There was no batch to send.** The pipeline builder speaks REST: one request per node
+  added, inserted or deleted, and nothing that connects two nodes already there. The
+  artifact command API is the visual builder's. So the pipeline gets
+  `POST /pipeline-builder/graphs/{id}/commands`, a batch of four commands:
+  - `add_node`, which may name a `ref`, and a later edge in the same batch may use that
+    ref in place of the id the server has not yet given;
+  - `add_edge`;
+  - `delete_node`, which takes the node's edges with it;
+  - `delete_edge`.
+
+  The batch is checked command by command against a copy of the graph, and the copy is
+  written once, so it applies whole or not at all. It is scoped and permissioned like
+  every other edit to a graph and recorded as one audit event. The response is the canvas
+  and `created`, each ref with its new id, which is what lets a paste be taken back
+  exactly. `oms/test_pipeline_commands.py`, 42 assertions, holds:
+  - a paste with its edges;
+  - an edge between an existing node and a new one;
+  - five refused batches that change nothing;
+  - the undo of a paste;
+  - an edge taken back;
+  - another project's editor and a viewer refused.
+
+  The auth, tenancy, route, query-bound and object-write audits all hold. The route
+  requires `edit`, and the tenancy census is unchanged at 360.
+
+  **Copy, paste and delete.** Copy puts the selected nodes and the edges between them on the
+  system clipboard as JSON twice: under a private format, and as text. The payload names
+  its own kind, so a paste reads it rather than guessing at whatever text is on the
+  clipboard. The last copy is also kept in the tab, for when the clipboard cannot be read.
+  A clipboard that was read and holds something else has nothing to paste.
+
+  Paste sends one batch: the nodes 40 px down and right of where they were, then their
+  edges, by ref. The pasted nodes become the selection. It re-fetches nothing, because the
+  batch returns the canvas. One Undo takes the whole paste back in one request, and the
+  button says so, `Undo paste`, as it says `Undo move` after a move.
+
+  `Delete selected` and the `Delete` key take every selected node and its edges in one
+  request. Unlike `Delete node`, they do not join a deleted node's neighbours: with several
+  nodes going, which neighbours would join has no one answer. `Ctrl+C`, `Ctrl+V` and
+  `Delete` are rows in the hotkeys table, and the reference test observes them too:
+  - the clipboard, which its reset empties;
+  - the number of nodes added or removed since its reset.
+
+  Its first version read "the change so far" before an asynchronous paste had landed, got 0
+  for the button and 0 for the key, and called them the same.
+
+  **Proven by** `three copied nodes paste into a second pipeline with their edges`. It copies
+  three of four nodes, reads the system clipboard, and opens a second pipeline in a fresh page
+  load, so the paste must come from the clipboard and not from anything the page kept. It
+  then checks:
+  - that one command batch was the only edit;
+  - that the server holds three new nodes and exactly the two edges between them, each
+    node 40 px from its original;
+  - that the pasted nodes are what is selected;
+  - that one `Undo paste` in one request leaves the pipeline as it was.
+
+  `Delete removes every selected node in one request` is the second test. Its first version
+  counted the preview and suggestions POSTs for the node shown next, which are reads, so
+  edits are counted and those are not. `GRAPH_EDITOR_PARITY.md` reads 8 of 15, with
+  `copy-paste` and `remove-selected` met, and its baseline holds 6 gaps. The twelve
+  graph-editor tests pass, and so do 103 movement, multi-node, evaluator, drag, inert,
+  shell, concurrent-drag and touch tests.
+
+  **Negative runs,** each on a rebuilt `dist` or a restarted test:
+  - **N1, a paste sent as two batches, nodes then edges:** failed at `the paste was not one
+    command batch`.
+  - **N2, a copy that drops the edges between the nodes:** failed at `Copied 3 nodes and 2
+    edges.`, `Received: "Copied 3 nodes."`.
+  - **N3, a paste pushed to no history:** timed out looking for `Undo paste`.
+  - **N4, Delete taking only the node last clicked:** failed at `Deleted 2 nodes`, `Received:
+    "Deleted 1 node."`.
+  - **N5, the backend letting an unknown node through:** `test_pipeline_commands.py` failed at
+    `a batch naming a node that is not there: 200`, with an edge to `nobody` written.
+  - Restored, the tests pass, and the sources are byte for byte what they were.
 - **X6 — Hidden nodes are a view state that says how many it hides.** **Open** — `Ctrl+H`,
   `Ctrl+K`, `Show all`, the badge. Proven by a test that hides two, reads the badge, reloads,
   and finds nothing hidden on the server.

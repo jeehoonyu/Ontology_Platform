@@ -5,6 +5,7 @@ import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
 import { columnLayout, layersOf } from "../lib/graphLayout";
+import { CLIPBOARD_KIND, readNodes, writeNodes } from "../lib/nodeClipboard";
 import { bare, ctrl, useHotkeys, type Hotkey } from "../lib/hotkeys";
 import { postJson } from "../api";
 import {
@@ -27,6 +28,8 @@ import {
   insertPipelineNode,
   previewPipelineNode,
   savePipelineLayout,
+  applyPipelineCommands,
+  type PipelineCommand,
   suggestPipelineNode,
   updatePipelineNode
 } from "../api/workspaceState";
@@ -99,7 +102,9 @@ export function PipelineBuilder() {
   // GOAL_MOVEMENT_2026-09-12: a drop saved positions to the server and nothing
   // could take a move back. A move belongs to the graph it was made on, so a
   // different graph starts with nothing to undo.
-  const [moves, setMoves] = useState<Array<{ graphId: string; nodeId: string; positions: Record<string, { x: number; y: number }> }>>([]);
+  // X5 of GOAL_GRAPH_2026-09-23 widened it to what else one Undo can take back: a
+  // paste, whose nodes it removes in one request.
+  const [moves, setMoves] = useState<HistoryEntry[]>([]);
   useEffect(() => { setMoves([]); setSelection([]); }, [selectedGraphId]);
   useEffect(() => {
     if (!selection.length) return;
@@ -428,6 +433,12 @@ export function PipelineBuilder() {
     // hotkeys stand down (`dragging` below), and a test proves the zoom stays put.
     { keys: "Up Arrow", label: "Fit to view", button: "Fit to view", matches: bare("ArrowUp"),
       run: () => setZoom(ZOOM_FIT) },
+    // With text selected on the page, Ctrl+C copies the text, as it always did.
+    { keys: "Ctrl+C", label: "Copy", button: "Copy",
+      matches: (event) => ctrl("c")(event) && !window.getSelection()?.toString(), run: () => void copySelection() },
+    { keys: "Ctrl+V", label: "Paste", button: "Paste", matches: ctrl("v"), run: () => void pasteNodes() },
+    { keys: "Delete", label: "Delete selected", button: "Delete selected", matches: bare("Delete"),
+      run: () => void deleteSelected() },
   ];
   // Whether a drag is live on this screen: its keys are the drag's while it is.
   const dragging = useRef(false);
@@ -477,7 +488,7 @@ export function PipelineBuilder() {
       selected_node: current.selected_node ? { ...current.selected_node, position: placed(current.selected_node) } : current.selected_node
     });
     const previous = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
-    setMoves((current) => [...current, { graphId: selectedGraphId, nodeId: label, positions: previous }]);
+    setMoves((current) => [...current, { kind: "move", graphId: selectedGraphId, label, positions: previous }]);
     const positions = Object.fromEntries(canvas.nodes.map((node) => [node.id, placed(node)]));
     setActionStatus(`Saving ${label} position...`);
     void savePipelineLayout(selectedGraphId, positions)
@@ -515,21 +526,113 @@ export function PipelineBuilder() {
     commitPositions(Object.fromEntries(placed), label, `Laid out ${label}.`);
   }
 
-  /** One Undo, one committed move: the positions before it are saved back. */
-  async function undoMove() {
+  /**
+   * One Undo, one committed change. A move saves the positions before it back; a
+   * paste removes the nodes it added, and their edges, in one request.
+   */
+  async function undoLast() {
     const last = moves[moves.length - 1];
     if (!last || !canvas || last.graphId !== selectedGraphId) return;
     setMoves((current) => current.slice(0, -1));
-    // A node deleted since the move has no position to restore.
+    // A node deleted since has no position to restore and nothing to remove.
     const present = new Set(canvas.nodes.map((node) => node.id));
+    if (last.kind === "paste") {
+      const pasted = last.nodeIds.filter((id) => present.has(id));
+      setActionStatus(`Taking back the paste of ${last.label}...`);
+      try {
+        if (pasted.length) {
+          setCanvas(await applyPipelineCommands(last.graphId, pasted.map((id) => ({ op: "delete_node" as const, node_id: id }))));
+        }
+        setSelection((current) => current.filter((id) => !pasted.includes(id)));
+        setActionStatus(`Took back the paste of ${last.label}.`);
+      } catch (error) {
+        setActionStatus(`Could not take back the paste: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
     const positions = Object.fromEntries(Object.entries(last.positions).filter(([id]) => present.has(id)));
-    setActionStatus(`Moving ${last.nodeId} back...`);
+    setActionStatus(`Moving ${last.label} back...`);
     try {
       setCanvas(await savePipelineLayout(last.graphId, positions));
-      setActionStatus(`Moved ${last.nodeId} back.`);
+      setActionStatus(`Moved ${last.label} back.`);
       setRefreshKey((key) => key + 1);
     } catch (error) {
-      setActionStatus(`Could not move ${last.nodeId} back: ${error instanceof Error ? error.message : String(error)}`);
+      setActionStatus(`Could not move ${last.label} back: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const count = (n: number) => (n === 1 ? "1 node" : `${n} nodes`);
+
+  /**
+   * The selected nodes and the edges between them, to the clipboard. X5 of
+   * GOAL_GRAPH_2026-09-23. A text selection on the page is the browser's to copy.
+   */
+  async function copySelection() {
+    if (!canvas || !targets.length) return;
+    const chosen = new Set(targets);
+    const nodes = canvas.nodes.filter((node) => chosen.has(node.id)).map((node) => ({
+      id: node.id, type: node.type, label: node.label, config: node.config || {}, position: node.position,
+    }));
+    const edges = canvas.edges.filter((edge) => chosen.has(edge.source) && chosen.has(edge.target))
+      .map((edge) => ({ source: edge.source, target: edge.target }));
+    const where = await writeNodes({ kind: CLIPBOARD_KIND, version: 1, nodes, edges });
+    setActionStatus(`Copied ${count(nodes.length)}${edges.length ? ` and ${edges.length === 1 ? "1 edge" : `${edges.length} edges`}` : ""}.`
+      + (where === "tab" ? " The system clipboard refused it, so it pastes in this tab only." : ""));
+  }
+
+  /**
+   * What was copied, into this pipeline: one batch that adds the nodes and the edges
+   * between them, 40px down and right of where they were, with the pasted nodes
+   * selected. One Undo takes the whole paste back. The batch is the one request a
+   * paste sends; nothing is re-fetched after it, because the batch returns the canvas.
+   */
+  async function pasteNodes() {
+    if (!selectedGraphId || !canvas) return;
+    const read = await readNodes();
+    if (!read?.copied.nodes.length) {
+      setActionStatus("Nothing to paste: copy nodes first.");
+      return;
+    }
+    const { copied } = read;
+    const commands: PipelineCommand[] = [
+      ...copied.nodes.map((node) => ({
+        op: "add_node" as const, ref: node.id, node_type: node.type, label: node.label, config: node.config,
+        position: { x: node.position.x + 40, y: node.position.y + 40 },
+      })),
+      ...copied.edges.map((edge) => ({ op: "add_edge" as const, source: edge.source, target: edge.target })),
+    ];
+    const label = count(copied.nodes.length);
+    setActionStatus(`Pasting ${label}...`);
+    try {
+      const result = await applyPipelineCommands(selectedGraphId, commands);
+      setCanvas(result);
+      const pasted = Object.values(result.created);
+      setSelection(pasted);
+      setMoves((current) => [...current, { kind: "paste", graphId: selectedGraphId, label, nodeIds: pasted }]);
+      setActionStatus(`Pasted ${label}.` + (read.from === "tab" ? " Read from this tab's copy; the system clipboard could not be read." : ""));
+    } catch (error) {
+      setActionStatus(`Could not paste: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Every selected node, and its edges, in one request. Unlike `Delete node`, it does
+   * not join the neighbours of a deleted node: with more than one node going, which
+   * neighbours would join is not a question with one answer.
+   */
+  async function deleteSelected() {
+    if (!selectedGraphId || !targets.length) return;
+    const doomed = [...targets];
+    const label = count(doomed.length);
+    setActionStatus(`Deleting ${label}...`);
+    try {
+      const result = await applyPipelineCommands(selectedGraphId, doomed.map((id) => ({ op: "delete_node" as const, node_id: id })));
+      setCanvas(result);
+      setSelection([]);
+      if (doomed.includes(selectedNodeId)) setSelectedNodeId(result.selected_node?.id || "");
+      setActionStatus(`Deleted ${label}. Their edges went with them.`);
+    } catch (error) {
+      setActionStatus(`Could not delete: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -614,7 +717,10 @@ export function PipelineBuilder() {
                   graph, so that button re-sent what was stored -- and it sat beside the
                   panes' reset, one noun naming the artifact everyone shares and a
                   preference in this browser. V8 of GOAL_MOVEMENT_2026-09-12. */}
-              <button onClick={() => void undoMove()} disabled={!moves.length}>Undo move</button>
+              {/* Named for what it takes back: a move or a paste. X5 of GOAL_GRAPH. */}
+              <button onClick={() => void undoLast()} disabled={!moves.length}>
+                Undo {moves[moves.length - 1]?.kind ?? "move"}
+              </button>
               <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
               <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>
               <button onClick={() => run("preview")} disabled={!selectedGraphId || Boolean(busyAction)}>Preview</button>
@@ -666,6 +772,9 @@ export function PipelineBuilder() {
               <button type="button" onClick={() => selectAlongEdges("children")} disabled={!targets.length}>
                 Select children
               </button>
+              <button type="button" onClick={() => void copySelection()} disabled={!targets.length}>Copy</button>
+              <button type="button" onClick={() => void pasteNodes()} disabled={!canvas}>Paste</button>
+              <button type="button" onClick={() => void deleteSelected()} disabled={!targets.length}>Delete selected</button>
               <button type="button" onClick={autoLayout} disabled={!canvas?.nodes.length}>Auto layout</button>
               <button type="button" onClick={openSearch} disabled={!canvas?.nodes.length}>Search pipeline</button>
               <button type="button" ref={hotkeysButton} onClick={showHotkeys}>View hotkeys</button>
@@ -990,6 +1099,11 @@ interface ConfigFieldDefinition {
 }
 
 type NodeDraft = { label: string; values: Record<string, string> };
+
+/** What one Undo takes back: a committed move of any number of nodes, or a paste. */
+type HistoryEntry =
+  | { kind: "move"; graphId: string; label: string; positions: Record<string, { x: number; y: number }> }
+  | { kind: "paste"; graphId: string; label: string; nodeIds: string[] };
 
 function PipelineNodeConfig({ details, draft, onDraft, onSave }: {
   details: PipelineNodeDetails;

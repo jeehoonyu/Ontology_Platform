@@ -11,7 +11,8 @@ import math
 import time
 import uuid
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from types import SimpleNamespace
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -352,6 +353,28 @@ class PipelineInsertNodeRequest(BaseModel):
 class PipelineCreateNodeRequest(PipelineInsertNodeRequest):
     connect_from_node_id: Optional[str] = None
     actor: str = "pipeline_builder"
+
+
+class PipelineCommand(BaseModel):
+    """One edit in a batch. X5 of `GOAL_GRAPH_2026-09-23.md`.
+
+    `add_node` may name a `ref`; an edge later in the same batch can use the ref in
+    place of the id the server will give the node, which is what lets a paste carry
+    the edges between the nodes it adds.
+    """
+    op: Literal["add_node", "add_edge", "delete_node", "delete_edge"]
+    ref: Optional[str] = None
+    node_type: Optional[str] = None
+    label: Optional[str] = None
+    config: Dict[str, Any] = Field(default_factory=dict)
+    position: Optional[Dict[str, float]] = None
+    node_id: Optional[str] = None
+    source: Optional[str] = None
+    target: Optional[str] = None
+
+
+class PipelineCommandBatch(BaseModel):
+    commands: List[PipelineCommand] = Field(min_length=1, max_length=200)
 
 
 class PipelineLayoutRequest(BaseModel):
@@ -2059,6 +2082,79 @@ def delete_pipeline_node(graph_id: str, node_id: str, principal: Principal = Dep
     db.commit()
     db.refresh(graph)
     return _canvas_payload(db, graph)
+
+
+@router.post("/pipeline-builder/graphs/{graph_id}/commands")
+def apply_pipeline_commands(graph_id: str, body: PipelineCommandBatch, principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    """Several edits to one graph as one change: every command applies, or none does.
+
+    X5 of `GOAL_GRAPH_2026-09-23.md`. A paste adds nodes and the edges between them,
+    and sent one request per node it was a paste that could stop halfway, leave a
+    graph nobody made, and take as many undos as it had nodes. The batch is checked
+    command by command against a copy of the graph, and the copy is written once.
+
+    The response is the canvas and `created`: each `ref` the batch named, with the
+    node id it was given, so the client can take back exactly what it added.
+    """
+    graph = _graph_for(db, graph_id, principal, "edit")
+    nodes: List[Dict[str, Any]] = [copy.deepcopy(node) for node in graph.nodes or []]
+    edges: List[Dict[str, Any]] = [copy.deepcopy(edge) for edge in graph.edges or []]
+    # `_node_from_request` finds a free id by reading `.nodes`; this lets it read the
+    # batch's own copy, so two nodes added in one batch cannot take the same id.
+    working = SimpleNamespace(nodes=nodes)
+    created: Dict[str, str] = {}
+    counts: Dict[str, int] = {}
+
+    def resolve(name: Optional[str], index: int, role: str) -> str:
+        if not name:
+            raise HTTPException(status_code=422, detail=f"command {index}: {role} is required")
+        if name in created:
+            return created[name]
+        if any(_node_id(node, position) == name for position, node in enumerate(nodes)):
+            return name
+        raise HTTPException(status_code=422, detail=(
+            f"command {index}: '{name}' is neither a node on this graph nor one added earlier in this batch"))
+
+    for index, command in enumerate(body.commands):
+        counts[command.op] = counts.get(command.op, 0) + 1
+        if command.op == "add_node":
+            if command.ref and command.ref in created:
+                raise HTTPException(status_code=422, detail=f"command {index}: ref '{command.ref}' is used twice")
+            node = _node_from_request(working, PipelineInsertNodeRequest(
+                node_type=command.node_type or "", label=command.label, config=command.config,
+                position=command.position,
+            ), {"x": 180, "y": 180})
+            nodes.append(node)
+            if command.ref:
+                created[command.ref] = node["id"]
+        elif command.op == "add_edge":
+            source = resolve(command.source, index, "source")
+            target = resolve(command.target, index, "target")
+            if source == target:
+                raise HTTPException(status_code=422, detail=f"command {index}: a node cannot feed itself")
+            if not _edge_exists(edges, source, target):
+                edges.append({"source": source, "target": target, "source_port": "output", "target_port": "input"})
+        elif command.op == "delete_node":
+            node_id = resolve(command.node_id, index, "node_id")
+            nodes[:] = [node for position, node in enumerate(nodes) if _node_id(node, position) != node_id]
+            edges[:] = [edge for edge in edges if _edge_source(edge) != node_id and _edge_target(edge) != node_id]
+        else:
+            source = resolve(command.source, index, "source")
+            target = resolve(command.target, index, "target")
+            if not _edge_exists(edges, source, target):
+                raise HTTPException(status_code=422, detail=f"command {index}: there is no edge {source} -> {target}")
+            edges[:] = [edge for edge in edges if not (_edge_source(edge) == source and _edge_target(edge) == target)]
+
+    graph.nodes = nodes
+    graph.edges = edges
+    graph.updated_at = _now()
+    _audit_graph(db, principal.id, "pipeline_builder.graph.commands", graph, {
+        "commands": counts,
+        "created": created,
+    })
+    db.commit()
+    db.refresh(graph)
+    return {**_canvas_payload(db, graph), "created": created}
 
 
 @router.post("/pipeline-builder/graphs/{graph_id}/nodes/{node_id}/preview")

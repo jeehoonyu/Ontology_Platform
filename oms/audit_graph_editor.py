@@ -86,9 +86,9 @@ CONTROLS: Dict[str, Control] = {
     },
     "remove-selected": {
         "original": "Remove the selected nodes",
-        "ours": "Delete node, one node at a time",
-        "file": BUILDER, "handler": "removeNode",
-        "state": {"gap": "deletes one node, not a selection"},
+        "ours": "Delete selected and the Delete key: every selected node and its edges, in one request",
+        "file": BUILDER, "handler": "deleteSelected",
+        "state": {"test": "graph-editor.spec.ts::Delete removes every selected node in one request"},
     },
     "layout": {
         "original": "Layout: evenly disperse and organise the graph; grid snapping",
@@ -105,9 +105,10 @@ CONTROLS: Dict[str, Control] = {
     },
     "copy-paste": {
         "original": "Ctrl+C / Ctrl+V copy and paste nodes, across pipelines",
-        "ours": "nothing",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "no copy and no paste"},
+        "ours": "Copy and Paste, Ctrl+C and Ctrl+V: nodes and their edges, one batch, across pipelines",
+        "file": BUILDER, "handler": "pasteNodes",
+        "state": {"test": "graph-editor.spec.ts::three copied nodes paste into a second pipeline with "
+                          "their edges"},
     },
     "hide": {
         "original": "Ctrl+H hides the selection, Ctrl+K shows every hidden node",
@@ -143,9 +144,9 @@ CONTROLS: Dict[str, Control] = {
     },
     "undo-redo": {
         "original": "Undo and Redo in the top toolbar",
-        "ours": "Undo move, one step, moves only",
-        "file": BUILDER, "handler": "undoMove",
-        "state": {"gap": "no redo, and adds and deletes are not undone"},
+        "ours": "Undo, one step: a move of any number of nodes, a layout or a paste",
+        "file": BUILDER, "handler": "undoLast",
+        "state": {"gap": "no redo, and a single add or a delete is not undone"},
     },
     "save-state": {
         "original": "Explicit Save, a filled Saved state, View changes for unsaved work",

@@ -33,8 +33,9 @@ async function openFixture(page: Page, nodes: FixtureNode[] = FOUR,
                            edges: Array<[string, string]> = [["a", "c"], ["b", "d"]]) {
   const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const name = `Graph fixture ${suffix}`;
+  const id = `graph_fixture_${suffix}`;
   const created = await page.request.post("/pipeline-builder/graphs", { data: {
-    id: `graph_fixture_${suffix}`,
+    id,
     display_name: name,
     nodes: nodes.map((node) => ({ id: node.id, type: "filter", config: {}, position: { x: node.x, y: node.y } })),
     edges: edges.map(([source, target]) => ({ source, target })),
@@ -57,7 +58,26 @@ async function openFixture(page: Page, nodes: FixtureNode[] = FOUR,
     element.scrollTop = 0;
     element.scrollIntoView({ block: "start" });
   });
-  return { name, canvas };
+  return { id, name, canvas };
+}
+
+/** The status strip's message. */
+function status(page: Page) {
+  return page.locator(".workbench-status-strip > span:not(.badge)");
+}
+
+/**
+ * The requests that edit a graph. A node's preview and suggestions are reads the
+ * canvas sends as POST whenever the node it details changes; they are not edits.
+ */
+function edits(page: Page) {
+  const sent: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" || /\/(preview|suggestions)$/.test(path)) return;
+    sent.push(`${request.method()} ${path}`);
+  });
+  return sent;
 }
 
 /** The ids every tool would act on, read from the nodes. */
@@ -296,18 +316,24 @@ test.describe("one command lays out the pipeline", () => {
  * by name, so a row taken out of the table fails here because the reference -- drawn
  * from the same table -- no longer lists it.
  */
-const EXPECTED_KEYS = ["Ctrl+A", "Ctrl+E", "Ctrl+D", "Ctrl+F", "Up Arrow"];
+const EXPECTED_KEYS = ["Ctrl+A", "Ctrl+E", "Ctrl+D", "Ctrl+F", "Up Arrow", "Ctrl+C", "Ctrl+V", "Delete"];
 
 const PRESS: Record<string, string> = {
   "Ctrl+A": "Control+a", "Ctrl+E": "Control+e", "Ctrl+D": "Control+d", "Ctrl+F": "Control+f",
-  "Up Arrow": "ArrowUp",
+  "Up Arrow": "ArrowUp", "Ctrl+C": "Control+c", "Ctrl+V": "Control+v", "Delete": "Delete",
 };
 
 const zoomOf = (page: Page) => page.locator(".canvas-stage").evaluate((stage) =>
   Number(/scale\(([\d.]+)\)/.exec((stage as HTMLElement).style.transform)?.[1] || 0));
 
-/** How to put the canvas in a known state for a row, and what to read after it. */
-const OUTCOMES: Record<string, { reset: (page: Page) => Promise<void>; read: (page: Page) => Promise<unknown> }> = {
+const nodeCount = (page: Page) => page.locator(".pipeline-canvas .pipeline-node").count();
+
+/**
+ * How to put the canvas in a known state for a row, and what to read after it. What
+ * `reset` returns is handed to `read`, so a row that changes the graph is read as the
+ * change since its reset, and a result left over from the run before cannot pass.
+ */
+const OUTCOMES: Record<string, { reset: (page: Page) => Promise<unknown>; read: (page: Page, before: unknown) => Promise<unknown> }> = {
   "Select all": { reset: (page) => node(page, "a").click(), read: selected },
   "Select parents": { reset: (page) => node(page, "c").click(), read: selected },
   "Select children": { reset: (page) => node(page, "a").click(), read: selected },
@@ -327,9 +353,45 @@ const OUTCOMES: Record<string, { reset: (page: Page) => Promise<void>; read: (pa
     },
     read: zoomOf,
   },
+  // Copy is read off the clipboard, which the reset empties; paste and delete as the
+  // number of nodes they added or took away since their reset. Delete is set up by a
+  // paste, which leaves the one node it added selected.
+  "Copy": {
+    reset: async (page) => {
+      await page.evaluate(() => navigator.clipboard.writeText(""));
+      await node(page, "a").click();
+    },
+    // Each read waits for its change to happen: a read taken before an asynchronous
+    // copy or paste has landed would compare two nothings and pass.
+    read: async (page) => {
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).not.toBe("");
+      const text = await page.evaluate(() => navigator.clipboard.readText());
+      return JSON.parse(text).nodes.map((item: { id: string }) => item.id);
+    },
+  },
+  "Paste": {
+    reset: async (page) => nodeCount(page),
+    read: async (page, before) => {
+      await expect.poll(() => nodeCount(page)).toBeGreaterThan(before as number);
+      return (await nodeCount(page)) - (before as number);
+    },
+  },
+  "Delete selected": {
+    reset: async (page) => {
+      const before = await nodeCount(page);
+      await page.getByRole("button", { name: "Paste", exact: true }).click();
+      await expect.poll(() => nodeCount(page)).toBe(before + 1);
+      return before + 1;
+    },
+    read: async (page, before) => {
+      await expect.poll(() => nodeCount(page)).toBeLessThan(before as number);
+      return (before as number) - (await nodeCount(page));
+    },
+  },
 };
 
 test.describe("every hotkey has a button, and the reference is the wiring", () => {
+  test.use({ permissions: ["clipboard-read", "clipboard-write"] });
   test.beforeEach(async ({}, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
   });
@@ -355,13 +417,13 @@ test.describe("every hotkey has a button, and the reference is the wiring", () =
       await expect(page.getByRole("button", { name: button, exact: true }),
                    `${keysText} names a button, "${button}", that is not on the page`).toHaveCount(1);
 
-      await outcome.reset(page);
+      const beforeButton = await outcome.reset(page);
       await page.getByRole("button", { name: button, exact: true }).click();
-      const byButton = await outcome.read(page);
+      const byButton = await outcome.read(page, beforeButton);
 
-      await outcome.reset(page);
+      const beforeKey = await outcome.reset(page);
       await page.keyboard.press(PRESS[keysText] || keysText);
-      await expect.poll(() => outcome.read(page), { message: `${keysText} did not do what ${button} does` })
+      await expect.poll(() => outcome.read(page, beforeKey), { message: `${keysText} did not do what ${button} does` })
         .toEqual(byButton);
     }
   });
@@ -410,5 +472,87 @@ test.describe("a hotkey never takes a key a drag is using", () => {
     await page.keyboard.press("Space");
     await expect.poll(topOf, { message: "the keyboard drag did not move the node up" }).toBeLessThan(before);
     expect(await zoomOf(page), "Up Arrow refitted the canvas after the drag").toBe(zoomBefore);
+  });
+});
+
+/**
+ * Nodes copy and paste, within and across pipelines, as one batch. X5 of
+ * `GOAL_GRAPH_2026-09-23.md`. The clipboard is the system's, read back here to show
+ * what a copy put on it; what a paste made is read from the server, not the screen.
+ */
+test.describe("nodes copy and paste as one batch", () => {
+  test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("three copied nodes paste into a second pipeline with their edges", async ({ page }) => {
+    const chain: FixtureNode[] = [
+      { id: "a", x: 40, y: 60 }, { id: "b", x: 300, y: 60 }, { id: "c", x: 40, y: 250 }, { id: "d", x: 300, y: 250 },
+    ];
+    await openFixture(page, chain, [["a", "b"], ["b", "c"]]);
+    await node(page, "a").click();
+    await node(page, "b").click({ modifiers: ["Shift"] });
+    await node(page, "c").click({ modifiers: ["Shift"] });
+    await expect.poll(() => selected(page)).toEqual(["a", "b", "c"]);
+    await page.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect(status(page)).toHaveText("Copied 3 nodes and 2 edges.");
+    const onClipboard = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+    expect(onClipboard.kind, "the clipboard does not hold pipeline nodes").toBe("ontology-platform/pipeline-nodes");
+    expect(onClipboard.nodes.map((item: { id: string }) => item.id).sort()).toEqual(["a", "b", "c"]);
+    expect(onClipboard.edges, "the copy dropped the edges between the nodes").toHaveLength(2);
+
+    // A second pipeline, opened in a fresh page load: the copy has to come back from
+    // the system clipboard, not from anything this page kept.
+    const second = await openFixture(page, [{ id: "only", x: 40, y: 400 }], []);
+    const sent = edits(page);
+    // Opening the pipeline left the focus on its row in the Outputs pane, and a key
+    // pressed there is the pane's. A click on bare canvas gives the keys to the canvas.
+    const box = await page.locator(".canvas-stage").boundingBox();
+    await page.mouse.click(box!.x + 20, box!.y + 20);
+    await page.keyboard.press("Control+v");
+    await expect(status(page)).toHaveText("Pasted 3 nodes.");
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(4);
+    expect(sent, "the paste was not one command batch").toEqual([`POST /pipeline-builder/graphs/${second.id}/commands`]);
+
+    const stored = await (await page.request.get(`/pipeline-builder/graphs/${second.id}`)).json();
+    const pasted = stored.nodes.filter((item: { id: string }) => item.id !== "only");
+    expect(pasted, "three nodes did not land in the second pipeline").toHaveLength(3);
+    // Every fixture node is a Filter with the same label, so a pasted node is told
+    // from the others by where it landed: 40px down and right of its original.
+    const at = (x: number, y: number) => pasted.find((item: { position: { x: number; y: number } }) =>
+      item.position.x === x + 40 && item.position.y === y + 40) as { id: string } | undefined;
+    const original = Object.fromEntries(chain.map((item) => [item.id, item]));
+    const idOf = (id: string) => {
+      const found = at(original[id].x, original[id].y);
+      expect(found, `no pasted node sits 40px down and right of ${id}`).toBeTruthy();
+      return found!.id;
+    };
+    expect(stored.edges.map((edge: { source: string; target: string }) => [edge.source, edge.target]).sort(),
+           "the edges between the pasted nodes did not come with them")
+      .toEqual([[idOf("a"), idOf("b")], [idOf("b"), idOf("c")]].sort());
+    await expect.poll(() => selected(page), { message: "the pasted nodes are not what is selected" })
+      .toEqual([idOf("a"), idOf("b"), idOf("c")].sort());
+
+    await page.getByRole("button", { name: "Undo paste" }).click();
+    await expect(status(page)).toHaveText("Took back the paste of 3 nodes.");
+    await expect(page.locator(".pipeline-canvas .pipeline-node"), "one Undo did not take the paste back")
+      .toHaveCount(1);
+    expect(sent, "taking the paste back was not one request").toHaveLength(2);
+  });
+
+  test("Delete removes every selected node in one request", async ({ page }) => {
+    const { id } = await openFixture(page);
+    await node(page, "a").click();
+    await node(page, "b").click({ modifiers: ["Shift"] });
+    await expect.poll(() => selected(page)).toEqual(["a", "b"]);
+    const sent = edits(page);
+    await page.keyboard.press("Delete");
+    await expect(status(page)).toHaveText("Deleted 2 nodes. Their edges went with them.");
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(2);
+    expect(sent, "deleting two nodes was not one request").toEqual([`POST /pipeline-builder/graphs/${id}/commands`]);
+    const stored = await (await page.request.get(`/pipeline-builder/graphs/${id}`)).json();
+    expect(stored.nodes.map((item: { id: string }) => item.id).sort()).toEqual(["c", "d"]);
+    expect(stored.edges, "an edge still names a deleted node").toEqual([]);
   });
 });

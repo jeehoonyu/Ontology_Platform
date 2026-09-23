@@ -88,6 +88,21 @@ export function deletePipelineNode(graphId: string, nodeId: string): Promise<Pip
   );
 }
 
+/** One edit in a batch. `add_node` may name a `ref` that a later edge uses. X5 of GOAL_GRAPH. */
+export type PipelineCommand =
+  | { op: "add_node"; ref?: string; node_type: string; label?: string; config?: Record<string, unknown>;
+      position?: { x: number; y: number } }
+  | { op: "add_edge"; source: string; target: string }
+  | { op: "delete_node"; node_id: string }
+  | { op: "delete_edge"; source: string; target: string };
+
+export type PipelineCommandResult = PipelineCanvasState & { created: Record<string, string> };
+
+/** Several edits to one pipeline as one request, applied whole or not at all. */
+export function applyPipelineCommands(graphId: string, commands: PipelineCommand[]): Promise<PipelineCommandResult> {
+  return postJson<PipelineCommandResult>(`/pipeline-builder/graphs/${encodeURIComponent(graphId)}/commands`, { commands });
+}
+
 export function savePipelineLayout(graphId: string, positions: Record<string, { x: number; y: number }>): Promise<PipelineCanvasState> {
   return api<PipelineCanvasState>(`/pipeline-builder/graphs/${encodeURIComponent(graphId)}/layout`, {
     method: "PATCH",
