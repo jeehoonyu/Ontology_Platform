@@ -12,49 +12,49 @@
     "verdict": "PASS"
   },
   "audit_check_coverage": {
-    "at": 1790198869,
+    "at": 1790199083,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_dependency_provenance": {
-    "at": 1790198869,
+    "at": 1790199084,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_drag_affordances": {
-    "at": 1790198877,
+    "at": 1790199092,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_evidence_corpus": {
-    "at": 1790198869,
+    "at": 1790199083,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_extensibility": {
-    "at": 1790198869,
+    "at": 1790199084,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_frontier": {
-    "at": 1790198883,
+    "at": 1790199094,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_inert_controls": {
-    "at": 1790198878,
+    "at": 1790199092,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_iteration_state": {
-    "at": 1790198887,
+    "at": 1790199083,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -66,25 +66,25 @@
     "verdict": "PASS"
   },
   "audit_movement_contract": {
-    "at": 1790198879,
+    "at": 1790199093,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_object_writes": {
-    "at": 1788434868,
+    "at": 1790199052,
     "environment": "local",
-    "migration_head": "0043_drop_orphaned_value_types",
+    "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_pane_layout": {
-    "at": 1790198877,
+    "at": 1790199092,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1790198871,
+    "at": 1790199085,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -102,31 +102,31 @@
     "verdict": "PASS"
   },
   "audit_route_cost": {
-    "at": 1790198877,
+    "at": 1790199091,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_route_coverage": {
-    "at": 1790198874,
+    "at": 1790199089,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_route_payload": {
-    "at": 1790198877,
+    "at": 1790199091,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_snapshot_scope": {
-    "at": 1790198877,
+    "at": 1790199091,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_style_scope": {
-    "at": 1790198877,
+    "at": 1790199091,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -138,7 +138,7 @@
     "verdict": "PASS"
   },
   "audit_table_truncation": {
-    "at": 1790198879,
+    "at": 1790199093,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -162,13 +162,13 @@
     "verdict": "PASS"
   },
   "audit_ui_primitives": {
-    "at": 1790198877,
+    "at": 1790199091,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_ui_states": {
-    "at": 1790198877,
+    "at": 1790199091,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -180,25 +180,25 @@
     "verdict": "PASS"
   },
   "validate_docs_conformance": {
-    "at": 1790198879,
+    "at": 1790199093,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1790198880,
+    "at": 1790199094,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "FAIL"
   },
   "validate_schema_freeze": {
-    "at": 1790198879,
+    "at": 1790199094,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1790198879,
+    "at": 1790199094,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "FAIL"

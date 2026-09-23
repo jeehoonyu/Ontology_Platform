@@ -68,23 +68,8 @@ check(audit.coupling_matches('open({ objectTypeId: "work_order" })') == ["work_o
 check(audit.coupling_matches('typeof x; objectType === "pump_station"') == ["pump_station"],
       "a typeof elsewhere on the line does not hide a real coupling")
 
-# --set-baseline must keep the provenance block audit_iteration_state dates
-# baselines by; without it the rewritten file counts as undated.
-import tempfile  # noqa: E402
-
-with tempfile.TemporaryDirectory() as scratch:
-    kept_baseline, kept_argv = audit.BASELINE, sys.argv
-    audit.BASELINE = Path(scratch) / "extensibility-baseline.json"
-    sys.argv = ["audit_extensibility.py", "--set-baseline"]
-    try:
-        audit.main()
-        written = json.loads(audit.BASELINE.read_text(encoding="utf-8"))
-    finally:
-        audit.BASELINE, sys.argv = kept_baseline, kept_argv
-check(written.get("provenance", {}).get("recorded_at"),
-      "--set-baseline records when it was taken", written)
-check(written.get("provenance", {}).get("stale_after"),
-      "--set-baseline records how long it stays true", written)
+# The writer leaves `provenance` to enforcement_runs.recording(), which dates
+# every baseline a command-line run rewrites; the committed file must carry it.
 check(baseline.get("provenance", {}).get("recorded_at"),
       "the committed baseline is dated", baseline)
 

@@ -141,9 +141,17 @@ The path is now built with `as_posix()`, and `oms/test_ratchet_motion.py` assert
 baseline committed many times reads back as many versions. With the history read, the census
 agrees with the table above: one ceiling unmoved, `raw_empty_ceiling`.
 
-`--set-baseline` in `audit_extensibility.py` also wrote the file without its `provenance`
-block, which would have left the next person to lower it with an undated baseline. It keeps
-the block now, and the test says so.
+A correction to the commit that recorded this. It said `--set-baseline` in
+`audit_extensibility.py` wrote an undated file, and gave the writer its own `provenance`
+block. It did not: every audit's command line runs through `enforcement_runs.recording()`,
+which dates any baseline the run rewrote and carries its declared life across, and that is
+the one place the lesson is kept. Only a direct call to `main()` skips it, and the test that
+"proved" the fix made exactly that call. The writer is back to leaving `provenance` alone.
+
+The seven other baselines past thirty days — evidence corpus, check coverage, UI states,
+enforcement, iteration state, dependency provenance, object writes — were re-measured the
+same day through their command lines. Every ceiling held at its reading. One floor had
+slack: `ever_run_floor` stood at 17 while 33 checks had run, and is now 33.
 
 ## Non-completion rule
 

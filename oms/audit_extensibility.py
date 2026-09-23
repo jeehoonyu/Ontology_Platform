@@ -27,7 +27,6 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -248,12 +247,6 @@ def main() -> int:
 
     if args.set_baseline:
         BASELINE.write_text(json.dumps({
-            # audit_iteration_state reads a baseline's age and shelf life from
-            # this block; a baseline written without it counts as undated.
-            "provenance": {
-                "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "stale_after": "recomputed each run",
-            },
             "renderable_base_types_floor": reading["renderable_base_types"],
             "ontology_type_coupling_ceiling": reading["ontology_type_coupling"],
             "surfaces_missing_specs_ceiling": reading["surfaces_missing_specs"],

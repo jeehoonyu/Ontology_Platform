@@ -155,7 +155,9 @@ goal does not jump it.
 
 Done 2026-09-23, before S1. The re-measurement closed K5 of
 [`GOAL_CONTINUOUS.md`](GOAL_CONTINUOUS.md) — its one coupling was a `typeof` guard — and found
-that `audit_ratchet_motion` had read no history on Windows. Both are recorded there.
+that `audit_ratchet_motion` had read no history on Windows. Both are recorded there. The seven
+other baselines past thirty days were re-measured next; every ceiling held, one floor rose
+from 17 to 33, and the loop's next step is an open condition again.
 
 ## What this is not
 
