@@ -109,12 +109,51 @@ it reads the validation status, as it does now.
 
 ## Conditions
 
-- **S1 — Measure the widths in between, and make the measurement a gate.** **Open** —
+- **S1 — Measure the widths in between, and make the measurement a gate.** **Met** —
   `shell-widths.spec.ts`, the width list above, the three assertions, on every screen with
   panes. Its first run is expected to fail at 1000, 1024, 1100 on assertion 1, at 1280 and
   above on the pipeline builder on assertion 2, and at 220 px panes on assertion 3. Those
   failures are the record; the test is committed red before any fix, so each fix has a test
   that was seen to fail.
+
+  **What was built.** `SHELL_WIDTHS` is 320, 375, 640, 700, 760, 768, 900, 901, 1000, 1024,
+  1100, 1101, 1200, 1280, 1366, 1500, 1600 and 1920: the twelve widths above, the four the
+  projects already visit, and the two ends of the walk. 1024 and 1366 are measured at 768
+  high and the rest at 700. The three screens with panes are the pipeline builder, the
+  ontology manager and Workshop, which stands for the four artifact screens that share its
+  layout. Each width is reloaded from `Reset panes` and judged with soft assertions, so one
+  run reports every width that fails. Assertion 1 is read as "the workspace begins in the top half of the
+  first viewport", because a first screen that is mostly sidebar is the same defect as one
+  that is all of it. Assertion 2 compares the panes in the row, since a bottom pane spans the
+  screen by design, and holds the pane host to the workspace's content width within 24 px.
+
+  The check registry named no browser spec, so it gained `BROWSER_GATES`.
+  `audit_check_coverage` now fails if a named spec is deleted, or if its `SHELL_WIDTHS`
+  stops parsing as one ascending list, and `oms/test_check_homes.py` holds both. The browser
+  suite is run by hand, and the declaration says so.
+
+  **The first run, before any fix.** It came back redder than predicted:
+
+  | Screen | Assertion | Fails at |
+  | --- | --- | --- |
+  | Pipeline builder | 1, workspace in the first screen | 901, 1000, 1024, 1100: the workspace begins at 700 of 700, and at 768 of 768 |
+  | Pipeline builder | 2, canvas the widest | 901 (132 px), 1101 (64), 1200 (139), 1280 (200), against the 220 px library |
+  | Pipeline builder | 2, host fills the workspace | every width from 901 to 1920: 618 of 869 at 901, 686 of 950 at 1280, 1303 of 1590 at 1920 |
+  | Pipeline builder | 3, no clipped title | 320 (`Add data / transforms`, 108 of 125 px), then every width from 760: the same title 51 of 125 and `Outputs` 40 of 46; at 1101 also `Pipeline`, 4 of 45 |
+  | Ontology manager | 1 | 901, 1000, 1024, 1100 |
+  | Ontology manager | 2 and 3 | nowhere |
+  | Workshop | 1 | 901, 1000, 1024, 1100 |
+  | Workshop | 2, canvas the widest | 320 (304 px against a 310 px inspector), 760 (150), 768 (158), 900 (290), 901 (291), 1101 (205), 1200 (304) |
+  | Workshop | 3 | every width: `Node library`, 60 of 71 px |
+
+  Four findings the goal did not predict. The band begins at 901, not 1000: the rule that
+  stacks the sidebar and the rule that makes it full height overlap from 901 to 1100. The
+  pipeline's empty track fails from 901, because the `min-width: 901px` block, which comes
+  later in the stylesheet, re-splits the builder there. Workshop's canvas loses to its
+  inspector below 1280. And Workshop's side panes keep 238 and 310 px even when the panes
+  stack, including at 320: M7's declared widths are written as inline styles, which the
+  stacking rule cannot override. So `Node library` is clipped at every width, and at 320 the
+  inspector is wider than the canvas above it.
 - **S2 — No width gives the sidebar a screen to itself.** **Open** — the `min-width: 901px`
   block moves to 1101. Proven by S1 at 1000, 1024 and 1100, and shown to fail again with the
   block moved back.

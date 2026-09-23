@@ -106,6 +106,54 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "rehearse_sftp_connector": {"gates": "the durable connector path against real SFTP", "cadence": "manual: needs sftp"},
 }
 
+BROWSER_SPECS = REPO_ROOT / "frontend" / "tests"
+
+# Browser specs that are gates in their own right, not only tests. The suite runs
+# every spec; these are named because a measurement lives in them, and a gate that
+# is renamed or deleted has to fail somewhere rather than quietly stop existing.
+# The browser suite is run by hand, which is what `audit_browser_evidence` records.
+BROWSER_GATES: Dict[str, Dict[str, str]] = {
+    "shell-widths.spec.ts": {
+        "gates": "every screen with panes starts its workspace in the first viewport, keeps its "
+                 "canvas the widest pane, and clips no pane title, at every width in SHELL_WIDTHS",
+        "cadence": "manual: needs node and a Chrome channel",
+        # S1 of GOAL_SHELL_2026-09-23: the width list is the gate, so it must parse.
+        "widths": "SHELL_WIDTHS",
+    },
+}
+
+_WIDTH_LIST = re.compile(r"export const (?P<name>[A-Z_]+)\s*=\s*\[(?P<body>[^\]]*)\]")
+
+
+def declared_widths(spec: str, list_name: str) -> List[int]:
+    """The width list a browser gate declares, read from the spec's own source."""
+    path = BROWSER_SPECS / spec
+    if not path.exists():
+        return []
+    for match in _WIDTH_LIST.finditer(path.read_text(encoding="utf-8", errors="replace")):
+        if match.group("name") == list_name:
+            return [int(value) for value in re.findall(r"\d+", match.group("body"))]
+    return []
+
+
+def browser_gate_problems(gates: Dict[str, Dict[str, str]] | None = None) -> List[str]:
+    """Browser gates the registry names that the tree no longer holds."""
+    problems = []
+    for spec, declared in (BROWSER_GATES if gates is None else gates).items():
+        if not (BROWSER_SPECS / spec).exists():
+            problems.append(f"{spec} is declared a browser gate and does not exist")
+            continue
+        list_name = declared.get("widths")
+        if not list_name:
+            continue
+        widths = declared_widths(spec, list_name)
+        if not widths:
+            problems.append(f"{spec} declares no {list_name} list the registry can read")
+        elif widths != sorted(set(widths)):
+            problems.append(f"{spec}'s {list_name} is not one ascending list of distinct widths")
+    return problems
+
+
 _REQUIREMENT_PATTERNS = (
     ("postgres", re.compile(r"requires a PostgreSQL DATABASE_URL|startswith\(\"postgresql\"\)")),
     ("docker", re.compile(r'"docker"')),

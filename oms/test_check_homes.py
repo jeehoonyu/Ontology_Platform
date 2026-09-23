@@ -34,7 +34,9 @@ import audit_query_bounds  # noqa: E402
 import validate_docs_conformance  # noqa: E402
 import validate_external_evaluations  # noqa: E402
 import validate_tier_b_evidence  # noqa: E402
-from check_registry import DECLARATIONS, discover, requirements_of  # noqa: E402
+from check_registry import (  # noqa: E402
+    BROWSER_GATES, DECLARATIONS, browser_gate_problems, declared_widths, discover, requirements_of,
+)
 from enforcement_runs import recording  # noqa: E402
 
 passed = 0
@@ -101,5 +103,23 @@ check(not requirements_of("audit_query_bounds"),
 for name, declaration in DECLARATIONS.items():
     check(declaration.get("gates") and declaration.get("cadence"),
           f"{name} declares what it gates and how often it runs", declaration)
+
+# --- browser gates the registry names ----------------------------------------
+# S1 of GOAL_SHELL_2026-09-23. A browser spec that is a gate is named here, so a
+# rename or a deletion fails this rather than leaving a gate nobody runs.
+
+check(not browser_gate_problems(), "every declared browser gate exists and parses",
+      browser_gate_problems())
+widths = declared_widths("shell-widths.spec.ts", BROWSER_GATES["shell-widths.spec.ts"]["widths"])
+for width in (1000, 1024, 1100, 1101, 1366):
+    check(width in widths, f"the shell sweep visits {width}, a width the goal found broken or real", widths)
+check(browser_gate_problems({"no-such.spec.ts": {"gates": "x", "cadence": "manual: y"}}),
+      "a browser gate whose spec is gone is reported", None)
+check(browser_gate_problems({"shell-widths.spec.ts": {"gates": "x", "cadence": "manual: y",
+                                                      "widths": "NO_SUCH_LIST"}}),
+      "a browser gate whose width list is gone is reported", None)
+for spec, declaration in BROWSER_GATES.items():
+    check(declaration.get("gates") and declaration.get("cadence"),
+          f"{spec} declares what it gates and how often it runs", declaration)
 
 print(f"Check homes verified: {passed} assertions passed.")

@@ -31,7 +31,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_registry import (  # noqa: E402
-    DECLARATIONS, discover, requirements_of, suite_executions, workflow_invocations,
+    BROWSER_GATES, DECLARATIONS, browser_gate_problems, declared_widths, discover,
+    requirements_of, suite_executions, workflow_invocations,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -89,6 +90,17 @@ def main() -> int:
         f"{s} {sum(1 for r in report.values() if r['state'] == s)}"
         for s in (SUITE, CI, MANUAL, UNAUTOMATED, UNDECLARED)))
 
+    # Browser gates are not scripts here, so they have no state above. What can be
+    # checked from the tree is that each one still exists and still declares what
+    # it measures; a deleted gate is otherwise indistinguishable from a passing one.
+    print(f"{len(BROWSER_GATES)} browser gate(s):")
+    for spec, declared in BROWSER_GATES.items():
+        widths = declared_widths(spec, declared["widths"]) if declared.get("widths") else []
+        print(f"    {spec}" + (f"  {len(widths)} widths" if widths else ""))
+    browser_problems = browser_gate_problems()
+    for problem in browser_problems:
+        print(f"  BROWSER GATE MISSING: {problem}")
+
     if args.set_baseline:
         BASELINE.write_text(json.dumps({
             "undeclared_ceiling": undeclared,
@@ -108,7 +120,7 @@ def main() -> int:
         print("\nNo baseline recorded. Run with --set-baseline to start the ratchet.")
         return 0
 
-    failed = False
+    failed = bool(browser_problems)
     for label, count, key in (("undeclared", undeclared, "undeclared_ceiling"),
                               ("unautomated", unautomated, "unautomated_ceiling")):
         ceiling = baseline.get(key)
