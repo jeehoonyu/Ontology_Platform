@@ -97,6 +97,16 @@ SURFACES: Dict[str, Dict[str, Any]] = {
         "recover": {"test": "movement-contract.spec.ts::one Undo takes back a committed pipeline node move"},
         "alternative": {"gap": "moves from the keyboard, and not from a single pointer without a drag"},
     },
+    "pipeline-lasso": {
+        "file": "components/canvas/PipelineCanvas.tsx", "mechanism": "dnd-kit",
+        "moves": "a selection rectangle over the pipeline canvas (X2 of GOAL_GRAPH)",
+        "cancel": {"test": "graph-editor.spec.ts::a lasso selects the nodes inside it and Escape "
+                           "selects nothing"},
+        "recover": {"na": "a lasso moves nothing and writes nothing, so there is no move to undo; "
+                          "Escape, a click or another lasso replaces what it selected"},
+        "alternative": {"test": "graph-editor.spec.ts::the nodes a lasso selects can be selected "
+                                "without a drag"},
+    },
     "pipeline-palette": {
         "file": "workspaces/PipelineBuilder.tsx", "mechanism": "dnd-kit",
         "moves": "a node type from the palette onto the pipeline canvas",

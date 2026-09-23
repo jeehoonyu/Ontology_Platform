@@ -1,4 +1,4 @@
-import { useState, type MutableRefObject } from "react";
+import { useRef, useState, type MutableRefObject } from "react";
 import { useDndMonitor, useDraggable, useDroppable } from "@dnd-kit/core";
 import { DataTable, KeyValueGrid, StatusBadge } from "../data/DataDisplay";
 import { asString, classNames, formatValue } from "../../utils/format";
@@ -16,6 +16,33 @@ export const ZOOM_MAX = 1.35;
 export const ZOOM_FIT = 0.86;
 export const ZOOM_STEP = 0.08;
 
+/** The drag id of the selection rectangle. The builder stops at it before a drop
+ * onto the canvas can be read as a palette entry and create a node. */
+export const LASSO_ID = "lasso:canvas";
+
+/** A node's box in stage pixels: `.pipeline-node` is 172 wide and at least 58 tall. */
+const NODE_WIDTH = 172;
+const NODE_HEIGHT = 58;
+
+interface Region { x: number; y: number; width: number; height: number }
+
+function regionFrom(start: { x: number; y: number }, delta: { x: number; y: number }, zoom: number): Region {
+  const end = { x: start.x + delta.x / zoom, y: start.y + delta.y / zoom };
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+/** A node is inside a region when its centre is. */
+function inRegion(node: PipelineNode, region: Region): boolean {
+  const cx = node.position.x + NODE_WIDTH / 2;
+  const cy = node.position.y + NODE_HEIGHT / 2;
+  return cx >= region.x && cx <= region.x + region.width && cy >= region.y && cy <= region.y + region.height;
+}
+
 export function PipelineCanvas({
   canvas,
   zoom,
@@ -29,7 +56,8 @@ export function PipelineCanvas({
   quickAddType,
   onContextInsert,
   onDeleteNode,
-  onZoom
+  onZoom,
+  onLasso
 }: {
   canvas: PipelineCanvasState | null;
   zoom: number;
@@ -46,19 +74,57 @@ export function PipelineCanvas({
   onDeleteNode: (nodeId: string) => void;
   /** Absolute, already clamped by the caller that owns the zoom state. */
   onZoom: (next: number) => void;
+  /** The nodes a selection rectangle closed over, and whether Shift was held when it began. */
+  onLasso: (nodeIds: string[], additive: boolean) => void;
 }) {
   const droppable = useDroppable({ id: "pipeline-canvas" });
   // The live delta of a node drag, so the other selected nodes move with the one
   // being dragged instead of jumping when it drops. dnd-kit transforms only the
   // active draggable; the rest of a selection follows it from here. M5.
   const [carry, setCarry] = useState<{ id: string; x: number; y: number } | null>(null);
+  // The selection rectangle, in stage pixels. X2 of GOAL_GRAPH_2026-09-23: a drag
+  // that starts on empty canvas selects the nodes it closes over. It begins where
+  // the pointer went down, measured against the stage at that moment, and grows by
+  // the delta dnd-kit reports -- which already counts any scroll of the canvas since.
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const lassoStart = useRef<{ x: number; y: number; additive: boolean } | null>(null);
+  const [lasso, setLasso] = useState<Region | null>(null);
+  const endLasso = () => {
+    lassoStart.current = null;
+    setLasso(null);
+  };
   useDndMonitor({
+    onDragStart(event) {
+      if (String(event.active.id) !== LASSO_ID) return;
+      const pointer = event.activatorEvent as PointerEvent;
+      const stage = stageRef.current?.getBoundingClientRect();
+      if (!stage) return;
+      lassoStart.current = {
+        x: (pointer.clientX - stage.left) / zoom,
+        y: (pointer.clientY - stage.top) / zoom,
+        additive: pointer.shiftKey,
+      };
+      setLasso({ x: lassoStart.current.x, y: lassoStart.current.y, width: 0, height: 0 });
+    },
     onDragMove(event) {
       const id = String(event.active.id);
       if (id.startsWith("node:")) setCarry({ id: id.slice(5), x: event.delta.x, y: event.delta.y });
+      else if (id === LASSO_ID && lassoStart.current) setLasso(regionFrom(lassoStart.current, event.delta, zoom));
     },
-    onDragEnd() { setCarry(null); },
-    onDragCancel() { setCarry(null); }
+    onDragEnd(event) {
+      setCarry(null);
+      const start = lassoStart.current;
+      if (String(event.active.id) === LASSO_ID && start) {
+        const region = regionFrom(start, event.delta, zoom);
+        onLasso(nodes.filter((node) => inRegion(node, region)).map((node) => node.id), start.additive);
+      }
+      endLasso();
+    },
+    // Escape, or a pointer the system takes back: nothing is selected by it.
+    onDragCancel() {
+      setCarry(null);
+      endLasso();
+    }
   });
   const carried = carry && selection.length > 1 && selection.includes(carry.id) ? new Set(selection) : null;
   const nodes = canvas?.nodes || [];
@@ -70,7 +136,9 @@ export function PipelineCanvas({
       ref={(element) => {
         containerRef.current = element;
       }}
-      className={classNames("pipeline-canvas", droppable.isOver && "drag-active")}
+      // The drop outline is for something that can land here; a lasso lands nothing.
+      className={classNames("pipeline-canvas",
+        droppable.isOver && String(droppable.active?.id ?? "") !== LASSO_ID && "drag-active")}
     >
       {/* The drop target sits inside the scrolling canvas rather than being it.
           dnd-kit sums scroll offsets over the scrollable ancestors of whatever a
@@ -103,7 +171,11 @@ export function PipelineCanvas({
         ))}
       </div>
       {!nodes.length && <div className="empty canvas-empty">Generate an ontology draft or create a pipeline graph to start.</div>}
-      <div className="canvas-stage" style={{ transform: `scale(${zoom})` }}>
+      <div className="canvas-stage" ref={stageRef} style={{ transform: `scale(${zoom})` }}>
+        <LassoSurface />
+        {lasso ? (
+          <div className="canvas-lasso" style={{ left: lasso.x, top: lasso.y, width: lasso.width, height: lasso.height }} />
+        ) : null}
         <svg viewBox="0 0 1500 700" className="edge-layer">
           {(canvas?.edges || []).map((edge) => {
             const source = byId.get(edge.source);
@@ -178,6 +250,22 @@ export function PipelineCanvas({
       </div>
     </div>
   );
+}
+
+/**
+ * The empty canvas, which a drag turns into a selection rectangle.
+ *
+ * On `DragKit`'s sensors like every other drag here, so the drag census counts it
+ * and Escape cancels it the way it cancels a node drag. It sits under every node,
+ * edge control and menu on the stage, so a press on any of them is theirs, and only
+ * a press on bare canvas reaches it; a click stays a click below 8px of travel.
+ * The listeners are spread and the attributes are not: it is not a control, so it
+ * takes no role and no tab stop, and a key pressed on a button never starts it.
+ * Touch is not claimed: without `touch-action: none` a finger here scrolls.
+ */
+function LassoSurface() {
+  const draggable = useDraggable({ id: LASSO_ID });
+  return <div ref={draggable.setNodeRef} className="canvas-lasso-surface" {...draggable.listeners} />;
 }
 
 /**

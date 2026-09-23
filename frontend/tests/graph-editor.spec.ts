@@ -18,13 +18,15 @@ interface FixtureNode { id: string; x: number; y: number }
 
 /**
  * Four nodes in two rows, edges a→c and b→d, so a region can take the left column
- * without the right one, and parents and children are one edge away.
+ * without the right one, and parents and children are one edge away. Placed inside
+ * what the canvas shows at 1280 -- 489px at zoom 0.86, 568 stage pixels -- and clear
+ * of the legend in its top right corner, which a lasso must not start on.
  */
 const FOUR: FixtureNode[] = [
-  { id: "a", x: 120, y: 80 },
-  { id: "b", x: 120, y: 260 },
-  { id: "c", x: 560, y: 80 },
-  { id: "d", x: 560, y: 260 },
+  { id: "a", x: 40, y: 60 },
+  { id: "b", x: 40, y: 250 },
+  { id: "c", x: 300, y: 60 },
+  { id: "d", x: 300, y: 250 },
 ];
 
 async function openFixture(page: Page, nodes: FixtureNode[] = FOUR,
@@ -48,7 +50,13 @@ async function openFixture(page: Page, nodes: FixtureNode[] = FOUR,
   const canvas = page.locator(".pipeline-canvas");
   await expect(canvas.locator(".pipeline-node")).toHaveCount(nodes.length);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  await canvas.evaluate((element) => { element.scrollLeft = 0; element.scrollTop = 0; });
+  // Opening the pipeline from the Outputs pane scrolled the workspace to that row,
+  // and a pointer gesture aimed at the canvas then landed 1,260px above the screen.
+  await canvas.evaluate((element) => {
+    element.scrollLeft = 0;
+    element.scrollTop = 0;
+    element.scrollIntoView({ block: "start" });
+  });
   return { name, canvas };
 }
 
@@ -125,5 +133,103 @@ test.describe("the selection is one set, and every tool writes it", () => {
     await label.fill("keep this text");
     await label.press("Control+a");
     await expect.poll(() => selected(page), { message: "Ctrl+A in a field selected nodes" }).toEqual(["a"]);
+  });
+});
+
+
+/**
+ * A region of the canvas selects with a drag. X2 of `GOAL_GRAPH_2026-09-23.md`.
+ *
+ * Points are chosen in stage pixels -- the coordinates node positions are stored
+ * in -- and turned into screen points through the stage's own box and zoom, so the
+ * rectangle is where the fixture's nodes are whatever the pane's width.
+ */
+async function stageToScreen(page: Page, x: number, y: number) {
+  return page.locator(".canvas-stage").evaluate((stage, [px, py]) => {
+    const box = stage.getBoundingClientRect();
+    const zoom = box.width / (stage as HTMLElement).offsetWidth;
+    return { x: box.left + px * zoom, y: box.top + py * zoom };
+  }, [x, y] as const);
+}
+
+/** Presses on bare canvas at one stage point and drags to another, live, not released. */
+async function startLasso(page: Page, from: [number, number], to: [number, number], shift = false) {
+  const start = await stageToScreen(page, ...from);
+  const end = await stageToScreen(page, ...to);
+  await page.mouse.move(start.x, start.y);
+  if (shift) await page.keyboard.down("Shift");
+  await page.mouse.down();
+  for (let step = 1; step <= 12; step += 1) {
+    await page.mouse.move(start.x + ((end.x - start.x) * step) / 12, start.y + ((end.y - start.y) * step) / 12);
+    await page.waitForTimeout(16);
+  }
+  // Live before anything is judged: a rectangle that never started selects nothing
+  // and would pass every assertion about Escape below.
+  await expect(page.locator(".canvas-lasso"), "the lasso never started").toBeVisible();
+}
+
+async function finishLasso(page: Page, shift = false) {
+  await page.mouse.up();
+  if (shift) await page.keyboard.up("Shift");
+  // dnd-kit swallows the click that follows a drop for 50ms.
+  await page.waitForTimeout(150);
+}
+
+// The left column holds a (centre 126,89) and b (126,279); the right, c (386,89) and d.
+const LEFT_COLUMN: [[number, number], [number, number]] = [[10, 30], [240, 340]];
+const TOP_RIGHT: [[number, number], [number, number]] = [[250, 30], [520, 160]];
+
+test.describe("a region of the canvas selects with a drag", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the lasso is a desktop pointer gesture.");
+  });
+
+  test("a lasso selects the nodes inside it and Escape selects nothing", async ({ page }) => {
+    await openFixture(page);
+    const writes: string[] = [];
+    page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
+
+    await startLasso(page, ...LEFT_COLUMN);
+    await expect(page.locator(".pipeline-canvas"), "a lasso lit the drop outline, as if something could land")
+      .not.toHaveClass(/\bdrag-active\b/);
+    await finishLasso(page);
+    await expect.poll(() => selected(page), { message: "the lasso did not select the left column" })
+      .toEqual(["a", "b"]);
+
+    await startLasso(page, ...TOP_RIGHT);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+    await expect(page.locator(".canvas-lasso"), "Escape left the rectangle drawn").toHaveCount(0);
+    const after = await selected(page);
+    expect(after, "a lasso cancelled with Escape selected what it was over").not.toContain("c");
+    expect(writes, "a lasso wrote something; it selects, and a selection is not an edit").toEqual([]);
+    await expect(page.locator(".pipeline-canvas .pipeline-node"), "a lasso created a node").toHaveCount(4);
+  });
+
+  test("Shift held when a lasso begins adds to the selection", async ({ page }) => {
+    await openFixture(page);
+    await startLasso(page, ...LEFT_COLUMN);
+    await finishLasso(page);
+    await expect.poll(() => selected(page)).toEqual(["a", "b"]);
+
+    await startLasso(page, ...TOP_RIGHT, true);
+    await finishLasso(page, true);
+    await expect.poll(() => selected(page), { message: "a Shift lasso replaced the selection" })
+      .toEqual(["a", "b", "c"]);
+
+    await startLasso(page, ...TOP_RIGHT);
+    await finishLasso(page);
+    await expect.poll(() => selected(page), { message: "a plain lasso added instead of replacing" })
+      .toEqual(["c"]);
+  });
+
+  test("the nodes a lasso selects can be selected without a drag", async ({ page }) => {
+    // WCAG 2.5.7: a single pointer and no drag. Shift+click builds the same set.
+    await openFixture(page);
+    await node(page, "a").click();
+    await node(page, "b").click({ modifiers: ["Shift"] });
+    await expect.poll(() => selected(page), { message: "Shift+click did not build the lasso's selection" })
+      .toEqual(["a", "b"]);
   });
 });

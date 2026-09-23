@@ -29,7 +29,7 @@ import {
   suggestPipelineNode,
   updatePipelineNode
 } from "../api/workspaceState";
-import { BottomDrawer, PipelineCanvas, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
+import { BottomDrawer, LASSO_ID, PipelineCanvas, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
 import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { Toolbar } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
@@ -332,6 +332,18 @@ export function PipelineBuilder() {
     return chosen.filter((id) => present.has(id));
   }, [canvas, selection, selectedNodeId]);
 
+  /**
+   * The nodes a selection rectangle closed over. With Shift held when it began they
+   * join the selection, as a Shift+click does; without, they replace it.
+   */
+  function selectRegion(nodeIds: string[], additive: boolean) {
+    setSelection((current) => {
+      if (!additive) return nodeIds;
+      const base = current.length ? current : selectedNodeId ? [selectedNodeId] : [];
+      return Array.from(new Set([...base, ...nodeIds]));
+    });
+  }
+
   /** Every node on the canvas. Writes the set only, so nothing is fetched. */
   function selectAll() {
     setSelection((canvas?.nodes || []).map((node) => node.id));
@@ -430,6 +442,9 @@ export function PipelineBuilder() {
 
   function endCanvasDrag(event: DragEndEvent) {
     const id = String(event.active.id);
+    // The canvas selected what the rectangle closed over. It must not reach the
+    // palette drop below, which would read "lasso:canvas" as a node type to create.
+    if (id === LASSO_ID) return;
     if (id.startsWith("node:")) {
       // A node already on the canvas: commit once, where it came to rest.
       const node = canvas?.nodes.find((item) => item.id === id.slice(5));
@@ -559,6 +574,7 @@ export function PipelineBuilder() {
               quickAddType={quickAddType}
               onContextInsert={(nodeType) => insertAfter(nodeType)}
               onDeleteNode={removeNode}
+              onLasso={selectRegion}
             />
                 </div>
             );

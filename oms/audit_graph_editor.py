@@ -66,9 +66,10 @@ Control = Dict[str, Any]
 CONTROLS: Dict[str, Control] = {
     "lasso": {
         "original": "Drag Select Mode; Shift+drag from panning mode lassos nodes",
-        "ours": "click selects; Shift+click extends (M5)",
-        "file": BUILDER, "handler": "selectNode",
-        "state": {"gap": "no lasso"},
+        "ours": "a drag on bare canvas selects the nodes it closes over; Shift adds; Shift+click too",
+        "file": BUILDER, "handler": "selectRegion",
+        "state": {"test": "graph-editor.spec.ts::a lasso selects the nodes inside it and Escape "
+                          "selects nothing"},
     },
     "select-all": {
         "original": "Select all nodes; Ctrl+A",

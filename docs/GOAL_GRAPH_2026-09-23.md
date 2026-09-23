@@ -174,7 +174,7 @@ and the count is a button that lists them.
   - **N4, a row claimed met by a test nobody wrote:** the audit failed on the missing test.
   - Restored, the sources are byte for byte what they were.
 - **X2 — A region of the canvas selects with a drag, and the set is what every tool takes.**
-  **Open** — lasso on `DragKit`, Shift adds, `Select all` and `Ctrl+A`, parents and children.
+  **Met** — lasso on `DragKit`, Shift adds, `Select all` and `Ctrl+A`, parents and children.
   Proven by `graph-editor.spec.ts::a lasso selects the nodes inside it and Escape selects
   nothing`, reading the selection list, and shown to fail with the background draggable
   removed.
@@ -217,6 +217,55 @@ and the count is a button that lists them.
   - **N3, a key typed into a field taken by the canvas:** failed at `Ctrl+A in a field
     selected nodes`.
   - Restored, the three pass, and the two sources are byte for byte what they were.
+
+  **Second half, the lasso.** A drag that starts on bare canvas draws a rectangle, and on
+  release selects the nodes whose centres it closes over. It is a `useDraggable` on
+  `DragKit`'s shared sensors, on its own surface under everything else on the stage, so a
+  press on a node, an edge control or a menu is theirs, and a click stays a click below
+  8 px. Only the listeners are spread on it, not the attributes: it is not a control, so it
+  takes no role and no tab stop, and a key pressed on a button can never start it.
+  - The rectangle starts where the pointer went down, measured against the stage at that
+    moment, and grows by dnd-kit's delta, which already counts any scroll of the canvas.
+  - Shift held when it starts adds to the selection; otherwise it replaces it.
+  - Escape cancels it through dnd-kit, and nothing is selected by it.
+  - The drop outline stays off, because nothing can land.
+  - Touch is not claimed: without `touch-action: none` a finger on bare canvas scrolls.
+
+  The scouts found one trap before it shipped. Every non-node drag that ends over the canvas
+  was read as a palette drop, which creates a node of the dragged id's type. The builder now
+  stops at the lasso's id first, and the second negative below shows what that line
+  prevents.
+
+  Three more tests in `graph-editor.spec.ts`:
+  - `a lasso selects the nodes inside it and Escape selects nothing`: it proves the lasso
+    is live before judging it, reads the set from the nodes, and counts that nothing was
+    written or created;
+  - `Shift held when a lasso begins adds to the selection`;
+  - `the nodes a lasso selects can be selected without a drag`, the single-pointer way, by
+    Shift+click.
+
+  The fixture's nodes sit inside the 568 stage pixels the canvas shows at 1280, clear of the
+  legend in its top right corner. A first version put the right column where the canvas
+  could not show it, so the lasso started on the legend.
+
+  **Gates.** `MOVEMENT_CONTRACT.md` gains `pipeline-lasso`, with cancel and alternative met
+  by those tests. Its recover stage is declared not applicable in the baseline, an edit made
+  here in the open: a lasso moves nothing and writes nothing, so there is no move to undo. The
+  gap count holds at 12. `DRAG_AFFORDANCES.md` lists `lasso:canvas` among the pipeline
+  canvas's drags. `PipelineCanvas.tsx` already had its sensor-backed entry, and the census
+  finds no native drag and no hand-rolled pointer. `GRAPH_EDITOR_PARITY.md` reads 3 of 15
+  met, with `lasso` added, and its baseline holds 11 gaps. On the same build, 109 tests pass
+  on the desktop-1280 project, one skipped: the multi-node, movement, evaluator, drag, touch,
+  concurrent-drag, inert, shell and graph-editor specs.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the background draggable removed, as the goal asks:** failed at `the lasso never
+    started`.
+  - **N2, the builder's guard removed:** failed at `a lasso wrote something; it selects, and a
+    selection is not an edit`. The lasso had gone on to the palette drop.
+  - **N3, Shift ignored:** failed at `a Shift lasso replaced the selection`.
+  - **N4, the drop outline lit by a lasso:** failed at `a lasso lit the drop outline`.
+  - Restored, the six tests pass, and the two sources are byte for byte what they were.
 - **X3 — One command lays out the pipeline, and one undo puts it back.** **Open** — `Auto
   layout` on the pipeline canvas, one history entry. Proven by `auto layout moves every node
   and one Undo restores every position`, reading committed positions.
