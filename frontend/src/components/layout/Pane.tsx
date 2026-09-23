@@ -1,8 +1,8 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties,
+         type ReactNode } from "react";
 import { useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { DragHandle, PANE_PREFIX, SLOT_PREFIX, isPaneDrag, isSlot } from "../dnd/DragKit";
 import {
-  DEFAULT_SLOT_PX,
   MAX_SLOT_PX,
   MIN_SLOT_PX,
   SLOTS,
@@ -12,6 +12,7 @@ import {
   movePane,
   saveLayout,
   setSize,
+  sideWidth,
   toggleCollapsed,
   toggleHidden,
   type PaneLayout,
@@ -207,6 +208,7 @@ function Splitter({ slot, size, onResize, onStart, onPreview, onCommit, onCancel
 
 function Slot({ name, size, empty, children }: {
   name: SlotName;
+  /** A side slot's width. Centre and bottom take what is left, so they have none. */
   size?: number;
   /** No visible pane in it. A side slot then gives its width back to the centre. */
   empty?: boolean;
@@ -218,13 +220,16 @@ function Slot({ name, size, empty, children }: {
   // object type surface, and the relationship designer inside it clipped two of
   // its six object types. It stays a thin droppable strip, so a pane can still be
   // dragged into it and the keyboard slot getter still finds it. M7.
+  // The width is a custom property, not an inline `width`. S3 of GOAL_SHELL: as an
+  // inline style it beat the stylesheet's stacking rule, so below 700px Workshop's
+  // side slots stayed 238 and 310px wide in a one-column stack, and at 320 the
+  // inspector was wider than the canvas above it.
   return (
     <div
       ref={droppable.setNodeRef}
       className={`pane-slot pane-slot-${name}${empty ? " pane-slot-empty" : ""}${droppable.isOver ? " drag-active" : ""}`}
       data-slot={name}
-      style={name === "center" || !size || empty ? undefined
-                                                 : { flexBasis: `${size}px`, width: `${size}px` }}
+      style={!size || empty ? undefined : { "--slot-width": `${size}px` } as CSSProperties}
     >{children}</div>
   );
 }
@@ -295,7 +300,22 @@ export function PaneHost({ state, render }: {
   // The arrangement a pointer resize started from, so Escape can put it back
   // exactly -- including a slot that had no stored width at all.
   const before = useRef<PaneLayout | null>(null);
+  // The row's width, which caps a side slot nobody has sized. Measured before
+  // paint, so the first frame is already the capped one.
+  const row = useRef<HTMLDivElement | null>(null);
+  const [rowWidth, setRowWidth] = useState(0);
+  const mounted = layout !== null;
+  useLayoutEffect(() => {
+    const element = row.current;
+    if (!element) return;
+    const measure = () => setRowWidth(element.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [mounted]);
   if (!layout) return null;
+  const widthOf = (slot: SlotName) => sideWidth(layout, panes, slot, rowWidth);
   const byId = new Map(panes.map((pane) => [pane.id, pane]));
   const hiddenPanes = layout.hidden.map((id) => byId.get(id)).filter(Boolean) as PaneSpec[];
   const occupied = (slot: SlotName) => layout.slots[slot].some((id) => !layout.hidden.includes(id));
@@ -303,7 +323,7 @@ export function PaneHost({ state, render }: {
   const splitter = (slot: SlotName) => (
     <Splitter
       slot={slot}
-      size={layout.sizes[slot] ?? DEFAULT_SLOT_PX}
+      size={widthOf(slot)}
       onResize={(px) => update(setSize(layout, slot, px))}
       onStart={() => { before.current = layout; }}
       onPreview={(px) => preview(setSize(layout, slot, px))}
@@ -357,11 +377,12 @@ export function PaneHost({ state, render }: {
               layout and are shared with everyone who opens it. V8 of GOAL_MOVEMENT. */}
           <button type="button" onClick={reset}>Reset panes</button>
         </div>
-        <div className="pane-host-row">
+        <div className="pane-host-row" ref={row}>
           {(["left", "center", "right"] as SlotName[]).map((slot) => (
             <Fragment key={slot}>
             {slot === "right" && occupied("right") ? splitter("right") : null}
-            <Slot name={slot} size={layout.sizes[slot]} empty={slot !== "center" && !occupied(slot)}>
+            <Slot name={slot} size={slot === "center" ? undefined : widthOf(slot)}
+                  empty={slot !== "center" && !occupied(slot)}>
               {layout.slots[slot].filter((id) => !layout.hidden.includes(id)).map((id) => {
                 const spec = byId.get(id);
                 if (!spec) return null;
@@ -383,7 +404,7 @@ export function PaneHost({ state, render }: {
             </Fragment>
           ))}
         </div>
-        <Slot name="bottom" size={layout.sizes.bottom}>
+        <Slot name="bottom">
           {layout.slots.bottom.filter((id) => !layout.hidden.includes(id)).map((id) => {
             const spec = byId.get(id);
             if (!spec) return null;

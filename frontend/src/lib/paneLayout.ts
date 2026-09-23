@@ -37,13 +37,20 @@ export interface PaneSpec {
    * artifact canvases' library and inspector were 238 and 310 pixels as fixed
    * tracks, and dropping them to the 220 default on the way onto `Pane` would
    * have squeezed the inspector's forms to fit a number chosen for another screen.
+   *
+   * A ceiling, not a promise: `sideWidth` gives a side slot at most a third of the
+   * row until someone chooses a width, so the canvas stays the widest pane.
    */
   width?: number;
 }
 
 export interface PaneLayout {
   slots: Record<SlotName, string[]>;
-  /** Pixels per slot, clamped. The splitter writes these; M3. */
+  /**
+   * Pixels per slot that a person chose, clamped. The splitter and the width
+   * presets write these; M3 and V3. A slot nobody sized has no entry, and takes
+   * its declared width through `sideWidth`.
+   */
   sizes: Partial<Record<SlotName, number>>;
   collapsed: string[];
   hidden: string[];
@@ -69,12 +76,40 @@ export function clampSize(px: number): number {
 
 export function defaultLayout(panes: PaneSpec[]): PaneLayout {
   const slots = { left: [], center: [], right: [], bottom: [] } as Record<SlotName, string[]>;
-  const sizes: Partial<Record<SlotName, number>> = {};
-  for (const pane of panes) {
-    slots[pane.slot].push(pane.id);
-    if (pane.width && sizes[pane.slot] === undefined) sizes[pane.slot] = clampSize(pane.width);
-  }
-  return { slots, sizes, collapsed: [], hidden: [] };
+  for (const pane of panes) slots[pane.slot].push(pane.id);
+  return { slots, sizes: {}, collapsed: [], hidden: [] };
+}
+
+/** The width a screen declares for a side slot: its first pane's, or the default. */
+export function declaredWidth(panes: PaneSpec[], slot: SlotName): number {
+  const declared = panes.find((pane) => pane.slot === slot && pane.width);
+  return declared?.width ? clampSize(declared.width) : DEFAULT_SLOT_PX;
+}
+
+/**
+ * What the row spends besides the three slots: two 7px splitters and four 8px
+ * gaps with both sides occupied, or one splitter, three gaps and the 14px strip
+ * of an empty side. 48 covers both.
+ */
+export const ROW_OVERHEAD_PX = 48;
+
+/**
+ * The width a side slot takes, given the row it sits in.
+ *
+ * S3 of `GOAL_SHELL_2026-09-23.md`. A chosen width is kept exactly: the person
+ * asked for it. A declared width is a ceiling, capped at a third of what the row
+ * has after its splitters and gaps, which leaves the canvas at least as wide as
+ * either side. Measured before this: Workshop's canvas was 205px beside a 310px
+ * inspector at 1101, and 150px at 760. `rowWidth` is 0 until the row is measured,
+ * and then nothing is capped.
+ */
+export function sideWidth(layout: PaneLayout, panes: PaneSpec[], slot: SlotName, rowWidth: number): number {
+  const chosen = layout.sizes[slot];
+  if (typeof chosen === "number") return chosen;
+  const declared = declaredWidth(panes, slot);
+  if (rowWidth <= 0) return declared;
+  const third = Math.floor((rowWidth - ROW_OVERHEAD_PX) / 3);
+  return Math.min(declared, Math.max(MIN_SLOT_PX, third));
 }
 
 /**
@@ -107,10 +142,15 @@ export function reconcile(stored: Partial<PaneLayout> | null, panes: PaneSpec[])
   }
 
   // A stored layout that never resized a slot keeps the screen's declared width.
-  const sizes: Partial<Record<SlotName, number>> = { ...base.sizes };
+  // Builds before S3 stored the declared width itself whenever they saved, which
+  // reads the same as a choice; a stored width equal to the declared one is taken
+  // as no choice, so it keeps the cap a declared width has.
+  const sizes: Partial<Record<SlotName, number>> = {};
   for (const slot of SLOTS) {
     const value = stored.sizes?.[slot];
-    if (typeof value === "number" && Number.isFinite(value)) sizes[slot] = clampSize(value);
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (clampSize(value) === declaredWidth(panes, slot)) continue;
+    sizes[slot] = clampSize(value);
   }
 
   const keep = (ids: unknown) => (Array.isArray(ids) ? ids : [])

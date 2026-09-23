@@ -172,9 +172,47 @@ it reads the validation status, as it does now.
   pass at the four project widths, none of which is in the band. Their one failure, on every
   project, is the bundle carrying no `build-provenance.json`, because this `dist` was built
   with `vite build` rather than `measure_browser_evidence.py --build`.
-- **S3 — The pipeline canvas is the widest pane at every desktop width.** **Open** — the
+- **S3 — The pipeline canvas is the widest pane at every desktop width.** **Met** — the
   empty 330 px track goes; the canvas takes the share. Proven by S1 assertion 2 at 1101 and
   above. The numbers before: canvas 169 px of 994 available at 1280.
+
+  **Two changes, because S1 found the pipeline was not the only screen.**
+  `.pipeline-workbench-page .builder-shell` is one column, both in its base rule and in the
+  1101 block, and the pane host takes the width. In `paneLayout.ts` a side slot's declared
+  width becomes a ceiling rather than a size: `sideWidth` keeps a width a person chose
+  exactly, and caps a declared one at a third of the row after its splitters and gaps. That
+  leaves the canvas at least as wide as either side. `PaneHost` measures the row before
+  paint and passes the width as `--slot-width`, not an inline `width`, so the stacking rule
+  below 700 px can override it at last. A layout saved by an older build stored the
+  declared width as if someone had chosen it, so a stored width equal to the declared one
+  is read as no choice.
+
+  | Width | Pipeline: library · canvas · outputs | Workshop: library · canvas · inspector |
+  | --- | --- | --- |
+  | 760 | 220 · 241 · 220 | 232 · 234 · 232 (was 238 · 150 · 310) |
+  | 1101 | 220 · 328 · 220 (canvas was 64) | 238 · 265 · 250 (was 238 · 205 · 310) |
+  | 1280 | 220 · 507 · 220 (canvas was 169, then 200 at 700 high) | 238 · 384 · 310 |
+  | 1920 | 220 · 1147 · 220 | 238 · 1024 · 310 |
+
+  At 1280 and above the cap does not bind on any screen, so Workshop's inspector keeps the
+  310 px M7 gave its forms. The ontology manager's Resources pane keeps 260 from 1280 up and
+  gives up to 34 px of it below.
+
+  **The proof.** Assertion 2 passes at all eighteen widths on all three screens. What still
+  fails is assertion 3 alone, the titles, which is S4. On the same build, the 84 tests in
+  `pane-layout`, `movement-contract`, `multi-node-drag`, `truncation-sites`,
+  `drag-affordances`, `touch-authoring` and `concurrent-drags` pass on the desktop-1280
+  project. They include every splitter, width-preset and `Reset panes` test.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the empty track back in the 1101 block:** the pipeline builder failed at `the pane
+    host is 550px of 771px the workspace has` at 1101, and at every width up to `1303px of
+    1590px` at 1920.
+  - **N2, a declared width that is never capped:** Workshop failed at `Canvas is 205px,
+    narrower than Inspector at 310px` at 1101, and at 760, 768, 900, 901 and 1200.
+  - **N3, the width written as an inline style again:** Workshop's titles clipped from 320 to
+    700, where the slots stack. `Node library` and `Inspector` had 0 px each at 320.
+  - Restored, only assertion 3 fails, and the three sources are byte for byte what they were.
 - **S4 — A pane title is never clipped at the pane's default width.** **Open** — the `⋯` menu
   below 280 px. Proven by S1 assertion 3 on every pane screen, and by a tap test on the
   390×844 touch viewport that opens the menu and moves a pane from it, so the control beside

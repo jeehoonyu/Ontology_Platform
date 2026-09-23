@@ -2576,9 +2576,12 @@ pre {
 .pane-slot-right {
   /* 220px, not 260: at 1280 two 260px flanks left the pipeline canvas 236px
      wide, narrower than either pane framing it. The centre is the screen; the
-     panes are the margin. A person who wants them wider has a splitter. */
+     panes are the margin. A person who wants them wider has a splitter.
+     `PaneHost` sets the width it computed -- a declared width capped at a third
+     of the row, or the one a person chose -- as `--slot-width`, so the stacking
+     rule below can still override it. */
   flex: 0 0 auto;
-  width: 220px;
+  width: var(--slot-width, 220px);
 }
 
 .pane-slot-bottom {
@@ -3178,8 +3181,11 @@ pre {
 }
 
 .pipeline-workbench-page .builder-shell {
+  /* One column. The second track was the inspector's until the inspector became a
+     pane; nothing rendered in it after that, and at 1280 it held 308 of the 994px
+     workspace while the pipeline canvas got 169. S3 of GOAL_SHELL_2026-09-23. */
   min-height: 100vh;
-  grid-template-columns: minmax(760px, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 
@@ -5389,7 +5395,7 @@ pre {
   .pipeline-workbench-page .builder-shell {
     height: 100%;
     min-height: 0;
-    grid-template-columns: minmax(0, 1fr) clamp(250px, 24vw, 330px);
+    grid-template-columns: minmax(0, 1fr);
     overflow: hidden;
   }
 
