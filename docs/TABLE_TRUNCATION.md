@@ -34,8 +34,8 @@ way to the rest names items nobody can reach.
 
 | File | Line | In | Cuts | How | Note from the true total | Rest reachable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 298 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
-| `components/canvas/PipelineCanvas.tsx` | 305 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 303 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 310 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 223 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 72 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
@@ -106,8 +106,8 @@ test that reads its note; whether that note's condition matches the limit is the
 | --- | --- | --- | --- | --- |
 | `api.ts` | 15 | `request` | `text` | text |
 | `components/canvas/PipelineCanvas.tsx` | 58 | `PipelineCanvas` | `id` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 164 | `PipelineCanvas` | `action.label` | text |
-| `components/canvas/PipelineCanvas.tsx` | 314 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
+| `components/canvas/PipelineCanvas.tsx` | 167 | `PipelineCanvas` | `action.label` | text |
+| `components/canvas/PipelineCanvas.tsx` | 319 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
 | `components/layout/Pane.tsx` | 376 | `usePaneLayout` | `active` | prefix dropped |
 | `components/layout/Pane.tsx` | 377 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
@@ -120,9 +120,9 @@ test that reads its note; whether that note's condition matches the limit is the
 | `workspaces/OntologyRegistryPanel.tsx` | 151 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` | request payload |
-| `workspaces/PipelineBuilder.tsx` | 371 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 399 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 478 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 407 | `PipelineBuilder` | `current` | last dropped |
+| `workspaces/PipelineBuilder.tsx` | 435 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 514 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |

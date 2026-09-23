@@ -2774,6 +2774,30 @@ pre {
   font-size: 12px;
 }
 
+/* The selection tools above the pipeline canvas: what is selected, and the ways to
+   select along the graph. GOAL_GRAPH_2026-09-23. */
+.canvas-select-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: #f7f9fa;
+  border-bottom: 1px solid #d7dedf;
+}
+
+.canvas-select-tools button {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.canvas-selection-count {
+  font-size: 12px;
+  color: #3d4a54;
+  margin-right: auto;
+  font-variant-numeric: tabular-nums;
+}
+
 .pipeline-canvas {
   position: relative;
   overflow: auto;
@@ -4817,8 +4841,10 @@ pre {
   /* One track: the canvas is the body's only child. The library and a 38px rail
      sat here before they became panes, and their tracks stayed: from 1101 up the
      canvas was held to 236px however wide its pane grew, and at 1920 it had 236 of
-     the 1129 pixels the pane gave it. S3 of GOAL_SHELL_2026-09-23. */
+     the 1129 pixels the pane gave it. S3 of GOAL_SHELL_2026-09-23. The selection
+     tools sit above it and take their own height. */
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .pipeline-workbench-page .node-library {

@@ -152,7 +152,10 @@ export function PipelineCanvas({
             key={node.id}
             node={node}
             zoom={zoom}
-            selected={selectedNodeId === node.id || selection.includes(node.id)}
+            // What every tool acts on: the set, or the node last clicked when the set
+            // is empty. It was both at once, so a node outside a multi-node selection
+            // still looked selected because it had been clicked last.
+            selected={selection.length ? selection.includes(node.id) : selectedNodeId === node.id}
             follow={carried && carry && carry.id !== node.id && carried.has(node.id) ? carry : null}
             onSelect={onSelect}
           />
@@ -211,6 +214,8 @@ function PipelineNodeCard({ node, zoom, selected, follow, onSelect }: {
     <button
       ref={draggable.setNodeRef}
       className={classNames("pipeline-node", node.category, node.type, selected && "selected", draggable.isDragging && "dragging", node.status === "ERROR" && "error")}
+      data-node-id={node.id}
+      data-in-selection={selected ? "true" : "false"}
       style={{
         left: node.position.x,
         top: node.position.y,

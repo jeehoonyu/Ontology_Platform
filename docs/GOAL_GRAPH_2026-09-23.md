@@ -178,6 +178,45 @@ and the count is a button that lists them.
   Proven by `graph-editor.spec.ts::a lasso selects the nodes inside it and Escape selects
   nothing`, reading the selection list, and shown to fail with the background draggable
   removed.
+
+  **First half, the set and the tools that write it.** The builder has one set of nodes the
+  tools act on: `selection`, or, when that is empty, the node last clicked. A node shows as
+  selected only if it is in that set. It used to show as selected if it was either, so a
+  node outside a Shift-built selection still looked selected because it had been clicked
+  last. Each node carries `data-node-id` and `data-in-selection`, which is how a test
+  reads the set. The count reads `N of M selected` above the canvas, beside three
+  buttons:
+  - `Select all`;
+  - `Select parents`, which adds the selected nodes' parents, one edge away, so pressing it
+    again walks further up;
+  - `Select children`, the same downwards.
+
+  All three write the set and nothing else, so they send no request. A change to the
+  clicked node costs four requests, which is why none of them touches it. Their keys are
+  `Ctrl+A`, `Ctrl+E` and `Ctrl+D`, the original's. They are rows in one table in
+  `lib/hotkeys.ts`, whose listener is driven by the table and nothing else. A key counts
+  only when nothing in particular has the focus or the focus is on the canvas. A key typed
+  into a field belongs to the field.
+
+  Proven by three tests in `graph-editor.spec.ts`, each on a pipeline it builds through the
+  API with nodes where it put them:
+  - `Select all, parents and children write the one selection and send nothing`;
+  - `Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do`;
+  - `a key typed into a field is the field's`.
+
+  `GRAPH_EDITOR_PARITY.md` reads 2 of 15 met, `select-all` and `select-family`, and its
+  baseline holds 12 gaps. On the same build, 130 tests pass on the desktop-1280 project,
+  one skipped: the multi-node, movement, shell, evaluator, truncation, inert, drag and
+  concurrent-drag specs.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, `Ctrl+A` taken out of the table:** failed at `Ctrl+A did not select every node`.
+  - **N2, `Select all` also moving the clicked node:** failed before it reached the requests
+    it counts. Moving the clicked node also changed what Escape falls back to, so `c` was no
+    longer the node left selected.
+  - **N3, a key typed into a field taken by the canvas:** failed at `Ctrl+A in a field
+    selected nodes`.
+  - Restored, the three pass, and the two sources are byte for byte what they were.
 - **X3 — One command lays out the pipeline, and one undo puts it back.** **Open** — `Auto
   layout` on the pipeline canvas, one history entry. Proven by `auto layout moves every node
   and one Undo restores every position`, reading committed positions.

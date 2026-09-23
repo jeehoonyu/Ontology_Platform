@@ -72,15 +72,16 @@ CONTROLS: Dict[str, Control] = {
     },
     "select-all": {
         "original": "Select all nodes; Ctrl+A",
-        "ours": "nothing",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "no way to select every node"},
+        "ours": "Select all, and Ctrl+A",
+        "file": BUILDER, "handler": "selectAll",
+        "state": {"test": "graph-editor.spec.ts::Select all, parents and children write the one "
+                          "selection and send nothing"},
     },
     "select-family": {
         "original": "Ctrl+D selects children, Ctrl+E selects parents",
-        "ours": "nothing",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "no way to select along the edges"},
+        "ours": "Select children and Select parents, one edge at a time; Ctrl+D and Ctrl+E",
+        "file": BUILDER, "handler": "selectAlongEdges",
+        "state": {"test": "graph-editor.spec.ts::Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do"},
     },
     "remove-selected": {
         "original": "Remove the selected nodes",

@@ -4,6 +4,7 @@ import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../compone
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
+import { ctrl, useHotkeys, type Hotkey } from "../lib/hotkeys";
 import { postJson } from "../api";
 import {
   cancelJob,
@@ -323,6 +324,41 @@ export function PipelineBuilder() {
   }
 
   /** Click selects one node; Shift-click adds or removes one from the selection. */
+  // The nodes every tool acts on: the set, or the node last clicked when the set is
+  // empty. GOAL_GRAPH_2026-09-23: selection is one set, and every tool takes it.
+  const targets = useMemo(() => {
+    const present = new Set((canvas?.nodes || []).map((node) => node.id));
+    const chosen = selection.length ? selection : selectedNodeId ? [selectedNodeId] : [];
+    return chosen.filter((id) => present.has(id));
+  }, [canvas, selection, selectedNodeId]);
+
+  /** Every node on the canvas. Writes the set only, so nothing is fetched. */
+  function selectAll() {
+    setSelection((canvas?.nodes || []).map((node) => node.id));
+  }
+
+  /**
+   * Adds the selected nodes' parents or children, one edge away, so pressing it
+   * again walks further. The original's Ctrl+E and Ctrl+D. Writes the set only.
+   */
+  function selectAlongEdges(direction: "parents" | "children") {
+    const from = new Set(targets);
+    const reached = (canvas?.edges || [])
+      .filter((edge) => from.has(direction === "parents" ? edge.target : edge.source))
+      .map((edge) => (direction === "parents" ? edge.source : edge.target));
+    setSelection(Array.from(new Set([...targets, ...reached])));
+  }
+
+  // One table, and the listener is driven by it. X4 renders it as the reference.
+  const hotkeys: Hotkey[] = [
+    { keys: "Ctrl+A", label: "Select all", button: "Select all", matches: ctrl("a"), run: selectAll },
+    { keys: "Ctrl+E", label: "Select parents", button: "Select parents", matches: ctrl("e"),
+      run: () => selectAlongEdges("parents") },
+    { keys: "Ctrl+D", label: "Select children", button: "Select children", matches: ctrl("d"),
+      run: () => selectAlongEdges("children") },
+  ];
+  useHotkeys(hotkeys, ".pipeline-body", Boolean(canvas));
+
   function selectNode(nodeId: string, extend = false) {
     setSelectedNodeId(nodeId);
     setSelection((current) => {
@@ -497,6 +533,18 @@ export function PipelineBuilder() {
             </div>);
             if (pane === "canvas") return (
                 <div className="pipeline-body">
+            <div className="canvas-select-tools">
+              <span className="canvas-selection-count">
+                {targets.length} of {canvas?.nodes.length ?? 0} selected
+              </span>
+              <button type="button" onClick={selectAll} disabled={!canvas?.nodes.length}>Select all</button>
+              <button type="button" onClick={() => selectAlongEdges("parents")} disabled={!targets.length}>
+                Select parents
+              </button>
+              <button type="button" onClick={() => selectAlongEdges("children")} disabled={!targets.length}>
+                Select children
+              </button>
+            </div>
             <PipelineCanvas
               canvas={canvas}
               zoom={zoom}
