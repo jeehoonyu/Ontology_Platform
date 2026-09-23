@@ -86,7 +86,10 @@ def read() -> Dict[str, Any]:
         if not isinstance(current, dict):
             continue
 
-        versions = _history(str(path.relative_to(REPO_ROOT)))
+        # `git show <commit>:<path>` names a tree path, which takes forward
+        # slashes only. On Windows str() gives backslashes, every show failed,
+        # and every ceiling read as having no history at all.
+        versions = _history(path.relative_to(REPO_ROOT).as_posix())
         for key, value in current.items():
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 continue

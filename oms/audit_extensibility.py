@@ -27,6 +27,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -155,25 +156,41 @@ def rendering_reach(sources: List[Path]) -> Dict[str, Any]:
     }
 
 
+# snake_case identifiers used where an object type id is expected.
+COUPLING_PATTERNS = (
+    re.compile(r'objectTypeId\s*[=:]\s*"([a-z][a-z0-9_]{2,})"'),
+    re.compile(r'object_type_id"\s*:\s*"([a-z][a-z0-9_]{2,})"'),
+    re.compile(r'objectType\s*===\s*"([a-z][a-z0-9_]{2,})"'),
+)
+# `typeof objectType === "object"` is a JavaScript type guard. The string it
+# compares with is a JavaScript type name, not an object type id, and counting
+# it made the one coupling this audit reported from 2026-08-06 a false one.
+TYPEOF_OPERAND = re.compile(r"\btypeof\s+$")
+
+
+def coupling_matches(text: str) -> List[str]:
+    """The object-type ids ``text`` compares against, in order of appearance."""
+    found: List[str] = []
+    for pattern in COUPLING_PATTERNS:
+        for match in pattern.finditer(text):
+            if TYPEOF_OPERAND.search(text, 0, match.start()):
+                continue
+            found.append(match.group(1))
+    return found
+
+
 def ontology_type_coupling(sources: List[Path]) -> Dict[str, int]:
     """Concrete object-type identifiers appearing in UI source.
 
     Each occurrence is a place where a new object type is invisible until
     someone edits the front end.
     """
-    # snake_case identifiers used where an object type id is expected.
-    patterns = (
-        re.compile(r'objectTypeId\s*[=:]\s*"([a-z][a-z0-9_]{2,})"'),
-        re.compile(r'object_type_id"\s*:\s*"([a-z][a-z0-9_]{2,})"'),
-        re.compile(r'objectType\s*===\s*"([a-z][a-z0-9_]{2,})"'),
-    )
     hits: Dict[str, int] = {}
     for path in sources:
         text = path.read_text(encoding="utf-8", errors="ignore")
-        for pattern in patterns:
-            for match in pattern.findall(text):
-                key = f"{path.relative_to(REPO_ROOT).as_posix()}:{match}"
-                hits[key] = hits.get(key, 0) + 1
+        for match in coupling_matches(text):
+            key = f"{path.relative_to(REPO_ROOT).as_posix()}:{match}"
+            hits[key] = hits.get(key, 0) + 1
     return hits
 
 
@@ -231,6 +248,12 @@ def main() -> int:
 
     if args.set_baseline:
         BASELINE.write_text(json.dumps({
+            # audit_iteration_state reads a baseline's age and shelf life from
+            # this block; a baseline written without it counts as undated.
+            "provenance": {
+                "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "stale_after": "recomputed each run",
+            },
             "renderable_base_types_floor": reading["renderable_base_types"],
             "ontology_type_coupling_ceiling": reading["ontology_type_coupling"],
             "surfaces_missing_specs_ceiling": reading["surfaces_missing_specs"],

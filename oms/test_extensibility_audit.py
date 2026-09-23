@@ -56,6 +56,38 @@ check(reading["ontology_type_coupling"] <= baseline["ontology_type_coupling_ceil
       "object-type coupling holds its ceiling",
       {"now": reading["ontology_type_coupling"], "ceiling": baseline["ontology_type_coupling_ceiling"]})
 
+# A JavaScript type guard names a JavaScript type, not an object type. The
+# ontology manager's `typeof objectType === "object"` was the one coupling this
+# audit reported from its first baseline until 2026-09-23.
+check(audit.coupling_matches('const ok = typeof objectType === "object";') == [],
+      "a typeof guard is not an object-type coupling")
+check(audit.coupling_matches('if (objectType === "pump_station") {}') == ["pump_station"],
+      "a comparison with an object-type id is a coupling")
+check(audit.coupling_matches('open({ objectTypeId: "work_order" })') == ["work_order"],
+      "an object-type id passed as a literal is a coupling")
+check(audit.coupling_matches('typeof x; objectType === "pump_station"') == ["pump_station"],
+      "a typeof elsewhere on the line does not hide a real coupling")
+
+# --set-baseline must keep the provenance block audit_iteration_state dates
+# baselines by; without it the rewritten file counts as undated.
+import tempfile  # noqa: E402
+
+with tempfile.TemporaryDirectory() as scratch:
+    kept_baseline, kept_argv = audit.BASELINE, sys.argv
+    audit.BASELINE = Path(scratch) / "extensibility-baseline.json"
+    sys.argv = ["audit_extensibility.py", "--set-baseline"]
+    try:
+        audit.main()
+        written = json.loads(audit.BASELINE.read_text(encoding="utf-8"))
+    finally:
+        audit.BASELINE, sys.argv = kept_baseline, kept_argv
+check(written.get("provenance", {}).get("recorded_at"),
+      "--set-baseline records when it was taken", written)
+check(written.get("provenance", {}).get("stale_after"),
+      "--set-baseline records how long it stays true", written)
+check(baseline.get("provenance", {}).get("recorded_at"),
+      "the committed baseline is dated", baseline)
+
 # interfaces_configured is the flag Stage 1 flips. It is asserted as a boolean
 # rather than as False so this test does not have to be edited to land the
 # feature it is watching for.

@@ -66,8 +66,8 @@ sense of newly created; all four are old measurements that had never been claime
 | **K2** | Hand-written empty states are replaced by the shared primitive | `raw_empty_ceiling` at 0 | 32 | **Open** |
 | **K3** | Every evidence file records the third-party code that produced it | `unrecorded_ceiling` at 0 | 23 of 24 | **Open** |
 | **K4** | Every evidence file records the migration head it was taken at | `unprovenanced_ceiling` at 0 | 10 | **Open** |
-| **K5** | No UI surface couples to a concrete ontology type | `ontology_type_coupling_ceiling` at 0 | 1 — `frontend/src/workspaces/OntologyManager.tsx` | **Open** |
-| **K6** | No ratchet sits at a ceiling nobody has ever lowered | `unmoved_ceiling` at 0 | 2 of 17: `ontology_type_coupling_ceiling` recorded five times and never fell, `raw_empty_ceiling` twice | **Open** — measured now rather than asserted. `oms/audit_ratchet_motion.py` reads each ceiling at every commit that touched its baseline and asks whether it ever fell; `oms/test_ratchet_motion.py`; fifteenth check in the pre-push hook |
+| **K5** | No UI surface couples to a concrete ontology type | `ontology_type_coupling_ceiling` at 0 | 1 — `frontend/src/workspaces/OntologyManager.tsx` | **Met** 2026-09-23 — the one coupling was `typeof objectType === "object"`, a JavaScript type guard read as an object type named `object`. `coupling_matches` in `oms/audit_extensibility.py` skips a `typeof` operand; `oms/test_extensibility_audit.py` holds both sides; the ceiling is 0 |
+| **K6** | No ratchet sits at a ceiling nobody has ever lowered | `unmoved_ceiling` at 0 | 2 of 17: `ontology_type_coupling_ceiling` recorded five times and never fell, `raw_empty_ceiling` twice | **Open** — 1 of 17 since 2026-09-23: `raw_empty_ceiling`, K2's. Measured now rather than asserted. `oms/audit_ratchet_motion.py` reads each ceiling at every commit that touched its baseline and asks whether it ever fell; `oms/test_ratchet_motion.py`; fifteenth check in the pre-push hook |
 | **K7** | A completing goal's last condition names its successor | the frontier is consulted before a goal is closed | done by hand today, and only because someone remembered | **Open** |
 | **K8** | No ratchet's ceiling stands above what it currently measures | every ceiling equals its measurement | not measured; `unauthorized_mutating_ceiling` stood at 75 while the count had been 71 since before the branch that found it | **Open** — 5 of 27 audits announce an unlocked improvement and 22 say nothing, so the uniform check needs every audit to report its current value in one shape first |
 | **K9** | The run ledger records only verdicts a check actually reached | 0 fabricated verdicts | `recording()` maps `SystemExit(2)` to FAIL, so an argparse usage error overwrites the last real result; two manual checks were recorded as failing this way | **Open** — `oms/test_enforcement_runs.py` pins the current mapping, so changing it is a contract change and wants its own commit rather than a merge-eve edit |
@@ -126,6 +126,24 @@ but 22 others say nothing at all, and a gate covering a fifth of the ratchets wh
 like it covers all of them is worse than the gap it papers over. The prerequisite is a
 common way for an audit to state what it measured, not a regex over prose that five of them
 happen to share.
+
+## The census that read nothing on Windows
+
+Re-measuring `extensibility-baseline.json` on 2026-09-23, the step `audit_iteration_state`
+named ahead of the shell and graph goals, lowered its coupling ceiling from 1 to 0 and should
+have moved K6 from 2 to 1. The motion census said 2 to 0.
+
+It had read no history. `_history` asked git for `<commit>:docs\<file>`; a tree path takes
+forward slashes only, so on Windows every `git show` failed, every ceiling came back with no
+versions, and a ceiling with no versions is filed as recorded once and exempt. The audit could
+never report an unmoved ceiling on this machine, and it passed every run while it could not.
+The path is now built with `as_posix()`, and `oms/test_ratchet_motion.py` asserts that a
+baseline committed many times reads back as many versions. With the history read, the census
+agrees with the table above: one ceiling unmoved, `raw_empty_ceiling`.
+
+`--set-baseline` in `audit_extensibility.py` also wrote the file without its `provenance`
+block, which would have left the next person to lower it with an undated baseline. It keeps
+the block now, and the test says so.
 
 ## Non-completion rule
 

@@ -61,6 +61,16 @@ for record in reading["unmoved"]:
           "a ceiling is only held against its owner once the file was revisited", record)
     check(record["now"] > 0, "a ceiling already at zero has nothing left to lower", record)
 
+# The census is only as good as the history it reads. On Windows the tree path was
+# built with backslashes, every `git show` failed, and every ceiling read as recorded
+# once: the audit reported nothing unmoved because it had read nothing at all.
+tenancy_history = audit_ratchet_motion._history(
+    Path("docs", "tenancy-scope-baseline.json").as_posix())
+check(len(tenancy_history) > 1,
+      "a baseline committed many times reads back as many versions", len(tenancy_history))
+check(any(record["versions"] > 1 for record in reading["moved"] + reading["unmoved"]),
+      "the census sees more than one version of some ceiling", None)
+
 check(audit_ratchet_motion.read()["unmoved"] == reading["unmoved"],
       "the census is reproducible, or a ratchet on it means nothing", None)
 
