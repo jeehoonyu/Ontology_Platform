@@ -120,9 +120,9 @@ test that reads its note; whether that note's condition matches the limit is the
 | `workspaces/OntologyRegistryPanel.tsx` | 151 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` | request payload |
-| `workspaces/PipelineBuilder.tsx` | 365 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 393 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 460 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 371 | `PipelineBuilder` | `current` | last dropped |
+| `workspaces/PipelineBuilder.tsx` | 399 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 478 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |

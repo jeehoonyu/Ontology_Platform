@@ -86,6 +86,7 @@ export function PipelineBuilder() {
   // context menu; this only widens what a node drag moves.
   const [selection, setSelection] = useState<string[]>([]);
   const [canvas, setCanvas] = useState<PipelineCanvasState | null>(null);
+  const [canvasFailed, setCanvasFailed] = useState(false);
   const [preview, setPreview] = useState<NodePreview | null>(null);
   const [suggestions, setSuggestions] = useState<NodeSuggestions | null>(null);
   const [details, setDetails] = useState<PipelineNodeDetails | null>(null);
@@ -147,6 +148,7 @@ export function PipelineBuilder() {
   useEffect(() => {
     if (!selectedGraphId) return;
     let cancelled = false;
+    setCanvasFailed(false);
     getPipelineCanvas(selectedGraphId, selectedNodeId || undefined)
       .then((nextCanvas) => {
         if (!cancelled) {
@@ -154,7 +156,11 @@ export function PipelineBuilder() {
           setSelectedNodeId(nextCanvas.selected_node?.id || selectedNodeId);
         }
       })
-      .catch(() => !cancelled && setCanvas(null));
+      .catch(() => {
+        if (cancelled) return;
+        setCanvas(null);
+        setCanvasFailed(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -430,6 +436,18 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
+  // S5 of GOAL_SHELL_2026-09-23. The badge read `canvas?.validation.status ||
+  // "loading"`, so it said loading with no pipeline selected and after a canvas
+  // had failed to load, when nothing was loading. It says loading only while the
+  // page or a canvas is on its way.
+  const pageLoading = !state.value && !state.error;
+  const stripStatus = canvas ? canvas.validation.status
+    : pageLoading ? "loading"
+    : state.error ? "Pipelines failed to load"
+    : !selectedGraphId ? "No pipeline selected"
+    : canvasFailed ? "Canvas failed to load"
+    : "loading";
+
   return (
     <section className="workbench-page pipeline-workbench-page">
       <div className="builder-shell">
@@ -452,7 +470,7 @@ export function PipelineBuilder() {
           />
           <Toolbar groups={canvas?.toolbar_groups || state.value?.selected_canvas?.toolbar_groups || []} />
           <div className="workbench-status-strip">
-            <StatusBadge value={canvas?.validation.status || "loading"} />
+            <StatusBadge value={stripStatus} />
             <span>{actionStatus}</span>
           </div>
           <DndContext sensors={sensors} collisionDetection={slotAwareCollision} onDragStart={(event) => {

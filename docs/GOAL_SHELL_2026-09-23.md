@@ -276,9 +276,46 @@ it reads the validation status, as it does now.
   **Gates.** `INERT_CONTROLS.md` reads 0 inert of 333: the `⋯` button is the one new control,
   and it is wired. `TABLE_TRUNCATION.md` moved line numbers only. The movable pane count
   holds at 11 of 24, `Pane.tsx` keeps its drag entry, and the fast tier passes 23 of 23.
-- **S5 — The status strip says "loading" only while something loads.** **Open** — `No pipeline
+- **S5 — The status strip says "loading" only while something loads.** **Met** — `No pipeline
   selected` with no canvas. Proven by a test that opens the pipeline builder with no graph and
   reads the strip, shown to fail with the fallback restored.
+
+  **"No canvas" was three states, not one.** The badge now reads, in order:
+  - the canvas's validation status, when there is a canvas;
+  - `loading`, while the pipeline list itself is on its way;
+  - `Pipelines failed to load`, if that list failed;
+  - `No pipeline selected`, when none is;
+  - `Canvas failed to load`, when the selected pipeline's canvas failed;
+  - `loading` again, only while that canvas is on its way.
+
+  The canvas request now records a failure, where before its `catch` only cleared the canvas.
+  The builder's `useAsyncState` starts out not loading, before its first request is sent, so
+  the page counts as loading until it has either a value or an error.
+
+  **The proof.** Four tests in `shell-widths.spec.ts` under `the pipeline status strip says
+  what is true`, each reaching its state through a response the test controls. Which pipeline
+  a fresh database selects depends on what earlier tests made, so the tests don't rely on it.
+  - With no pipeline selected, the strip says so.
+  - While the page's pipeline list is held back, the strip says `loading`. When the list
+    arrives, it says `No pipeline selected`.
+  - With a fixture pipeline's canvas held back, the strip says `loading`. When the canvas
+    arrives, it says the canvas's own validation status.
+  - With the canvas answered by a 500, the strip says `Canvas failed to load`.
+
+  Writing the second and fourth tests caught a wrong assumption in their first version: they
+  expected the bootstrapped scenario to select a pipeline. It selects none, and the strip,
+  now honest, said `No pipeline selected`. On the same build, `evaluator.spec.ts` and
+  `multi-node-drag.spec.ts` pass on the desktop-1280 project, 50 of them, one skipped. Both
+  read the strip.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the fallback put back:** all four tests failed, the first at `the strip claims
+    something is loading when no pipeline is selected`, `Received: "loading"`.
+  - **N2, a failed canvas said to be loading:** failed at `a failed canvas still reads as
+    loading`.
+  - **N3, the page's own load ignored:** failed at `the strip says nothing is selected before
+    it knows`, `Received: "No pipeline selected"`.
+  - Restored, the four pass, and `PipelineBuilder.tsx` is byte for byte what it was.
 - **S6 — 1024 and 1366 stay in the sweep for good.** **Open** — the two widths join the
   Playwright projects so the existing render sweep, route sweep and touch tests run there
   too, and the check registry names them. Proven by `audit_check_coverage` seeing the
