@@ -38,10 +38,16 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure"
   },
+  // 1024x768 and 1366x768 are what real screens are: a tablet in landscape and the
+  // commonest laptop. Four projects were a claim about four widths, and the band
+  // from 901 to 1100 went unseen between two of them. S6 of GOAL_SHELL_2026-09-23;
+  // `oms/check_registry.py` names every project, so one cannot quietly go.
   projects: [
     { name: "mobile-375", use: { viewport: { width: 375, height: 812 } } },
     { name: "tablet-768", use: { viewport: { width: 768, height: 1024 } } },
+    { name: "tablet-1024", use: { viewport: { width: 1024, height: 768 } } },
     { name: "desktop-1280", use: { viewport: { width: 1280, height: 900 } } },
+    { name: "laptop-1366", use: { viewport: { width: 1366, height: 768 } } },
     { name: "wide-1600", use: { viewport: { width: 1600, height: 1000 } } }
   ],
   webServer: {

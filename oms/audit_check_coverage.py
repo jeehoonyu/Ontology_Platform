@@ -31,8 +31,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_registry import (  # noqa: E402
-    BROWSER_GATES, DECLARATIONS, browser_gate_problems, declared_widths, discover,
-    requirements_of, suite_executions, workflow_invocations,
+    BROWSER_GATES, DECLARATIONS, PLAYWRIGHT_PROJECTS, browser_gate_problems, declared_widths,
+    discover, project_problems, requirements_of, suite_executions, workflow_invocations,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -100,6 +100,11 @@ def main() -> int:
     browser_problems = browser_gate_problems()
     for problem in browser_problems:
         print(f"  BROWSER GATE MISSING: {problem}")
+    print(f"{len(PLAYWRIGHT_PROJECTS)} Playwright project(s): "
+          + ", ".join(f"{name} ({width})" for name, width in PLAYWRIGHT_PROJECTS.items()))
+    browser_problems += project_problems()
+    for problem in project_problems():
+        print(f"  PROJECT MISMATCH: {problem}")
 
     if args.set_baseline:
         BASELINE.write_text(json.dumps({

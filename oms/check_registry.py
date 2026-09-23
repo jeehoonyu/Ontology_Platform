@@ -122,6 +122,50 @@ BROWSER_GATES: Dict[str, Dict[str, str]] = {
     },
 }
 
+PLAYWRIGHT_CONFIG = REPO_ROOT / "frontend" / "playwright.config.ts"
+
+# The viewports every browser spec runs at unless it skips itself, by project
+# name. S6 of GOAL_SHELL_2026-09-23: four projects were a claim about four
+# widths, and the band from 901 to 1100 went unseen between two of them. A
+# project dropped from the config, or added without being named here, fails.
+PLAYWRIGHT_PROJECTS: Dict[str, int] = {
+    "mobile-375": 375,
+    "tablet-768": 768,
+    "tablet-1024": 1024,
+    "desktop-1280": 1280,
+    "laptop-1366": 1366,
+    "wide-1600": 1600,
+}
+
+_PROJECT = re.compile(r'\{\s*name:\s*"(?P<name>[a-z0-9-]+)",\s*use:\s*\{\s*viewport:\s*\{\s*width:\s*(?P<width>\d+)')
+
+
+def configured_projects() -> Dict[str, int]:
+    """The projects `playwright.config.ts` declares, with their viewport widths."""
+    if not PLAYWRIGHT_CONFIG.exists():
+        return {}
+    text = PLAYWRIGHT_CONFIG.read_text(encoding="utf-8", errors="replace")
+    return {match.group("name"): int(match.group("width")) for match in _PROJECT.finditer(text)}
+
+
+def project_problems(declared: Dict[str, int] | None = None,
+                     configured: Dict[str, int] | None = None) -> List[str]:
+    """Where the registry's projects and the config's disagree, and any project
+    width the shell sweep does not visit."""
+    declared = PLAYWRIGHT_PROJECTS if declared is None else declared
+    configured = configured_projects() if configured is None else configured
+    problems = [f"project {name} is named here and not in playwright.config.ts"
+                for name in sorted(set(declared) - set(configured))]
+    problems += [f"project {name} is in playwright.config.ts and not named here"
+                 for name in sorted(set(configured) - set(declared))]
+    problems += [f"project {name} is {configured[name]} px wide in the config and {declared[name]} here"
+                 for name in sorted(set(declared) & set(configured)) if declared[name] != configured[name]]
+    swept = set(declared_widths("shell-widths.spec.ts", "SHELL_WIDTHS"))
+    problems += [f"project {name} runs at {width} px, which SHELL_WIDTHS does not visit"
+                 for name, width in sorted(declared.items()) if swept and width not in swept]
+    return problems
+
+
 _WIDTH_LIST = re.compile(r"export const (?P<name>[A-Z_]+)\s*=\s*\[(?P<body>[^\]]*)\]")
 
 

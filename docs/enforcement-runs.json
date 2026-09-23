@@ -6,16 +6,16 @@
     "verdict": "PASS"
   },
   "audit_browser_evidence": {
-    "at": 1789341851,
+    "at": 1790202461,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_check_coverage": {
-    "at": 1790201888,
+    "at": 1790202518,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
-    "verdict": "PASS"
+    "verdict": "FAIL"
   },
   "audit_dependency_provenance": {
     "at": 1790201889,
@@ -42,10 +42,16 @@
     "verdict": "PASS"
   },
   "audit_frontier": {
-    "at": 1790199094,
+    "at": 1790202108,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
+  },
+  "audit_graph_editor": {
+    "at": 1790202181,
+    "environment": "local",
+    "migration_head": "0045_entity_exact_pass",
+    "verdict": "FAIL"
   },
   "audit_inert_controls": {
     "at": 1790201897,
@@ -54,7 +60,7 @@
     "verdict": "PASS"
   },
   "audit_iteration_state": {
-    "at": 1790201888,
+    "at": 1790202108,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -84,7 +90,7 @@
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1790201890,
+    "at": 1790202518,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -180,13 +186,13 @@
     "verdict": "PASS"
   },
   "validate_docs_conformance": {
-    "at": 1790201898,
+    "at": 1790202518,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1790201899,
+    "at": 1790202107,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "FAIL"
@@ -198,7 +204,7 @@
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1790201899,
+    "at": 1790202107,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "FAIL"

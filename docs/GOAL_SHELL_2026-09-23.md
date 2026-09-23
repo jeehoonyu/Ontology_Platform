@@ -316,10 +316,50 @@ it reads the validation status, as it does now.
   - **N3, the page's own load ignored:** failed at `the strip says nothing is selected before
     it knows`, `Received: "No pipeline selected"`.
   - Restored, the four pass, and `PipelineBuilder.tsx` is byte for byte what it was.
-- **S6 — 1024 and 1366 stay in the sweep for good.** **Open** — the two widths join the
+- **S6 — 1024 and 1366 stay in the sweep for good.** **Met** — the two widths join the
   Playwright projects so the existing render sweep, route sweep and touch tests run there
   too, and the check registry names them. Proven by `audit_check_coverage` seeing the
   projects.
+
+  **What was built.** Two new projects, `tablet-1024` at 1024×768 and `laptop-1366` at
+  1366×768, following the `<class>-<width>` names the other four use. `check_registry.py`
+  names all six in `PLAYWRIGHT_PROJECTS`. `audit_check_coverage` reads the projects out of
+  `playwright.config.ts` and fails if:
+  - a project is in the config and not in the registry, or the other way round;
+  - a width differs between the two;
+  - a project's width is one `SHELL_WIDTHS` does not visit.
+
+  `oms/test_check_homes.py` holds all three, with a mutated registry for each.
+
+  **What runs at the new widths.** 24 tests on each new project: the render sweep over 16
+  routes (alignment, overflow and axe), the legacy sweep and the served-shell checks. They
+  run on every project, and the legacy sweep's overflow ceilings hold at both new widths.
+  Two parts of the goal's sentence did not carry over:
+  - **The route sweep.** No spec has that name. The nearest, `route-cost.spec.ts`, measures
+    request counts once, at desktop-1280, because what a route requests does not depend on
+    the width. It stays there.
+  - **The touch tests.** They set their own viewports, 390×844 and now 1024×768, and run
+    once. A project's width never reaches them, so running them per project would repeat
+    the same test six times.
+
+  **The baseline that records widths.** `browser-evidence-baseline.json` was re-recorded
+  from a full run of the suite: 1,152 test runs over six viewports, 308 ran, 844 skipped,
+  0 failed, 0 flaky, with desktop-1280 running 187. The bundle came from
+  `measure_browser_evidence.py --build`, 70 source inputs, and the audit found it was the
+  repository's. The run went through a copy of `playwright.config.ts` pointed at port 8011,
+  because a preview server from another session held 8010; nothing else in the config
+  changed. One entry is still `known_failing`: `pipeline deploys an immutable snapshot`. It
+  ran and passed here, and it stays listed until isolated runs discharge it.
+
+  **Negative runs:**
+  - **N1, `laptop-1366` dropped from the config:** the audit failed at `project laptop-1366
+    is named here and not in playwright.config.ts`.
+  - **N2, `tablet-1024` dropped from the registry:** the audit failed at `project
+    tablet-1024 is in playwright.config.ts and not named here`.
+  - **N3, the laptop project at 1360:** the audit failed at `project laptop-1366 is 1360 px
+    wide in the config and 1366 here`.
+  - In each case `test_check_homes.py` failed too, and the two files were restored byte for
+    byte.
 
 ## Order and size
 

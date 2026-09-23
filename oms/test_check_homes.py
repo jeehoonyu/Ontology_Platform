@@ -35,7 +35,8 @@ import validate_docs_conformance  # noqa: E402
 import validate_external_evaluations  # noqa: E402
 import validate_tier_b_evidence  # noqa: E402
 from check_registry import (  # noqa: E402
-    BROWSER_GATES, DECLARATIONS, browser_gate_problems, declared_widths, discover, requirements_of,
+    BROWSER_GATES, DECLARATIONS, PLAYWRIGHT_PROJECTS, browser_gate_problems, configured_projects,
+    declared_widths, discover, project_problems, requirements_of,
 )
 from enforcement_runs import recording  # noqa: E402
 
@@ -121,5 +122,23 @@ check(browser_gate_problems({"shell-widths.spec.ts": {"gates": "x", "cadence": "
 for spec, declaration in BROWSER_GATES.items():
     check(declaration.get("gates") and declaration.get("cadence"),
           f"{spec} declares what it gates and how often it runs", declaration)
+
+# --- the Playwright projects the registry names ------------------------------
+# S6 of GOAL_SHELL_2026-09-23: 1024 and 1366 join the projects for good.
+
+check(configured_projects() == PLAYWRIGHT_PROJECTS,
+      "the registry names exactly the projects playwright.config.ts declares",
+      {"config": configured_projects(), "registry": PLAYWRIGHT_PROJECTS})
+check(not project_problems(), "and every project's width is in the shell sweep", project_problems())
+for width in (1024, 1366):
+    check(width in PLAYWRIGHT_PROJECTS.values(), f"a project runs at {width}", PLAYWRIGHT_PROJECTS)
+dropped = {name: width for name, width in PLAYWRIGHT_PROJECTS.items() if width != 1366}
+check(any("not in playwright.config.ts" in p or "not named here" in p
+          for p in project_problems(declared=dropped)),
+      "a project the config has and the registry lost is reported", None)
+check(any("SHELL_WIDTHS does not visit" in p
+          for p in project_problems(declared={**PLAYWRIGHT_PROJECTS, "odd-1111": 1111},
+                                    configured={**PLAYWRIGHT_PROJECTS, "odd-1111": 1111})),
+      "a project at a width the sweep skips is reported", None)
 
 print(f"Check homes verified: {passed} assertions passed.")
