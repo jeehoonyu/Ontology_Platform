@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
@@ -67,7 +68,28 @@ REFERENCE = REPO_ROOT / "docs" / "MOVEMENT_CONTRACT.md"
 BASELINE = REPO_ROOT / "docs" / "movement-contract-baseline.json"
 
 STAGES = ("cancel", "recover", "alternative")
-MECHANISMS = ("dnd-kit", "xyflow", "pointer")
+# `command` is a move made by one click rather than a drag -- `Auto layout` moves
+# every node on the pipeline canvas (X3 of GOAL_GRAPH_2026-09-23). The drag census
+# cannot see a command, so a command surface names the handler that does it and the
+# gate checks its file still defines it, the way `audit_graph_editor` checks a row.
+MECHANISMS = ("dnd-kit", "xyflow", "pointer", "command")
+FRONTEND_SRC = REPO_ROOT / "frontend" / "src"
+
+
+def command_missing(surface: Dict[str, Any]) -> str:
+    """Empty unless a command surface names a handler its file no longer defines."""
+    handler = surface.get("handler")
+    if not handler:
+        return "is a command and names no handler that does it"
+    path = FRONTEND_SRC / surface["file"]
+    if not path.exists():
+        return f"names {surface['file']}, which does not exist"
+    name = re.escape(handler)
+    definition = rf"\bfunction\s+{name}\s*\(|\b(?:const|let)\s+{name}\s*="
+    if not re.search(definition, path.read_text(encoding="utf-8")):
+        return f"names `{handler}`, which {surface['file']} no longer defines"
+    return ""
+
 
 Cell = Dict[str, str]
 
@@ -106,6 +128,16 @@ SURFACES: Dict[str, Dict[str, Any]] = {
                           "Escape, a click or another lasso replaces what it selected"},
         "alternative": {"test": "graph-editor.spec.ts::the nodes a lasso selects can be selected "
                                 "without a drag"},
+    },
+    "pipeline-layout": {
+        "file": "workspaces/PipelineBuilder.tsx", "mechanism": "command", "handler": "autoLayout",
+        "moves": "every node of the pipeline into layers, with one click (X3 of GOAL_GRAPH)",
+        "cancel": {"na": "one click with nothing in between: no gesture is under way to take back "
+                         "part of, and `Undo move` takes back the whole of it"},
+        "recover": {"test": "graph-editor.spec.ts::auto layout moves every node and one Undo restores "
+                            "every position"},
+        "alternative": {"test": "graph-editor.spec.ts::auto layout moves every node and one Undo "
+                                "restores every position"},
     },
     "pipeline-palette": {
         "file": "workspaces/PipelineBuilder.tsx", "mechanism": "dnd-kit",
@@ -265,7 +297,11 @@ def compare(found: Dict[str, Any], baseline: Dict[str, Any],
         failures.append(f"{file} moves something with {mechanism} and no surface here counts what "
                         f"cancelling or undoing that move does")
     for name, surface in surfaces.items():
-        if (surface["file"], surface["mechanism"]) not in required:
+        if surface["mechanism"] == "command":
+            problem = command_missing(surface)
+            if problem:
+                failures.append(f"{name} {problem}")
+        elif (surface["file"], surface["mechanism"]) not in required:
             failures.append(f"{name} is declared as {surface['mechanism']} in {surface['file']}, "
                             f"which the drag census no longer finds there")
 

@@ -233,3 +233,55 @@ test.describe("a region of the canvas selects with a drag", () => {
       .toEqual(["a", "b"]);
   });
 });
+
+/**
+ * One command lays out the pipeline, and one undo puts it back. X3 of
+ * `GOAL_GRAPH_2026-09-23.md`. Positions are read as committed -- `style.left` and
+ * `style.top`, never a bounding box -- for the reason `GOAL_DRAG` L8 records.
+ */
+test.describe("one command lays out the pipeline", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  const position = (page: Page, id: string) => node(page, id).evaluate((element) => {
+    const style = (element as HTMLElement).style;
+    return { x: Number.parseFloat(style.left) || 0, y: Number.parseFloat(style.top) || 0 };
+  });
+
+  test("auto layout moves every node and one Undo restores every position", async ({ page }) => {
+    // Out of order on purpose: a flows into b and d, b into c, and nothing is where
+    // its layer would put it.
+    const messy: FixtureNode[] = [
+      { id: "a", x: 300, y: 300 }, { id: "b", x: 40, y: 40 }, { id: "c", x: 200, y: 420 }, { id: "d", x: 420, y: 60 },
+    ];
+    await openFixture(page, messy, [["a", "b"], ["b", "c"], ["a", "d"]]);
+    const before = Object.fromEntries(await Promise.all(messy.map(async (item) => [item.id, await position(page, item.id)])));
+    const layouts: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().includes("/layout")) layouts.push(request.url());
+    });
+
+    await page.getByRole("button", { name: "Auto layout" }).click();
+    await expect(page.locator(".workbench-status-strip")).toContainText("Laid out 4 nodes.");
+
+    // Layer 0 is a; layer 1 is b above d, the order they already had; layer 2 is c.
+    const expected: Record<string, { x: number; y: number }> = {
+      a: { x: 40, y: 60 }, b: { x: 300, y: 60 }, d: { x: 300, y: 170 }, c: { x: 560, y: 60 },
+    };
+    for (const [id, at] of Object.entries(expected)) {
+      await expect.poll(() => position(page, id), { message: `auto layout did not place ${id} in its layer` })
+        .toEqual(at);
+    }
+    expect(layouts, "auto layout was not one save").toHaveLength(1);
+
+    await page.getByRole("button", { name: "Undo move" }).click();
+    await expect(page.locator(".workbench-status-strip")).toContainText("Moved 4 nodes back.");
+    for (const item of messy) {
+      await expect.poll(() => position(page, item.id), { message: `one Undo did not put ${item.id} back` })
+        .toEqual(before[item.id]);
+    }
+    expect(layouts, "the undo was not one save").toHaveLength(2);
+    await expect(page.getByRole("button", { name: "Undo move" }), "one undo left more to undo").toBeDisabled();
+  });
+});

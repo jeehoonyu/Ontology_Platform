@@ -4,6 +4,7 @@ import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../compone
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
+import { columnLayout, layersOf } from "../lib/graphLayout";
 import { ctrl, useHotkeys, type Hotkey } from "../lib/hotkeys";
 import { postJson } from "../api";
 import {
@@ -388,28 +389,69 @@ export function PipelineBuilder() {
    * one drag, the defect V4 of GOAL_MOVEMENT removed from the artifact canvases.
    */
   function moveNodes(nodeIds: string[], delta: { x: number; y: number }) {
-    if (!selectedGraphId || !canvas) return;
+    if (!canvas) return;
     const moving = new Set(nodeIds);
-    const placed = (node: { id: string; position: { x: number; y: number } }) => moving.has(node.id)
-      ? { x: Math.max(0, node.position.x + delta.x), y: Math.max(0, node.position.y + delta.y) }
-      : node.position;
+    const label = nodeIds.length === 1 ? nodeIds[0] : `${nodeIds.length} nodes`;
+    commitPositions(
+      Object.fromEntries(canvas.nodes.filter((node) => moving.has(node.id)).map((node) => [node.id, {
+        x: Math.max(0, node.position.x + delta.x), y: Math.max(0, node.position.y + delta.y)
+      }])),
+      label,
+      nodeIds.length === 1 ? `Saved ${label} position.` : `Saved positions of ${label}.`
+    );
+  }
+
+  /**
+   * Puts nodes where `next` says, and commits once: one layout request, and one
+   * history entry holding every position before, so one `Undo move` takes the whole
+   * change back however many nodes it touched. Node moves and `Auto layout` both
+   * come through here.
+   */
+  function commitPositions(next: Record<string, { x: number; y: number }>, label: string, done: string) {
+    if (!selectedGraphId || !canvas) return;
+    const placed = (node: { id: string; position: { x: number; y: number } }) => next[node.id] || node.position;
     setCanvas((current) => current && {
       ...current,
       nodes: current.nodes.map((node) => ({ ...node, position: placed(node) })),
       selected_node: current.selected_node ? { ...current.selected_node, position: placed(current.selected_node) } : current.selected_node
     });
     const previous = Object.fromEntries(canvas.nodes.map((node) => [node.id, node.position]));
-    const label = nodeIds.length === 1 ? nodeIds[0] : `${nodeIds.length} nodes`;
     setMoves((current) => [...current, { graphId: selectedGraphId, nodeId: label, positions: previous }]);
     const positions = Object.fromEntries(canvas.nodes.map((node) => [node.id, placed(node)]));
     setActionStatus(`Saving ${label} position...`);
     void savePipelineLayout(selectedGraphId, positions)
       .then((nextCanvas) => {
         setCanvas(nextCanvas);
-        setActionStatus(nodeIds.length === 1 ? `Saved ${label} position.` : `Saved positions of ${label}.`);
+        setActionStatus(done);
         setRefreshKey((key) => key + 1);
       })
       .catch((error: Error) => setActionStatus(`Could not save layout: ${error.message}`));
+  }
+
+  /**
+   * Lays the pipeline out left to right, a column per layer: a node nothing flows
+   * into on the left, and every edge pointing to a later column. Inside a column the
+   * nodes keep the order top to bottom a person had already given them. One commit,
+   * so one `Undo move` puts every node back. X3 of GOAL_GRAPH_2026-09-23.
+   */
+  function autoLayout() {
+    if (!canvas?.nodes.length) return;
+    const layer = layersOf(canvas.nodes.map((node) => node.id), canvas.edges);
+    const depth = (id: string) => layer.get(id) ?? 0;
+    const ordered = [...canvas.nodes].sort((a, b) =>
+      depth(a.id) - depth(b.id) || a.position.y - b.position.y || a.position.x - b.position.x);
+    const placed = columnLayout(ordered, (node) => node.id, (node) => depth(node.id),
+                                { x: 260, y: 110, originX: 40, originY: 60 });
+    const moved = canvas.nodes.filter((node) => {
+      const to = placed.get(node.id);
+      return to && (to.x !== node.position.x || to.y !== node.position.y);
+    });
+    if (!moved.length) {
+      setActionStatus("The pipeline is already laid out; nothing moved.");
+      return;
+    }
+    const label = `${canvas.nodes.length} nodes`;
+    commitPositions(Object.fromEntries(placed), label, `Laid out ${label}.`);
   }
 
   /** One Undo, one committed move: the positions before it are saved back. */
@@ -548,7 +590,7 @@ export function PipelineBuilder() {
             </div>);
             if (pane === "canvas") return (
                 <div className="pipeline-body">
-            <div className="canvas-select-tools">
+            <div className="canvas-tools">
               <span className="canvas-selection-count">
                 {targets.length} of {canvas?.nodes.length ?? 0} selected
               </span>
@@ -559,6 +601,7 @@ export function PipelineBuilder() {
               <button type="button" onClick={() => selectAlongEdges("children")} disabled={!targets.length}>
                 Select children
               </button>
+              <button type="button" onClick={autoLayout} disabled={!canvas?.nodes.length}>Auto layout</button>
             </div>
             <PipelineCanvas
               canvas={canvas}

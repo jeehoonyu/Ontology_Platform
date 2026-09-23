@@ -92,9 +92,10 @@ CONTROLS: Dict[str, Control] = {
     },
     "layout": {
         "original": "Layout: evenly disperse and organise the graph; grid snapping",
-        "ours": "nothing on this canvas; PlatformGraph has Auto layout",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "no layout command on the pipeline canvas"},
+        "ours": "Auto layout: a column per layer, one save and one Undo; no grid snapping",
+        "file": BUILDER, "handler": "autoLayout",
+        "state": {"test": "graph-editor.spec.ts::auto layout moves every node and one Undo restores "
+                          "every position"},
     },
     "zoom-fit": {
         "original": "Zoom in, out and fit; Up Arrow fits",

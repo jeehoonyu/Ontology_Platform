@@ -266,9 +266,60 @@ and the count is a button that lists them.
   - **N3, Shift ignored:** failed at `a Shift lasso replaced the selection`.
   - **N4, the drop outline lit by a lasso:** failed at `a lasso lit the drop outline`.
   - Restored, the six tests pass, and the two sources are byte for byte what they were.
-- **X3 — One command lays out the pipeline, and one undo puts it back.** **Open** — `Auto
+- **X3 — One command lays out the pipeline, and one undo puts it back.** **Met** — `Auto
   layout` on the pipeline canvas, one history entry. Proven by `auto layout moves every node
   and one Undo restores every position`, reading committed positions.
+
+  **What was built.** `Auto layout`, beside the selection tools, lays the pipeline out left to
+  right with a column per layer. A node nothing flows into is layer 0, and every other node
+  is one past the deepest node that flows into it, so every edge points to a later column.
+  Within a column, the nodes keep the top-to-bottom order a person had already given them.
+  A graph with a cycle still lays out and loses no node.
+
+  The goal said the layout would use "the layered placement `PlatformGraph` already has".
+  `PlatformGraph` places by columns, not layers: a column per kind of resource. So what is
+  shared is the placement: `lib/graphLayout.ts` holds `columnLayout`, which `PlatformGraph`
+  now uses with its kinds and the pipeline uses with its layers. `PlatformGraph` places
+  exactly as it did.
+
+  Node moves and the layout now commit through one function, `commitPositions`. It sends
+  one layout request and pushes one history entry holding every position from before, so
+  one `Undo move` takes back the whole change. If a layout would move nothing, it moves
+  nothing and says so.
+
+  **Proven by** `auto layout moves every node and one Undo restores every position`. It runs
+  on a four-node pipeline placed out of order on purpose, and checks:
+  - each node's committed position after the layout;
+  - that the layout was one save;
+  - that one Undo put every node back exactly, with one more save;
+  - that nothing was left to undo.
+
+  **Gates.**
+  - `MOVEMENT_CONTRACT.md` gains `pipeline-layout`, as a new `command` mechanism: a move
+    made by one click, which the drag census cannot see. A command surface names its
+    handler, and the gate checks its file still defines it. `test_movement_contract_audit`
+    holds a renamed handler and a missing one.
+  - The surface's recover and alternative stages are met by the test above. Its cancel
+    stage is declared not applicable in the baseline, in the open: one click has no gesture
+    under way to take back part of. The gap count holds at 12.
+  - `GRAPH_EDITOR_PARITY.md` reads 4 of 15, with `layout` met. Grid snapping is still not
+    there and is said so. The baseline holds 10 gaps.
+  - On the same build, 98 tests pass on the desktop-1280 project, one skipped: evaluator,
+    movement, multi-node, graph-editor, drag and inert.
+
+  **A ceiling raised, in the open.** `audit_route_payload` failed the pipeline route at 562,471
+  bytes against a ceiling of 552,973 recorded on 2026-09-13. Built without this commit, the
+  route was already 561,031 bytes, 134 bytes inside the 8 KB tolerance. The pane menu, the
+  status strip and the selection tools of the last day had spent the rest, and this commit
+  adds 1,440 bytes. Every one of those is a feature a condition asked for, so the pipeline
+  route's ceiling is set to 562,471 by hand, and no other route's ceiling moves.
+  `PlatformGraph` is 778 bytes heavier and still inside its tolerance.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the undo entry keeping one node's position:** failed at `one Undo did not put b
+    back`.
+  - **N2, every node in one column:** failed at `auto layout did not place b in its layer`.
+  - Restored, the test passes, and `PipelineBuilder.tsx` is byte for byte what it was.
 - **X4 — Every hotkey has a button, and the help is the wiring.** **Open** — the `HOTKEYS`
   table, the `View hotkeys` dialog rendered from it, the listener driven by it. Proven by a
   test that reads the dialog, presses each key, and checks the same outcome as the button;

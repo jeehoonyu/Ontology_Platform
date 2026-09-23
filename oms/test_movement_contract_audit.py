@@ -75,6 +75,21 @@ ok, failures, _ = compare(found, live_baseline, stale, check_reference=False)
 check(not ok and any("no longer finds there" in f for f in failures),
       f"a surface whose file has no such drag is not refused: {failures}")
 
+# --- a command moves things too, and names what does it ---------------------------------
+# X3 of GOAL_GRAPH: `Auto layout` moves every pipeline node with one click. The drag
+# census cannot see a command, so its handler is what is checked.
+COMMAND = next(name for name, surface in SURFACES.items() if surface["mechanism"] == "command")
+renamed = copy.deepcopy(SURFACES)
+renamed[COMMAND]["handler"] = "aHandlerNobodyWrote"
+ok, failures, _ = compare(found, live_baseline, renamed, check_reference=False)
+check(not ok and any(f"{COMMAND} names `aHandlerNobodyWrote`" in f for f in failures),
+      f"a command naming a handler its file does not define passes: {failures}")
+unnamed = copy.deepcopy(SURFACES)
+del unnamed[COMMAND]["handler"]
+ok, failures, _ = compare(found, live_baseline, unnamed, check_reference=False)
+check(not ok and any("names no handler" in f for f in failures),
+      f"a command naming no handler passes: {failures}")
+
 # The cells below are chosen from the tree rather than named. The first version
 # named `visual-node.cancel` as a gap to close and `pane-move.cancel` as a met
 # stage to regress -- and V5 then met `visual-node.cancel`, so "closing a gap"

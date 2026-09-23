@@ -22,6 +22,7 @@
   "na_cells": [
     "pane-move.recover",
     "pane-resize.recover",
-    "pipeline-lasso.recover"
+    "pipeline-lasso.recover",
+    "pipeline-layout.cancel"
   ]
 }

@@ -17,6 +17,7 @@ import { Page } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString } from "../utils/format";
 import type { JsonObject, TableRow } from "../types";
+import { columnLayout } from "../lib/graphLayout";
 
 interface GraphOverview {
   node_count: number;
@@ -47,15 +48,16 @@ const KIND_COLORS: Record<string, string> = {
 };
 
 function layoutNodes(rows: TableRow[]): Node<JsonObject>[] {
-  const counters: Record<string, number> = {};
   const kinds = Array.from(new Set(rows.map((row) => asString(row.kind, "resource"))));
+  // A column per kind of resource, in the order kinds first appear. The pipeline
+  // canvas places by the same rule with a column per layer.
+  const placed = columnLayout(rows, (row) => asString(row.id),
+                              (row) => kinds.indexOf(asString(row.kind, "resource")), { x: 270, y: 92 });
   return rows.map((row) => {
     const kind = asString(row.kind, "resource");
-    const index = counters[kind] || 0;
-    counters[kind] = index + 1;
     return {
       id: asString(row.id),
-      position: { x: kinds.indexOf(kind) * 270, y: index * 92 },
+      position: placed.get(asString(row.id)) || { x: 0, y: 0 },
       data: { ...row, label: asString(row.label || row.resource_id || row.id) },
       style: { borderColor: KIND_COLORS[kind] || "#77838d" },
       className: `platform-graph-node kind-${kind}`
