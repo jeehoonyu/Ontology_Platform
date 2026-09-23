@@ -154,9 +154,24 @@ it reads the validation status, as it does now.
   stack, including at 320: M7's declared widths are written as inline styles, which the
   stacking rule cannot override. So `Node library` is clipped at every width, and at 320 the
   inspector is wider than the canvas above it.
-- **S2 — No width gives the sidebar a screen to itself.** **Open** — the `min-width: 901px`
+- **S2 — No width gives the sidebar a screen to itself.** **Met** — the `min-width: 901px`
   block moves to 1101. Proven by S1 at 1000, 1024 and 1100, and shown to fail again with the
   block moved back.
+
+  One line in `styles.css`, with a comment saying why the block starts at 1101. Assertion 1
+  now passes at all eighteen widths on all three screens, and the ontology manager passes
+  every assertion at every width. Between 901 and 1100 the pipeline builder also takes the
+  one-column rules the 1100 block already gave it, because the 901 block is no longer there
+  to re-split it. The remaining failures on the pipeline builder and Workshop belong to S3
+  and S4.
+
+  **Negative run,** on a rebuilt `dist`: with the block back at `min-width: 901px`, the spec
+  failed on all three screens at `the workspace begins at 700px of a 700px first screen` for
+  901, 1000 and 1100, and `768px of a 768px` for 1024. Restored, no screen reports it at any
+  width, and `styles.css` is byte for byte what it was. The served-shell and legacy sweeps
+  pass at the four project widths, none of which is in the band. Their one failure, on every
+  project, is the bundle carrying no `build-provenance.json`, because this `dist` was built
+  with `vite build` rather than `measure_browser_evidence.py --build`.
 - **S3 — The pipeline canvas is the widest pane at every desktop width.** **Open** — the
   empty 330 px track goes; the canvas takes the share. Proven by S1 assertion 2 at 1101 and
   above. The numbers before: canvas 169 px of 994 available at 1280.

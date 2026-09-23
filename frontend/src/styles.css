@@ -5364,7 +5364,11 @@ pre {
   color: #4d5b64;
 }
 
-@media (min-width: 901px) {
+/* The side-by-side shell: the sidebar stands beside the workspace, so both take the
+   viewport's height and scroll inside it. It was `min-width: 901px`, and between 901 and
+   1100 the sidebar is a bar across the top (`max-width: 1100px` above), so the bar took
+   `height: 100vh` and the first screen was the bar alone. S2 of GOAL_SHELL_2026-09-23. */
+@media (min-width: 1101px) {
   .app-shell {
     height: 100vh;
     overflow: hidden;
