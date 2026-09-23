@@ -11,7 +11,7 @@ a census reported three mechanisms. Everything below runs through
 
 | File | Drags | Reachable without a mouse | Proven by |
 | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | a node around the pipeline canvas, and receives palette drops | the node's position had no non-drag control at all and now moves from the keyboard; the canvas offers `Add <type>` when it is empty | a pipeline node moves with the keyboard |
+| `components/canvas/PipelineCanvas.tsx` | a node around the pipeline canvas, a selection rectangle over it, and receives palette drops | the node's position had no non-drag control at all and now moves from the keyboard; the canvas offers `Add <type>` when it is empty; what a lasso selects, Shift+click and `Select all` select without a drag | a pipeline node moves with the keyboard |
 | `components/layout/Pane.tsx` | a pane between the left, centre, right and bottom slots of a screen | the `Move <pane> to` select in every pane header, the `Hide` button, and the `Panes` menu that lists what is hidden; the grip is the drag and is never the only way | a pane moves to another slot without a drag |
 | `workspaces/OntologyManager.tsx` | a source dataset field onto a property, and a property row up or down | the `Map <property>` select beside every target, and `Up` and `Down` on every row; both grips are keyboard-operable buttons | a property row reorders without a drag |
 | `workspaces/PipelineBuilder.tsx` | a node type from the palette onto the canvas | tapping the palette entry arms the type, and the empty canvas offers `Add <type>`; once nodes exist the edge insert control does it | a touch user can add the first node to a pipeline |
@@ -21,7 +21,7 @@ a census reported three mechanisms. Everything below runs through
 
 | File | Draggable and droppable ids |
 | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | `node:`, `pipeline-canvas` |
+| `components/canvas/PipelineCanvas.tsx` | `lasso:canvas`, `node:`, `pipeline-canvas` |
 | `components/layout/Pane.tsx` | `` |
 | `workspaces/OntologyManager.tsx` | `field:`, `property:` |
 | `workspaces/PipelineBuilder.tsx` | `palette:` |

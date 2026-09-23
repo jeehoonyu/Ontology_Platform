@@ -107,9 +107,11 @@ _ID = re.compile(r'use(?:Draggable|Droppable)\(\{\s*id:\s*[`"]([^`"$]*)')
 # here rather than quietly stopping proving it.
 SENSOR_BACKED: Dict[str, Dict[str, str]] = {
     "components/canvas/PipelineCanvas.tsx": {
-        "moves": "a node around the pipeline canvas, and receives palette drops",
+        "moves": "a node around the pipeline canvas, a selection rectangle over it, and receives "
+                 "palette drops",
         "reachable": "the node's position had no non-drag control at all and now moves "
-                     "from the keyboard; the canvas offers `Add <type>` when it is empty",
+                     "from the keyboard; the canvas offers `Add <type>` when it is empty; "
+                     "what a lasso selects, Shift+click and `Select all` select without a drag",
         "proven_by": "drag-affordances.spec.ts::a pipeline node moves with the keyboard",
     },
     "components/layout/Pane.tsx": {

@@ -264,7 +264,9 @@ export function PipelineCanvas({
  * Touch is not claimed: without `touch-action: none` a finger here scrolls.
  */
 function LassoSurface() {
-  const draggable = useDraggable({ id: LASSO_ID });
+  // Written out rather than `LASSO_ID`: the drag census reads the id literal, and
+  // a constant here left the lasso missing from what this file registers.
+  const draggable = useDraggable({ id: "lasso:canvas" });
   return <div ref={draggable.setNodeRef} className="canvas-lasso-surface" {...draggable.listeners} />;
 }
 
