@@ -99,9 +99,9 @@ CONTROLS: Dict[str, Control] = {
     },
     "zoom-fit": {
         "original": "Zoom in, out and fit; Up Arrow fits",
-        "ours": "Zoom in, Zoom out and Fit to view buttons",
+        "ours": "Zoom in, Zoom out and Fit to view buttons; Up Arrow does what Fit to view does",
         "file": CANVAS, "handler": "onZoom",
-        "state": {"gap": "no key fits"},
+        "state": {"gap": "Fit to view returns to one fixed zoom; it does not fit the graph to the canvas"},
     },
     "copy-paste": {
         "original": "Ctrl+C / Ctrl+V copy and paste nodes, across pipelines",
@@ -117,9 +117,10 @@ CONTROLS: Dict[str, Control] = {
     },
     "search": {
         "original": "Ctrl+F opens Search pipeline",
-        "ours": "nothing",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "no search of the graph"},
+        "ours": "Search pipeline and Ctrl+F: matches by name, id or type are selected",
+        "file": BUILDER, "handler": "searchNodes",
+        "state": {"test": "graph-editor.spec.ts::a search selects what matches, and a tool used after "
+                          "it takes that"},
     },
     "organise": {
         "original": "Legend and colour groups; folders; text nodes",
@@ -154,9 +155,10 @@ CONTROLS: Dict[str, Control] = {
     },
     "hotkeys": {
         "original": "Help, View hotkeys",
-        "ours": "one hotkey, Escape clears the selection",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "no reference, and one key"},
+        "ours": "View hotkeys, rendered from the table the listener reads; each key names its button",
+        "file": BUILDER, "handler": "showHotkeys",
+        "state": {"test": "graph-editor.spec.ts::the hotkeys reference lists the table, and each key "
+                          "does what its button does"},
     },
 }
 

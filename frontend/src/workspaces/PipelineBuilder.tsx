@@ -5,7 +5,7 @@ import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
 import { columnLayout, layersOf } from "../lib/graphLayout";
-import { ctrl, useHotkeys, type Hotkey } from "../lib/hotkeys";
+import { bare, ctrl, useHotkeys, type Hotkey } from "../lib/hotkeys";
 import { postJson } from "../api";
 import {
   cancelJob,
@@ -30,7 +30,7 @@ import {
   suggestPipelineNode,
   updatePipelineNode
 } from "../api/workspaceState";
-import { BottomDrawer, LASSO_ID, PipelineCanvas, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
+import { BottomDrawer, LASSO_ID, PipelineCanvas, ZOOM_FIT, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
 import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { Toolbar } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
@@ -362,15 +362,76 @@ export function PipelineBuilder() {
     setSelection(Array.from(new Set([...targets, ...reached])));
   }
 
-  // One table, and the listener is driven by it. X4 renders it as the reference.
+  // Search pipeline: matches by name, id or type are selected, and the first is
+  // scrolled into view. It writes the set, so a tool used after a search acts on
+  // what it found. The original's Ctrl+F.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const searchBox = useRef<HTMLInputElement | null>(null);
+  const [hotkeysOpen, setHotkeysOpen] = useState(false);
+  const hotkeysButton = useRef<HTMLButtonElement | null>(null);
+  const hotkeysClose = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (searchOpen) searchBox.current?.focus();
+  }, [searchOpen]);
+  // The reference takes the focus when it opens, so Escape reaches it and a screen
+  // reader lands in it, and gives it back to the button that opened it.
+  useEffect(() => {
+    if (hotkeysOpen) hotkeysClose.current?.focus();
+  }, [hotkeysOpen]);
+
+  function openSearch() {
+    setSearchOpen(true);
+    searchBox.current?.focus();
+    searchBox.current?.select();
+  }
+
+  function matching(text: string) {
+    const needle = text.trim().toLowerCase();
+    if (!needle || !canvas) return [];
+    return canvas.nodes.filter((node) =>
+      [node.label, node.id, node.type].some((value) => String(value || "").toLowerCase().includes(needle)));
+  }
+
+  function searchNodes(text: string) {
+    setSearchText(text);
+    const found = matching(text);
+    if (!text.trim()) return;
+    setSelection(found.map((node) => node.id));
+    const first = found[0];
+    if (first) {
+      canvasRef.current?.querySelector(`[data-node-id="${CSS.escape(first.id)}"]`)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  function showHotkeys() {
+    setHotkeysOpen(true);
+  }
+
+  function closeHotkeys() {
+    setHotkeysOpen(false);
+    hotkeysButton.current?.focus();
+  }
+
+  // Every key the canvas answers to, in one table. The listener is driven by it and
+  // `View hotkeys` renders it, so the reference cannot disagree with the wiring, and
+  // every row names the button that does the same thing. X4 of GOAL_GRAPH_2026-09-23.
   const hotkeys: Hotkey[] = [
     { keys: "Ctrl+A", label: "Select all", button: "Select all", matches: ctrl("a"), run: selectAll },
     { keys: "Ctrl+E", label: "Select parents", button: "Select parents", matches: ctrl("e"),
       run: () => selectAlongEdges("parents") },
     { keys: "Ctrl+D", label: "Select children", button: "Select children", matches: ctrl("d"),
       run: () => selectAlongEdges("children") },
+    { keys: "Ctrl+F", label: "Search pipeline", button: "Search pipeline", matches: ctrl("f"), run: openSearch },
+    // Up Arrow is also how a keyboard drag moves a node up. While a drag is live the
+    // hotkeys stand down (`dragging` below), and a test proves the zoom stays put.
+    { keys: "Up Arrow", label: "Fit to view", button: "Fit to view", matches: bare("ArrowUp"),
+      run: () => setZoom(ZOOM_FIT) },
   ];
-  useHotkeys(hotkeys, ".pipeline-body", Boolean(canvas));
+  // Whether a drag is live on this screen: its keys are the drag's while it is.
+  const dragging = useRef(false);
+  useHotkeys(hotkeys, ".pipeline-body", Boolean(canvas), () => dragging.current);
 
   function selectNode(nodeId: string, extend = false) {
     setSelectedNodeId(nodeId);
@@ -567,9 +628,13 @@ export function PipelineBuilder() {
             <span>{actionStatus}</span>
           </div>
           <DndContext sensors={sensors} collisionDetection={slotAwareCollision} onDragStart={(event) => {
+            dragging.current = true;
             const id = String(event.active.id);
             if (id.startsWith("node:")) setSelectedNodeId(id.slice(5));
+          }} onDragCancel={() => {
+            dragging.current = false;
           }} onDragEnd={(event) => {
+            dragging.current = false;
             // A pane move stops here; anything else belongs to the canvas.
             if (paneState.handleDragEnd(event)) return;
             endCanvasDrag(event);
@@ -602,7 +667,60 @@ export function PipelineBuilder() {
                 Select children
               </button>
               <button type="button" onClick={autoLayout} disabled={!canvas?.nodes.length}>Auto layout</button>
+              <button type="button" onClick={openSearch} disabled={!canvas?.nodes.length}>Search pipeline</button>
+              <button type="button" ref={hotkeysButton} onClick={showHotkeys}>View hotkeys</button>
             </div>
+            {searchOpen ? (
+              <div className="canvas-search">
+                <input
+                  ref={searchBox}
+                  aria-label="Find in pipeline"
+                  placeholder="Name, id or type"
+                  value={searchText}
+                  onChange={(event) => searchNodes(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSearchOpen(false);
+                  }}
+                />
+                <span className="canvas-search-count">
+                  {searchText.trim()
+                    ? `${matching(searchText).length} of ${canvas?.nodes.length ?? 0} match`
+                    : "Type to select what matches"}
+                </span>
+                <button type="button" onClick={() => setSearchOpen(false)}>Close search</button>
+              </div>
+            ) : null}
+            {hotkeysOpen ? (
+              <section
+                role="dialog"
+                aria-label="Hotkeys"
+                className="hotkeys-reference"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeHotkeys();
+                }}
+              >
+                <header>
+                  <strong>Hotkeys</strong>
+                  <button type="button" ref={hotkeysClose} onClick={closeHotkeys}>Close</button>
+                </header>
+                <table>
+                  <thead><tr><th>Keys</th><th>Does</th><th>Button</th></tr></thead>
+                  <tbody>
+                    {hotkeys.map((hotkey) => (
+                      <tr key={hotkey.keys}>
+                        <td><kbd>{hotkey.keys}</kbd></td><td>{hotkey.label}</td><td>{hotkey.button}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            ) : null}
             <PipelineCanvas
               canvas={canvas}
               zoom={zoom}

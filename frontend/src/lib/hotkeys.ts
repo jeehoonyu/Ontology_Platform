@@ -45,14 +45,22 @@ export function inScope(event: KeyboardEvent, scope: string): boolean {
   return target === document.body || target === document.documentElement || Boolean(target.closest(scope));
 }
 
-/** Listens for the table's keys while `active`, inside `scope`. */
-export function useHotkeys(table: Hotkey[], scope: string, active = true) {
+/**
+ * Listens for the table's keys while `active`, inside `scope`, and never while
+ * `busy` says a drag is live. A keyboard drag moves with the arrow keys, and this
+ * listener runs before the drag's own: measured, Up Arrow in a drag refitted the
+ * canvas under it, because the listener was trusting the drag to have claimed the
+ * key first.
+ */
+export function useHotkeys(table: Hotkey[], scope: string, active = true, busy: () => boolean = () => false) {
   const current = useRef(table);
   current.current = table;
+  const isBusy = useRef(busy);
+  isBusy.current = busy;
   useEffect(() => {
     if (!active) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !inScope(event, scope)) return;
+      if (event.defaultPrevented || isBusy.current() || !inScope(event, scope)) return;
       const hotkey = current.current.find((row) => row.matches(event));
       if (!hotkey) return;
       event.preventDefault();

@@ -320,10 +320,73 @@ and the count is a button that lists them.
     back`.
   - **N2, every node in one column:** failed at `auto layout did not place b in its layer`.
   - Restored, the test passes, and `PipelineBuilder.tsx` is byte for byte what it was.
-- **X4 — Every hotkey has a button, and the help is the wiring.** **Open** — the `HOTKEYS`
+- **X4 — Every hotkey has a button, and the help is the wiring.** **Met** — the `HOTKEYS`
   table, the `View hotkeys` dialog rendered from it, the listener driven by it. Proven by a
   test that reads the dialog, presses each key, and checks the same outcome as the button;
   shown to fail with one key removed from the table, because the dialog then omits it.
+
+  **What was built.** The builder's `hotkeys` table has five rows now:
+  - `Ctrl+A`, `Ctrl+E` and `Ctrl+D`, from X2;
+  - `Ctrl+F`, which opens Search pipeline;
+  - `Up Arrow`, which does what `Fit to view` does.
+
+  Each row is the keys, what they do, the button that does the same, and the handler.
+  `View hotkeys` renders the table as a dialog. The dialog takes the focus when it opens, so
+  Escape reaches it, and hands the focus back to its button when it closes.
+
+  Search pipeline selects every node whose name, id or type contains what was typed, says
+  how many of how many match, and scrolls the first into view. It writes the selection, so
+  a tool used after a search takes what it found.
+
+  `Ctrl+C`, `Ctrl+V`, `Ctrl+H` and `Delete` arrive as rows with the conditions that give them
+  something to do (X5 and X6). The reference picks them up because it is the table.
+
+  **Two keys the goal named do not land as written.** `Ctrl+K`, the original's "show all
+  hidden", is this product's command palette on every screen (`App.tsx`), and a pipeline
+  canvas taking it would take the palette away there. X6 gives "show all" its own key.
+  `Up Arrow` fits the way our `Fit to view` does: it returns to one fixed zoom and does not
+  fit the graph to the canvas. The `zoom-fit` parity row stays a gap for that.
+
+  **The test caught its own premise.** The first version of the table said a keyboard drag
+  handles Up Arrow first and prevents its default, so a hotkey would leave it alone. A test
+  written to prove that failed. Up Arrow in a keyboard drag refitted the canvas under the
+  drag, 1.02 back to 0.86, because this listener runs before the drag's own. The builder
+  now tracks a live drag through the drag context's start, end and cancel, and the hotkeys
+  stand down while one is live.
+
+  **Proven by** three more tests in `graph-editor.spec.ts`:
+  - `the hotkeys reference lists the table, and each key does what its button does`. It reads
+    the rows from the dialog, and for each checks that the named button is on the page and
+    that pressing the key gives what clicking the button gives: the selection for the
+    selection rows, the focus for search, the zoom for fit. A row it has no way to observe
+    fails it.
+  - `a search selects what matches, and a tool used after it takes that`.
+  - `Up Arrow during a keyboard drag moves the node, not the zoom`.
+
+  `GRAPH_EDITOR_PARITY.md` reads 6 of 15, with `search` and `hotkeys` met, and its baseline
+  holds 8 gaps. On the same build, the ten graph-editor tests pass. So do 43 multi-node,
+  drag, movement and concurrent-drag tests. Before the drag fix, 124 across nine specs had
+  passed.
+
+  **Route payload, re-measured.** With this commit `audit_route_payload` failed Vertex, a route
+  this work never touched, at 8.6 KB over its ceiling. The global stylesheet ships in the
+  entry, so every class added for the pane menu, the canvas tools, the lasso, the search and
+  this reference lands on every route. The shared closure has grown 5,728 bytes since the
+  ceilings were set on 2026-09-11: about 2 KB is this session's stylesheet, and the rest came
+  in between. The ceilings are re-measured with `--set-baseline`, the ceremony the gate
+  names. Every route rose by the shared growth plus its own, from +2,865 bytes (the pipeline
+  builder, whose ceiling was raised by hand in X3) to +8,583 (Vertex).
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, `Ctrl+A` taken out of the table, as the goal asks:** failed at `the hotkeys
+    reference does not list Ctrl+A`, the reference reading the other four.
+  - **N2, the hotkeys running during a drag:** failed at `Up Arrow refitted the canvas in the
+    middle of a drag`.
+  - **N3, the reference not taking the focus:** failed at `Escape did not close the
+    reference`.
+  - **N4, a search that selects nothing:** failed at `the search did not select the node it
+    matched`.
+  - Restored, the ten tests pass, and the two sources are byte for byte what they were.
 - **X5 — Nodes copy and paste, within and across pipelines, as one batch.** **Open** —
   proven by `three copied nodes paste into a second pipeline with their edges`, counting
   the command batch and the nodes after.

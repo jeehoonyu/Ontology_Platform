@@ -6,7 +6,7 @@ regenerates this and fails if it disagrees with the source.
 **12 unfixed**: 5 of 12 truncations and 7 of 35 loaded windows.
 
 A truncation is unfixed when it renders no true count, cuts rows before a table that would have paged
-them, or shows part of a list with no way to the rest. 4 reach one of the 88 table elements
+them, or shows part of a list with no way to the rest. 4 reach one of the 89 table elements
 (`<DataTable>`, `<DataGrid>`, `<table>`, `role="table"` or `role="grid"`) written across the frontend.
 A loaded window is unfixed when its screen draws part of a set as the set and says nothing.
 
@@ -120,9 +120,9 @@ test that reads its note; whether that note's condition matches the limit is the
 | `workspaces/OntologyRegistryPanel.tsx` | 151 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` | request payload |
-| `workspaces/PipelineBuilder.tsx` | 461 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 492 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 571 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 522 | `PipelineBuilder` | `current` | last dropped |
+| `workspaces/PipelineBuilder.tsx` | 553 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 633 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |

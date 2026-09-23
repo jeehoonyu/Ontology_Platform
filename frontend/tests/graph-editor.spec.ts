@@ -285,3 +285,130 @@ test.describe("one command lays out the pipeline", () => {
     await expect(page.getByRole("button", { name: "Undo move" }), "one undo left more to undo").toBeDisabled();
   });
 });
+
+/**
+ * Every hotkey has a button, and the reference is the wiring. X4 of
+ * `GOAL_GRAPH_2026-09-23.md`.
+ *
+ * The test reads `View hotkeys` and nothing else to learn what the keys are, then
+ * for each row checks that the button it names is on the page, and that pressing the
+ * key gives what clicking the button gives. The keys the goal names are checked for
+ * by name, so a row taken out of the table fails here because the reference -- drawn
+ * from the same table -- no longer lists it.
+ */
+const EXPECTED_KEYS = ["Ctrl+A", "Ctrl+E", "Ctrl+D", "Ctrl+F", "Up Arrow"];
+
+const PRESS: Record<string, string> = {
+  "Ctrl+A": "Control+a", "Ctrl+E": "Control+e", "Ctrl+D": "Control+d", "Ctrl+F": "Control+f",
+  "Up Arrow": "ArrowUp",
+};
+
+const zoomOf = (page: Page) => page.locator(".canvas-stage").evaluate((stage) =>
+  Number(/scale\(([\d.]+)\)/.exec((stage as HTMLElement).style.transform)?.[1] || 0));
+
+/** How to put the canvas in a known state for a row, and what to read after it. */
+const OUTCOMES: Record<string, { reset: (page: Page) => Promise<void>; read: (page: Page) => Promise<unknown> }> = {
+  "Select all": { reset: (page) => node(page, "a").click(), read: selected },
+  "Select parents": { reset: (page) => node(page, "c").click(), read: selected },
+  "Select children": { reset: (page) => node(page, "a").click(), read: selected },
+  "Search pipeline": {
+    reset: async (page) => {
+      const close = page.getByRole("button", { name: "Close search" });
+      if (await close.count()) await close.click();
+      await node(page, "a").click();
+    },
+    read: (page) => page.getByLabel("Find in pipeline").evaluate((box) => box === document.activeElement),
+  },
+  "Fit to view": {
+    reset: async (page) => {
+      await page.getByRole("button", { name: "Zoom in" }).click();
+      await page.getByRole("button", { name: "Zoom in" }).click();
+      await node(page, "a").click();
+    },
+    read: zoomOf,
+  },
+};
+
+test.describe("every hotkey has a button, and the reference is the wiring", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("the hotkeys reference lists the table, and each key does what its button does", async ({ page }) => {
+    await openFixture(page);
+    await page.getByRole("button", { name: "View hotkeys" }).click();
+    const reference = page.getByRole("dialog", { name: "Hotkeys" });
+    await expect(reference).toBeVisible();
+    const rows = await reference.locator("tbody tr").evaluateAll((trs) =>
+      trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((cell) => (cell.textContent || "").trim())));
+    const keys = rows.map((row) => row[0]);
+    for (const expected of EXPECTED_KEYS) {
+      expect(keys, `the hotkeys reference does not list ${expected}`).toContain(expected);
+    }
+    await page.keyboard.press("Escape");
+    await expect(reference, "Escape did not close the reference").toHaveCount(0);
+    await expect(page.getByRole("button", { name: "View hotkeys" }), "closing lost the focus").toBeFocused();
+
+    for (const [keysText, label, button] of rows) {
+      const outcome = OUTCOMES[label];
+      expect(outcome, `the reference lists "${label}", which this test has no way to observe`).toBeTruthy();
+      await expect(page.getByRole("button", { name: button, exact: true }),
+                   `${keysText} names a button, "${button}", that is not on the page`).toHaveCount(1);
+
+      await outcome.reset(page);
+      await page.getByRole("button", { name: button, exact: true }).click();
+      const byButton = await outcome.read(page);
+
+      await outcome.reset(page);
+      await page.keyboard.press(PRESS[keysText] || keysText);
+      await expect.poll(() => outcome.read(page), { message: `${keysText} did not do what ${button} does` })
+        .toEqual(byButton);
+    }
+  });
+
+  test("a search selects what matches, and a tool used after it takes that", async ({ page }) => {
+    await openFixture(page);
+    await page.getByRole("button", { name: "Search pipeline" }).click();
+    const box = page.getByLabel("Find in pipeline");
+    await expect(box, "the search box did not take the focus").toBeFocused();
+    await box.fill("c");
+    await expect.poll(() => selected(page), { message: "the search did not select the node it matched" })
+      .toEqual(["c"]);
+    await expect(page.locator(".canvas-search-count")).toHaveText("1 of 4 match");
+    await page.getByRole("button", { name: "Select parents" }).click();
+    await expect.poll(() => selected(page), { message: "a tool after a search did not take what it found" })
+      .toEqual(["a", "c"]);
+  });
+});
+
+test.describe("a hotkey never takes a key a drag is using", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("Up Arrow during a keyboard drag moves the node, not the zoom", async ({ page }) => {
+    // Up Arrow fits the view, and it is also how a keyboard drag moves a node up.
+    // The drag handles it first and prevents its default; this proves the hotkey
+    // then leaves it alone rather than refitting the canvas under the drag.
+    await openFixture(page);
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    const zoomBefore = await zoomOf(page);
+    expect(zoomBefore, "the zoom did not leave the fitted level").not.toBe(0.86);
+    const topOf = () => node(page, "b").evaluate((element) => Number.parseFloat((element as HTMLElement).style.top) || 0);
+    const before = await topOf();
+
+    await node(page, "b").focus();
+    const announcement = page.locator("[id^='DndLiveRegion']").filter({ hasText: /node:/ });
+    await page.keyboard.press("Space");
+    await expect(announcement, "the keyboard drag never started").toContainText(/draggable item/i);
+    for (let step = 0; step < 2; step += 1) {
+      await page.keyboard.press("ArrowUp");
+      await page.waitForTimeout(60);
+    }
+    expect(await zoomOf(page), "Up Arrow refitted the canvas in the middle of a drag").toBe(zoomBefore);
+    await page.keyboard.press("Space");
+    await expect.poll(topOf, { message: "the keyboard drag did not move the node up" }).toBeLessThan(before);
+    expect(await zoomOf(page), "Up Arrow refitted the canvas after the drag").toBe(zoomBefore);
+  });
+});
