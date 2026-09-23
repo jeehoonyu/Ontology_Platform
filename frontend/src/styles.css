@@ -2640,6 +2640,30 @@ pre {
   padding: 2px 6px;
 }
 
+/* A narrow pane's Collapse, Move to… and Hide, opened from its `⋯` button. It sits
+   in the flow under the header rather than floating over the body, so a collapsed
+   pane -- which has no body -- still shows it whole. S4 of GOAL_SHELL_2026-09-23. */
+.pane-menu {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #d7dedf;
+  background: #f3f6f7;
+}
+
+.pane-menu button,
+.pane-menu select {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+
+.pane-menu-button {
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
 .pane-body {
   flex: 1 1 auto;
   min-height: 0;

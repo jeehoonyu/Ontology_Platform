@@ -40,6 +40,11 @@ import {
  * one never sees it. Condition M4 tests exactly that, including with this wiring
  * removed.
  */
+// Below this width a pane's Collapse, Move to… and Hide sit behind one `⋯`
+// button, so the title gets the header first. At 220px the four controls left
+// `Add data / transforms` 51 of the 125 pixels it needs. S4 of GOAL_SHELL.
+const PANE_MENU_BELOW_PX = 280;
+
 // Not exported. `PaneHost` is the entry point a screen uses, and a primitive
 // exported for a caller that does not exist yet is a claim about the future.
 // M7 exports it if a screen needs a pane outside a host.
@@ -57,10 +62,90 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
   children: ReactNode;
 }) {
   const draggable = useDraggable({ id: `${PANE_PREFIX}${id}`, disabled: anchored });
+  const { setNodeRef } = draggable;
+  const section = useRef<HTMLElement | null>(null);
+  const header = useRef<HTMLElement | null>(null);
+  const titleText = useRef<HTMLElement | null>(null);
+  const controlBox = useRef<HTMLDivElement | null>(null);
+  const menuButton = useRef<HTMLButtonElement | null>(null);
+  // The width the three controls take in the header, read while they are there,
+  // so the menu stays shut only where they fit beside the whole title.
+  const fullControls = useRef(0);
+  const narrowNow = useRef(false);
+  const [narrow, setNarrow] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const setSection = useCallback((element: HTMLElement | null) => {
+    setNodeRef(element);
+    section.current = element;
+  }, [setNodeRef]);
+  // S4 of GOAL_SHELL_2026-09-23. Measured before paint, so a narrow pane's first
+  // frame already has the menu rather than a clipped title. Narrow is below 280px,
+  // or wherever the whole title and the three controls do not fit side by side:
+  // at 320 the pipeline's library pane is 287px and `Add data / transforms` still
+  // lost 17 of its 125 pixels to them.
+  useLayoutEffect(() => {
+    const element = section.current;
+    if (!element) return;
+    const measure = () => {
+      const bar = header.current;
+      const title = titleText.current;
+      if (!narrowNow.current && controlBox.current) fullControls.current = controlBox.current.offsetWidth;
+      let crowded = false;
+      if (bar && title) {
+        const style = getComputedStyle(bar);
+        const gap = parseFloat(style.columnGap) || 0;
+        const grip = (bar.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0;
+        const need = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + grip + 2 * gap
+          + title.scrollWidth + fullControls.current;
+        crowded = bar.clientWidth < need;
+      }
+      narrowNow.current = element.offsetWidth < PANE_MENU_BELOW_PX || crowded;
+      setNarrow(narrowNow.current);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hidden]);
   if (hidden) return null;
+  const closeMenu = () => {
+    setMenuOpen(false);
+    menuButton.current?.focus();
+  };
+  // The same three controls whether they sit in the header or behind the menu:
+  // the same names, so a keyboard, a screen reader and a test find the same
+  // thing, and only one set is ever rendered.
+  const controls = (
+    <>
+      <button
+        type="button"
+        aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`}
+        onClick={() => {
+          onCollapse();
+          if (narrow) setMenuOpen(false);
+        }}
+      >{collapsed ? "+" : "−"}</button>
+      {anchored ? null : (
+        <>
+          <select
+            aria-label={`Move ${title} to`}
+            value=""
+            onChange={(event) => {
+              if (event.target.value) onMove(event.target.value as SlotName);
+            }}
+          >
+            <option value="">Move to…</option>
+            {SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
+          </select>
+          <button type="button" aria-label={`Hide ${title}`} onClick={onHide}>×</button>
+        </>
+      )}
+    </>
+  );
+  const menuId = `pane-menu-${id}`;
   return (
     <section
-      ref={draggable.setNodeRef}
+      ref={setSection}
       className={`pane${collapsed ? " pane-collapsed" : ""}`}
       aria-label={title}
       // M2 shipped a pane that faded while dragging and never moved: the
@@ -74,34 +159,41 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
             opacity: 0.6, zIndex: 4, position: "relative" }
         : undefined}
     >
-      <header className="pane-header">
+      <header className="pane-header" ref={header}>
         {anchored ? <span className="pane-grip pane-grip-anchored" aria-hidden="true">⋮⋮</span>
                   : <DragHandle label={title} grip={draggable} className="pane-grip" />}
-        <strong>{title}</strong>
-        <div className="pane-controls">
+        <strong ref={titleText}>{title}</strong>
+        <div className="pane-controls" ref={controlBox}>
           {actions}
-          <button
-            type="button"
-            aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`}
-            onClick={onCollapse}
-          >{collapsed ? "+" : "−"}</button>
-          {anchored ? null : (
-            <>
-              <select
-                aria-label={`Move ${title} to`}
-                value=""
-                onChange={(event) => {
-                  if (event.target.value) onMove(event.target.value as SlotName);
-                }}
-              >
-                <option value="">Move to…</option>
-                {SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-              </select>
-              <button type="button" aria-label={`Hide ${title}`} onClick={onHide}>×</button>
-            </>
-          )}
+          {narrow ? (
+            <button
+              ref={menuButton}
+              type="button"
+              className="pane-menu-button"
+              aria-label={`Pane actions for ${title}`}
+              aria-expanded={menuOpen}
+              aria-controls={menuOpen ? menuId : undefined}
+              onClick={() => setMenuOpen((open) => !open)}
+            >⋯</button>
+          ) : controls}
         </div>
       </header>
+      {/* In the flow under the header, not a popover over the body: a collapsed
+          pane has no body, and a popover would be clipped by the pane's edge. */}
+      {narrow && menuOpen ? (
+        <div
+          id={menuId}
+          className="pane-menu"
+          role="group"
+          aria-label={`${title} pane actions`}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeMenu();
+          }}
+        >{controls}</div>
+      ) : null}
       {collapsed ? null : <div className="pane-body">{children}</div>}
     </section>
   );

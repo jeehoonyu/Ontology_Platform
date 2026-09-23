@@ -19,6 +19,16 @@ import { expect, test, type Page } from "@playwright/test";
  */
 const LIBRARY = "Add data / transforms";
 
+/**
+ * A pane too narrow for its title and its controls keeps Collapse, `Move to…` and
+ * Hide behind one `⋯` button (S4 of `GOAL_SHELL_2026-09-23.md`). Opens it when the
+ * pane has one, so a test reaches the same select whatever width the pane is.
+ */
+async function paneControls(page: Page, title: string) {
+  const menu = page.getByRole("button", { name: `Pane actions for ${title}` });
+  if (await menu.count()) await menu.click();
+}
+
 const slotOf = (page: Page, title: string) => page.locator(".pane").filter({ hasText: title }).first()
   .evaluate((element) => element.closest(".pane-slot")?.getAttribute("data-slot") || "");
 
@@ -870,6 +880,7 @@ test.describe("resetting the panes touches only the panes", () => {
     // the reset below was only the second way to lose it.
     const unsent = `Typed but not saved ${Date.now()}`;
     await label.fill(unsent);
+    await paneControls(page, "Outputs");
     await page.getByLabel("Move Outputs to").selectOption("bottom");
     await expect.poll(slotOfOutputs).toBe("bottom");
     await expect(page.locator(".pipeline-node-config").getByLabel("Node label"),
@@ -966,6 +977,7 @@ test.describe("a pane that moves keeps what was typed into it", () => {
     const panel = await typeIntoPackageForm(page, picked, `moved_${suffix}`);
 
     // `Move to…`, the single-pointer way to move a pane.
+    await paneControls(page, "Resources");
     await page.getByLabel("Move Resources to").selectOption("right");
     await expect.poll(() => slotHolding(page, ".ontology-package-panel")).toBe("right");
     // The selects render only once the remounted panel's reload has landed, so every
@@ -980,6 +992,7 @@ test.describe("a pane that moves keeps what was typed into it", () => {
     // `Create a package` is the empty string and a real choice. A reload after the
     // remount must not read it as no choice and select the first package again.
     await panel.getByLabel("Package").selectOption("");
+    await paneControls(page, "Resources");
     await page.getByLabel("Move Resources to").selectOption("left");
     await expect.poll(() => slotHolding(page, ".ontology-package-panel")).toBe("left");
     await expect(panel.getByLabel("Package"), "moving the pane took back the choice to create a package")
@@ -1040,6 +1053,7 @@ test.describe("a pane that moves keeps what was typed into it", () => {
     await review.getByRole("tab", { name: /Proposals/ }).click();
     await review.getByPlaceholder("Proposal title").fill(`Unsent proposal ${suffix}`);
 
+    await paneControls(page, "Inspector");
     await page.getByLabel("Move Inspector to").selectOption("bottom");
     await expect.poll(() => slotHolding(page, ".artifact-review-panel")).toBe("bottom");
 
@@ -1071,6 +1085,7 @@ test.describe("a pane that moves keeps what was typed into it", () => {
     await runtime.getByLabel("Parameter 1 name").fill("incident_id");
     await runtime.getByLabel("Parameter 1 value").fill(`incident_${suffix}`);
 
+    await paneControls(page, "Run results");
     await page.getByLabel("Move Run results to").selectOption("right");
     await expect.poll(() => slotHolding(page, ".agent-runtime-panel")).toBe("right");
     await expect(runtime.getByLabel("Instruction"), "moving the pane threw away an instruction that had not been run")

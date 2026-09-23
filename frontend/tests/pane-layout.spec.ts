@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Panes a person can rearrange, operated the way a person without a mouse would.
@@ -256,6 +256,8 @@ test.describe("an empty side slot gives its width back", () => {
       const canvasWidth = () => page.locator(".pane-slot-center").evaluate((el) => el.getBoundingClientRect().width);
       const before = await canvasWidth();
 
+      // At 220px the Outputs pane keeps its controls behind `⋯` (S4 of GOAL_SHELL).
+      await page.getByRole("button", { name: "Pane actions for Outputs" }).click();
       await page.getByLabel("Move Outputs to").selectOption("bottom");
       await expect.poll(() => page.locator(".pane-slot-right .pane").count()).toBe(0);
 
@@ -266,5 +268,95 @@ test.describe("an empty side slot gives its width back", () => {
     } finally {
       await context.close();
     }
+  });
+});
+
+/**
+ * A pane too narrow for its title and its controls. S4 of `GOAL_SHELL_2026-09-23.md`.
+ *
+ * At 220px the pipeline library's header held a grip, a collapse button, a
+ * `Move to…` select and a hide button, and left `Add data / transforms` 51 of the
+ * 125 pixels it needs. The three controls now sit behind one `⋯` button there,
+ * and the grip stays outside it, because the grip is the drag.
+ *
+ * A tablet in landscape, touch and 1024 wide, because that is where a side pane is
+ * narrow and a finger is what reaches for it. At 390x844, the viewport the rest of
+ * this file uses, the panes stack full width and every title fits beside its
+ * controls, so there is no menu there to tap.
+ */
+test.describe("a narrow pane's controls are one tap away", () => {
+  test.use({ viewport: { width: 1024, height: 768 }, hasTouch: true, isMobile: false });
+  const menu = (page: Page) => page.getByRole("button", { name: `Pane actions for ${LIBRARY}` });
+  const slotOf = (page: Page) => page.locator(".pane").filter({ hasText: LIBRARY }).first()
+    .evaluate((el) => el.closest(".pane-slot")?.getAttribute("data-slot") || "");
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280",
+              "Runs once; this block sets its own tablet viewport and touch emulation.");
+    await page.goto(SCREEN);
+    await page.getByRole("button", { name: "Reset panes" }).tap();
+  });
+
+  test("a narrow pane's menu opens with a tap and moves the pane", async ({ page }) => {
+    const title = page.locator(".pane").filter({ hasText: LIBRARY }).first().locator(".pane-header strong");
+    await expect(title).toHaveText(LIBRARY);
+    expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth),
+           "the title is still clipped beside its controls").toBe(0);
+    // Behind the menu, not beside the title: the select is not on the page until
+    // the menu opens, so it cannot be the thing squeezing the title.
+    await expect(page.getByLabel(`Move ${LIBRARY} to`)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: `Reorder ${LIBRARY}` }),
+                 "the grip went into the menu; it is the drag and stays in the header").toBeVisible();
+
+    await menu(page).tap();
+    await expect(menu(page)).toHaveAttribute("aria-expanded", "true");
+    await page.getByLabel(`Move ${LIBRARY} to`).selectOption("right");
+
+    await expect.poll(() => slotOf(page), { message: "moving the pane from its menu did not move it" })
+      .toBe("right");
+  });
+
+  test("a narrow pane's menu is reached and left from the keyboard", async ({ page }) => {
+    await menu(page).focus();
+    await page.keyboard.press("Enter");
+    const group = page.getByRole("group", { name: `${LIBRARY} pane actions` });
+    await expect(group, "Enter on the menu button did not open it").toBeVisible();
+
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: `Collapse ${LIBRARY}` }),
+                 "the menu's first control is not the next stop after its button").toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(group, "Escape did not close the menu").toHaveCount(0);
+    await expect(menu(page), "closing the menu lost the focus").toBeFocused();
+    await expect(menu(page)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a pane its title crowds keeps its menu open, and the title whole", async ({ page }) => {
+    // At 320 the library pane is 287px: over the 280 line, and still too narrow for
+    // its title beside three controls. It takes the menu for the second reason, and
+    // an open menu changes the pane's height, which measures it again. Measured
+    // from the menu button alone, the controls would seem to fit, the menu would
+    // close itself and the title would be clipped again.
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.reload();
+    await expect(menu(page), "a crowded pane at 320 offers no menu").toBeVisible();
+    await menu(page).tap();
+    await expect(page.getByRole("group", { name: `${LIBRARY} pane actions` }),
+                 "the menu closed itself when it opened").toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(page.getByRole("group", { name: `${LIBRARY} pane actions` })).toBeVisible();
+    const title = page.locator(".pane").filter({ hasText: LIBRARY }).first().locator(".pane-header strong");
+    expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth),
+           "the title is clipped while the menu is open").toBe(0);
+  });
+
+  test("a narrow pane hides from its menu and the Panes list brings it back", async ({ page }) => {
+    await menu(page).tap();
+    await page.getByRole("button", { name: `Hide ${LIBRARY}` }).tap();
+    await expect(page.locator(".pane").filter({ hasText: LIBRARY }), "hiding from the menu did nothing")
+      .toHaveCount(0);
+    await page.getByLabel("Panes").selectOption({ label: `Show ${LIBRARY}` });
+    await expect(page.locator(".pane").filter({ hasText: LIBRARY })).toHaveCount(1);
   });
 });

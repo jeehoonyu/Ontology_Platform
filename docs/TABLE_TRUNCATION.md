@@ -108,8 +108,8 @@ test that reads its note; whether that note's condition matches the limit is the
 | `components/canvas/PipelineCanvas.tsx` | 58 | `PipelineCanvas` | `id` | prefix dropped |
 | `components/canvas/PipelineCanvas.tsx` | 164 | `PipelineCanvas` | `action.label` | text |
 | `components/canvas/PipelineCanvas.tsx` | 314 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
-| `components/layout/Pane.tsx` | 284 | `usePaneLayout` | `active` | prefix dropped |
-| `components/layout/Pane.tsx` | 285 | `usePaneLayout` | `over` | prefix dropped |
+| `components/layout/Pane.tsx` | 376 | `usePaneLayout` | `active` | prefix dropped |
+| `components/layout/Pane.tsx` | 377 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `lib/builderKernel.ts` | 22 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `workspaces/Analytics.tsx` | 62 | `truncate` | `text` | text |
