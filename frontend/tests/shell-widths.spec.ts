@@ -33,13 +33,15 @@ const heightAt = (width: number) => (width === 1024 || width === 1366 ? 768 : 70
 /** Allowance for the page's own padding and the pane host's borders. */
 const GUTTER_PX = 24;
 
-const SCREENS: Array<{ name: string; route: string; canvas: string; prepare?: (page: Page) => Promise<void> }> = [
-  { name: "pipeline builder", route: "/workspace/pipeline", canvas: "Pipeline" },
-  { name: "ontology manager", route: "/workspace/ontology", canvas: "Object type" },
+const SCREENS: Array<{ name: string; route: string; canvas: string; surface: string;
+                       prepare?: (page: Page) => Promise<void> }> = [
+  { name: "pipeline builder", route: "/workspace/pipeline", canvas: "Pipeline", surface: ".pipeline-canvas" },
+  { name: "ontology manager", route: "/workspace/ontology", canvas: "Object type", surface: ".manager-surface" },
   {
     name: "workshop",
     route: "/workspace/workshop",
     canvas: "Canvas",
+    surface: ".visual-flow-canvas",
     prepare: async (page) => {
       const draft = page.getByRole("button", { name: "Create draft" });
       await expect(draft.or(page.locator(".pane-host")).first()).toBeVisible();
@@ -49,6 +51,8 @@ const SCREENS: Array<{ name: string; route: string; canvas: string; prepare?: (p
 ];
 
 interface Reading {
+  surfaceWidth: number;
+  paneContent: number;
   viewportHeight: number;
   workspaceTop: number;
   workspaceContent: number;
@@ -58,8 +62,8 @@ interface Reading {
   clipped: Array<{ title: string; scroll: number; client: number }>;
 }
 
-async function read(page: Page, canvas: string): Promise<Reading> {
-  return page.evaluate((canvasTitle) => {
+async function read(page: Page, canvas: string, surface: string): Promise<Reading> {
+  return page.evaluate(([canvasTitle, surfaceSelector]) => {
     window.scrollTo(0, 0);
     const workspace = document.querySelector("main.workspace") as HTMLElement;
     const style = getComputedStyle(workspace);
@@ -74,7 +78,18 @@ async function read(page: Page, canvas: string): Promise<Reading> {
     const clipped = Array.from(document.querySelectorAll<HTMLElement>(".pane .pane-header strong"))
       .filter((title) => title.scrollWidth > title.clientWidth)
       .map((title) => ({ title: title.textContent || "", scroll: title.scrollWidth, client: title.clientWidth }));
+    // The thing a person works on, inside the pane that holds it. S3 made the pane
+    // the widest; the pipeline's canvas then sat in a 236px grid track inside it,
+    // with the rest of the pane blank beside it, because the pane was measured and
+    // the canvas was not.
+    const body = canvasPane?.querySelector(".pane-body") as HTMLElement | null;
+    const bodyStyle = body ? getComputedStyle(body) : null;
+    const paneContent = body && bodyStyle
+      ? body.clientWidth - parseFloat(bodyStyle.paddingLeft) - parseFloat(bodyStyle.paddingRight) : 0;
+    const surfaceElement = canvasPane?.querySelector(surfaceSelector) as HTMLElement | null;
     return {
+      surfaceWidth: surfaceElement ? width(surfaceElement) : 0,
+      paneContent,
       viewportHeight: window.innerHeight,
       workspaceTop: workspace.getBoundingClientRect().top + window.scrollY,
       workspaceContent: content,
@@ -83,7 +98,7 @@ async function read(page: Page, canvas: string): Promise<Reading> {
       widestOther: others[0] || { title: "(none)", width: 0 },
       clipped,
     };
-  }, canvas);
+  }, [canvas, surface] as const);
 }
 
 test.describe("every screen with panes, at every width in the list", () => {
@@ -108,7 +123,7 @@ test.describe("every screen with panes, at every width in the list", () => {
           await page.reload();
           await screen.prepare?.(page);
           await expect(page.locator(".pane-host-row .pane").first()).toBeVisible();
-          const at = await read(page, screen.canvas);
+          const at = await read(page, screen.canvas, screen.surface);
 
           expect.soft(at.workspaceTop,
             `${width}px: the workspace begins at ${at.workspaceTop}px of a ${at.viewportHeight}px first screen`)
@@ -119,6 +134,10 @@ test.describe("every screen with panes, at every width in the list", () => {
             `${width}px: ${screen.canvas} is ${Math.round(at.canvasWidth)}px, narrower than ` +
             `${at.widestOther.title} at ${Math.round(at.widestOther.width)}px`)
             .toBeGreaterThanOrEqual(at.widestOther.width - 1);
+          expect.soft(at.paneContent - at.surfaceWidth,
+            `${width}px: the ${screen.canvas} surface is ${Math.round(at.surfaceWidth)}px of the ` +
+            `${Math.round(at.paneContent)}px its pane holds; the rest is blank beside it`)
+            .toBeLessThanOrEqual(GUTTER_PX);
           expect.soft(at.workspaceContent - at.hostWidth,
             `${width}px: the pane host is ${Math.round(at.hostWidth)}px of ${Math.round(at.workspaceContent)}px ` +
             `the workspace has; the rest is a track nothing fills`)

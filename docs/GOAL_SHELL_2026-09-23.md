@@ -213,6 +213,28 @@ it reads the validation status, as it does now.
   - **N3, the width written as an inline style again:** Workshop's titles clipped from 320 to
     700, where the slots stack. `Node library` and `Inspector` had 0 px each at 320.
   - Restored, only assertion 3 fails, and the three sources are byte for byte what they were.
+
+  **The pane was measured; the canvas inside it was not.** After S6, a probe of the canvas
+  itself found `.pipeline-canvas` at 236 px at every width from 1101 up: 236 of the 489
+  px its pane held at 1280, and 236 of 1,129 at 1920. `.pipeline-workbench-page
+  .pipeline-body` still had the grid `236px minmax(0, 1fr) 38px`, from when the library and
+  a 38 px rail sat in it beside the canvas. They became panes and their tracks stayed, and
+  the canvas, the body's only child, went into the first of them. S1's assertion 2 compared
+  panes, so it passed. It now also holds each screen's working surface to the body of the
+  pane that holds it, within the 24 px gutter: `.pipeline-canvas`, `.manager-surface` and
+  `.visual-flow-canvas`. Its first run failed on the pipeline builder at every width from
+  1101 up, and passed on the other two screens. Both pipeline-body rules are now one track,
+  and all eighteen widths pass on all three screens.
+
+  On the same build, 137 tests pass on the desktop-1280 project, one skipped: the movement,
+  multi-node, drag, evaluator, concurrent-drag, truncation, touch and pane specs. A first
+  run of the same set failed two, `pipeline creates a graph and accepts a dragged node` and
+  `the artifact canvas is anchored and offers no way to hide itself`. Both passed alone and
+  in the next full run, and the output that would have said why was not kept.
+
+  **Negative run:** with the three tracks put back, the spec failed at `the Pipeline surface
+  is 236px of the 310px its pane holds` at 1101, and at each width up to 1920. Restored, the
+  three pass, and `styles.css` is byte for byte what it was.
 - **S4 — A pane title is never clipped at the pane's default width.** **Met** — the `⋯` menu
   below 280 px. Proven by S1 assertion 3 on every pane screen, and by a tap test on the
   390×844 touch viewport that opens the menu and moves a pane from it, so the control beside
