@@ -1,0 +1,28 @@
+{
+  "provenance": {
+    "stale_after": "recomputed each run",
+    "recorded_at": "2026-09-23T22:21:13Z"
+  },
+  "note": "Graph controls the original offers that the pipeline canvas does not. A ceiling, not a floor. A control under na_controls was declared not taken on purpose; adding one is an edit someone makes here.",
+  "gaps": 14,
+  "met": 0,
+  "gap_controls": [
+    "connect",
+    "context-menu",
+    "copy-paste",
+    "hide",
+    "hotkeys",
+    "lasso",
+    "layout",
+    "remove-selected",
+    "save-state",
+    "search",
+    "select-all",
+    "select-family",
+    "undo-redo",
+    "zoom-fit"
+  ],
+  "na_controls": [
+    "organise"
+  ]
+}

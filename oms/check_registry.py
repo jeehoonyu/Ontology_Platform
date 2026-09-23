@@ -66,6 +66,7 @@ DECLARATIONS: Dict[str, Dict[str, str]] = {
     "audit_inert_controls": {"gates": "no file gains a control that renders and does nothing, and an empty handler does not count as wired", "cadence": "every suite run"},
     "audit_table_truncation": {"gates": "no table, list or loaded window shows part of a set without saying how much and reaching the rest; a cut the scanner cannot place, an unclaimed request limit or server cap, or a new n/a counts", "cadence": "every suite run"},
     "audit_movement_contract": {"gates": "every movement surface is counted against cancel, recover and a single-pointer alternative; a met stage names a test that exists, and gaps may only fall", "cadence": "every suite run"},
+    "audit_graph_editor": {"gates": "every control the original's graph editor offers is mapped to a handler the pipeline canvas still has, or counted as a gap; a met control names a test that exists, and gaps may only fall", "cadence": "every suite run"},
     "audit_route_coverage": {"gates": "compatibility routes have typed equivalents before retirement", "cadence": "every push"},
     "validate_docs_conformance": {"gates": "documentation states what the product does", "cadence": "every suite run"},
     "validate_schema_freeze": {"gates": "no migration lands during a pilot window", "cadence": "every push"},

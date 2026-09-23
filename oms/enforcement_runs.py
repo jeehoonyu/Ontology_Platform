@@ -145,6 +145,10 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "a move can be cancelled and taken back, or the gap is counted",
         "runs_in": "suite",
     },
+    "audit_graph_editor": {
+        "purpose": "the pipeline canvas's gap to the original's graph controls is a kept table",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",
