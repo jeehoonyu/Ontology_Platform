@@ -4178,10 +4178,30 @@ def _exec_logic_block_list(
                 key: resolve_value(value, scope)
                 for key, value in (block.get("parameters") or {}).items()
             }
-            mutated = apply_action_mutations(
-                db, action_type=action, parameters=parameters, actor=block.get("actor", "logic")
-            )
-            result = {"action_type_id": action.id, "mutated_object_ids": mutated}
+            # The approval gate `POST /actions/execute` enforces for the identical call. This
+            # block applied any action outright, so a logic run was a way to take a high-risk
+            # action without the approval an interactive caller needs -- and `approve` is a
+            # permission the role model withholds from the operators who may run logic (R15
+            # of GOAL_REPAIR_2026-08-23). A gated action becomes a proposal: the run reads
+            # ACTION_PROPOSED and the change goes through `/actions/execute`, where the
+            # approval is staged. The function's own `approval_required` is not the test: it
+            # defaults to true and describes proposals, where the action's rules are what
+            # `/actions/execute` asks.
+            if action_requires_approval(action):
+                proposal = {
+                    "action_type_id": action.id,
+                    "display_name": action.display_name,
+                    "parameters": parameters,
+                    "requires_approval": True,
+                }
+                proposed_actions.append(proposal)
+                result = {"action_type_id": action.id, "mutated_object_ids": [],
+                          "status": "approval_required", "proposal": proposal}
+            else:
+                mutated = apply_action_mutations(
+                    db, action_type=action, parameters=parameters, actor=block.get("actor", "logic")
+                )
+                result = {"action_type_id": action.id, "mutated_object_ids": mutated}
             outputs[block.get("output", "applied_action")] = result
         elif block_type == "conditional":
             condition_met = _eval_logic_condition(block.get("condition", {}), scope, db)
@@ -4211,6 +4231,16 @@ def _exec_logic_block_list(
             raise ValueError(f"Unsupported logic block '{block_type}'")
 
         trace.append({"index": index, "depth": depth, "type": block_type, "result": result})
+
+
+def action_requires_approval(action: models.ActionType) -> bool:
+    """The approval test `POST /actions/execute` applies, and automate and slate copy."""
+    rules = action.rules or {}
+    return bool(
+        rules.get("requires_approval")
+        or rules.get("approval_required")
+        or str(rules.get("risk_level", "")).lower() in {"high", "critical"}
+    )
 
 
 def execute_logic_blocks(

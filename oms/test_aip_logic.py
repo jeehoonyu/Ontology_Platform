@@ -115,6 +115,29 @@ assert "t3" in r["outputs"]["applied"]["mutated_object_ids"], r["outputs"]
 t3 = ok(client.get("/objects/ticket/t3"), "get t3")
 assert t3["properties"]["priority"] == "critical", t3
 
+# ---- 9. apply_action of an approval-gated action proposes it instead (R15) ----
+# The block applied any action outright, so a logic run skipped the approval gate an
+# interactive `POST /actions/execute` enforces for the same action.
+ok(client.post("/action-types", json={"id": "escalate_risky", "display_name": "Escalate (high risk)", "description": "",
+    "parameters": {"ticket_id": {"type": "string", "required": True}},
+    "rules": {"risk_level": "high",
+              "object_mutations": [{"object_type_id": "ticket", "object_id": "$ticket_id", "set": {"priority": "blocked"}}]}}),
+   "high-risk action")
+ok(client.post("/logic-functions", json={"id": "lf_apply_risky", "display_name": "Apply risky", "blocks": [
+    {"type": "apply_action", "action_type_id": "escalate_risky", "parameters": {"ticket_id": "$ticket_id"}, "output": "applied"},
+]}), "create lf_apply_risky")
+before = ok(client.get("/objects/ticket/t1"), "get t1")["properties"]["priority"]
+r = run_logic("lf_apply_risky", {"ticket_id": "t1"})
+assert r["status"] == "ACTION_PROPOSED", f"a high-risk action applied through logic ran without approval: {r['status']}"
+passed += 1
+assert r["outputs"]["applied"]["mutated_object_ids"] == [] and r["outputs"]["applied"]["status"] == "approval_required", r["outputs"]
+passed += 1
+assert [p["action_type_id"] for p in r["proposed_actions"]] == ["escalate_risky"] and r["proposed_actions"][0]["requires_approval"], r
+passed += 1
+after = ok(client.get("/objects/ticket/t1"), "get t1 after")["properties"]["priority"]
+assert after == before, f"the object changed without approval: {before} -> {after}"
+passed += 1
+
 print(f"\nAIP Logic faithful engine verified: {passed} assertions passed.")
 from app.database import engine as _engine  # noqa: E402
 _engine.dispose()

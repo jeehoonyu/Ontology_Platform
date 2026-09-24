@@ -665,6 +665,24 @@ objects without committing, so its work was discarded while its ids were returne
   configured it. `AtmAutomation` still has no project, so T2's column is still owed. Its
   condition reads still count objects in every project.
 
+**A seventh, found beside them: Logic's `apply_action`, 2026-09-23.** The same re-read found
+the sibling T5 never looked at. A logic function's `apply_action` block applied any action
+outright. So `POST /logic-functions/{id}/run`, which answers to `execute`, took a high-risk
+action with none of the approval `POST /actions/execute` requires for the identical call.
+- **The fix.** A gated action becomes a proposal. It uses the same test as
+  `/actions/execute`, now one helper, `runtime.action_requires_approval`. The run reads
+  ACTION_PROPOSED, and the change goes through `/actions/execute`.
+- **What does not gate it.** The function's own `approval_required` flag defaults to true
+  and describes proposals, so gating on it would have turned every `apply_action` into a
+  proposal. The first version did, and `test_aip_logic.py`'s ordinary apply failed.
+- **Proven by** `oms/test_aip_logic.py`, 31 assertions. A logic run applying a high-risk
+  action reads ACTION_PROPOSED, mutates nothing, and proposes the action as requiring
+  approval. The ordinary apply still mutates.
+- **Other tests.** The nine other test files that build logic functions pass.
+- **Negative run.** With the gate removed, the test failed at `a high-risk action applied
+  through logic ran without approval: SUCCESS`. Restored, `runtime.py` is byte for byte
+  what it was.
+
 ## Non-completion rule
 
 Inherited unchanged from `GOAL_2026-08-03`: no condition is marked met while it lacks
