@@ -46,27 +46,32 @@ function resultFromJob(job: PlatformJob | null): AgentRunResult | null {
   return job.result as unknown as AgentRunResult;
 }
 
-export function AgentRuntimePanel({ draft: held, onDraft }: {
-  /** Held by a caller whose pane can move, so a remount reads it back. */
-  draft?: AgentDraft;
-  onDraft?: (update: (current: AgentDraft) => AgentDraft) => void;
-}) {
-  const agents = useQuery({ queryKey: ["aip-agents"], queryFn: listAgents });
-  const [own, setOwn] = useState<AgentDraft>(NEW_AGENT_DRAFT);
-  const draft = held ?? own;
-  const setDraft: (update: (current: AgentDraft) => AgentDraft) => void = onDraft ?? setOwn;
-  const { agentId, prompt, parameters, executionMode } = draft;
-  const setAgentId = (value: string) => setDraft((current) => ({ ...current, agentId: value }));
-  const setPrompt = (value: string) => setDraft((current) => ({ ...current, prompt: value }));
-  const setParameters = (update: (rows: ParameterRow[]) => ParameterRow[]) =>
-    setDraft((current) => ({ ...current, parameters: update(current.parameters) }));
-  const setExecutionMode = (value: "graph" | "single") => setDraft((current) => ({ ...current, executionMode: value }));
+/**
+ * An agent run: its job, the task graph's stages, the result, and whether it is still
+ * running. The panel used to keep these for itself, so a Run results pane moved to
+ * another slot remounted them empty: a finished run's answer, citations and proposals
+ * were gone, and a run in flight finished into a panel that no longer existed and was
+ * never shown. The builder holds the run with this hook and hands it in, as it does
+ * the draft; the Decision workspace passes nothing, and the panel runs its own.
+ * V12 of GOAL_MOVEMENT_2026-09-12 recorded the draft; this is the run.
+ */
+export interface AgentRun {
+  job: PlatformJob | null;
+  graphStages: PlatformJob[];
+  result: AgentRunResult | null;
+  busy: boolean;
+  error: string;
+  invoke: (agentId: string, draft: AgentDraft) => Promise<void>;
+  cancel: () => Promise<void>;
+  retry: () => Promise<void>;
+}
+
+export function useAgentRun(): AgentRun {
   const [job, setJob] = useState<PlatformJob | null>(null);
   const [graphStages, setGraphStages] = useState<PlatformJob[]>([]);
   const [result, setResult] = useState<AgentRunResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const selectedAgentId = agentId || agents.data?.[0]?.id || "";
 
   useEffect(() => {
     if (!job || !["BLOCKED", "QUEUED", "RUNNING"].includes(job.status)) return;
@@ -86,9 +91,6 @@ export function AgentRuntimePanel({ draft: held, onDraft }: {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [job?.id, job?.status]);
-
-  const policy = result?.policy_summary?.decision || (job?.status === "FAILED" ? "FAILED" : "NOT_RUN");
-  const events = useMemo(() => job?.events || [], [job?.events]);
 
   async function executeGraph(coordinator: PlatformJob) {
     const graph = coordinator.agent_task_graph;
@@ -114,16 +116,16 @@ export function AgentRuntimePanel({ draft: held, onDraft }: {
     return runAgentJob(coordinator.id);
   }
 
-  async function invoke() {
-    if (!selectedAgentId || !prompt.trim()) return;
+  async function invoke(agentId: string, { prompt, parameters, executionMode }: AgentDraft) {
+    if (!agentId || !prompt.trim()) return;
     setBusy(true);
     setError("");
     setResult(null);
     try {
       const parameterValues = Object.fromEntries(parameters.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value]));
       const queued = executionMode === "graph"
-        ? await enqueueAgentTaskGraph(selectedAgentId, prompt.trim(), parameterValues, crypto.randomUUID())
-        : await enqueueAgentInvocation(selectedAgentId, prompt.trim(), parameterValues, crypto.randomUUID());
+        ? await enqueueAgentTaskGraph(agentId, prompt.trim(), parameterValues, crypto.randomUUID())
+        : await enqueueAgentInvocation(agentId, prompt.trim(), parameterValues, crypto.randomUUID());
       setJob(queued);
       setGraphStages([]);
       const execution = await executeGraph(queued);
@@ -171,6 +173,32 @@ export function AgentRuntimePanel({ draft: held, onDraft }: {
     }
   }
 
+  return { job, graphStages, result, busy, error, invoke, cancel, retry };
+}
+
+export function AgentRuntimePanel({ draft: held, onDraft, run: heldRun }: {
+  /** Held by a caller whose pane can move, so a remount reads it back. */
+  draft?: AgentDraft;
+  onDraft?: (update: (current: AgentDraft) => AgentDraft) => void;
+  /** The same, for the run: `useAgentRun` in the caller. */
+  run?: AgentRun;
+}) {
+  const agents = useQuery({ queryKey: ["aip-agents"], queryFn: listAgents });
+  const [own, setOwn] = useState<AgentDraft>(NEW_AGENT_DRAFT);
+  const draft = held ?? own;
+  const setDraft: (update: (current: AgentDraft) => AgentDraft) => void = onDraft ?? setOwn;
+  const { agentId, prompt, parameters, executionMode } = draft;
+  const setAgentId = (value: string) => setDraft((current) => ({ ...current, agentId: value }));
+  const setPrompt = (value: string) => setDraft((current) => ({ ...current, prompt: value }));
+  const setParameters = (update: (rows: ParameterRow[]) => ParameterRow[]) =>
+    setDraft((current) => ({ ...current, parameters: update(current.parameters) }));
+  const setExecutionMode = (value: "graph" | "single") => setDraft((current) => ({ ...current, executionMode: value }));
+  const ownRun = useAgentRun();
+  const { job, graphStages, result, busy, error, invoke, cancel, retry } = heldRun ?? ownRun;
+  const selectedAgentId = agentId || agents.data?.[0]?.id || "";
+  const policy = result?.policy_summary?.decision || (job?.status === "FAILED" ? "FAILED" : "NOT_RUN");
+  const events = useMemo(() => job?.events || [], [job?.events]);
+
   return (
     <section className="agent-runtime-panel" aria-label="Durable agent runtime">
       <header>
@@ -183,7 +211,7 @@ export function AgentRuntimePanel({ draft: held, onDraft }: {
             <option value="graph">Durable task graph</option>
             <option value="single">Single compatibility job</option>
           </select>
-          <button className="primary-action" onClick={invoke} disabled={busy || !selectedAgentId || !prompt.trim()}><Play size={14} /> {busy ? "Running" : "Run agent"}</button>
+          <button className="primary-action" onClick={() => void invoke(selectedAgentId, draft)} disabled={busy || !selectedAgentId || !prompt.trim()}><Play size={14} /> {busy ? "Running" : "Run agent"}</button>
         </div>
       </header>
       {agents.error ? <ErrorBanner message={agents.error instanceof Error ? agents.error.message : String(agents.error)} /> : null}
@@ -206,8 +234,8 @@ export function AgentRuntimePanel({ draft: held, onDraft }: {
               <span><StatusBadge value={job.status} /><small>{job.job_type} · attempt {job.attempt}</small></span>
               <div className="agent-progress"><i style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} /></div>
               <strong>{job.progress}%</strong>
-              {["BLOCKED", "QUEUED", "RUNNING"].includes(job.status) ? <button onClick={cancel}><Ban size={14} /> Cancel</button> : null}
-              {["FAILED", "CANCELLED"].includes(job.status) ? <button onClick={retry} disabled={busy}><RotateCcw size={14} /> Retry</button> : null}
+              {["BLOCKED", "QUEUED", "RUNNING"].includes(job.status) ? <button onClick={() => void cancel()}><Ban size={14} /> Cancel</button> : null}
+              {["FAILED", "CANCELLED"].includes(job.status) ? <button onClick={() => void retry()} disabled={busy}><RotateCcw size={14} /> Retry</button> : null}
             </div>
           ) : null}
           {job?.agent_task_graph ? (

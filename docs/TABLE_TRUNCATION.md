@@ -40,8 +40,8 @@ way to the rest names items nobody can reach.
 | `workspaces/MapWorkspace.tsx` | 223 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 72 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
 | `workspaces/OntologyManager.tsx` | 291 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
-| `workspaces/VisualBuilder.tsx` | 706 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
-| `workspaces/VisualBuilder.tsx` | 810 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 707 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 811 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
 
 ## Found and not placed
 
@@ -136,10 +136,10 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `workspaces/PipelineBuilder.tsx` | 722 | `PipelineBuilder` | `over` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 727 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 834 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 712 | `VisualBuilder` | `participant.display_name` | text |
+| `workspaces/VisualBuilder.tsx` | 510 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 603 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 608 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 713 | `VisualBuilder` | `participant.display_name` | text |
 
 ## What this does not see
 

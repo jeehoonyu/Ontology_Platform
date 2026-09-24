@@ -1098,6 +1098,53 @@ test.describe("a pane that moves keeps what was typed into it", () => {
       .toHaveValue(agentId);
   });
 
+  test("an agent run in flight lands in Run results after it moves, and its answer survives the next move", async ({ page }) => {
+    // The run lived in the panel: the job, its stages, the result and whether it was running.
+    // A move remounted the panel empty, and a run still in flight finished into the panel that
+    // had gone. The worker's request is held here so the move happens mid-run, not after.
+    const suffix = Date.now();
+    const agentId = `moved_run_agent_${suffix}`;
+    await settled(await page.request.post("/agents", { data: { id: agentId, display_name: `Moved run agent ${suffix}` } }), "agent");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route((url) => url.pathname === "/aip/agents/workers/run-next", async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto("/workspace/aip");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const runtime = page.locator(".agent-runtime-panel");
+    await expect(runtime, "the agent runtime did not render in Run results").toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    await runtime.getByLabel("Agent", { exact: true }).selectOption(agentId);
+    await runtime.getByLabel("Execution mode").selectOption("single");
+    await runtime.getByLabel("Instruction").fill(`Moved run ${suffix}`);
+    await runtime.getByRole("button", { name: "Run agent" }).click();
+    await expect(runtime.getByRole("button", { name: "Running" }), "the run did not start").toBeVisible();
+
+    await paneControls(page, "Run results");
+    await page.getByLabel("Move Run results to").selectOption("right");
+    await expect.poll(() => slotHolding(page, ".agent-runtime-panel")).toBe("right");
+    await expect(runtime.getByRole("button", { name: "Running" }), "moving the pane forgot a run that was still going")
+      .toBeVisible();
+    await expect(runtime.locator(".agent-job-state"), "moving the pane dropped the running job's state").toBeVisible();
+
+    release();
+    const answer = runtime.locator(".agent-run-evidence .agent-answer p");
+    await expect(answer, "the run finished into the panel the move replaced, and the moved pane never showed it")
+      .not.toBeEmpty({ timeout: 20_000 });
+    const said = await answer.textContent();
+    await expect(runtime.getByRole("button", { name: "Run agent" })).toBeVisible();
+
+    await paneControls(page, "Run results");
+    await page.getByLabel("Move Run results to").selectOption("left");
+    await expect.poll(() => slotHolding(page, ".agent-runtime-panel")).toBe("left");
+    await expect(answer, "moving the pane threw away a finished run's answer").toHaveText(said || "");
+    await expect(runtime.locator(".agent-job-state"), "moving the pane threw away a finished run's job").toBeVisible();
+  });
+
   test("the object type search narrows the Resources list, and says when nothing matches", async ({ page }) => {
     // Discover lists every object type the person can see, uncapped. The box above it
     // had no value, no handler and no form: it took text and did nothing with it.

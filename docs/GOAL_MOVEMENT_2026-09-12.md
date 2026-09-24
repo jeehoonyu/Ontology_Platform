@@ -553,6 +553,31 @@ Three things in that table are the defect the research describes:
   - No route exceeds its payload ceiling or sends more requests when it opens.
   - The fast tier passes 23 of 23.
 
+  **Followed through, 2026-09-23: the run, not only the draft.** V12 held the agent
+  runtime's draft above the panes, but not its run. The job, the task graph's stages, the
+  result and whether the run was still going stayed in the panel, and so did the loop that
+  drives a run and the poll that follows it. Moving Run results remounted the panel empty.
+  A finished run's answer, tool trace and proposals were gone. A run still in flight
+  finished into the panel the move had replaced, and the moved pane never showed it.
+  - **The change.** The run and everything that drives it now live in `useAgentRun`. The
+    builder calls the hook and hands the run in beside the draft. The Decision workspace
+    renders the panel in no pane and passes nothing, and the panel runs its own there.
+  - **The test.** `an agent run in flight lands in Run results after it moves, and its answer
+    survives the next move`, in `movement-contract.spec.ts`. It holds the worker's
+    `run-next` request, starts a run and moves Run results mid-run. It requires the moved
+    panel still running, with its job state. It then releases the request and requires the
+    answer in the moved panel. Last, it moves the pane back and requires the same answer and
+    job.
+  - **Also passing.** The draft test beside it and `AIP agent runtime exposes durable policy
+    and citation evidence`, which runs a task graph through the hook.
+  - **Negative runs,** on a rebuilt `dist`. With the builder passing no run, and with the
+    panel preferring its own run to the one it is handed, the test failed at `moving the
+    pane forgot a run that was still going`. Both fail before the answer is read, so the
+    answer checks have run only against a working build. Restored, the three agent tests
+    pass, and both sources are byte for byte what they were.
+  - `TABLE_TRUNCATION.md` was regenerated; only line numbers in `VisualBuilder.tsx` moved.
+    The fast tier passes 24 of 24.
+
 - **V13 — A collapsed pane keeps what it holds.** **Met** — 2026-09-23. Proven by
   `a collapsed pane keeps what it holds` in `movement-contract.spec.ts`.
 
