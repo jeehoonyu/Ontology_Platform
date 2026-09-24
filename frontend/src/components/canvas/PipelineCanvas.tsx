@@ -57,7 +57,9 @@ export function PipelineCanvas({
   onContextInsert,
   onDeleteNode,
   onZoom,
-  onLasso
+  onLasso,
+  hiddenNodes = new Set<string>(),
+  onShowAll
 }: {
   canvas: PipelineCanvasState | null;
   zoom: number;
@@ -76,6 +78,9 @@ export function PipelineCanvas({
   onZoom: (next: number) => void;
   /** The nodes a selection rectangle closed over, and whether Shift was held when it began. */
   onLasso: (nodeIds: string[], additive: boolean) => void;
+  /** Nodes a person hid from this view. X6 of GOAL_GRAPH: not an edit, nothing saved. */
+  hiddenNodes?: Set<string>;
+  onShowAll?: () => void;
 }) {
   const droppable = useDroppable({ id: "pipeline-canvas" });
   // The live delta of a node drag, so the other selected nodes move with the one
@@ -127,9 +132,23 @@ export function PipelineCanvas({
     }
   });
   const carried = carry && selection.length > 1 && selection.includes(carry.id) ? new Set(selection) : null;
-  const nodes = canvas?.nodes || [];
+  // Hidden nodes are a view of the graph, not an edit to it: they are left out here
+  // and nowhere else. An edge to one draws to a badge on the node that remains, and
+  // the canvas says how many are hidden, beside the one control that shows them all.
+  const allNodes = canvas?.nodes || [];
+  const nodes = allNodes.filter((node) => !hiddenNodes.has(node.id));
+  const hiddenCount = allNodes.length - nodes.length;
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const selectedNode = byId.get(selectedNodeId);
+  const hiddenNeighbours = new Map<string, number>();
+  for (const edge of canvas?.edges || []) {
+    const sourceShown = byId.has(edge.source);
+    const targetShown = byId.has(edge.target);
+    if (sourceShown === targetShown) continue;
+    const shown = sourceShown ? edge.source : edge.target;
+    if (!hiddenNodes.has(sourceShown ? edge.target : edge.source)) continue;
+    hiddenNeighbours.set(shown, (hiddenNeighbours.get(shown) || 0) + 1);
+  }
 
   return (
     <div
@@ -170,7 +189,13 @@ export function PipelineCanvas({
           </span>
         ))}
       </div>
-      {!nodes.length && <div className="empty canvas-empty">Generate an ontology draft or create a pipeline graph to start.</div>}
+      {hiddenCount ? (
+        <p className="canvas-hidden-note" role="note">
+          {hiddenCount} of {allNodes.length} nodes hidden in this browser
+          <button type="button" onClick={onShowAll}>Show all</button>
+        </p>
+      ) : null}
+      {!allNodes.length && <div className="empty canvas-empty">Generate an ontology draft or create a pipeline graph to start.</div>}
       <div className="canvas-stage" ref={stageRef} style={{ transform: `scale(${zoom})` }}>
         <LassoSurface />
         {lasso ? (
@@ -210,7 +235,21 @@ export function PipelineCanvas({
             </button>
           );
         })}
-        {!nodes.length && onAddFirst ? (
+        {Array.from(hiddenNeighbours, ([id, count]) => {
+          const node = byId.get(id);
+          if (!node) return null;
+          return (
+            <span
+              key={`hidden-${id}`}
+              className="hidden-link"
+              style={{ left: node.position.x + 176, top: node.position.y + 40 }}
+              title={`${count} connected ${count === 1 ? "node is" : "nodes are"} hidden`}
+            >
+              {count} hidden
+            </span>
+          );
+        })}
+        {!allNodes.length && onAddFirst ? (
           <div className="pipeline-canvas-first">
             <strong>Empty canvas</strong>
             <span>Drag a node from the palette, or add the selected type here.</span>

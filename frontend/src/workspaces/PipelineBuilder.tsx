@@ -6,7 +6,7 @@ import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
 import { columnLayout, layersOf } from "../lib/graphLayout";
 import { CLIPBOARD_KIND, readNodes, writeNodes } from "../lib/nodeClipboard";
-import { bare, ctrl, useHotkeys, type Hotkey } from "../lib/hotkeys";
+import { bare, ctrl, ctrlShift, useHotkeys, type Hotkey } from "../lib/hotkeys";
 import { postJson } from "../api";
 import {
   cancelJob,
@@ -330,13 +330,22 @@ export function PipelineBuilder() {
   }
 
   /** Click selects one node; Shift-click adds or removes one from the selection. */
+  // Nodes hidden from this view, per pipeline, in this browser: a viewing preference
+  // like a pane layout, never sent to the server. X6 of GOAL_GRAPH_2026-09-23.
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  useEffect(() => { setHiddenIds(readHidden(selectedGraphId)); }, [selectedGraphId]);
+  const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
+  const shownNodes = useMemo(() => (canvas?.nodes || []).filter((node) => !hiddenSet.has(node.id)),
+                             [canvas, hiddenSet]);
+
   // The nodes every tool acts on: the set, or the node last clicked when the set is
-  // empty. GOAL_GRAPH_2026-09-23: selection is one set, and every tool takes it.
+  // empty. GOAL_GRAPH_2026-09-23: selection is one set, and every tool takes it. A
+  // hidden node is not on the canvas, so no tool takes it.
   const targets = useMemo(() => {
-    const present = new Set((canvas?.nodes || []).map((node) => node.id));
+    const present = new Set(shownNodes.map((node) => node.id));
     const chosen = selection.length ? selection : selectedNodeId ? [selectedNodeId] : [];
     return chosen.filter((id) => present.has(id));
-  }, [canvas, selection, selectedNodeId]);
+  }, [shownNodes, selection, selectedNodeId]);
 
   /**
    * The nodes a selection rectangle closed over. With Shift held when it began they
@@ -352,7 +361,24 @@ export function PipelineBuilder() {
 
   /** Every node on the canvas. Writes the set only, so nothing is fetched. */
   function selectAll() {
-    setSelection((canvas?.nodes || []).map((node) => node.id));
+    setSelection(shownNodes.map((node) => node.id));
+  }
+
+  /** Hides what is selected from this view; the graph on the server is untouched. */
+  function hideSelection() {
+    if (!targets.length) return;
+    const next = Array.from(new Set([...hiddenIds, ...targets]));
+    setHiddenIds(next);
+    writeHidden(selectedGraphId, next);
+    setSelection([]);
+    setActionStatus(`Hid ${targets.length === 1 ? "1 node" : `${targets.length} nodes`} in this browser. `
+      + "The pipeline itself is unchanged.");
+  }
+
+  function showAllHidden() {
+    setHiddenIds([]);
+    writeHidden(selectedGraphId, []);
+    setActionStatus("Showing every node.");
   }
 
   /**
@@ -363,7 +389,8 @@ export function PipelineBuilder() {
     const from = new Set(targets);
     const reached = (canvas?.edges || [])
       .filter((edge) => from.has(direction === "parents" ? edge.target : edge.source))
-      .map((edge) => (direction === "parents" ? edge.source : edge.target));
+      .map((edge) => (direction === "parents" ? edge.source : edge.target))
+      .filter((id) => !hiddenSet.has(id));
     setSelection(Array.from(new Set([...targets, ...reached])));
   }
 
@@ -394,7 +421,7 @@ export function PipelineBuilder() {
   function matching(text: string) {
     const needle = text.trim().toLowerCase();
     if (!needle || !canvas) return [];
-    return canvas.nodes.filter((node) =>
+    return shownNodes.filter((node) =>
       [node.label, node.id, node.type].some((value) => String(value || "").toLowerCase().includes(needle)));
   }
 
@@ -439,6 +466,9 @@ export function PipelineBuilder() {
     { keys: "Ctrl+V", label: "Paste", button: "Paste", matches: ctrl("v"), run: () => void pasteNodes() },
     { keys: "Delete", label: "Delete selected", button: "Delete selected", matches: bare("Delete"),
       run: () => void deleteSelected() },
+    { keys: "Ctrl+H", label: "Hide selected", button: "Hide selected", matches: ctrl("h"), run: hideSelection },
+    // Not the original's Ctrl+K: that is this product's command palette on every screen.
+    { keys: "Ctrl+Shift+H", label: "Show all", button: "Show all", matches: ctrlShift("h"), run: showAllHidden },
   ];
   // Whether a drag is live on this screen: its keys are the drag's while it is.
   const dragging = useRef(false);
@@ -775,6 +805,7 @@ export function PipelineBuilder() {
               <button type="button" onClick={() => void copySelection()} disabled={!targets.length}>Copy</button>
               <button type="button" onClick={() => void pasteNodes()} disabled={!canvas}>Paste</button>
               <button type="button" onClick={() => void deleteSelected()} disabled={!targets.length}>Delete selected</button>
+              <button type="button" onClick={hideSelection} disabled={!targets.length}>Hide selected</button>
               <button type="button" onClick={autoLayout} disabled={!canvas?.nodes.length}>Auto layout</button>
               <button type="button" onClick={openSearch} disabled={!canvas?.nodes.length}>Search pipeline</button>
               <button type="button" ref={hotkeysButton} onClick={showHotkeys}>View hotkeys</button>
@@ -845,6 +876,8 @@ export function PipelineBuilder() {
               onContextInsert={(nodeType) => insertAfter(nodeType)}
               onDeleteNode={removeNode}
               onLasso={selectRegion}
+              hiddenNodes={hiddenSet}
+              onShowAll={showAllHidden}
             />
                 </div>
             );
@@ -1099,6 +1132,29 @@ interface ConfigFieldDefinition {
 }
 
 type NodeDraft = { label: string; values: Record<string, string> };
+
+const HIDDEN_PREFIX = "ontology.pipeline.hidden.";
+
+/** The nodes hidden from one pipeline in this browser. A store that throws hides nothing. */
+function readHidden(graphId: string): string[] {
+  if (!graphId) return [];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(HIDDEN_PREFIX + graphId) || "[]");
+    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHidden(graphId: string, ids: string[]) {
+  if (!graphId) return;
+  try {
+    if (ids.length) window.localStorage.setItem(HIDDEN_PREFIX + graphId, JSON.stringify(ids));
+    else window.localStorage.removeItem(HIDDEN_PREFIX + graphId);
+  } catch {
+    /* not being able to remember what is hidden must not stop hiding it */
+  }
+}
 
 /** What one Undo takes back: a committed move of any number of nodes, or a paste. */
 type HistoryEntry =

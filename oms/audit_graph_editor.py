@@ -112,9 +112,10 @@ CONTROLS: Dict[str, Control] = {
     },
     "hide": {
         "original": "Ctrl+H hides the selection, Ctrl+K shows every hidden node",
-        "ours": "nothing",
-        "file": BUILDER, "handler": None,
-        "state": {"gap": "nothing can be hidden"},
+        "ours": "Hide selected and Ctrl+H, in this browser; Show all and Ctrl+Shift+H, since Ctrl+K is the command palette",
+        "file": BUILDER, "handler": "hideSelection",
+        "state": {"test": "graph-editor.spec.ts::two hidden nodes are counted, survive a reload here, and are "
+                          "hidden nowhere on the server"},
     },
     "search": {
         "original": "Ctrl+F opens Search pipeline",

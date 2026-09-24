@@ -316,12 +316,16 @@ test.describe("one command lays out the pipeline", () => {
  * by name, so a row taken out of the table fails here because the reference -- drawn
  * from the same table -- no longer lists it.
  */
-const EXPECTED_KEYS = ["Ctrl+A", "Ctrl+E", "Ctrl+D", "Ctrl+F", "Up Arrow", "Ctrl+C", "Ctrl+V", "Delete"];
+const EXPECTED_KEYS = ["Ctrl+A", "Ctrl+E", "Ctrl+D", "Ctrl+F", "Up Arrow", "Ctrl+C", "Ctrl+V", "Delete",
+                       "Ctrl+H", "Ctrl+Shift+H"];
 
 const PRESS: Record<string, string> = {
   "Ctrl+A": "Control+a", "Ctrl+E": "Control+e", "Ctrl+D": "Control+d", "Ctrl+F": "Control+f",
   "Up Arrow": "ArrowUp", "Ctrl+C": "Control+c", "Ctrl+V": "Control+v", "Delete": "Delete",
+  "Ctrl+H": "Control+h", "Ctrl+Shift+H": "Control+Shift+h",
 };
+
+const shownCount = (page: Page) => page.locator(".pipeline-canvas .pipeline-node").count();
 
 const zoomOf = (page: Page) => page.locator(".canvas-stage").evaluate((stage) =>
   Number(/scale\(([\d.]+)\)/.exec((stage as HTMLElement).style.transform)?.[1] || 0));
@@ -388,6 +392,33 @@ const OUTCOMES: Record<string, { reset: (page: Page) => Promise<unknown>; read: 
       return (before as number) - (await nodeCount(page));
     },
   },
+  // Hiding changes what the canvas shows and nothing else, so both are read from it.
+  "Hide selected": {
+    reset: async (page) => {
+      const showAll = page.getByRole("button", { name: "Show all", exact: true });
+      if (await showAll.count()) await showAll.click();
+      await node(page, "a").click();
+      return shownCount(page);
+    },
+    read: async (page, before) => {
+      await expect.poll(() => shownCount(page)).toBeLessThan(before as number);
+      return (before as number) - (await shownCount(page));
+    },
+  },
+  "Show all": {
+    reset: async (page) => {
+      const showAll = page.getByRole("button", { name: "Show all", exact: true });
+      if (await showAll.count()) await showAll.click();
+      await node(page, "a").click();
+      await page.getByRole("button", { name: "Hide selected", exact: true }).click();
+      await expect(page.locator(".canvas-hidden-note")).toBeVisible();
+      return shownCount(page);
+    },
+    read: async (page, before) => {
+      await expect.poll(() => shownCount(page)).toBeGreaterThan(before as number);
+      return (await shownCount(page)) - (before as number);
+    },
+  },
 };
 
 test.describe("every hotkey has a button, and the reference is the wiring", () => {
@@ -414,10 +445,10 @@ test.describe("every hotkey has a button, and the reference is the wiring", () =
     for (const [keysText, label, button] of rows) {
       const outcome = OUTCOMES[label];
       expect(outcome, `the reference lists "${label}", which this test has no way to observe`).toBeTruthy();
-      await expect(page.getByRole("button", { name: button, exact: true }),
-                   `${keysText} names a button, "${button}", that is not on the page`).toHaveCount(1);
 
       const beforeButton = await outcome.reset(page);
+      await expect(page.getByRole("button", { name: button, exact: true }),
+                   `${keysText} names a button, "${button}", that is not on the page`).toHaveCount(1);
       await page.getByRole("button", { name: button, exact: true }).click();
       const byButton = await outcome.read(page, beforeButton);
 
@@ -554,5 +585,61 @@ test.describe("nodes copy and paste as one batch", () => {
     const stored = await (await page.request.get(`/pipeline-builder/graphs/${id}`)).json();
     expect(stored.nodes.map((item: { id: string }) => item.id).sort()).toEqual(["c", "d"]);
     expect(stored.edges, "an edge still names a deleted node").toEqual([]);
+  });
+});
+
+/**
+ * Hidden nodes are a view state that says how many it hides. X6 of
+ * `GOAL_GRAPH_2026-09-23.md`. Hiding is in this browser only, like a pane layout:
+ * it survives a reload here, and the pipeline on the server never hears of it.
+ */
+test.describe("hidden nodes are a view state", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server", async ({ page }) => {
+    const { id, name } = await openFixture(page);
+    await node(page, "a").click();
+    await node(page, "b").click({ modifiers: ["Shift"] });
+    const sent = edits(page);
+    await page.keyboard.press("Control+h");
+
+    await expect(page.locator(".pipeline-canvas .pipeline-node"), "Ctrl+H did not hide the two selected nodes")
+      .toHaveCount(2);
+    await expect(page.locator(".canvas-hidden-note"), "the canvas does not say how many it hides")
+      .toContainText("2 of 4 nodes hidden in this browser");
+    // a feeds c and b feeds d: each node that remains says one neighbour is hidden.
+    await expect(page.locator(".hidden-link"), "an edge to a hidden node left no trace on the node it came from")
+      .toHaveText(["1 hidden", "1 hidden"]);
+    expect(sent, "hiding sent an edit; it is a view of the graph, not a change to it").toEqual([]);
+
+    await page.reload();
+    const row = page.locator(".output-rail .resource-row").filter({ hasText: name });
+    await row.click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node"), "the hidden nodes came back on reload")
+      .toHaveCount(2);
+    const stored = await (await page.request.get(`/pipeline-builder/graphs/${id}`)).json();
+    expect(stored.nodes, "the server lost a node that was only hidden").toHaveLength(4);
+    expect(JSON.stringify(stored), "hiding was written to the pipeline on the server").not.toContain("hidden");
+
+    await page.getByRole("button", { name: "Show all", exact: true }).click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(4);
+    await expect(page.locator(".canvas-hidden-note")).toHaveCount(0);
+    await expect(page.locator(".hidden-link")).toHaveCount(0);
+  });
+
+  test("a hidden node is out of every tool's reach", async ({ page }) => {
+    await openFixture(page);
+    await node(page, "a").click();
+    await page.getByRole("button", { name: "Hide selected", exact: true }).click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(3);
+    // a was the node last clicked, which a tool takes when nothing else is selected.
+    // Hidden, it is not on the canvas, and no tool may take it.
+    await expect(page.locator(".canvas-selection-count"), "a hidden node is still what the tools act on")
+      .toHaveText("0 of 4 selected");
+    await page.getByRole("button", { name: "Select all", exact: true }).click();
+    await expect.poll(() => selected(page), { message: "Select all took a hidden node" }).toEqual(["b", "c", "d"]);
+    await expect(page.locator(".canvas-selection-count")).toHaveText("3 of 4 selected");
   });
 });

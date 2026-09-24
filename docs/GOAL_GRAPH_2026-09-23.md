@@ -465,9 +465,68 @@ and the count is a button that lists them.
   - **N5, the backend letting an unknown node through:** `test_pipeline_commands.py` failed at
     `a batch naming a node that is not there: 200`, with an edge to `nobody` written.
   - Restored, the tests pass, and the sources are byte for byte what they were.
-- **X6 — Hidden nodes are a view state that says how many it hides.** **Open** — `Ctrl+H`,
+- **X6 — Hidden nodes are a view state that says how many it hides.** **Met** — `Ctrl+H`,
   `Ctrl+K`, `Show all`, the badge. Proven by a test that hides two, reads the badge, reloads,
   and finds nothing hidden on the server.
+
+  **What was built.** `Hide selected` and `Ctrl+H` hide the selected nodes from this view.
+  The hidden set is kept per pipeline in this browser, like a pane layout, and never sent to
+  the server. The canvas leaves the hidden nodes out, and each node that remains puts an
+  `n hidden` badge where an edge to a hidden node was. The canvas also says `N of M nodes
+  hidden in this browser`, in a note, beside `Show all`. A hidden node is out of every
+  tool's reach: `Select all`, the lasso, search, parents and children, and the node last
+  clicked when it is hidden.
+
+  **`Ctrl+K` is not the key.** It opens this product's command palette on every screen, and the
+  pipeline canvas taking it would take the palette away there. `Show all` is `Ctrl+Shift+H`, a
+  row in the hotkeys table, and the reference test observes both new rows by how many nodes
+  the canvas draws.
+
+  **The truncation audit learned what hiding is.** It read two ways of showing part of a set,
+  `.slice(` and an index filter, and a hidden view is a third: a predicate filter, which it
+  did not see. It now reads a filter that drops members of a set named `hidden...`, by name,
+  because the same shape computes data elsewhere. `builderKernel`'s removed nodes are one
+  example, and a rule taking every exclusion filter would charge those as cuts. A hidden
+  view must, in its own component:
+  - render a count in a `role="note"`, as text and not an attribute;
+  - offer `Show all`.
+
+  Otherwise it is an unfixed truncation, held to the same ceiling as the rest.
+  `TABLE_TRUNCATION.md` has a section for them, where the canvas reads yes and yes. Two
+  filters in the builder, which keep hidden nodes from the tools and draw nothing, are
+  declared not a view in `DELIBERATE_VIEWS` with the reason, and added to the baseline's
+  `na`, in the open. The unfixed count holds at 12. `test_table_truncation_audit` holds the
+  rule with 7 more assertions, one of them against a note whose only braces are an
+  `onClick`, which the first version accepted as a count.
+
+  **Proven by** `two hidden nodes are counted, survive a reload here, and are hidden nowhere on the
+  server`. It hides two nodes with `Ctrl+H` and reads `2 of 4 nodes hidden in this browser`
+  and two `1 hidden` badges, with no edit sent. It reloads and finds them still hidden here.
+  It then reads the pipeline from the server: four nodes, and no mention of hiding.
+  `Show all` brings all four back. `a hidden node is out of every tool's reach` is the second
+  test. `GRAPH_EDITOR_PARITY.md` reads 9 of 15, and its baseline holds 5 gaps.
+
+  On the same build, 111 tests pass across the graph-editor, multi-node, movement, evaluator,
+  drag, inert and shell specs. One failed: `pipeline creates a graph and accepts a dragged
+  node`. It passed five times out of five alone. It had also failed once in the run after
+  the canvas-surface fix, before any of this goal's code existed, so it predates this
+  condition. It is named here to be looked at, not explained.
+
+  **Negative runs,** each on a rebuilt `dist` or against the source:
+  - **N1, no note:** failed at `the canvas does not say how many it hides`.
+  - **N2, hiding kept only until a reload:** failed at `the hidden nodes came back on reload`,
+    4 where 2 were expected.
+  - **N3, a hidden node still in the tools' reach.** The first version removed `Select all`'s
+    filter, and passed, because the tools' own filter still held. That filter is the one that
+    matters, and the test gained an assertion it alone answers. With that filter removed, the
+    test failed at `a hidden node is still what the tools act on`: `1 of 4 selected` where
+    `0 of 4` was right. `Select all`'s filter is a second guard, and removing it alone changes
+    nothing a person sees.
+  - **N4, an edge to a hidden node leaving no badge:** failed at `left no trace on the node it
+    came from`.
+  - **N5, the count written without `role="note"`:** `audit_table_truncation` failed at
+    `view:PipelineCanvas.tsx::PipelineCanvas::hiddenNodes is an unfixed truncation`.
+  - Restored, the tests pass, and the sources are byte for byte what they were.
 - **X7 — A port drag connects two nodes by the same command as the edge control.** **Open** —
   proven by `dragging an output port onto an input port inserts one edge and one Undo removes
   it`, and by the existing edge-control test still passing.

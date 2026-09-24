@@ -29,6 +29,12 @@ export function ctrl(letter: string) {
     (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === letter;
 }
 
+/** Ctrl, or Command, with Shift and one letter. */
+export function ctrlShift(letter: string) {
+  return (event: KeyboardEvent) =>
+    (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey && event.key.toLowerCase() === letter;
+}
+
 /** A key pressed on its own. */
 export function bare(key: string) {
   return (event: KeyboardEvent) => !event.ctrlKey && !event.metaKey && !event.altKey && event.key === key;

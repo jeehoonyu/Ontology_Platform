@@ -26,9 +26,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit_table_truncation import (  # noqa: E402
-    BASELINE, DELIBERATE_CUTS, FRONTEND_SRC, REFERENCE, accounting, compare, cut_name, cuts_in,
-    declared_na, others_in, render, scan, silent_per_file, source_of, table_extents, totals,
-    unfixed_names,
+    BASELINE, DELIBERATE_CUTS, DELIBERATE_VIEWS, FRONTEND_SRC, REFERENCE, accounting, compare, cut_name,
+    cuts_in, declared_na, hidden_views_in, others_in, render, scan, silent_per_file, source_of,
+    table_extents, totals, unfixed_names,
 )
 
 checks = 0
@@ -671,6 +671,31 @@ check(BASELINE.exists() and not any(key.endswith("_ceiling") for key in json.loa
       "T21: the baseline carries a `_ceiling` key, which enrols this debt in the ratchet-motion gate")
 check(json.loads(BASELINE.read_text(encoding="utf-8")).get("unfixed_names") == unfixed_names(found),
       "T21: the baseline's names are not exactly what is unfixed now")
+
+# --- a view that leaves out what a person hid (X6 of GOAL_GRAPH_2026-09-23) ------------
+HIDING = '''
+export function Canvas({ nodes, hiddenNodes, onShowAll }) {
+  const shown = nodes.filter((node) => !hiddenNodes.has(node.id));
+  return (<div>%s{shown.map((node) => <b key={node.id}>{node.id}</b>)}</div>);
+}
+'''
+silent_view = hidden_views_in(HIDING % "")
+check(len(silent_view) == 1 and not silent_view[0]["noted"] and not silent_view[0]["reachable"],
+      f"T22: a view that hides nodes and says nothing is not read as silent: {silent_view}")
+said = hidden_views_in(HIDING % '<p role="note">{nodes.length - shown.length} hidden '
+                                 '<button onClick={onShowAll}>Show all</button></p>')
+check(said and said[0]["noted"] and said[0]["reachable"],
+      f"T22: a view that counts what it hides and shows it all is not read as stated: {said}")
+uncounted = hidden_views_in(HIDING % '<p role="note">Some are hidden <button onClick={onShowAll}>Show all</button></p>')
+check(uncounted and not uncounted[0]["noted"], f"T22: a note with no count passes as stating one: {uncounted}")
+check(not hidden_views_in("const kept = nodes.filter((node) => !removedNodes.has(node.id));"),
+      "T22: an exclusion filter that is not a hidden set is read as a view")
+fake = {"files": {"components/Canvas.tsx": {"tables": 0, "cuts": [], "others": [], "views": silent_view}}}
+check("view:Canvas.tsx::Canvas::hiddenNodes" in unfixed_names(fake),
+      f"T22: a silent hidden view is not counted unfixed: {unfixed_names(fake)}")
+check(all(key in json.loads(BASELINE.read_text(encoding="utf-8")).get("na", []) for key in DELIBERATE_VIEWS),
+      "T22: a filter declared not a view is not held in the baseline's na")
+check("## What a person hid" in render(found), "T22: the reference has no section for hidden views")
 
 print(f"Table truncation gate verified: {checks} assertions passed "
       f"({silent} unfixed, {reaching} reaching a table, across {tables} tables).")

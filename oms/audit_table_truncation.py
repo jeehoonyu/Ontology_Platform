@@ -170,6 +170,14 @@ _CUT = re.compile(
     r"\.slice(\()"
     r"|\.filter(\()\s*\(\s*\w+\s*,\s*(\w+)\s*\)\s*=>\s*\3\s*<")
 
+# A view that leaves out what a person hid: `nodes.filter((node) => !hiddenNodes.has(...))`.
+# X6 of GOAL_GRAPH_2026-09-23. It is a predicate, so `_CUT` does not see it, and it is
+# read by name -- a filter dropping members of a set called `hidden...` -- because the
+# same shape computes data elsewhere (`builderKernel`'s removed nodes) and a rule that
+# took every exclusion filter would charge those as cuts. A view that hides must say
+# how many it hides and offer `Show all` in the same component, or it is unfixed.
+_HIDDEN_VIEW = re.compile(r"\.filter\(\s*\(?\s*\w+\s*\)?\s*=>\s*!\s*(hidden\w*)\.has\(")
+
 # A third spelling, with no `.slice` at all: a library row model that filters.
 # Presence is read per file, because the grid registers its features at module
 # level, above the component that draws the rows.
@@ -681,6 +689,15 @@ DELIBERATE_CUTS: Dict[str, str] = {
         "the five most recent views kept for navigation history; the full list of views is the nav itself",
 }
 
+# Filters of a hidden set that draw nothing. Each is declared here with the reason,
+# which the baseline must also hold, the same open edit a deliberate cut takes.
+DELIBERATE_VIEWS: Dict[str, str] = {
+    "view:PipelineBuilder.tsx::PipelineBuilder::hiddenSet":
+        "the nodes the builder's tools act on; the canvas draws them, says how many it hides and shows them all",
+    "view:PipelineBuilder.tsx::PipelineBuilder::hiddenSet#2":
+        "the parents or children a selection reaches; the canvas draws them, says how many it hides and shows them all",
+}
+
 _NOTE_OPEN = re.compile(r"<(\w+)\b[^<>]*?\brole=[\"']note[\"']")
 
 
@@ -727,6 +744,39 @@ def _reachable(body: str, cut: Dict[str, Any]) -> bool:
             if re.search(rf"\b{re.escape(state.group(2))}\(", tag):
                 return True
     return False
+
+
+def hidden_views_in(text: str) -> List[Dict[str, Any]]:
+    """Every view that leaves out a hidden set, and whether its component says so."""
+    found = []
+    for begins, ends, declaration in _declarations(text):
+        body = text[begins:ends]
+        for match in _HIDDEN_VIEW.finditer(body):
+            markup = _note_markup(body)
+            # A count is text the note renders -- `{hiddenCount} of {nodes.length}` -- not an
+            # attribute: `onClick={onShowAll}` beside a sentence with no number is no count.
+            noted = "hidden" in markup and re.search(r"(?<![=$])\{[^{}]+\}", markup) is not None
+            reachable = any("Show all" in body[button.start():_element_end(body, button.start(), "button")]
+                            for button in re.finditer(r"<button\b", body))
+            found.append({"line": text.count("\n", 0, begins + match.start()) + 1, "declaration": declaration,
+                          "set": match.group(1), "noted": noted, "reachable": reachable})
+    return found
+
+
+def view_name(file: str, view: Dict[str, Any]) -> str:
+    return f"view:{file.split('/')[-1]}::{view['declaration']}::{view['set']}"
+
+
+def _named_views(found: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any], str]]:
+    """(file, view, name) for every hidden view; a second of one set in one declaration is `#2`."""
+    seen: Counter = Counter()
+    named = []
+    for file, entry in sorted(found["files"].items()):
+        for view in entry.get("views", []):
+            key = view_name(file, view)
+            seen[key] += 1
+            named.append((file, view, key if seen[key] == 1 else f"{key}#{seen[key]}"))
+    return named
 
 
 def cut_name(file: str, cut: Dict[str, Any]) -> str:
@@ -1368,8 +1418,9 @@ def scan(sources: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         tables += here
         cuts = cuts_in(text)
         others = others_in(text)
-        if here or cuts or others:
-            files[label] = {"tables": here, "cuts": cuts, "others": others}
+        views = hidden_views_in(text)
+        if here or cuts or others or views:
+            files[label] = {"tables": here, "cuts": cuts, "others": others, "views": views}
     return {"files": files, "tables": tables, "windows": census(sources), "sources": dict(sources or {})}
 
 
@@ -1393,13 +1444,16 @@ def _windows(found: Dict[str, Any], windows: Optional[Dict[str, Dict[str, Any]]]
 def unfixed_names(found: Dict[str, Any], windows: Optional[Dict[str, Dict[str, Any]]] = None) -> List[str]:
     cuts = [key for _, cut, key in _named(found) if _silent(cut) and key not in DELIBERATE_CUTS]
     gaps = [f"window:{name}" for name, window in _windows(found, windows).items() if _state_kind(window.get("state")) == "gap"]
-    return sorted(cuts + gaps)
+    views = [key for _, view, key in _named_views(found)
+             if not (view["noted"] and view["reachable"]) and key not in DELIBERATE_VIEWS]
+    return sorted(cuts + gaps + views)
 
 
 def declared_na(found: Dict[str, Any], windows: Optional[Dict[str, Dict[str, Any]]] = None) -> List[str]:
     cuts = [key for _, _, key in _named(found) if key in DELIBERATE_CUTS]
     na = [f"window:{name}" for name, window in _windows(found, windows).items() if _state_kind(window.get("state")) == "na"]
-    return sorted(cuts + na)
+    views = [key for _, _, key in _named_views(found) if key in DELIBERATE_VIEWS]
+    return sorted(cuts + na + views)
 
 
 def totals(found: Dict[str, Any]) -> Tuple[int, int, int]:
@@ -1521,9 +1575,26 @@ def render(found: Dict[str, Any], windows: Optional[Dict[str, Dict[str, Any]]] =
     claimed = {key for window in windows.values() for key in window.get("claims", [])}
     for key in sorted(set(items) - claimed):
         lines.append(f"| **unclaimed** | | `{key}` | **unclaimed** | {items[key].get('at', '')} |")
+    lines += [
+        "",
+        "## What a person hid",
+        "",
+        "A view that leaves out what someone hid, read by the name of the set it drops. "
+        "It must say how many it hides and offer `Show all` beside that.",
+        "",
+        "| File | Line | In | Leaves out | Says how many | Show all |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    views = [(file, view, key) for file, view, key in _named_views(found) if key not in DELIBERATE_VIEWS]
+    for file, view, _ in views:
+        lines.append(f"| `{file}` | {view['line']} | `{view['declaration']}` | `{view['set']}` "
+                     f"| {'yes' if view['noted'] else '**no**'} | {'yes' if view['reachable'] else '**no**'} |")
+    if not views:
+        lines.append("| none | | | | | |")
     lines += ["", "## Declared not a list", ""]
-    declared = [key for key in declared_na(found, windows) if key in DELIBERATE_CUTS]
-    lines += [f"- `{key}`: {DELIBERATE_CUTS[key]}" for key in declared] if declared else ["None."]
+    reasons = {**DELIBERATE_CUTS, **DELIBERATE_VIEWS}
+    declared = [key for key in declared_na(found, windows) if key in reasons]
+    lines += [f"- `{key}`: {reasons[key]}" for key in declared] if declared else ["None."]
     lines += [
         "",
         "## Read as text, a prefix, a last item or a request payload",

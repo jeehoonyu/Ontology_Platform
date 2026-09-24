@@ -26,6 +26,8 @@
   },
   "na": [
     "cut:App.tsx::App::[nextView, ...recentViews.filter((item) => item !== nextView)]",
+    "view:PipelineBuilder.tsx::PipelineBuilder::hiddenSet",
+    "view:PipelineBuilder.tsx::PipelineBuilder::hiddenSet#2",
     "window:agent-runs",
     "window:alert-evaluation",
     "window:generated-name",

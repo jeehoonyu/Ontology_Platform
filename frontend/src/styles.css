@@ -2877,6 +2877,35 @@ pre {
 
 /* Bare canvas, under everything else on the stage, which a drag turns into a
    selection rectangle. No `touch-action`: a finger here scrolls. X2 of GOAL_GRAPH. */
+/* How many nodes this view hides, and the control that shows them. X6 of GOAL_GRAPH. */
+.canvas-hidden-note {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 3px 8px;
+  font-size: 12px;
+  background: #fff8e1;
+  border: 1px solid #e0c46c;
+  border-radius: 3px;
+}
+
+.hidden-link {
+  position: absolute;
+  z-index: 2;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: #6b5500;
+  background: #fff8e1;
+  border: 1px dashed #c9a93b;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
 .canvas-lasso-surface {
   position: absolute;
   inset: 0;

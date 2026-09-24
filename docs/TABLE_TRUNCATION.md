@@ -34,8 +34,8 @@ way to the rest names items nobody can reach.
 
 | File | Line | In | Cuts | How | Note from the true total | Rest reachable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 393 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
-| `components/canvas/PipelineCanvas.tsx` | 400 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 432 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 439 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 223 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 72 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
@@ -94,9 +94,19 @@ test that reads its note; whether that note's condition matches the limit is the
 | `vertex-seeds` | `workspaces/Vertex.tsx` | `request:api/vertexApi.ts::searchSeedObjects::POST /object-sets/search::limit` = 24 | stated | `truncation-sites.spec.ts` — Vertex's seed list says how many objects the type holds and reaches every one |
 | `workflow-audit-rows` | `App.tsx` | `cap:asset_reliability_scenario._workflow_state::.limit(100)` | n/a | the audit rows only decide whether a report was exported |
 
+## What a person hid
+
+A view that leaves out what someone hid, read by the name of the set it drops. It must say how many it hides and offer `Show all` beside that.
+
+| File | Line | In | Leaves out | Says how many | Show all |
+| --- | --- | --- | --- | --- | --- |
+| `components/canvas/PipelineCanvas.tsx` | 139 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
+
 ## Declared not a list
 
 - `cut:App.tsx::App::[nextView, ...recentViews.filter((item) => item !== nextView)]`: the five most recent views kept for navigation history; the full list of views is the nav itself
+- `view:PipelineBuilder.tsx::PipelineBuilder::hiddenSet`: the nodes the builder's tools act on; the canvas draws them, says how many it hides and shows them all
+- `view:PipelineBuilder.tsx::PipelineBuilder::hiddenSet#2`: the parents or children a selection reaches; the canvas draws them, says how many it hides and shows them all
 
 ## Read as text, a prefix, a last item or a request payload
 
@@ -105,9 +115,9 @@ test that reads its note; whether that note's condition matches the limit is the
 | File | Line | In | Slice of | Read as |
 | --- | --- | --- | --- | --- |
 | `api.ts` | 15 | `request` | `text` | text |
-| `components/canvas/PipelineCanvas.tsx` | 111 | `PipelineCanvas` | `id` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 239 | `PipelineCanvas` | `action.label` | text |
-| `components/canvas/PipelineCanvas.tsx` | 409 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
+| `components/canvas/PipelineCanvas.tsx` | 116 | `PipelineCanvas` | `id` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 278 | `PipelineCanvas` | `action.label` | text |
+| `components/canvas/PipelineCanvas.tsx` | 448 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
 | `components/layout/Pane.tsx` | 376 | `usePaneLayout` | `active` | prefix dropped |
 | `components/layout/Pane.tsx` | 377 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
@@ -120,9 +130,9 @@ test that reads its note; whether that note's condition matches the limit is the
 | `workspaces/OntologyRegistryPanel.tsx` | 151 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` | request payload |
-| `workspaces/PipelineBuilder.tsx` | 536 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 656 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 739 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 566 | `PipelineBuilder` | `current` | last dropped |
+| `workspaces/PipelineBuilder.tsx` | 686 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 769 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |
