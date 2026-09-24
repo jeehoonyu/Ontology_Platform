@@ -193,6 +193,9 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [breakpoint, setBreakpoint] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const undoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
+  // The node and box the last Inspector edit changed, while edits to it keep coming. Any
+  // other entry, an Undo or a Redo ends the run, so the next keystroke starts a new one.
+  const editing = useRef("");
   const redoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   const hydratedArtifact = useRef("");
   const clipboard = useRef<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] } | null>(null);
@@ -423,6 +426,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }, [dirty, nodes, edges, artifact?.id, artifact?.lock_version, collaboration?.participant_token, lease?.token, collaborationConflict]);
 
   function snapshot() {
+    editing.current = "";
     undoStack.current.push({ nodes: structuredClone(nodes), edges: structuredClone(edges) });
     if (undoStack.current.length > 50) undoStack.current.shift();
     redoStack.current = [];
@@ -540,6 +544,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }
 
   function undo() {
+    editing.current = "";
     const previous = undoStack.current.pop();
     if (!previous) return;
     redoStack.current.push({ nodes: structuredClone(nodes), edges: structuredClone(edges) });
@@ -549,6 +554,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }
 
   function redo() {
+    editing.current = "";
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push({ nodes: structuredClone(nodes), edges: structuredClone(edges) });
@@ -558,7 +564,13 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   }
 
   function updateSelected(data: ArtifactNodeData) {
-    snapshot();
+    // One entry for a run of edits to one box. Each keystroke used to take its own, so typing
+    // a twelve-letter name took twelve presses of Undo to take back, and a fifty-entry history
+    // held the last fifty letters typed rather than the last fifty edits.
+    const box = editedBox(nodes.find((node) => node.id === selectedNodeId)?.data, data);
+    const run = box ? `${selectedNodeId}:${box}` : "";
+    if (!run || run !== editing.current) snapshot();
+    editing.current = run;
     setNodes((current) => current.map((node) => node.id === selectedNodeId ? { ...node, data } : node));
     setDirty(true);
   }
@@ -906,6 +918,25 @@ function NodeInspector({ node, onChange, onDuplicate, onDelete }: { node: Node<A
 }
 
 type InspectorField = NonNullable<ArtifactNodeData["fields"]>[number];
+
+/**
+ * The one box an Inspector edit changed -- `label`, `description`, or one field by id -- or
+ * "" when it changed anything else: a field added, removed or reordered, or more than one box
+ * at once. Only an edit to one box joins the run before it.
+ */
+function editedBox(before: ArtifactNodeData | undefined, after: ArtifactNodeData): string {
+  if (!before) return "";
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  if (changed.length !== 1) return "";
+  const [key] = changed;
+  if (key !== "fields") return key;
+  const was = before.fields || [];
+  const now = after.fields || [];
+  if (was.length !== now.length || was.some((field, index) => field.id !== now[index].id)) return "";
+  const edited = now.filter((field, index) => JSON.stringify(field) !== JSON.stringify(was[index]));
+  return edited.length === 1 ? `fields.${edited[0].id}` : "";
+}
 
 function SortableField({ field, onChange, onDelete }: { field: InspectorField; onChange: (field: InspectorField) => void; onDelete: () => void }) {
   const sortable = useSortable({ id: field.id });

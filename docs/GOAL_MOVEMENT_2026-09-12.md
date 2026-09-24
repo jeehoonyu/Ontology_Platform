@@ -182,6 +182,22 @@ Three things in that table are the defect the research describes:
   drag on an artifact canvas is taken back by one Undo`, which also asserts that the Undo
   took back only the move and not the node's creation. The click-with-no-movement guard
   stayed green through every build below.
+
+  **The same rule for typing, 2026-09-23.** The Inspector took a history entry on every
+  keystroke. A name typed letter by letter took that many presses of Undo to take back, and
+  fifty letters pushed every earlier edit out of the history.
+  - A run of edits to one box is now one entry. The box is the name, the description, or one
+    configuration field. Any other entry, an Undo, a Redo or another node's box starts a new
+    run. So does adding, removing or reordering a field, or an edit that touches two boxes.
+  - **Proven by** `typing into a node's name is one Undo, and its description another`. It
+    types a name and then a description into a new node, then presses Undo three times. The
+    presses must take back the description, then the name, then the node.
+  - **Negative runs.** With an entry on every keystroke again, it failed at `one Undo did not
+    take back all of the description's typing`. With one run per node rather than per box,
+    it failed at `one Undo took back the name as well as the description`. Restored, the
+    eight tests in the group pass, and `VisualBuilder.tsx` is byte for byte what it was.
+  - **Not held.** No test covers two separate typing sessions in one box, with nothing
+    between them, becoming one entry. None covers the structural edits never joining a run.
 - **V5 — Escape cancels a graph node drag.** **Met**, for the artifact canvases — Escape
   during a live drag puts back the nodes, edges, redo history and unsaved state captured at
   drag start and removes the drag's history entry. xyflow has no cancel of its own and keeps

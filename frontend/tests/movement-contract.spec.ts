@@ -486,6 +486,33 @@ test.describe("a graph node move is one entry, and Escape takes it back", () => 
     await expect(nodes(page), "one Undo took back more than the reorder").toHaveCount(index + 1);
   });
 
+  test("typing into a node's name is one Undo, and its description another", async ({ page }) => {
+    // Each keystroke in the Inspector was its own entry: a name typed letter by letter took
+    // as many presses to take back, and fifty letters pushed every earlier edit out.
+    const index = await addNode(page);
+    await nodes(page).nth(index).click();
+    const form = page.locator(".node-inspector-form");
+    const name = form.locator("label", { hasText: "Name" }).locator("input");
+    const description = form.locator("label", { hasText: "Description" }).locator("textarea");
+    const originalName = await name.inputValue();
+    const originalDescription = await description.inputValue();
+    await name.click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await name.pressSequentially("Renamed", { delay: 15 });
+    await description.click();
+    await description.pressSequentially(" why", { delay: 15 });
+    await expect(name).toHaveValue("Renamed");
+
+    const undo = page.getByRole("button", { name: "Undo" });
+    await undo.click();
+    await expect(description, "one Undo did not take back all of the description's typing").toHaveValue(originalDescription);
+    await expect(name, "one Undo took back the name as well as the description").toHaveValue("Renamed");
+    await undo.click();
+    await expect(name, "one Undo did not take back the whole name").toHaveValue(originalName);
+    await undo.click();
+    await expect(nodes(page), "the name's typing left more than one entry behind").toHaveCount(index);
+  });
+
   test("a click on an artifact node records nothing (guard)", async ({ page }) => {
     // A guard, measured true before V4: clicking selects and must not snapshot.
     // Kept because moving the history entry to drag start is exactly the change
