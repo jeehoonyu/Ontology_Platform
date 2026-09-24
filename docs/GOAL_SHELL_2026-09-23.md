@@ -383,6 +383,10 @@ it reads the validation status, as it does now.
   - In each case `test_check_homes.py` failed too, and the two files were restored byte for
     byte.
 
+  **The successor** is [`GOAL_GRAPH_2026-09-23.md`](GOAL_GRAPH_2026-09-23.md), stated the same day.
+  It works on the pipeline canvas this goal gave the width to. Every condition here is met, and
+  `shell-widths.spec.ts` stays as the gate that keeps them met.
+
 ## Order and size
 
 | Step | Touches | Commits |
