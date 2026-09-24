@@ -267,6 +267,22 @@ That is the write-cost ratchet's treatment of debt applied to tests. A gate that
 day one for a defect it just found is a gate someone turns off; a gate that hides the defect
 is worse than no gate.
 
+**Discharged, 2026-09-23.** The entry named its own discharge: the race fixed, or several
+consecutive isolated runs passing. Both hold now.
+- **The race was the test's.** 2eb7cd5 (2026-08-25) found it: `complete_job` writes status
+  and result in one transaction, and the test read the job on the strength of what the panel
+  said about the partition jobs. The test now polls `/jobs/{id}` until the job itself reads
+  `SUCCEEDED`. The entry outlived that fix by a month because nothing retires an entry.
+- **The isolated runs.** Three runs, each in its own invocation with a fresh server and
+  database, passed three of three.
+- **Still able to fail.** With `row_count` stripped from the job's result, the defect this
+  entry described, the test failed at `row_count`: 4 expected, undefined received. Restored,
+  it passes, and `pipeline_builder_ops.py` is byte for byte what it was.
+
+`known_failing` is empty. The baseline was re-recorded from a full run of a bundle the audit
+found to be the repository's: 1,338 test runs over six viewports, 349 ran, 989 skipped, 0
+failed, 0 flaky, desktop-1280 running 218. The run includes this session's new tests.
+
 ## What this is not
 
 Not a redesign, and not a verdict on how the product looks. The render sweep already checks

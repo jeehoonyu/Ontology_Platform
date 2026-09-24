@@ -371,7 +371,8 @@ it reads the validation status, as it does now.
   repository's. The run went through a copy of `playwright.config.ts` pointed at port 8011,
   because a preview server from another session held 8010; nothing else in the config
   changed. One entry is still `known_failing`: `pipeline deploys an immutable snapshot`. It
-  ran and passed here, and it stays listed until isolated runs discharge it.
+  ran and passed here, and it stays listed until isolated runs discharge it. (Discharged
+  later the same day; `GOAL_BROWSER_EVIDENCE_2026-08-17.md` records how.)
 
   **Negative runs:**
   - **N1, `laptop-1366` dropped from the config:** the audit failed at `project laptop-1366
