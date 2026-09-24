@@ -155,6 +155,12 @@ and the count is a button that lists them.
   It is the twenty-fourth check in the fast tier, is declared in the check registry and the
   enforcement ledger, and is run by `oms/test_graph_editor_audit.py`.
 
+  *Found by the suite-cost census, later the same day.* That test's ratchet case closed a gap
+  by marking the first control with a handler met. It was a gap when the case was written, and
+  once X2 met the lasso, "closing" it moved no count and the test failed. The fast tier runs
+  the audit, not its test, so nothing ran it until the census ran the whole suite. The case
+  now closes the first real gap. 36 assertions pass.
+
   **The first run reads 0 of 15, not 3.** Seven rows have a handler doing part of the job:
   `selectNode`, `removeNode`, `onZoom`, `insertAfter`, the click menu's `onContextInsert`,
   `undoMove` and `moveNodes`. Seven have nothing. The legend and colour groups row is not

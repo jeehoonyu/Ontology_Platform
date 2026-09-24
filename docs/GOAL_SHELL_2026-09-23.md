@@ -343,6 +343,11 @@ it reads the validation status, as it does now.
   too, and the check registry names them. Proven by `audit_check_coverage` seeing the
   projects.
 
+  *Found by the suite-cost census, later the same day.* `test_browser_evidence_audit.py`
+  compared the recorded baseline's viewports with the four it was written with. It failed
+  once the baseline was re-recorded with six. It now reads them from `PLAYWRIGHT_PROJECTS`,
+  the one place S6 made them named. 41 assertions pass.
+
   **What was built.** Two new projects, `tablet-1024` at 1024×768 and `laptop-1366` at
   1366×768, following the `<class>-<width>` names the other four use. `check_registry.py`
   names all six in `PLAYWRIGHT_PROJECTS`. `audit_check_coverage` reads the projects out of

@@ -160,7 +160,10 @@ check(any("new" in n and "brand new test" in n for n in added[2]), added[2])
 check(BASELINE.exists(), f"no baseline at {BASELINE}")
 real = json.loads(BASELINE.read_text(encoding="utf-8"))
 check(len(real["tests"]) > 200, len(real["tests"]))
-check(set(real["viewports"]) == set(VIEWPORTS), sorted(real["viewports"]))
+# The configured projects, named once in the registry. This compared against the four this file
+# was written with, and failed when S6 of GOAL_SHELL_2026-09-23 added tablet-1024 and laptop-1366.
+from check_registry import PLAYWRIGHT_PROJECTS  # noqa: E402
+check(set(real["viewports"]) == set(PLAYWRIGHT_PROJECTS), sorted(real["viewports"]))
 
 skipped_now = [name for name, outcome in real["tests"].items() if outcome == SKIPPED]
 ran_now = [name for name, outcome in real["tests"].items() if outcome == RAN]

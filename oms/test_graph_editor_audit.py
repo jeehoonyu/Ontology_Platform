@@ -76,19 +76,22 @@ check(not ok and any("newly declared not taken" in f for f in failures),
       "turning a gap into not taken lowers the count and passes")
 
 # --- the ratchet ---------------------------------------------------------------------
+# A gap closed. This borrowed MAPPED, the first control with a handler, which was a gap when
+# the test was written; once the lasso was met, "closing" it moved no count and this failed.
+CLOSABLE = controls_of(CONTROLS, "gap")[0]
 PROVEN = "pane-layout.spec.ts::a narrow pane's menu opens with a tap and moves the pane"
 improved = copy.deepcopy(CONTROLS)
-improved[MAPPED]["state"] = {"test": PROVEN}
+improved[CLOSABLE]["state"] = {"test": PROVEN}
 ok, failures, notes = compare(live_baseline, improved, check_reference=False)
 check(ok and any("->" in note for note in notes), f"closing a gap is refused or unreported: {failures}")
 
 met_baseline = {"gaps": len(controls_of(improved, "gap")), "gap_controls": controls_of(improved, "gap"),
                 "na_controls": controls_of(improved, "na")}
 regressed = copy.deepcopy(improved)
-regressed[MAPPED]["state"] = {"gap": "stopped working"}
+regressed[CLOSABLE]["state"] = {"gap": "stopped working"}
 ok, failures, _ = compare(met_baseline, regressed, check_reference=False)
 check(not ok and any("up from" in f for f in failures), f"a rising gap count passes: {failures}")
-check(not ok and any(f"{MAPPED} is a gap the baseline does not hold" in f for f in failures),
+check(not ok and any(f"{CLOSABLE} is a gap the baseline does not hold" in f for f in failures),
       "a met control becoming a gap is not named")
 
 # --- rendering -----------------------------------------------------------------------
