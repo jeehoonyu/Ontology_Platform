@@ -937,7 +937,11 @@ def evaluate_alert_rules_inline(db: Session, *, limit: int = 500, source: Option
 def ops_summary(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
     open_alerts = semantic_scope.accessible_query(db, principal, AlertEvent).filter(AlertEvent.status == "OPEN").all()
-    open_incidents = semantic_scope.accessible_query(db, principal, Incident).filter(open_incident_clause()).all()
+    # Newest change first, so the ten `latest_incidents` are the ten most recently updated. The
+    # query had no order, and the ten were whichever the database returned first. The count is
+    # every open incident, and the screen says so when it lists fewer.
+    open_incidents = (semantic_scope.accessible_query(db, principal, Incident).filter(open_incident_clause())
+                      .order_by(Incident.updated_at.desc(), Incident.created_at.desc(), Incident.id).all())
     pending_approvals = semantic_scope.accessible_query(db, principal, models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value).all()
     failed_pipelines = semantic_scope.accessible_query(db, principal, models.PipelineRun).filter(models.PipelineRun.status == "FAILED").order_by(models.PipelineRun.created_at.desc()).limit(10).all()
     latest_events = semantic_scope.accessible_query(db, principal, OpsEvent).order_by(OpsEvent.created_at.desc()).limit(10).all()

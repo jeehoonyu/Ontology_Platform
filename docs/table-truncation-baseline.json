@@ -1,10 +1,10 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-19T02:21:31Z"
+    "recorded_at": "2026-09-24T01:37:11Z"
   },
   "note": "Truncations left unfixed, by name: a table cut with no true count or before a table that pages, a list cut that does not say how much it shows and let the rest be reached, and a cut nobody placed. The count may fall and must never rise, and a name not held here fails. A name under `na` was declared not a list on purpose.",
-  "unfixed": 12,
+  "unfixed": 11,
   "unfixed_names": [
     "cut:DecisionWorkspace.tsx::RiskBoard::finding.risk.drivers",
     "cut:PipelineCanvas.tsx::MiniGraph::edges",
@@ -16,7 +16,6 @@
     "window:explorer-objects",
     "window:imports-warnings",
     "window:object-profile-links",
-    "window:ops-latest-incidents",
     "window:pipeline-output-builds"
   ],
   "per_file": {

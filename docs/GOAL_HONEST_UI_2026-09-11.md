@@ -2448,6 +2448,41 @@ plan, and it is measured there.
     approvals and incidents with nothing said. The legacy shell's recommendation card names
     the newest approval as the approval.
 
+  **And Operations' Latest incidents, the gap window `ops-latest-incidents`.** `/ops/summary`
+  read its open incidents in no order and returned the first ten as `latest_incidents`, so the
+  panel listed whichever ten the database returned first. In SQLite those were the ten written
+  earliest, with nothing said.
+  - The read is now ordered by `updated_at`, newest first. Ties in the one-second clock break by
+    `created_at`, newest first, then by id. The ten stay ten, and the count is every open
+    incident.
+  - When more are open, the panel says "Showing the 10 most recently updated of N open
+    incidents. The Incidents tab lists every one."
+  - The window is declared stated, and `TABLE_TRUNCATION.md` reads 11 unfixed: 5 of 12
+    truncations and 6 of 35 loaded windows. `test_table_truncation_audit.py` runs 246
+    assertions.
+  - **Proven by** `oms/test_ops_latest_incidents.py`, 8 assertions. It writes twelve open and
+    two resolved incidents in reverse id order, with explicit times out of any order. Two share
+    `updated_at`, and two share both times. It requires the ten most recently updated, the
+    newer creation first on a tie, and the id order on a full tie.
+  - Two new tests in `truncation-sites.spec.ts` cover the screen. One writes twelve incidents,
+    updates the sixth a second later, and requires it first, ten listed, and the note with the
+    open count, not cut off. The other serves a summary whose two open incidents are both
+    listed, and requires no note.
+  - **Negative runs.** In the backend test:
+    - no order failed at the first listed, `latest-11`, the last written;
+    - no `created_at` tie-break failed at the order, 04 before 05;
+    - no id tie-break failed at 08 before 07.
+
+    In the browser:
+    - no order failed at the first listed, the first written;
+    - ordering by creation failed at the first listed, a later-written incident;
+    - no note failed at the note, element not found;
+    - a note even on a complete list failed at the second test, one note where none belongs.
+
+    The first browser run updated the first-written incident, which a read in no order also
+    returns first, so the no-order mutation passed. The test now updates one written in the
+    middle. Restored, both sources are byte for byte what they were.
+
 ## Order and size
 
 | Step | Touches | Commits |

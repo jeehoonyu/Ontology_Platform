@@ -1248,6 +1248,10 @@ WINDOWS: Dict[str, Dict[str, Any]] = {
                    "cap:pipeline_builder_ops._execute_graph::rows[:5]"],
         "screen": "components/canvas/PipelineCanvas.tsx", "note": "Previewing the first",
         "state": {"stated": "truncation-sites.spec.ts::the pipeline drawer previews the rows it asks for and says how many the node holds"}},
+    "ops-latest-incidents": {
+        "claims": ["cap:ops_control.ops_summary::open_incidents[:10]"],
+        "screen": "workspaces/OpsWorkspace.tsx", "note": "of {summary.open_incidents.toLocaleString()} open incidents",
+        "state": {"stated": "truncation-sites.spec.ts::Latest incidents lists the most recently updated and says how many are open"}},
     # --- gaps: a screen draws part of a set as the set -----------------------------------------------------
     "mapping-preview": {
         "claims": ["request:api/workspaceState.ts::previewOntologyMapping::POST /ontology/mappings/preview::limit"],
@@ -1292,10 +1296,6 @@ WINDOWS: Dict[str, Dict[str, Any]] = {
         "claims": ["cap:imports_ops.imports_ui_state::.limit(50)"],
         "screen": "App.tsx",
         "state": {"gap": "Data Onboarding's validation warnings are built from the latest 50 import jobs and drawn as the warnings"}},
-    "ops-latest-incidents": {
-        "claims": ["cap:ops_control.ops_summary::open_incidents[:10]"],
-        "screen": "workspaces/OpsWorkspace.tsx",
-        "state": {"gap": "Latest incidents lists up to 10 open incidents with nothing said"}},
     "contract-run-history": {
         "claims": ["cap:pipeline_builder_ops.ontology_contract_ui_state::.limit(50)"],
         "screen": "workspaces/PipelineBuilder.tsx",

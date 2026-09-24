@@ -1120,6 +1120,58 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     await expect(panel.getByRole("note"), "one open approval is said to be one of many").toHaveCount(0);
   });
 
+  test("Latest incidents lists the most recently updated and says how many are open", async ({ page }) => {
+    // The summary read its open incidents in no order, so its ten were whichever the database
+    // returned first, and the panel listed them with nothing said. Twelve more open incidents keep
+    // the count past ten whatever ran before. One written in the middle is then updated, so it is
+    // the most recently updated: not the first written, which a read in no order returns first,
+    // nor the last, which an order by creation puts first.
+    const suffix = `${Date.now()}`;
+    const settled = async (response: APIResponse, label: string) => {
+      const text = await response.text();
+      expect(response.ok(), `${label}: ${text.slice(0, 500)}`).toBeTruthy();
+      return JSON.parse(text || "null");
+    };
+    const created: Array<{ id: string }> = [];
+    for (let index = 0; index < 12; index += 1) {
+      created.push(await settled(await page.request.post("/ops/incidents", { data: {
+        display_name: `Latest incident ${suffix} ${index}`, severity: "medium"
+      } }), `incident ${index}`));
+    }
+    // `updated_at` is held in seconds, so the update waits for the next one.
+    await page.waitForTimeout(1_100);
+    await settled(await page.request.patch(`/ops/incidents/${encodeURIComponent(created[5].id)}`, { data: { owner: `latest-${suffix}` } }), "update one in the middle");
+
+    const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/ops/summary");
+    await page.goto("/workspace/ops");
+    const summary = await (await loaded).json() as { open_incidents: number; latest_incidents: unknown[] };
+    expect(summary.open_incidents, "the fixture did not reach past the ten the panel lists").toBeGreaterThan(10);
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Current Severity", exact: true }) });
+    const listed = panel.locator(".ops-compact-list article");
+    await expect(listed).toHaveCount(10);
+    await expect(listed.first(), "Latest incidents does not start with the most recently updated").toContainText(`Latest incident ${suffix} 5`);
+    const openText = await page.evaluate((count) => count.toLocaleString(), summary.open_incidents);
+    await expect(panel.getByRole("note"), "Latest incidents lists ten of many open incidents and does not say so")
+      .toHaveText(`Showing the 10 most recently updated of ${openText} open incidents. The Incidents tab lists every one.`);
+    await expectUnclipped(panel.getByRole("note"), "the note is cut off, hiding how many incidents are open");
+  });
+
+  test("Latest incidents says nothing more when it lists every open incident", async ({ page }) => {
+    const incident = (index: number) => ({
+      id: `stub_latest_${index}`, display_name: `Stub latest ${index}`, severity: "medium", status: "OPEN", owner: null,
+      linked_objects: [], alert_ids: [], approval_ids: [], runbook_execution_ids: [], timeline: [], created_at: 1, updated_at: 1
+    });
+    await page.route((url) => url.pathname === "/ops/summary", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json() as Record<string, unknown>;
+      await route.fulfill({ response, json: { ...body, open_incidents: 2, latest_incidents: [incident(0), incident(1)] } });
+    });
+    await page.goto("/workspace/ops");
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Current Severity", exact: true }) });
+    await expect(panel.locator(".ops-compact-list article")).toHaveCount(2);
+    await expect(panel.getByRole("note"), "a list of every open incident is said to be part of more").toHaveCount(0);
+  });
+
   test("the Risk Board scores the whole type, counts every scored object, and says how much it lists", async ({ page }) => {
     test.setTimeout(120_000);
     // The workspace asked for 250 objects and the server scored the first 250 by id. The
