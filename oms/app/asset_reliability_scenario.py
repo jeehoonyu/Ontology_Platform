@@ -30,6 +30,7 @@ from . import (
     platform_core,
     production_auth,
     reliability_ops,
+    semantic_scope,
     tenancy,
 )
 from .database import get_db
@@ -724,8 +725,8 @@ def _latest_report(db: Session) -> Optional[Dict[str, Any]]:
     return investigations._report_dict(report) if report else None
 
 
-def _scenario_report_payload(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
-    summary = _summarize(db, asset_id=asset_id)
+def _scenario_report_payload(db: Session, principal: production_auth.Principal, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    summary = _summarize(db, principal, asset_id=asset_id)
     report = summary.get("latest_report")
     pipeline_runs = [
         _pipeline_run_dict(row)
@@ -813,8 +814,8 @@ def _scenario_report_markdown(payload: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _risk_findings(db: Session) -> List[Dict[str, Any]]:
-    rows = db.query(models.ObjectInstance).filter(models.ObjectInstance.object_type_id == "asset").all()
+def _risk_findings(db: Session, principal: production_auth.Principal) -> List[Dict[str, Any]]:
+    rows = semantic_scope.accessible_query(db, principal, models.ObjectInstance).filter(models.ObjectInstance.object_type_id == "asset").all()
     findings = []
     for obj in rows:
         risk = decision_intelligence.score_object(db, obj, scorecard_ids=[DECISION_SCORECARD_ID])
@@ -826,23 +827,29 @@ def _risk_findings(db: Session) -> List[Dict[str, Any]]:
 # Each loader keeps the 20 newest rows as its list and returns how many rows match. A list shorter
 # than 20 is every matching row, so its length is the count; one that reaches 20 is counted in SQL on
 # the query that loaded it, the way `platform_core._graph_overview` counts a kind that reached its limit.
-def _open_alerts(db: Session) -> Tuple[List[Dict[str, Any]], int]:
+# Rows and counts are the viewer's: each query reads only the projects the principal may view, as
+# `/ops/summary` does, so the Command Center no longer lists or counts another project's alerts,
+# approvals and incidents.
+def _open_alerts(db: Session, principal: production_auth.Principal, *, project_id: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int]:
+    """`project_id` narrows the list to one project: the demo incident may only link its own."""
     ops_control._ensure_tables(db)
-    query = db.query(ops_control.AlertEvent).filter(ops_control.AlertEvent.status == "OPEN")
+    query = semantic_scope.accessible_query(db, principal, ops_control.AlertEvent).filter(ops_control.AlertEvent.status == "OPEN")
+    if project_id is not None:
+        query = query.filter(ops_control.AlertEvent.project_id == project_id)
     rows = query.order_by(ops_control.AlertEvent.created_at.desc()).limit(20).all()
     return [ops_control._alert_dict(row) for row in rows], (len(rows) if len(rows) < 20 else query.count())
 
 
-def _open_approvals(db: Session) -> Tuple[List[Dict[str, Any]], int]:
-    query = db.query(models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value)
+def _open_approvals(db: Session, principal: production_auth.Principal) -> Tuple[List[Dict[str, Any]], int]:
+    query = semantic_scope.accessible_query(db, principal, models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value)
     rows = query.order_by(models_action.ApprovalRequest.created_at.desc()).limit(20).all()
     return [_approval_dict(row) for row in rows], (len(rows) if len(rows) < 20 else query.count())
 
 
-def _incidents(db: Session) -> Tuple[List[Dict[str, Any]], int, int]:
+def _incidents(db: Session, principal: production_auth.Principal) -> Tuple[List[Dict[str, Any]], int, int]:
     """The 20 most recently updated incidents, how many there are, and how many are not closed."""
     ops_control._ensure_tables(db)
-    query = db.query(ops_control.Incident)
+    query = semantic_scope.accessible_query(db, principal, ops_control.Incident)
     rows = query.order_by(ops_control.Incident.updated_at.desc()).limit(20).all()
     incidents = [ops_control._incident_dict(row) for row in rows]
     if len(rows) < 20:
@@ -850,18 +857,25 @@ def _incidents(db: Session) -> Tuple[List[Dict[str, Any]], int, int]:
     return incidents, query.count(), query.filter(ops_control.Incident.status != "CLOSED").count()
 
 
-def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
-    asset = db.get(models.ObjectInstance, asset_id)
-    work_order = db.get(models.ObjectInstance, DEFAULT_WORK_ORDER_ID)
-    risk_findings = _risk_findings(db)
+def _visible_object(db: Session, principal: production_auth.Principal, object_id: str) -> Optional[models.ObjectInstance]:
+    """The object, if the viewer may see it. `asset_id` arrives as a query parameter, and a summary
+    of an object before the bootstrap wrote it reads as none selected, so another project's reads
+    the same way rather than as a refusal."""
+    return semantic_scope.accessible_query(db, principal, models.ObjectInstance).filter(models.ObjectInstance.id == object_id).first()
+
+
+def _summarize(db: Session, principal: production_auth.Principal, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    asset = _visible_object(db, principal, asset_id)
+    work_order = _visible_object(db, principal, DEFAULT_WORK_ORDER_ID)
+    risk_findings = _risk_findings(db, principal)
     high_risk_assets = [
         item for item in risk_findings
         if item["risk"].get("band") in {"high", "critical"}
     ]
     data_contract_run = _latest_data_contract_run(db)
     monitor_run = _latest_monitor_run(db)
-    alerts, open_alert_count = _open_alerts(db)
-    approvals, open_approval_count = _open_approvals(db)
+    alerts, open_alert_count = _open_alerts(db, principal)
+    approvals, open_approval_count = _open_approvals(db, principal)
     latest_approval_row = db.query(models_action.ApprovalRequest).filter(
         models_action.ApprovalRequest.project_id == "default",
         models_action.ApprovalRequest.action_type_id == "escalate_work_order",
@@ -876,7 +890,7 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
         models_action.OutboxEvent.project_id == "default",
         models_action.OutboxEvent.action_type_id == "escalate_work_order",
     ).order_by(models_action.OutboxEvent.created_at.desc()).first()
-    incidents, incident_count, open_incident_count = _incidents(db)
+    incidents, incident_count, open_incident_count = _incidents(db, principal)
     timeline = platform_core._build_timeline(
         db,
         subject_type=None,
@@ -885,12 +899,12 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
         object_id=asset_id if asset else None,
         limit=25,
     )
-    graph = platform_core._graph_overview(db, 80)
+    graph = platform_core._graph_overview(db, 80, principal)
     # Called once and read twice. The two calls that used to be here were the
     # same summary computed twice in one dict literal, which cost this route six
     # duplicate queries -- the sort of thing that is invisible in the source and
     # obvious the moment anyone counts statements.
-    maintenance = maintenance_summary(db)
+    maintenance = maintenance_summary(db, principal)
     return {
         "scenario_id": SCENARIO_ID,
         "asset_id": asset_id,
@@ -923,8 +937,8 @@ def _summarize(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, 
     }
 
 
-def _workflow_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
-    summary = _summarize(db, asset_id=asset_id)
+def _workflow_state(db: Session, principal: production_auth.Principal, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    summary = _summarize(db, principal, asset_id=asset_id)
     try:
         from . import imports_ops, ontology_generator, pipeline_builder_ops
         latest_import = db.query(imports_ops.ImportJob).order_by(imports_ops.ImportJob.updated_at.desc()).first()
@@ -1055,8 +1069,8 @@ def _step_status(workflow: Dict[str, Any], step_id: str) -> str:
     return "available"
 
 
-def _command_center_ui_state(db: Session, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
-    workflow = _workflow_state(db, asset_id=asset_id)
+def _command_center_ui_state(db: Session, principal: production_auth.Principal, *, asset_id: str = HIGH_RISK_ASSET_ID) -> Dict[str, Any]:
+    workflow = _workflow_state(db, principal, asset_id=asset_id)
     summary = workflow.get("summary") or {}
     kpis = summary.get("kpis") or {}
     high_risk_assets = summary.get("high_risk_assets") or []
@@ -1379,7 +1393,7 @@ def _create_agent_recommendation(
     return _agent_session_dict(session)
 
 
-def _validation_dashboard(db: Session, *, include_summary: bool = True) -> Dict[str, Any]:
+def _validation_dashboard(db: Session, principal: production_auth.Principal, *, include_summary: bool = True) -> Dict[str, Any]:
     root = Path(__file__).resolve().parents[2]
     matrix_path = root / "foundry-docs" / "VALIDATION_MATRIX.md"
     rows: List[Dict[str, str]] = []
@@ -1407,7 +1421,7 @@ def _validation_dashboard(db: Session, *, include_summary: bool = True) -> Dict[
         "status_counts": status_counts,
         "priority_gaps": priority_gaps,
         "rows": rows,
-        "scenario_summary": _summarize(db) if include_summary else None,
+        "scenario_summary": _summarize(db, principal) if include_summary else None,
     }
 
 
@@ -1467,7 +1481,7 @@ def bootstrap_asset_reliability(
     )
     db.commit()
     _ensure_investigation(db)
-    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db)[0]])
+    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db, principal, project_id="default")[0]])
     _add_investigation_evidence(db, title="Bootstrap reliability evidence", payload={"decision_event_id": decision_event.id, "data_contract_status": data_contract_run["status"], "monitor_status": monitor_run["status"]}, tags=["bootstrap", "risk"])
     report = investigations.create_report(INVESTIGATION_ID, investigations.ReportRequest(title="Asset Reliability Bootstrap Report"), db)
 
@@ -1479,29 +1493,29 @@ def bootstrap_asset_reliability(
         "risk_findings": decision_result.get("findings", []),
         "data_contract_run": data_contract_run,
         "model_monitor_run": monitor_run,
-        "alerts": _open_alerts(db)[0],
+        "alerts": _open_alerts(db, principal)[0],
         "incident": incident,
         "report": report,
-        "summary": _summarize(db),
+        "summary": _summarize(db, principal),
     }
 
 
 @router.get("/scenarios/asset-reliability/summary")
 def asset_reliability_summary(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     tenancy.assert_project_permission(db, principal, "default", "view")
-    return _summarize(db, asset_id=asset_id)
+    return _summarize(db, principal, asset_id=asset_id)
 
 
 @router.get("/scenarios/asset-reliability/workflow-state")
 def asset_reliability_workflow_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     tenancy.assert_project_permission(db, principal, "default", "view")
-    return _workflow_state(db, asset_id=asset_id)
+    return _workflow_state(db, principal, asset_id=asset_id)
 
 
 @router.get("/ui-state/command-center")
 def command_center_ui_state(asset_id: str = Query(HIGH_RISK_ASSET_ID), db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     tenancy.assert_project_permission(db, principal, "default", "view")
-    return _command_center_ui_state(db, asset_id=asset_id)
+    return _command_center_ui_state(db, principal, asset_id=asset_id)
 
 
 @router.post("/project/demo/bootstrap")
@@ -1517,8 +1531,8 @@ def bootstrap_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: 
         "status": "READY",
         "mode": "idempotent_bootstrap",
         "scenario": result,
-        "workflow_state": _workflow_state(db),
-        "ui_state": _command_center_ui_state(db),
+        "workflow_state": _workflow_state(db, principal),
+        "ui_state": _command_center_ui_state(db, principal),
     }
 
 
@@ -1536,8 +1550,8 @@ def reset_project_demo(body: ProjectDemoRequest = ProjectDemoRequest(), db: Sess
         "mode": "idempotent_reset",
         "note": "Local demo reset is non-destructive: it re-upserts the sample workflow and leaves unrelated user data intact.",
         "scenario": result,
-        "workflow_state": _workflow_state(db),
-        "ui_state": _command_center_ui_state(db),
+        "workflow_state": _workflow_state(db, principal),
+        "ui_state": _command_center_ui_state(db, principal),
     }
 
 
@@ -1548,8 +1562,13 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
     asset = db.get(models.ObjectInstance, body.asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail=f"Asset '{body.asset_id}' not found. Run /scenarios/asset-reliability/bootstrap first.")
-    if not db.get(models.ObjectInstance, body.work_order_id):
+    work_order = db.get(models.ObjectInstance, body.work_order_id)
+    if not work_order:
         raise HTTPException(status_code=404, detail=f"Work order '{body.work_order_id}' not found")
+    # Triage scores the asset, persists the decision run and stages an escalation of the work
+    # order, so both must be objects the caller may execute on.
+    semantic_scope.assert_project(db, principal, asset.project_id, "execute")
+    semantic_scope.assert_project(db, principal, work_order.project_id, "execute")
     decision_result = decision_intelligence.evaluate_decision_scope_inline(
         decision_intelligence.DecisionEvaluateRequest(
             object_type_id="asset",
@@ -1587,7 +1606,7 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
         policy_decision=policy_decision,
     )
     approval = _stage_escalation_approval(db, actor=body.actor, work_order_id=body.work_order_id, reason=reason)
-    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db)[0]], approval_ids=[approval["id"]])
+    incident = _ensure_incident(db, alert_ids=[alert["id"] for alert in _open_alerts(db, principal, project_id="default")[0]], approval_ids=[approval["id"]])
     evidence = _add_investigation_evidence(
         db,
         title="Triage run evidence",
@@ -1610,14 +1629,14 @@ def run_asset_reliability_triage(body: ScenarioTriageRequest = ScenarioTriageReq
         "incident": incident,
         "evidence": evidence,
         "report": report,
-        "summary": _summarize(db, asset_id=body.asset_id),
+        "summary": _summarize(db, principal, asset_id=body.asset_id),
     }
 
 
 @router.get("/scenarios/asset-reliability/validation-dashboard")
 def asset_reliability_validation_dashboard(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     tenancy.assert_project_permission(db, principal, "default", "view")
-    return _validation_dashboard(db)
+    return _validation_dashboard(db, principal)
 
 
 @router.get("/scenarios/asset-reliability/report")
@@ -1630,7 +1649,7 @@ def asset_reliability_report(
 ):
     tenancy.assert_project_permission(db, principal, "default", "export")
     actor = _request_actor(principal, actor)
-    payload = _scenario_report_payload(db, asset_id=asset_id)
+    payload = _scenario_report_payload(db, principal, asset_id=asset_id)
     create_audit_log(
         db,
         actor=actor,

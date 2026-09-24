@@ -399,6 +399,78 @@ their parent's primary key, so no column and no migration was needed.
   marker, so nothing here depends on it. The marker belongs to T11, where a resource's
   project is to be recorded in one place.
 
+## The Command Center, 2026-09-23: the viewer's rows, not every project's
+
+Every Command Center route checks that its caller may use `default`, and then builds its
+summary with no principal. `_open_alerts`, `_open_approvals` and `_incidents` read the 20
+newest rows of every project. The graph was drawn for every project. The risk findings
+scored every project's assets. `maintenance_summary` counted every project's objects and
+listed every project's open work orders. The asset named by the `asset_id` query parameter
+was loaded by id wherever it lived. So a viewer of `default` saw, and counted, the alerts,
+approvals, incidents, assets and work orders of projects they could not open. Triage took
+the asset and work order ids from its body the same way. It scored another project's asset,
+persisted the decision run, and staged an escalation of another project's work order.
+
+The loader that listed the alerts also chose the ones the demo incident links. With another
+project's alert among the 20 newest, the bootstrap failed with 422, because
+`create_incident_inline` refuses a foreign alert. Once the incident existed, triage merged
+the foreign alert into it with no check at all.
+
+The viewer is now threaded from each route through `_summarize`, `_workflow_state`,
+`_command_center_ui_state`, `_validation_dashboard` and `_scenario_report_payload`:
+
+- The three loaders, the risk findings and the selected asset and work order read through
+  `semantic_scope.accessible_query`. Another project's asset named by id reads as none
+  selected, the way an asset the bootstrap has not written yet reads.
+- `_graph_overview` already took a principal and is now given one.
+- `maintenance_summary` takes an optional principal and reads its projects when given one.
+- Triage requires `execute` on the projects of both objects it names.
+- The demo incident links only `default`'s open alerts.
+
+An administrator of every project sees what they saw before.
+
+- **Proven by** `oms/test_command_center_tenancy.py`, 41 assertions.
+  - With another project's alert newest, the bootstrap succeeds, and neither it nor triage
+    links a foreign alert to the demo incident.
+  - With another project's two alerts, two approvals, two incidents, an asset and a work
+    order in place, an administrator of every project counts and lists all of them.
+  - A viewer of `default` alone gets `default`'s counts, compared with the tables, on six
+    routes: the summary, the workflow state, the Command Center, the validation dashboard,
+    the exported report and the demo bootstrap. None of the foreign ids appears anywhere in
+    those responses.
+  - Naming the foreign asset selects nothing for that viewer and selects it for the
+    administrator. Triage of the foreign asset, or of the foreign work order, is refused with
+    403, and no decision run is persisted and no approval is staged.
+  - Seventeen older tests that drive these routes pass. `test_maintenance_summary_cost`
+    needed one change: its stand-in for `maintenance_summary` now forwards its arguments.
+- **Negative runs.** Eleven mutations each fail the test at the assertion named for them:
+  - bootstrap linking every project's alerts fails with the 422;
+  - triage linking them fails at the foreign alert ids in the incident;
+  - each of the three loaders read unscoped fails at the summary's counts;
+  - the graph drawn for every project, and the risk findings scored for every project, fail
+    at the foreign ids listed;
+  - the selected asset loaded by id fails at the foreign asset shown;
+  - either triage check removed fails at the 200 that should have been a 403;
+  - `maintenance_summary` called without the viewer fails at the foreign work order listed.
+
+  Restored, `asset_reliability_scenario.py` is byte for byte what it was.
+- **The census.** Unscoped reads fall from 353 to 345, and the ceiling is lowered to match.
+  `helper_reference` falls from 269 to 259, because the summary helpers now hold a principal.
+  Their remaining raw reads are counted `unauthorized`, which stays at 47 net.
+  `row_used_reference` falls from 190 to 188, `existence_only_reference` from 163 to 157, and
+  `transitive_reference` rises from 37 to 39: triage's work-order read and
+  `maintenance_summary`'s read without a principal.
+- **What is still unscoped, stated so it is not mistaken for done.**
+  - `platform_core._build_timeline` takes no principal and reads ops events and audit logs.
+    `AuditLog` has no project column.
+  - `_latest_report`, `_latest_data_contract_run` and `_latest_monitor_run` are unscoped.
+  - The latest import, draft, graph and pipeline run in `_workflow_state` are unscoped.
+  - The report's pipeline runs are unscoped.
+  - `/domains/maintenance/summary` still calls `maintenance_summary` without a principal,
+    and its handler declares no permission.
+  - The Command Center still counts an incident as open when its status is anything but
+    `CLOSED`, where Operations counts three statuses. That is the next item, not this one.
+
 ## Non-completion rule
 
 Inherited unchanged: no condition is marked met without objective evidence, partial progress

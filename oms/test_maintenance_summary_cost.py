@@ -119,9 +119,9 @@ check(counts_of(after_noise) == 1,
 original = asset_reliability_scenario.maintenance_summary
 calls = []
 try:
-    def counted(db):
+    def counted(db, *args, **kwargs):
         calls.append(1)
-        return original(db)
+        return original(db, *args, **kwargs)
 
     asset_reliability_scenario.maintenance_summary = counted
     calls.clear()

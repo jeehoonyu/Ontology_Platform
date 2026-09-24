@@ -1,10 +1,11 @@
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import models
+from . import models, semantic_scope
+from .production_auth import Principal
 from .runtime import create_audit_log, now_ts
 
 
@@ -718,8 +719,13 @@ def bootstrap_maintenance_copilot(db: Session, *, actor: str = "system") -> Dict
     }
 
 
-def maintenance_summary(db: Session) -> Dict[str, Any]:
+def maintenance_summary(db: Session, principal: Optional[Principal] = None) -> Dict[str, Any]:
+    """Counts of the maintenance object types and the open work orders. Given a principal, both
+    read only the projects it may view; the Command Center passes its viewer. Without one, as
+    `/domains/maintenance/summary` calls it, they read every project."""
     object_types = ["facility", "asset", "technician", "part", "work_order", "purchase_request"]
+    objects = db.query(models.ObjectInstance) if principal is None else \
+        semantic_scope.accessible_query(db, principal, models.ObjectInstance)
 
     # One grouped count, not one count per object type. The comprehension that
     # used to be here issued six `SELECT count(*)` statements, and
@@ -731,7 +737,7 @@ def maintenance_summary(db: Session) -> Dict[str, Any]:
     # every key. A missing key here would read as an absent object type rather
     # than an empty one.
     tallied = dict(
-        db.query(models.ObjectInstance.object_type_id, func.count(models.ObjectInstance.id))
+        objects.with_entities(models.ObjectInstance.object_type_id, func.count(models.ObjectInstance.id))
         .filter(models.ObjectInstance.object_type_id.in_(object_types))
         .group_by(models.ObjectInstance.object_type_id)
         .all()
@@ -746,7 +752,7 @@ def maintenance_summary(db: Session) -> Dict[str, Any]:
             "status": (item.properties or {}).get("status"),
             "asset_id": (item.properties or {}).get("asset_id"),
         }
-        for item in db.query(models.ObjectInstance).filter(
+        for item in objects.filter(
             models.ObjectInstance.object_type_id == "work_order"
         ).all()
         if (item.properties or {}).get("status") != "CLOSED"

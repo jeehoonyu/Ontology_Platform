@@ -1,15 +1,15 @@
 {
   "provenance": {
-    "recorded_at": "2026-09-24T01:14:09Z",
+    "recorded_at": "2026-09-24T01:25:06Z",
     "stale_after": "recomputed each run"
   },
-  "existence_only_reference": 163,
-  "helper_reference": 269,
+  "existence_only_reference": 157,
+  "helper_reference": 259,
   "note": "Ratchet. Reads of a project-scoped model with no project predicate within six lines. Coarse in both directions and wrong about individual sites; what it can honestly say is that the count fell, and that a new unscoped read cannot arrive unnoticed.",
-  "row_used_reference": 190,
-  "scoped_reads_reference": 1058,
-  "transitive_reference": 37,
+  "row_used_reference": 188,
+  "scoped_reads_reference": 1051,
+  "transitive_reference": 39,
   "unauthorized_reference": 47,
-  "unscoped_reads_ceiling": 353,
+  "unscoped_reads_ceiling": 345,
   "worker_reference": 0
 }
