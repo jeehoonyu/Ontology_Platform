@@ -616,6 +616,30 @@ Three things in that table are the defect the research describes:
     moved. The style-scope, pane-layout, movement-contract, inert-control and
     drag-affordance audits hold, and the fast tier passes 24 of 24.
 
+  **And the paths V12 did not assert, 2026-09-23.** V12 said `Reset panes`, a hide and a
+  collapse bring unsent input back, and asserted none of them. Its census also passed over
+  the Ontology Manager's Object type pane, which is anchored and cannot move. It can
+  collapse, though, and a collapse used to unmount its open metadata editor.
+  - **Four tests.** Three in `a pane that moves keeps what was typed into it` each type into
+    one V12 screen: the package form in Resources, a review comment in the Inspector, and
+    an agent instruction and execution mode in Run results. Each then moves the pane,
+    presses `Reset panes`, hides it, shows it from the Panes list, and collapses and expands
+    it. The input must be there after each step. A fourth, in `a collapsed pane keeps what
+    it holds`, types a description into the Object type pane's metadata editor, collapses
+    and expands the pane, and requires the description kept.
+  - **Negative runs,** on a rebuilt `dist`:
+    - the collapse unmounting again failed the Object type test: the editor was gone;
+    - the review panel keeping its own comment failed at `Reset panes threw away a comment
+      that had not been sent`;
+    - the agent panel ignoring the held draft failed at `Reset panes threw away an
+      instruction that had not been run`;
+    - the package panel keeping its own form failed at `Reset panes threw away a version
+      that had not been sent`, `1.0.0` for `2.7.1`.
+
+    Each held-draft mutation fails at `Reset panes`, the first step, so the hide and
+    collapse steps have run only against a working build. Restored, the twelve tests in the
+    two groups pass, and the four sources are byte for byte what they were.
+
 ## Order and size
 
 | Step | Touches | Commits |

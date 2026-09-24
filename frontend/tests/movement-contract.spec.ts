@@ -1098,6 +1098,81 @@ test.describe("a pane that moves keeps what was typed into it", () => {
       .toHaveValue(agentId);
   });
 
+  /**
+   * V12 said `Reset panes`, a hide and a collapse bring a pane's unsent input back the way a
+   * move does, and asserted none of the three. A move and then `Reset panes` changes the
+   * pane's parent twice; a hide unmounts it and the Panes list mounts it again; a collapse
+   * (V13) keeps it mounted and hidden. `kept` reads the input after each.
+   */
+  async function resetHideCollapse(page: Page, pane: string, inside: string, home: string, kept: (what: string) => Promise<void>) {
+    await paneControls(page, pane);
+    await page.getByLabel(`Move ${pane} to`).selectOption(home === "bottom" ? "right" : "bottom");
+    await expect.poll(() => slotHolding(page, inside)).not.toBe(home);
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    await expect.poll(() => slotHolding(page, inside), { message: "Reset panes did not put the pane back" }).toBe(home);
+    await kept("Reset panes");
+
+    await paneControls(page, pane);
+    await page.getByRole("button", { name: `Hide ${pane}` }).click();
+    await expect(page.locator(inside), "the pane did not hide").toHaveCount(0);
+    await page.getByLabel("Panes").selectOption({ label: `Show ${pane}` });
+    await kept("hiding and showing the pane");
+
+    await paneControls(page, pane);
+    await page.getByRole("button", { name: `Collapse ${pane}` }).click();
+    await expect(page.locator(inside), "the pane did not collapse").toBeHidden();
+    await paneControls(page, pane);
+    await page.getByRole("button", { name: `Expand ${pane}` }).click();
+    await kept("collapsing and expanding the pane");
+  }
+
+  test("the package form survives Reset panes, a hide and a collapse of Resources", async ({ page }) => {
+    const { picked, suffix } = await packageFixture(page);
+    const panel = await typeIntoPackageForm(page, picked, `kept_${suffix}`);
+    await resetHideCollapse(page, "Resources", ".ontology-package-panel", "left", async (what) => {
+      await expect(panel.getByLabel("New version"), `${what} threw away a version that had not been sent`).toHaveValue("2.7.1");
+      await expect(panel.getByLabel("Namespace"), `${what} threw away a namespace that had not been sent`).toHaveValue(`kept_${suffix}`);
+      await expect(panel.getByLabel("Package"), `${what} put back the default package`).toHaveValue(picked);
+    });
+  });
+
+  test("an unsent review comment survives Reset panes, a hide and a collapse of the Inspector", async ({ page }) => {
+    await page.goto("/workspace/workshop");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const review = page.locator(".artifact-review-panel");
+    await expect(review, "the Inspector's review panel did not render").toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    const suffix = Date.now();
+    await review.getByPlaceholder("Add review context or a question").fill(`Kept comment ${suffix}`);
+    await resetHideCollapse(page, "Inspector", ".artifact-review-panel", "right", async (what) => {
+      await expect(review.getByPlaceholder("Add review context or a question"), `${what} threw away a comment that had not been sent`)
+        .toHaveValue(`Kept comment ${suffix}`);
+    });
+  });
+
+  test("an unsent agent instruction survives Reset panes, a hide and a collapse of Run results", async ({ page }) => {
+    // The instruction renders only once an agent exists.
+    const agentId = `kept_pane_agent_${Date.now()}`;
+    await settled(await page.request.post("/agents", { data: { id: agentId, display_name: `Kept pane agent ${agentId}` } }), "agent");
+    await page.goto("/workspace/aip");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const runtime = page.locator(".agent-runtime-panel");
+    await expect(runtime, "the agent runtime did not render in Run results").toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    const suffix = Date.now();
+    await runtime.getByLabel("Execution mode").selectOption("single");
+    await runtime.getByLabel("Instruction").fill(`Kept instruction ${suffix}`);
+    await resetHideCollapse(page, "Run results", ".agent-runtime-panel", "bottom", async (what) => {
+      await expect(runtime.getByLabel("Instruction"), `${what} threw away an instruction that had not been run`)
+        .toHaveValue(`Kept instruction ${suffix}`);
+      await expect(runtime.getByLabel("Execution mode"), `${what} put back the default execution mode`).toHaveValue("single");
+    });
+  });
+
   test("an agent run in flight lands in Run results after it moves, and its answer survives the next move", async ({ page }) => {
     // The run lived in the panel: the job, its stages, the result and whether it was running.
     // A move remounted the panel empty, and a run still in flight finished into the panel that
@@ -1229,6 +1304,34 @@ test.describe("a collapsed pane keeps what it holds", () => {
     await expect(review).toBeVisible();
     await expect(proposals, "expanding the pane mounted the review panel afresh, back on Comments")
       .toHaveAttribute("aria-selected", "true");
+  });
+
+  test("unsaved object type metadata survives the anchored Object type pane collapsing", async ({ page }) => {
+    // The Object type pane is anchored, so it cannot move and V12's census passed it by. It
+    // can collapse, and a collapse used to unmount it: the open metadata editor and what was
+    // typed into it were gone on expand.
+    const suffix = Date.now();
+    const name = `Collapsed type ${suffix}`;
+    const created = await page.request.post("/object-types", { data: {
+      id: `collapsed_type_${suffix}`, display_name: name, properties: { name: { type: "string" } }
+    } });
+    expect(created.ok(), `object type: ${(await created.text()).slice(0, 300)}`).toBeTruthy();
+    await page.goto("/workspace/ontology");
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    await page.getByLabel("Search object types").fill(name);
+    await page.locator(".resource-row").filter({ hasText: name }).click();
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Edit metadata" }).click();
+    const description = page.locator(".metadata-edit-grid textarea");
+    await description.fill(`Unsaved description ${suffix}`);
+
+    await paneControls(page, "Object type");
+    await page.getByRole("button", { name: "Collapse Object type" }).click();
+    await expect(description, "a collapsed pane still shows what it holds").toBeHidden();
+    await paneControls(page, "Object type");
+    await page.getByRole("button", { name: "Expand Object type" }).click();
+    await expect(description, "collapsing the pane threw away a description that had not been saved")
+      .toHaveValue(`Unsaved description ${suffix}`);
   });
 });
 
