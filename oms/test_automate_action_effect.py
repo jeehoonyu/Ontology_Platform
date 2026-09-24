@@ -260,9 +260,75 @@ check(t9.properties.get("priority") == "low", "the object is untouched until som
 pending = db.query(models_action.ApprovalRequest).filter(
     models_action.ApprovalRequest.action_type_id == "escalate_risky").first()
 check(pending is not None, "an ApprovalRequest exists")
-check(pending.requester == f"automation:{a9}",
-      "and names the automation as requester -- nobody typed this")
+# The caller who ran the automation asked for it; the automation is named beside them (R15).
+check(pending.requester == os.getenv("LOCAL_AUTH_USER", "local-admin"),
+      f"and names the caller who ran the automation as requester, not {pending.requester!r}")
+check(res.get("automation_id") == a9, "and the result names the automation")
+staged = db.query(models_action.AuditLog).filter(
+    models_action.AuditLog.event_type == "automate.action.approval_requested").one()
+check(staged.actor == pending.requester and staged.payload.get("automation_id") == a9,
+      "and an audit row records both who asked and which automation")
 check(pending.status == models_action.ApprovalStatus.PENDING.value, "and is PENDING")
+db.close()
+
+
+# ===========================================================================
+# 6. An automation runs an action only in a project its caller may execute in (R15)
+# ===========================================================================
+#
+# The lookup read any project's ActionType by id, so a caller who could execute in
+# `default` ran another project's action on that project's objects: 200 SUCCEEDED,
+# and the object changed.
+from app import production_auth  # noqa: E402
+
+db = SessionLocal()
+db.add(models.ObjectType(id="beta_ticket", project_id="beta-automate", display_name="Beta ticket",
+                         description="", properties={"priority": {"type": "string"}},
+                         created_at=NOW, updated_at=NOW))
+db.add(models.ObjectInstance(
+    id="b1", project_id="beta-automate", object_type_id="beta_ticket",
+    properties={"priority": "low"}, source_asset_id=None, lineage={},
+    created_at=NOW, updated_at=NOW))
+db.add(models.ActionType(
+    id="beta_escalate", project_id="beta-automate", display_name="Beta escalate", description="",
+    parameters={},
+    rules={"object_mutations": [{"object_type_id": "beta_ticket", "object_id": "b1", "set": {"priority": "hit"}}]},
+))
+db.commit()
+db.close()
+
+a10 = mk_automation("cross-project-auto")
+ok(client.post(f"/automations/{a10}/conditions",
+               json={"condition_type": "run_on_all", "config": {"object_type_id": "beta_ticket"}}),
+   "add a condition on another project's type")
+e10 = ok(client.post(f"/automations/{a10}/effects",
+                     json={"effect_type": "action", "execution_order": 0,
+                           "config": {"action_type_id": "beta_escalate"}}),
+         "add an effect naming another project's action")["id"]
+
+default_only = production_auth.Principal("default-operator", "Default operator", None, ["operator"],
+                                         ["view", "edit", "execute"], project_ids=["default"])
+api.dependency_overrides[production_auth.current_principal] = lambda: default_only
+r = ok(client.post(f"/automations/{a10}/run", json={"manual": True}), "run it as a caller of default only")
+effect = {x["effect_id"]: x for x in r["effect_results"]}[e10]
+check(effect["status"] == "FAILED", f"another project's action ran for a caller of default only: {effect['status']}")
+check("may not execute" in effect["result"].get("error", ""), f"the failure says why: {effect['result']}")
+db = SessionLocal()
+check(db.get(models.ObjectInstance, "b1").properties.get("priority") == "low",
+      "another project's object changed under a caller who may not execute there")
+db.close()
+api.dependency_overrides.pop(production_auth.current_principal, None)
+
+# The same automation, retried by a caller who may execute there, runs -- and the retry's
+# work is kept: the route used to return without committing it.
+r = ok(client.post(f"/automations/{a10}/run/retry-failed-batches"), "retry as an administrator")
+check(r["retried_batches"] == [0], f"the failed batch is retried: {r['retried_batches']}")
+check(r["results"][0]["results"][0]["status"] == "SUCCEEDED", "and succeeds for a caller who may execute there")
+db = SessionLocal()
+b1 = db.get(models.ObjectInstance, "b1")
+check(b1.properties.get("priority") == "hit", "the retry's mutation was not kept once the request ended")
+check((b1.lineage or {}).get("last_action_actor") == os.getenv("LOCAL_AUTH_USER", "local-admin"),
+      f"the mutation records the caller who ran it, not {(b1.lineage or {}).get('last_action_actor')!r}")
 db.close()
 
 

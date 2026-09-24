@@ -631,6 +631,40 @@ no grant on the marking got 200 both ways.
   `actor` for APPLY. It fails safe, since applying narrows access, but its trail is still
   the caller's choice.
 
+**`automate_ops`, 2026-09-23.** T5 closed the approval gate but not the scope. The action
+lookup read any project's ActionType by id. A probe as a caller who could execute only in
+`default` ran another project's action through an automation: 200 SUCCEEDED, and that
+project's object changed. The requester and the mutation named `automation:<id>`, and the
+person who pressed Run was recorded nowhere. The retry route staged approvals and mutated
+objects without committing, so its work was discarded while its ids were returned.
+- **The fix.** Every run starts from an HTTP route, so the caller is passed down.
+  - The action resolves through `semantic_scope.owned_row` at `execute`.
+  - An action the caller may not execute fails the effect, with the reason, and runs its
+    fallback. It does not abort the run, so the run history keeps the attempt.
+  - Requester and mutation actor are the caller, with the automation named in the result.
+  - A staged approval is audited.
+  - The retry commits.
+- **Proven by** `oms/test_automate_action_effect.py`, 63 assertions.
+  - A caller of `default` alone runs an automation naming another project's action. The
+    effect fails, saying why, and the object is untouched.
+  - An administrator's retry of the same batch succeeds.
+  - Its mutation survives the request, recorded as the caller's.
+  - A staged approval names the caller, with the automation in the result and the audit.
+- **Other tests.** `test_automate_ops.py` and `test_governed_automation_tenancy.py` pass
+  unchanged.
+- **Negative runs.** Four mutations each failed at their named assertion:
+  - the action read from any project;
+  - the automation named as requester;
+  - the retry left uncommitted;
+  - the mutation recorded as the automation. On its first run this one passed, because
+    nothing read a mutation's actor. The test now reads it from the object's lineage.
+
+  Restored, `automate_ops.py` is byte for byte what it was.
+- **The census.** Tenancy's unscoped reads fall from 345 to 344.
+- **Not closed here.** An automation is checked against whoever runs it, not whoever
+  configured it. `AtmAutomation` still has no project, so T2's column is still owed. Its
+  condition reads still count objects in every project.
+
 ## Non-completion rule
 
 Inherited unchanged from `GOAL_2026-08-03`: no condition is marked met while it lacks

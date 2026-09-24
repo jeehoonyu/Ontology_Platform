@@ -22,7 +22,7 @@ CRITIC CORRECTIONS honored:
 from .database import Base, get_db
 import uuid
 
-from . import models, models_action
+from . import models, models_action, production_auth, semantic_scope
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
@@ -469,7 +469,7 @@ def _compute_retry_intervals(retry: Optional[AtmRetryConfig]) -> List[int]:
 
 
 def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
-                       triggered_ids: List[str]) -> Dict[str, Any]:
+                       triggered_ids: List[str], principal: production_auth.Principal) -> Dict[str, Any]:
     """ACTUALLY execute an action effect against the ontology.
 
     Looks up the configured ActionType and invokes
@@ -483,8 +483,15 @@ def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
     using ``object_id_param: "_triggered_object_ids"`` (or the first triggered id
     via ``object_id_param: "_object_id"``) can target the automation's matches.
 
-    Raises ValueError/LookupError on a missing action type or an invalid mutation
-    so the caller can mark the effect FAILED (and run its fallback).
+    Raises ValueError/LookupError on a missing action type or an invalid mutation,
+    and PermissionError when the caller may not execute it, so the caller can mark
+    the effect FAILED (and run its fallback).
+
+    The action answers to the principal who ran the automation. The lookup read any
+    project's ActionType by id, so a caller who could execute in one project ran
+    another project's action on that project's objects -- the scope T5 of
+    GOAL_TENANCY_2026-08-27 left open for want of a column on AtmAutomation. Every run
+    starts from an HTTP route, so the caller is there to ask (R15 of GOAL_REPAIR).
     """
     # Imported lazily to avoid import-order coupling at module load time.
     from app.runtime import apply_action_mutations
@@ -493,11 +500,15 @@ def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
     if not action_type_id:
         raise ValueError("action effect requires config.action_type_id")
 
-    action_type = db.query(models.ActionType).filter(
-        models.ActionType.id == action_type_id
-    ).first()
-    if not action_type:
-        raise LookupError(f"ActionType '{action_type_id}' not found")
+    try:
+        action_type = semantic_scope.owned_row(db, principal, models.ActionType, action_type_id,
+                                               "execute", "ActionType")
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise LookupError(f"ActionType '{action_type_id}' not found") from exc
+        raise PermissionError(
+            f"'{principal.id}' may not execute ActionType '{action_type_id}' in project "
+            f"'{(exc.detail or {}).get('project_id') if isinstance(exc.detail, dict) else ''}'") from exc
 
     # Build the parameter map handed to the runtime. Caller-supplied parameters
     # win; we additionally surface the automation's triggered object ids so a
@@ -514,11 +525,8 @@ def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
     # at `execute` would have handed it to them anyway. T5 of
     # GOAL_TENANCY_2026-08-27.
     #
-    # The requester is the automation, which is the honest answer: nobody typed
-    # this. What is NOT fixed here is scope -- AtmAutomation carries no
-    # project_id, so the ActionType lookup above still cannot be constrained to
-    # the automation's own project. That needs a column and a migration and
-    # belongs to T2, not to this gate.
+    # The requester is the principal who ran the automation; the automation is
+    # named beside it, so an approver sees both who asked and what asked for them.
     rules = action_type.rules or {}
     requires_approval = bool(
         rules.get("requires_approval")
@@ -531,9 +539,15 @@ def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
             id=approval_id,
             project_id=action_type.project_id,
             action_type_id=action_type.id,
-            requester=f"automation:{automation.id}",
+            requester=principal.id,
             parameters=parameters,
             status=models_action.ApprovalStatus.PENDING.value,
+        ))
+        db.add(models_action.AuditLog(
+            id=uuid.uuid4().hex, actor=principal.id, event_type="automate.action.approval_requested",
+            subject_type="approval_request", subject_id=approval_id,
+            payload={"project_id": action_type.project_id, "action_type_id": action_type.id,
+                     "automation_id": automation.id},
         ))
         return {
             "type": "action",
@@ -542,19 +556,21 @@ def _run_action_effect(db: Session, automation: AtmAutomation, cfg: dict,
             "mutated_object_ids": [],
             "status": "pending_approval",
             "approval_request_id": approval_id,
+            "automation_id": automation.id,
         }
 
     mutated_object_ids = apply_action_mutations(
         db,
         action_type=action_type,
         parameters=parameters,
-        actor=f"automation:{automation.id}",
+        actor=principal.id,
     )
     return {
         "type": "action",
         "action_type_id": action_type_id,
         "objects": list(triggered_ids),
         "mutated_object_ids": list(mutated_object_ids),
+        "automation_id": automation.id,
     }
 
 
@@ -569,7 +585,8 @@ def _render_notification(config: dict, triggered_ids: List[str]) -> Dict[str, st
 
 
 def execute_effects(db: Session, automation: AtmAutomation, effects: List[AtmEffect],
-                    retry: Optional[AtmRetryConfig], triggered_ids: List[str]) -> List[Dict[str, Any]]:
+                    retry: Optional[AtmRetryConfig], triggered_ids: List[str],
+                    principal: production_auth.Principal) -> List[Dict[str, Any]]:
     """Execute effects in execution_order. Sequential semantics: a failed non-fallback
     effect SKIPS subsequent non-fallback effects and triggers its fallback (if any)."""
     ordered = sorted([e for e in effects if e.effect_type != "fallback"],
@@ -610,8 +627,8 @@ def execute_effects(db: Session, automation: AtmAutomation, effects: List[AtmEff
             # so the effect FAILS and any fallback fires, mirroring simulate_fail.
             if success:
                 try:
-                    base_result["result"] = _run_action_effect(db, automation, cfg, triggered_ids)
-                except (ValueError, LookupError, KeyError) as exc:
+                    base_result["result"] = _run_action_effect(db, automation, cfg, triggered_ids, principal)
+                except (ValueError, LookupError, KeyError, PermissionError) as exc:
                     success = False
                     base_result["result"] = {"type": "action",
                                              "action_type_id": cfg.get("action_type_id"),
@@ -909,6 +926,7 @@ def list_dependencies(automation_id: str, db: Session = Depends(get_db)):
 # --- Core run engine --------------------------------------------------------
 
 def _run_once(db: Session, automation: AtmAutomation, now: Optional[int], manual: bool,
+              principal: production_auth.Principal,
               extra_condition: Optional[Dict[str, Any]] = None) -> AtmRun:
     """Evaluate conditions then execute effects, recording an AtmRun."""
     created = _now()
@@ -985,7 +1003,7 @@ def _run_once(db: Session, automation: AtmAutomation, now: Optional[int], manual
     any_failed = False
     any_success = False
     for bi, batch in enumerate(batches):
-        batch_results = execute_effects(db, automation, effects, retry, batch)
+        batch_results = execute_effects(db, automation, effects, retry, batch, principal)
         for r in batch_results:
             r["batch_index"] = bi
             if r["status"] == "FAILED":
@@ -1009,9 +1027,10 @@ def _run_once(db: Session, automation: AtmAutomation, now: Optional[int], manual
 
 
 @router.post("/automations/{automation_id}/run")
-def run_automation(automation_id: str, body: RunRequest, db: Session = Depends(get_db)):
+def run_automation(automation_id: str, body: RunRequest, db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     automation = _get_automation(db, automation_id)
-    run = _run_once(db, automation, body.now, body.manual)
+    run = _run_once(db, automation, body.now, body.manual, principal)
 
     dependent_runs: List[str] = []
     # Fire dependents only when this run TRIGGERED (effects ran).
@@ -1022,7 +1041,7 @@ def run_automation(automation_id: str, body: RunRequest, db: Session = Depends(g
             if not dependent:
                 continue
             extra = dep.additional_condition or None
-            drun = _run_once(db, dependent, body.now, manual=False, extra_condition=extra)
+            drun = _run_once(db, dependent, body.now, False, principal, extra_condition=extra)
             dependent_runs.append(drun.id)
 
     return {
@@ -1041,7 +1060,8 @@ def _batch_size_for(db: Session, automation_id: str) -> int:
 
 
 @router.post("/automations/{automation_id}/run/retry-failed-batches")
-def retry_failed_batches(automation_id: str, db: Session = Depends(get_db)):
+def retry_failed_batches(automation_id: str, db: Session = Depends(get_db),
+                         principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     """Re-run effects for the batches that contained a failure in the latest run."""
     automation = _get_automation(db, automation_id)
     last_run = db.query(AtmRun).filter(AtmRun.automation_id == automation_id)\
@@ -1058,8 +1078,11 @@ def retry_failed_batches(automation_id: str, db: Session = Depends(get_db)):
     for bi in failed_batches:
         if bi is None or bi >= len(batches):
             continue
-        res = execute_effects(db, automation, effects, retry, batches[bi])
+        res = execute_effects(db, automation, effects, retry, batches[bi], principal)
         retried.append({"batch_index": bi, "results": res})
+    # The retry stages approvals and mutates objects like a run does. With no commit
+    # here, get_db closed the session and threw them away while returning their ids.
+    db.commit()
     return {"automation_id": automation_id, "retried_batches": failed_batches, "results": retried}
 
 

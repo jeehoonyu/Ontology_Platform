@@ -1,6 +1,6 @@
 {
   "audit_auth_coverage": {
-    "at": 1790219375,
+    "at": 1790219560,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -12,31 +12,31 @@
     "verdict": "PASS"
   },
   "audit_check_coverage": {
-    "at": 1790219384,
+    "at": 1790219569,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_dependency_provenance": {
-    "at": 1790219385,
+    "at": 1790219570,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_drag_affordances": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_evidence_corpus": {
-    "at": 1790219384,
+    "at": 1790219569,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_extensibility": {
-    "at": 1790219385,
+    "at": 1790219570,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -48,19 +48,19 @@
     "verdict": "PASS"
   },
   "audit_graph_editor": {
-    "at": 1790219397,
+    "at": 1790219583,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_inert_controls": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_iteration_state": {
-    "at": 1790219409,
+    "at": 1790219609,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -72,7 +72,7 @@
     "verdict": "PASS"
   },
   "audit_movement_contract": {
-    "at": 1790219397,
+    "at": 1790219582,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -84,13 +84,13 @@
     "verdict": "PASS"
   },
   "audit_pane_layout": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1790219387,
+    "at": 1790219572,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -108,31 +108,31 @@
     "verdict": "PASS"
   },
   "audit_route_cost": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_route_coverage": {
-    "at": 1790219391,
+    "at": 1790219576,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_route_payload": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_snapshot_scope": {
-    "at": 1790219394,
+    "at": 1790219579,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_style_scope": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -144,13 +144,13 @@
     "verdict": "PASS"
   },
   "audit_table_truncation": {
-    "at": 1790219397,
+    "at": 1790219582,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_tenancy_scope": {
-    "at": 1790219383,
+    "at": 1790219595,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -168,13 +168,13 @@
     "verdict": "PASS"
   },
   "audit_ui_primitives": {
-    "at": 1790219395,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "audit_ui_states": {
-    "at": 1790219394,
+    "at": 1790219580,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
@@ -186,25 +186,25 @@
     "verdict": "PASS"
   },
   "validate_docs_conformance": {
-    "at": 1790219398,
+    "at": 1790219583,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1790219398,
+    "at": 1790219583,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "FAIL"
   },
   "validate_schema_freeze": {
-    "at": 1790219398,
+    "at": 1790219583,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1790219398,
+    "at": 1790219583,
     "environment": "local",
     "migration_head": "0045_entity_exact_pass",
     "verdict": "FAIL"

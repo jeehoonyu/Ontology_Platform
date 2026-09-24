@@ -364,6 +364,13 @@ So the approval gate is closed in both and the scope is closed in one. Adding th
 migration and belongs to T2, where the same shape will come up again — a table that holds
 tenant work without recording which tenant.
 
+**Closed another way, 2026-09-23.** There was a project to ask after all: the caller's. Every
+automation run starts from an HTTP route, so R15 of GOAL_REPAIR passes the principal who ran it
+down to the ActionType lookup, which now goes through `semantic_scope.owned_row` at `execute`.
+The automation is checked against whoever presses Run, not whoever configured it. That matches
+`POST /actions/execute`, and is weaker than binding an automation to a project. The column is
+still worth having and still belongs to T2.
+
 ## `datasets_ext`, 2026-09-23: ten routes behind a tier
 
 `GOAL_REPAIR_2026-08-23` named `datasets_ext` among the modules that "reach across projects
