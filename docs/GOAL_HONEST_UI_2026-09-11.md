@@ -2498,6 +2498,17 @@ plan, and it is measured there.
     what it was.
   - Nothing holds Refresh being off during a refresh.
 
+  **And two things a narrow pane cut.** In the pipeline builder's Outputs pane at its narrow
+  160px width, the table pager's `Next rows` ran 18px past the pane and could not be
+  pressed. A contract row's object type and node id sat behind an ellipsis with no way to
+  read them whole.
+  - The pager now wraps, and each cut name carries its full text as a `title`.
+  - The Outputs test in `truncation-sites.spec.ts` now also requires both pager buttons
+    inside the narrow pane and both titles present.
+  - **Negative runs.** Without the wrap, it failed at `"Next rows" runs past the pane`, 18px.
+    Without the titles, it failed at `a contract's cut object type does not carry its full
+    name`. Restored, both sources are byte for byte what they were.
+
 ## Order and size
 
 | Step | Touches | Commits |

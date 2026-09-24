@@ -440,6 +440,15 @@ test.describe("a table the gate found says what it is not showing", () => {
     await page.getByLabel("Width of right pane").selectOption({ label: "Narrow · 160px" });
     await expectUnclipped(caption, "at the pane's narrow width the lineage caption runs past the table's scroll area");
     await expectUnclipped(counts, "at the pane's narrow width the contract's counts are cut off");
+
+    // The pager wraps: on one line, `Next rows` ran past the narrow pane and could not be pressed.
+    for (const name of ["Previous rows", "Next rows"]) {
+      await expectUnclipped(lineage.getByRole("button", { name }), `at the pane's narrow width "${name}" runs past the pane`);
+    }
+    // A contract's names may still be cut behind an ellipsis; each carries its full text.
+    const names = page.locator(".ontology-contract-row").first().locator("span").first();
+    await expect(names.locator("strong"), "a contract's cut object type does not carry its full name").toHaveAttribute("title", "enlarged_counts");
+    await expect(names.locator("small"), "a contract's cut node id does not carry its full text").toHaveAttribute("title", "ontology");
   });
 });
 

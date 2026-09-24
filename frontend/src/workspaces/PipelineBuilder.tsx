@@ -1074,7 +1074,8 @@ export function PipelineBuilder() {
               <div className="ontology-contract-list">
                 {contracts.sections.latest.map((contract) => (
                   <button key={contract.id || contract.node_id} className="ontology-contract-row" onClick={() => setSelectedNodeId(contract.node_id)}>
-                    <span><strong>{contract.object_type_id}</strong><small>{contract.node_id}</small></span>
+                    {/* The names may be cut behind an ellipsis in a narrow pane; the counts below may not. */}
+                    <span><strong title={contract.object_type_id}>{contract.object_type_id}</strong><small title={contract.node_id}>{contract.node_id}</small></span>
                     <span><StatusBadge value={contract.status} /></span>
                     <small className="contract-row-counts">{contract.accepted_rows.toLocaleString()} accepted / {contract.rejected_rows.toLocaleString()} rejected</small>
                   </button>

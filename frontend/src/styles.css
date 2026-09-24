@@ -2261,8 +2261,11 @@ h2 {
 }
 
 /* N5 of GOAL_HONEST_UI: the rows a truncation caption counts, reachable. */
+/* Wraps. On one line, in the pipeline builder's 160px Outputs pane, `Next rows` ran past
+   the pane's edge and could not be pressed. */
 .table-pager {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
   padding: 6px 0 0;
