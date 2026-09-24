@@ -28,7 +28,8 @@ from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import Response
-from sqlalchemy import String, Integer, JSON
+from sqlalchemy import Index, String, Integer, JSON
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -47,6 +48,15 @@ def _now() -> int:
 
 class DatasetTransaction(Base):
     __tablename__ = "dataset_transactions"
+    # One transaction per sequence number on a branch. `seq` was read as the branch's
+    # highest plus one and written with nothing to stop two requests reading the same
+    # highest, so two commits at once shared a number -- and on master the mirror kept
+    # only the second. The index makes the second commit fail, and the writer retries
+    # it against the log the first one left. Migration 0046 renumbers what already
+    # collided before building it.
+    __table_args__ = (
+        Index("uq_dataset_transactions_dataset_branch_seq", "dataset_id", "branch", "seq", unique=True),
+    )
     id: Mapped[str] = mapped_column(String, primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, index=True)
     branch: Mapped[str] = mapped_column(String, default="master", index=True)
@@ -164,13 +174,44 @@ def _fold(txns: List[DatasetTransaction], up_to_seq: Optional[int] = None) -> Li
 
 
 def _next_seq(db: Session, dataset_id: str, branch: str) -> int:
+    """The next number on the branch, counting rows this session added and has not written.
+
+    With autoflush off a pending row is invisible to the query, so two writes to one
+    dataset in one session -- a delivery whose quarantine and output are the same asset --
+    took the same number, which the unique index now refuses.
+    """
     last = (
         db.query(DatasetTransaction)
         .filter(DatasetTransaction.dataset_id == dataset_id, DatasetTransaction.branch == branch)
         .order_by(DatasetTransaction.seq.desc())
         .first()
     )
-    return (last.seq + 1) if last else 0
+    pending = [row.seq for row in db.new
+               if isinstance(row, DatasetTransaction) and row.dataset_id == dataset_id
+               and row.branch == branch and row.seq is not None]
+    return max([(last.seq + 1) if last else 0] + [seq + 1 for seq in pending])
+
+
+def _existing_branches(db: Session, dataset_id: str, names) -> set:
+    """Which of `names` exist: master always; any other branch once created -- or, for a
+    log written before branches had to exist, once it holds a transaction. One query per
+    table for all the names, not one pair per name."""
+    names = set(names)
+    found = names & {"master"}
+    wanted = names - found
+    if wanted:
+        found |= {name for (name,) in db.query(DatasetBranch.name).filter(
+            DatasetBranch.dataset_id == dataset_id, DatasetBranch.name.in_(wanted)).all()}
+    unseen = wanted - found
+    if unseen:
+        found |= {branch for (branch,) in db.query(DatasetTransaction.branch).filter(
+            DatasetTransaction.dataset_id == dataset_id, DatasetTransaction.branch.in_(unseen)).distinct().all()}
+    return found
+
+
+# Commits that lose the race for a sequence number retry against the log the winner left.
+# A handful covers any real contention; running out answers 409 rather than looping.
+COMMIT_ATTEMPTS = 5
 
 
 def _reconcile_master(db: Session, asset: models.DataAsset, primary_key: Optional[str]) -> List[DatasetTransaction]:
@@ -207,27 +248,41 @@ def create_transaction(dataset_id: str, body: TransactionCreate,
     asset = semantic_scope.asset_for(db, principal, dataset_id, "edit")
     if body.txn_type not in TXN_TYPES:
         raise HTTPException(status_code=422, detail=f"txn_type must be one of {sorted(TXN_TYPES)}")
-    base = _reconcile_master(db, asset, body.primary_key) if body.branch == "master" else None
-    if base is None:
-        seq = _next_seq(db, dataset_id, body.branch)
-    else:
-        seq = (base[-1].seq + 1) if base else 0
-    txn = DatasetTransaction(
-        id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.branch, txn_type=body.txn_type,
-        primary_key=body.primary_key, records=body.records, row_count=len(body.records),
-        status="COMMITTED", seq=seq, created_at=_now(),
-    )
-    db.add(txn)
-    committed = {"txn_type": body.txn_type, "branch": body.branch, "rows": len(body.records)}
-    # keep the DataAsset.records mirror in sync with the master branch view
-    if base is not None:
-        asset.records = _fold(base + [txn])
-        asset.updated_at = _now()
-        committed["dataset_rows"] = len(asset.records)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.transaction.committed",
-                                  subject_type="dataset", subject_id=dataset_id, payload=committed))
-    db.commit(); db.refresh(txn)
-    return txn
+    # A branch is created before it is written. A transaction to a name nobody created
+    # used to be accepted as seq 0 of a branch that then existed only in the log.
+    if body.branch not in _existing_branches(db, dataset_id, {body.branch}):
+        raise HTTPException(status_code=404, detail=f"Branch '{body.branch}' not found on dataset '{dataset_id}'")
+    for _attempt in range(COMMIT_ATTEMPTS):
+        # Everything is built afresh each attempt: a rollback drops the pending rows and
+        # expires `asset`, so its records reload with the winner's rows and the mirror
+        # below folds both commits instead of keeping only the last.
+        base = _reconcile_master(db, asset, body.primary_key) if body.branch == "master" else None
+        if base is None:
+            seq = _next_seq(db, dataset_id, body.branch)
+        else:
+            seq = (base[-1].seq + 1) if base else 0
+        txn = DatasetTransaction(
+            id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.branch, txn_type=body.txn_type,
+            primary_key=body.primary_key, records=body.records, row_count=len(body.records),
+            status="COMMITTED", seq=seq, created_at=_now(),
+        )
+        db.add(txn)
+        committed = {"txn_type": body.txn_type, "branch": body.branch, "rows": len(body.records), "seq": seq}
+        # keep the DataAsset.records mirror in sync with the master branch view
+        if base is not None:
+            asset.records = _fold(base + [txn])
+            asset.updated_at = _now()
+            committed["dataset_rows"] = len(asset.records)
+        db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.transaction.committed",
+                                      subject_type="dataset", subject_id=dataset_id, payload=committed))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        db.refresh(txn)
+        return txn
+    raise HTTPException(status_code=409, detail=f"Concurrent transactions on branch '{body.branch}' kept taking the same sequence number; retry")
 
 
 @router.get("/datasets/{dataset_id}/transactions", response_model=List[TransactionRead])
@@ -267,21 +322,40 @@ def dataset_changes(dataset_id: str, branch: str = Query(default="master"),
 def create_branch(dataset_id: str, body: BranchCreate,
                   principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
     asset = semantic_scope.asset_for(db, principal, dataset_id, "edit")
-    branch = DatasetBranch(id=uuid.uuid4().hex, dataset_id=dataset_id, name=body.name,
-                           base_branch=body.base_branch, created_at=_now())
-    db.add(branch)
-    # seed the new branch with a SNAPSHOT of the base branch's current view; master's
-    # view is its real rows, recorded first if the log never saw them
-    if body.base_branch == "master":
-        base_rows = _fold(_reconcile_master(db, asset, "id"))
+    # Creating a branch that exists wrote a second branch row and a second seq-0 SNAPSHOT
+    # on it -- and naming `master` wrote one on master. It is refused now, and a base
+    # nobody created is refused rather than seeding an empty snapshot.
+    existing = _existing_branches(db, dataset_id, {body.name, body.base_branch})
+    if body.name in existing:
+        raise HTTPException(status_code=409, detail=f"Branch '{body.name}' already exists on dataset '{dataset_id}'")
+    if body.base_branch not in existing:
+        raise HTTPException(status_code=404, detail=f"Branch '{body.base_branch}' not found on dataset '{dataset_id}'")
+    for _attempt in range(COMMIT_ATTEMPTS):
+        branch = DatasetBranch(id=uuid.uuid4().hex, dataset_id=dataset_id, name=body.name,
+                               base_branch=body.base_branch, created_at=_now())
+        db.add(branch)
+        # seed the new branch with a SNAPSHOT of the base branch's current view; master's
+        # view is its real rows, recorded first if the log never saw them
+        if body.base_branch == "master":
+            base_rows = _fold(_reconcile_master(db, asset, "id"))
+        else:
+            base_rows = _fold(_txns_for(db, dataset_id, body.base_branch))
+        db.add(DatasetTransaction(id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.name, txn_type="SNAPSHOT",
+                                  primary_key="id", records=base_rows, row_count=len(base_rows), status="COMMITTED",
+                                  seq=0, created_at=_now()))
+        db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.branch.created",
+                                      subject_type="dataset", subject_id=dataset_id, payload={"branch": body.name}))
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            # The seed's seq 0 collides only with a branch created concurrently; anything
+            # else was master's baseline losing a race, which the next attempt re-reads.
+            if body.name in _existing_branches(db, dataset_id, {body.name}):
+                raise HTTPException(status_code=409, detail=f"Branch '{body.name}' already exists on dataset '{dataset_id}'")
     else:
-        base_rows = _fold(_txns_for(db, dataset_id, body.base_branch))
-    db.add(DatasetTransaction(id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.name, txn_type="SNAPSHOT",
-                              primary_key="id", records=base_rows, row_count=len(base_rows), status="COMMITTED",
-                              seq=0, created_at=_now()))
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.branch.created",
-                                  subject_type="dataset", subject_id=dataset_id, payload={"branch": body.name}))
-    db.commit()
+        raise HTTPException(status_code=409, detail=f"Concurrent writes to dataset '{dataset_id}' kept colliding; retry")
     return {"id": branch.id, "dataset_id": dataset_id, "name": body.name, "base_branch": body.base_branch,
             "seeded_rows": len(base_rows)}
 

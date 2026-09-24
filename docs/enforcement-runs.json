@@ -1,68 +1,68 @@
 {
   "audit_auth_coverage": {
-    "at": 1790219560,
+    "at": 1790225661,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_browser_evidence": {
-    "at": 1790217319,
+    "at": 1790225636,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_check_coverage": {
-    "at": 1790220018,
+    "at": 1790225637,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_dependency_provenance": {
-    "at": 1790220018,
+    "at": 1790225637,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_drag_affordances": {
-    "at": 1790220028,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_evidence_corpus": {
-    "at": 1790220018,
+    "at": 1790225637,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_extensibility": {
-    "at": 1790220018,
+    "at": 1790225637,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_frontier": {
-    "at": 1790214297,
+    "at": 1790225665,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_graph_editor": {
-    "at": 1790220031,
+    "at": 1790225649,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_inert_controls": {
-    "at": 1790220029,
+    "at": 1790225672,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_iteration_state": {
-    "at": 1790220017,
+    "at": 1790225637,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_latency_observations": {
@@ -72,87 +72,87 @@
     "verdict": "PASS"
   },
   "audit_movement_contract": {
-    "at": 1790220031,
+    "at": 1790225649,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_object_writes": {
-    "at": 1790214297,
+    "at": 1790225665,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_pane_layout": {
-    "at": 1790220029,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_query_bounds": {
-    "at": 1790220020,
+    "at": 1790225664,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_ratchet_motion": {
-    "at": 1790217341,
+    "at": 1790225670,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_request_cost": {
-    "at": 1789340514,
+    "at": 1790220724,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_route_cost": {
-    "at": 1790220028,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_route_coverage": {
-    "at": 1790220024,
+    "at": 1790225643,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_route_payload": {
-    "at": 1790220028,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_snapshot_scope": {
-    "at": 1790220027,
+    "at": 1790225646,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_style_scope": {
-    "at": 1790220028,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_suite_cost": {
-    "at": 1789341803,
+    "at": 1790225116,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_table_truncation": {
-    "at": 1790220039,
+    "at": 1790225672,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_tenancy_scope": {
-    "at": 1790219834,
+    "at": 1790225656,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_tenant_orphans": {
@@ -168,15 +168,15 @@
     "verdict": "PASS"
   },
   "audit_ui_primitives": {
-    "at": 1790220028,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "audit_ui_states": {
-    "at": 1790220028,
+    "at": 1790225647,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "check_coverage": {
@@ -186,27 +186,27 @@
     "verdict": "PASS"
   },
   "validate_docs_conformance": {
-    "at": 1790220031,
+    "at": 1790225650,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "validate_external_evaluations": {
-    "at": 1790220031,
+    "at": 1790225650,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "FAIL"
   },
   "validate_schema_freeze": {
-    "at": 1790220031,
+    "at": 1790225650,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "PASS"
   },
   "validate_tier_b_evidence": {
-    "at": 1790220031,
+    "at": 1790225650,
     "environment": "local",
-    "migration_head": "0045_entity_exact_pass",
+    "migration_head": "0046_dataset_txn_seq_unique",
     "verdict": "FAIL"
   }
 }

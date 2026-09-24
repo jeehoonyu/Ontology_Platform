@@ -1708,6 +1708,89 @@ plan, and it is measured there.
   - **The baseline not audited:** only the audit block failed.
   - Restored: 80 pass, data integration passes, and the source is byte for byte what it was.
 
+  **Followed up, 2026-09-23: the seq race and the branch nobody created (decision F).** Two of the
+  five neighbours, closed together because each turned out to feed the other. A probe with both
+  commits held at a barrier reproduced all of it on SQLite:
+  - Two APPENDs to one branch both took seq 1. On master the mirror also kept only the second
+    commit's rows, while the log folded both.
+  - Creating a branch that existed wrote a second branch row and a second seq-0 SNAPSHOT on it.
+    Naming `master` wrote one on master.
+  - A transaction to a branch nobody created was accepted as its seq 0.
+  - **The fix.**
+    - A unique index on `(dataset_id, branch, seq)`, declared on the model and built by migration
+      `0046_dataset_txn_seq_unique`.
+    - A commit that loses the race retries against the log the winner left. Up to five attempts,
+      each rebuilt from scratch so the mirror folds both commits, then 409.
+    - `_next_seq` counts rows this session added but has not written, so two writes to one dataset
+      in one session cannot collide with each other.
+    - A transaction to an uncreated branch is 404. A branch counts as existing if it was created,
+      or if it holds a log row from before this rule, so no old branch goes dark.
+    - Re-creating a branch, or naming `master`, is 409. An uncreated base is 404.
+    - The pipeline's delivery, the other writer to master, answers 503 when its snapshot loses the
+      race. Nothing it built is kept. The async worker retries anything at 500 and above, and a
+      direct caller is told to deliver again.
+  - **The migration.** Collisions already in a database are renumbered before the index is built,
+    and only on the branches that hold one. The order is the one readers already fold the log in:
+    seq, then `created_at`, then insertion order (`rowid` on SQLite, `ctid` on Postgres). So every
+    current view is unchanged, and only the numbers after a branch's first collision move. The owner
+    chose to renumber (decision F). The downgrade drops the index and leaves the numbers.
+  - **Proven by** `oms/test_dataset_transaction_base.py`, now 14 blocks and 138 assertions:
+    - an uncreated branch refused, with nothing written;
+    - re-creating a branch and naming `master` refused, and an uncreated base refused, with the
+      branch list and both logs unchanged;
+    - two commits held at a barrier after each has read the log, on master and on a branch, both
+      landing, with distinct gapless numbers, and master's mirror equal to its log;
+    - a delivery forced onto a taken number answering 503, writing nothing, and landing when
+      delivered again;
+    - a second write in one session taking the next number.
+
+    The other-branch guard now creates its branch first and compares master's log before and after.
+    `oms/test_dataset_txn_seq_migration.py` seeds a raced master, a twice-created branch and a clean
+    branch with a gap, at 0045 without the index. It requires the first two renumbered in fold order
+    and the clean one untouched. It then requires the index to refuse a new collision, and the chain
+    to apply twice, downgrade and upgrade again. Twenty neighbouring tests pass, including every
+    migration test that passes through 0046.
+  - **Negative runs.** Seven of eight mutations failed at their named check:
+    - no index: two transactions sharing a number, `[0, 0, 1, 1]`;
+    - no retry: a racing commit erroring;
+    - the uncreated branch accepted;
+    - the uncreated base accepted;
+    - `_next_seq` blind to unwritten rows: the same number twice;
+    - the delivery's refusal unhandled: an unhandled IntegrityError;
+    - the migration building the index without renumbering: the upgrade failed on the existing
+      collisions.
+
+    The eighth removed the up-front refusal of a re-created branch, and the test still passed. The
+    index refuses it too: the seed's seq 0 collides, and the retry path re-checks and answers 409.
+    That is two layers, and only the index is tested alone. Restored, all three sources are byte for
+    byte what they were.
+  - **The head moved, and the census was worth running.** 0046 staled the four head-bound
+    baselines. Query bounds and request cost re-measured unchanged. The suite-cost census, last
+    run ten days earlier, found eight routes worse. Each was traced before any number was
+    written:
+    - The Command Center's five routes repeated one membership query 14 times for a scoped
+      viewer. That was today's scoping, 626aacf, and 4c657b8 fixed it with a per-session memo.
+    - `POST /action-types` repeated 32 times. That was an N+1 in ontology materialization,
+      older than the baseline, exposed by a test added since. 32bbffd fixed it, and the route
+      now repeats 2.
+    - `POST /datasets/{id}/branches` repeated a shape twice. That was this change's own
+      existence checks, now one query per table for both names.
+    - `GET /project/readiness` went from 22 to 33. The same script measured at the baseline's
+      own commit, f29983d, gives 33 too, so this is the environment, not the code. It is
+      recorded at 33 with that evidence.
+
+    The re-run census reads only that route as worse. The suite-cost baseline is re-recorded
+    at 0046, and the browser evidence is re-run there.
+  - **Found on the way.** The census runs every script, and two audit tests the day's goals
+    had left failing were fixed in 69333b0.
+  - **Branch existence, folded.** `_existing_branches` answers for every name a request asks
+    about in one query per table, instead of a pair of queries per name. The negatives above
+    were re-run against it, with the same outcomes.
+  - **Not closed here.** Parquet-backed assets and the pipeline's replace-by-design snapshot are the
+    other neighbours. Duplicate branch rows from before this change stay, and the list shows them
+    twice, but no new one can be written. GET routes still return an empty 200 for an uncreated
+    branch.
+
   **Then the Object Explorer's facet cards, the first of the smaller lists.** Each card drew the first
   seven buckets of its facet, whatever the facet was. A histogram always has eight bins, and the last
   one holds the maximum, so the top of every numeric distribution was missing. A value list kept the

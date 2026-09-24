@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "recorded_at": "2026-09-13T23:01:54Z",
+    "recorded_at": "2026-09-24T03:32:04Z",
     "stale_after": "migration head",
-    "migration_head": "0045_entity_exact_pass"
+    "migration_head": "0046_dataset_txn_seq_unique"
   },
   "note": "Per-request database round-trips. Written by oms/audit_request_cost.py --write-baseline.",
   "repeat_ceiling": 6,

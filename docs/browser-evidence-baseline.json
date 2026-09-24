@@ -1,12 +1,12 @@
 {
   "provenance": {
-    "migration_head": "0045_entity_exact_pass",
-    "bundle_source_hash": "dc86324bc877fe82de3c0419c87385d6c09bf80b5aec31238de04c8cfa5d4ca2",
+    "migration_head": "0046_dataset_txn_seq_unique",
+    "bundle_source_hash": "33d43404332158af312f1e6a3215fcab94598078e7f433bcad7f5d4110458cf2",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-24T02:35:19Z",
+    "recorded_at": "2026-09-24T04:53:56Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,43 +15,44 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 218,
+      "ran": 220,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 197
+      "skipped": 199
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 196
+      "skipped": 198
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 197
+      "skipped": 199
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 197
+      "skipped": 199
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 197
+      "skipped": 199
     }
   },
   "tests": {
     "desktop-1280 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "desktop-1280 :: AIP agent runtime exposes durable policy and citation evidence": "ran",
+    "desktop-1280 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "ran",
     "desktop-1280 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "ran",
     "desktop-1280 :: Data Onboarding counts every import job and says the recent list is a window": "ran",
     "desktop-1280 :: Decision Intelligence evaluates, explains, traces, and simulates ontology objects": "ran",
@@ -262,6 +263,7 @@
     "desktop-1280 :: tokens sort by whether they are revoked, false before true": "ran",
     "desktop-1280 :: two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server": "ran",
     "desktop-1280 :: two selected nodes connect without a drag": "ran",
+    "desktop-1280 :: typing into a node's name is one Undo, and its description another": "ran",
     "desktop-1280 :: under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view": "ran",
     "desktop-1280 :: unsaved object type metadata survives the anchored Object type pane collapsing": "ran",
     "desktop-1280 :: validation is aligned, human-readable, and accessible": "ran",
@@ -275,6 +277,7 @@
     "desktop-1280 :: zoom reaches its bounds and stops there": "ran",
     "laptop-1366 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "laptop-1366 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "laptop-1366 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "laptop-1366 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "laptop-1366 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
     "laptop-1366 :: Decision Intelligence evaluates, explains, traces, and simulates ontology objects": "skipped",
@@ -485,6 +488,7 @@
     "laptop-1366 :: tokens sort by whether they are revoked, false before true": "skipped",
     "laptop-1366 :: two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server": "skipped",
     "laptop-1366 :: two selected nodes connect without a drag": "skipped",
+    "laptop-1366 :: typing into a node's name is one Undo, and its description another": "skipped",
     "laptop-1366 :: under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view": "skipped",
     "laptop-1366 :: unsaved object type metadata survives the anchored Object type pane collapsing": "skipped",
     "laptop-1366 :: validation is aligned, human-readable, and accessible": "ran",
@@ -498,6 +502,7 @@
     "laptop-1366 :: zoom reaches its bounds and stops there": "skipped",
     "mobile-375 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "mobile-375 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "mobile-375 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "mobile-375 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "mobile-375 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
     "mobile-375 :: Decision Intelligence evaluates, explains, traces, and simulates ontology objects": "skipped",
@@ -708,6 +713,7 @@
     "mobile-375 :: tokens sort by whether they are revoked, false before true": "skipped",
     "mobile-375 :: two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server": "skipped",
     "mobile-375 :: two selected nodes connect without a drag": "skipped",
+    "mobile-375 :: typing into a node's name is one Undo, and its description another": "skipped",
     "mobile-375 :: under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view": "skipped",
     "mobile-375 :: unsaved object type metadata survives the anchored Object type pane collapsing": "skipped",
     "mobile-375 :: validation is aligned, human-readable, and accessible": "ran",
@@ -721,6 +727,7 @@
     "mobile-375 :: zoom reaches its bounds and stops there": "skipped",
     "tablet-1024 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "tablet-1024 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "tablet-1024 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-1024 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "tablet-1024 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
     "tablet-1024 :: Decision Intelligence evaluates, explains, traces, and simulates ontology objects": "skipped",
@@ -931,6 +938,7 @@
     "tablet-1024 :: tokens sort by whether they are revoked, false before true": "skipped",
     "tablet-1024 :: two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server": "skipped",
     "tablet-1024 :: two selected nodes connect without a drag": "skipped",
+    "tablet-1024 :: typing into a node's name is one Undo, and its description another": "skipped",
     "tablet-1024 :: under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view": "skipped",
     "tablet-1024 :: unsaved object type metadata survives the anchored Object type pane collapsing": "skipped",
     "tablet-1024 :: validation is aligned, human-readable, and accessible": "ran",
@@ -944,6 +952,7 @@
     "tablet-1024 :: zoom reaches its bounds and stops there": "skipped",
     "tablet-768 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "tablet-768 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "tablet-768 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-768 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "tablet-768 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
     "tablet-768 :: Decision Intelligence evaluates, explains, traces, and simulates ontology objects": "skipped",
@@ -1154,6 +1163,7 @@
     "tablet-768 :: tokens sort by whether they are revoked, false before true": "skipped",
     "tablet-768 :: two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server": "skipped",
     "tablet-768 :: two selected nodes connect without a drag": "skipped",
+    "tablet-768 :: typing into a node's name is one Undo, and its description another": "skipped",
     "tablet-768 :: under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view": "skipped",
     "tablet-768 :: unsaved object type metadata survives the anchored Object type pane collapsing": "skipped",
     "tablet-768 :: validation is aligned, human-readable, and accessible": "ran",
@@ -1167,6 +1177,7 @@
     "tablet-768 :: zoom reaches its bounds and stops there": "skipped",
     "wide-1600 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "wide-1600 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "wide-1600 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "wide-1600 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "wide-1600 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
     "wide-1600 :: Decision Intelligence evaluates, explains, traces, and simulates ontology objects": "skipped",
@@ -1377,6 +1388,7 @@
     "wide-1600 :: tokens sort by whether they are revoked, false before true": "skipped",
     "wide-1600 :: two hidden nodes are counted, survive a reload here, and are hidden nowhere on the server": "skipped",
     "wide-1600 :: two selected nodes connect without a drag": "skipped",
+    "wide-1600 :: typing into a node's name is one Undo, and its description another": "skipped",
     "wide-1600 :: under a filter, paging runs over the matches, the caption names both counts, and the way back stays in view": "skipped",
     "wide-1600 :: unsaved object type metadata survives the anchored Object type pane collapsing": "skipped",
     "wide-1600 :: validation is aligned, human-readable, and accessible": "ran",

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Integer, String
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from . import models, models_action, object_writes, platform_runtime, tenancy
@@ -1825,6 +1826,24 @@ def _output_asset_id(graph: PipelineBuilderGraph, override: Optional[str]) -> st
     return f"{graph.id}_output"
 
 
+def _write_delivery(db: Session, asset_id: str, write) -> None:
+    """Flush or commit a delivery, answering 503 when its snapshot lost the sequence race.
+
+    The dataset log holds one transaction per number on a branch (migration 0046). A
+    delivery whose snapshot took a number another write had just committed fails here;
+    it is transient, so it answers 503 -- the async worker retries anything at 500 and
+    above, and a caller who delivered directly is told to deliver again -- rather than
+    the 500 an unhandled IntegrityError would have been.
+    """
+    try:
+        write()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=(
+            f"Another write to dataset '{asset_id}' took the same transaction number while this "
+            "delivery ran; nothing was written. Deliver again."))
+
+
 def _commit_snapshot_transaction(db: Session, asset: models.DataAsset, rows: List[Dict[str, Any]], primary_key: str) -> DatasetTransaction:
     txn = DatasetTransaction(
         id=_new_id(),
@@ -2600,7 +2619,7 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
     graph.status = "DELIVERED"
     graph.updated_at = now
     if body.execution_job_id:
-        db.flush()
+        _write_delivery(db, asset.id, db.flush)
         active_job = db.query(platform_runtime.PlatformJob).filter(
             platform_runtime.PlatformJob.id == body.execution_job_id,
         ).with_for_update().first()
@@ -2616,7 +2635,7 @@ def deliver_graph(graph_id: str, body: PipelineDeliverRequest = PipelineDeliverR
         ):
             db.rollback()
             raise HTTPException(status_code=409, detail="Pipeline delivery was cancelled or lost its worker lease before commit")
-    db.commit()
+    _write_delivery(db, asset.id, db.commit)
     return {
         "graph_id": graph.id,
         "status": "DELIVERED",
