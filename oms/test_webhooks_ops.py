@@ -290,6 +290,26 @@ r = client.post("/listeners/ln_b/events", json={"k": "v"},
                 headers={"authorization": "Bearer wrong"})
 ok(r, "bearer invalid 401", 401)
 
+# A secret-bearing listener with no secret authenticates nothing (R15). A snapshot restore
+# nulls every secret, and the comparisons read a missing one as "": a bearer or api_key
+# listener then took a request with no credential, and an hmac one took sha256("" + body).
+for auth_type, secretless_headers in (
+    ("bearer", {}),
+    ("api_key", {}),
+    ("hmac", {"x-signature": hashlib.sha256(json.dumps({"k": "v"}).encode()).hexdigest()}),
+):
+    listener_id = f"ln_restored_{auth_type}"
+    ok(client.post("/listeners", json={
+        "id": listener_id, "display_name": f"Restored {auth_type}", "auth_type": auth_type,
+        "auth_secret": "was-set", "target_asset_id": None, "event_schema": ["k"],
+    }), f"create {auth_type} listener", 200)
+    with SessionLocal() as _db:
+        _db.get(M.WhListener, listener_id).auth_secret = None  # what a restore leaves
+        _db.commit()
+    r = client.post(f"/listeners/{listener_id}/events", content=json.dumps({"k": "v"}),
+                    headers={"content-type": "application/json", **secretless_headers})
+    ok(r, f"a {auth_type} listener with no secret refuses a request carrying none", 401)
+
 # 404s
 ok(client.get("/connections/webhooks/nope"), "missing webhook 404", 404)
 ok(client.get("/listeners/nope"), "missing listener 404", 404)

@@ -683,6 +683,22 @@ action with none of the approval `POST /actions/execute` requires for the identi
   through logic ran without approval: SUCCESS`. Restored, `runtime.py` is byte for byte
   what it was.
 
+**`webhooks_ops`, what T4 left, 2026-09-23.** T4 stopped an editor creating an
+unauthenticated listener. It did not stop one existing. The receiver compared a missing
+secret as `""`. So a bearer or api_key listener with no secret accepted a request carrying
+no credential, and an hmac one accepted `sha256("" + body)`, which anyone can compute. A
+snapshot restore produces exactly those rows: it nulls every listener secret and warns
+`rebind_required`. A restored listener was therefore open to anyone until rebound.
+- **The fix.** A secret-bearing listener with no secret now authenticates nothing, and the
+  three comparisons are constant-time.
+- **Proven by** `oms/test_webhooks_ops.py`, 88 assertions. Each of the three types, created
+  with a secret and then nulled as a restore leaves it, refuses a request that carries none
+  with 401. `test_recovery_runtime.py` and `test_project_snapshot_tenancy.py` pass.
+- **Negative run.** With a missing secret read as `""` again, the test failed at the bearer
+  listener, 200 for 401. Restored, `webhooks_ops.py` is byte for byte what it was.
+- **Not closed here.** There is still no route to rebind a secret, so a restored listener
+  stays refused until it is deleted and recreated. That is the safe side of the same gap.
+
 ## Non-completion rule
 
 Inherited unchanged from `GOAL_2026-08-03`: no condition is marked met while it lacks

@@ -29,7 +29,7 @@ from sqlalchemy import String, Integer, JSON, Boolean, Float, ForeignKey, inspec
 from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Any, Dict
-import time, uuid, hashlib, json
+import time, uuid, hashlib, hmac, json
 
 router = APIRouter(tags=["webhooks"])
 
@@ -881,24 +881,32 @@ def get_listener(listener_id: str, db: Session = Depends(get_db), principal: pro
 
 def _check_listener_auth(listener: WhListener, headers: Dict[str, str], body_bytes: bytes) -> bool:
     auth_type = listener.auth_type
-    secret = listener.auth_secret or ""
     # normalize header keys to lower-case
     lh = {k.lower(): v for k, v in headers.items()}
     if auth_type == "none":
         return True
+    # A type that authenticates with a secret, and has none, authenticates nothing. The
+    # comparisons below read a missing secret as "", so a bearer or api_key listener
+    # without one accepted a request that sent no credential, and an hmac one accepted
+    # sha256("" + body), which anyone can compute. A snapshot restore produces exactly
+    # these rows -- it nulls every secret and reports `rebind_required` -- so a restored
+    # listener was open to anyone until rebound (R15 of GOAL_REPAIR_2026-08-23).
+    secret = listener.auth_secret
+    if not secret:
+        return False
     if auth_type == "hmac":
         provided = lh.get("x-signature", "")
         expected = hmac_signature(secret, body_bytes)
-        return provided == expected
+        return hmac.compare_digest(provided, expected)
     if auth_type == "bearer":
         provided = lh.get("authorization", "")
         # accept either "Bearer <secret>" or the raw secret
         if provided.lower().startswith("bearer "):
             provided = provided[7:]
-        return provided == secret
+        return hmac.compare_digest(provided, secret)
     if auth_type == "api_key":
         provided = lh.get("x-api-key", "")
-        return provided == secret
+        return hmac.compare_digest(provided, secret)
     return False
 
 
