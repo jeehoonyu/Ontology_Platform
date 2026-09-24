@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
-from . import models, models_action
+from . import models, models_action, production_auth
 from .database import Base, get_db
 
 router = APIRouter(tags=["security"])
@@ -400,7 +400,8 @@ def list_markings(db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/markings/{marking_id}/grant", response_model=MarkingGrantRead)
-def grant_marking(marking_id: str, body: MarkingGrantCreate, db: Session = Depends(get_db)):
+def grant_marking(marking_id: str, body: MarkingGrantCreate, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
     marking = db.query(Marking).filter(Marking.id == marking_id).first()
     if not marking:
         raise HTTPException(status_code=404, detail=f"Marking '{marking_id}' not found")
@@ -422,7 +423,9 @@ def grant_marking(marking_id: str, body: MarkingGrantCreate, db: Session = Depen
     db.add(
         models_action.AuditLog(
             id=uuid.uuid4().hex,
-            actor="system",
+            # The caller, not "system": a grant is how an administrator comes to hold
+            # REMOVE, so the trail has to say who issued it (R15).
+            actor=principal.id,
             event_type="security.marking.granted",
             subject_type="marking_grant",
             subject_id=grant_id,
@@ -439,6 +442,7 @@ def grant_marking_permission(
     marking_id: str,
     body: MarkingPermissionGrantCreate,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("administer")),
 ):
     """Granular grant: bind a single marking permission (manage|apply|remove|members)
     to a principal. Unlike the legacy /grant (which issues a full/permissive grant),
@@ -476,7 +480,7 @@ def grant_marking_permission(
     db.add(
         models_action.AuditLog(
             id=uuid.uuid4().hex,
-            actor="system",
+            actor=principal.id,
             event_type="security.marking.permission_granted",
             subject_type="marking_grant",
             subject_id=grant_id,

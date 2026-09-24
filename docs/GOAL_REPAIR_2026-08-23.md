@@ -71,7 +71,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R3** | Every `ObjectInstance` write passes one chokepoint that validates and records a change event | 7 of 7 sites | 4 of 7 validated, 5 of 7 recorded a change | **Met** — 7 of 7, ceiling 7 -> 0. `oms/audit_object_writes.py` fails the build on a new direct construction; `oms/test_object_writes.py`, 26 assertions |
 | **R4** | Declared property constraints are enforced on write | 6 of 6 kinds | 0 of 6 — `enum`, `pattern`, `minimum`, `maximum`, `min_length`, `max_length` stored, never checked | **Met** — 6 of 6, plus the two halves that made the fix inert: `base_type` is read where `type` is absent, and an archived property is no longer enforced. `oms/test_property_constraints.py`, 41 assertions |
 | **R5** | Valid time is implemented, or withdrawn from the API and the README | no unproven claim | `valid_to` hardcoded `None`; `valid_from` never supplied by any caller | **Met** — implemented. Intervals close, `valid_from` is a caller's business time, and a correction makes the two axes disagree. `oms/test_valid_time.py`, 12 assertions |
-| **R6** | Authorization coverage is measured, ratcheted, and falling | `unauthorized_mutating_ceiling` at 0 | 42 modules with zero `require_permission`; no ratchet existed | **Open** — `unauthorized_mutating_ceiling` (auth-coverage) 282 -> 23 -> **16**, the last step in a0e9c65 (2026-09-02, `platform_core`'s seven handlers). 38 routers mounted, `main`'s 23 gated per-route. The four added last were never considered: `ROUTER_PERMISSIONS.get(name, [])` mounted them with no gate at all |
+| **R6** | Authorization coverage is measured, ratcheted, and falling | `unauthorized_mutating_ceiling` at 0 | 42 modules with zero `require_permission`; no ratchet existed | **Open** — `unauthorized_mutating_ceiling` (auth-coverage) 282 -> 23 -> 16 -> **11**: a0e9c65 (2026-09-02) took `platform_core`'s seven handlers, and 8195e11 (2026-09-23, R15) the five cipher handlers. 38 routers mounted, `main`'s 23 gated per-route. The four added last were never considered: `ROUTER_PERMISSIONS.get(name, [])` mounted them with no gate at all |
 | **R7** | Every Tier A sub-condition is computed rather than asserted | 8 of 8 | 6 of 8; `check_alembic_postgres` and `check_images` were constant returns | **Met** — 8 of 8 compute; `oms/test_tier_a_computed.py`, 47 assertions; reintroducing either stub fails it. Compose now renders here, and the postgres chain names what it needs |
 | **R8** | No claim in the documentation lacks an implementation behind it | 0 | 6 named | **Open** — 2 of 6 removed (`AgentStudio.py`, `ontology_value_types`). Of the remaining four, one has a dispatcher written in JSON, one is a design decision about a P0 witness, one is cheaper to wire than to delete, and one has an honest replacement that is redder than the fabrication |
 | **R9** | No release gate decides on a hash-derived metric | 0 gates | 1 — `_evaluate_submission_checks` thresholds `sha256(objective_id:algorithm)` | **Open** |
@@ -133,7 +133,8 @@ cannot close:
   `/cipher/encrypt` and `/cipher/hash` skip their licence check entirely when the caller supplies
   neither `license_id` nor `principal`. *Closed 2026-09-23; see "R15: what each finding became".*
 - **`security_propagation`**: `DELETE /security/resource-markings/{id}` strips a mandatory access
-  marking, and its only check is opt-in on a caller-supplied query parameter.
+  marking, and its only check is opt-in on a caller-supplied query parameter. *Closed 2026-09-23;
+  see "R15: what each finding became".*
 
 **And the systemic one.** A router permission is a *tier*, not a tenancy check. `fusion_ops`,
 `datasets_ext`, `ontology_core`, `quiver_runtime`, `osdk_ops`, `analytics` and others reach
@@ -597,6 +598,38 @@ that a call naming no identity now gets 403 instead of 200.
   returns `key_ref`, the hash pepper, to any viewer. This change closes authorization, not
   confidentiality. Licences granted before it under free-text names match no signed-in
   principal, so they now authorize nothing until re-granted to a real id.
+
+**The marking strip, 2026-09-23.** `DELETE /security/resource-markings/{id}` never looked at
+its caller. The router's `administer` tier was the only gate, and every caller passes it.
+With no `actor` query parameter the route stripped anything. With `actor=<someone holding
+REMOVE>` it stripped under that name and audited the name. A probe as an administrator with
+no grant on the marking got 200 both ways.
+- **The fix.** The route checks the caller's own REMOVE, or a full grant, on the marking, and
+  audits the caller. `actor` is still accepted when it names the caller and refused when it
+  names anyone else.
+- **No administer bypass.** Administering the platform is not holding the marking. A bypass
+  would make the check vacuous, since every caller of this router already administers.
+- **Grants name their issuer.** A grant is how an administrator comes to hold REMOVE, and
+  both grant routes audited as `system`. They now audit their caller.
+- **Proven by** `oms/test_security_governance.py`, whose strip section now acts as real
+  callers: 42 assertions. A caller without REMOVE is refused, even when naming one who holds
+  it. An administrator with no grant is refused. A caller with REMOVE, or with a full grant,
+  strips, audited under their own name. Both grant routes are audited as their caller.
+- **Negative runs.** Five mutations each failed at their named assertion:
+  - no REMOVE check;
+  - a named actor lending their REMOVE;
+  - administer treated as holding the marking;
+  - the strip audited as `system`;
+  - a grant audited as `system`.
+
+  Restored, both sources are byte for byte what they were.
+- **Not closed here.** An administrator can still grant themselves REMOVE and then strip.
+  The grant routes check no `manage` permission on the marking, because no marking has a
+  first manager to check against. Both steps are now audited under the administrator's own
+  name, which they were not. Requiring `manage` to grant needs someone to decide who manages
+  a new marking. The sibling `POST /security/resource-markings` still takes an opt-in
+  `actor` for APPLY. It fails safe, since applying narrows access, but its trail is still
+  the caller's choice.
 
 ## Non-completion rule
 

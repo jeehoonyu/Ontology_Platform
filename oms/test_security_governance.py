@@ -174,28 +174,73 @@ r = client.post("/security/resource-markings", json={"resource_id": "ds-4", "mar
 check(r.status_code == 404, "assign unknown marking -> 404")
 
 
-print("== Strip (DELETE) enforcement: REMOVE required only when actor supplied ==")
+print("== Strip (DELETE) enforcement: the caller's own REMOVE, always (R15) ==")
 
-# Actor WITHOUT remove -> 403 (and the marking stays)
-r = client.delete(f"/security/resource-markings/{applied_rm_id}?actor=applier")
-check(r.status_code == 403, "strip with actor lacking REMOVE -> 403")
-r = client.get("/security/resource-markings/ds-2")
-check("m-pii" in r.json()["marking_ids"], "marking still present after denied strip")
+from app import production_auth  # noqa: E402
 
-# Actor WITH remove -> 200
+
+def as_caller(principal_id):
+    """Requests after this run as `principal_id`, an administrator; None restores the default."""
+    if principal_id is None:
+        api.dependency_overrides.pop(production_auth.current_principal, None)
+        return
+    caller = production_auth.Principal(principal_id, principal_id, None, ["administrator"], ["*"])
+    api.dependency_overrides[production_auth.current_principal] = lambda: caller
+
+
+def still_marked(label):
+    check("m-pii" in client.get("/security/resource-markings/ds-2").json()["marking_ids"], label)
+
+
+# A caller without REMOVE -> 403, and the marking stays
+as_caller("applier")
+r = client.delete(f"/security/resource-markings/{applied_rm_id}")
+check(r.status_code == 403, "strip by a caller lacking REMOVE -> 403")
+still_marked("marking still present after denied strip")
+# ...and naming someone who holds it no longer lends their permission
 r = client.delete(f"/security/resource-markings/{applied_rm_id}?actor=remover")
-check(r.status_code == 200 and r.json()["stripped"] is True, "strip with REMOVE permission -> 200")
+check(r.status_code == 403, "strip naming a principal with REMOVE, by one without it -> 403")
+still_marked("marking still present after a strip under another's name")
+
+# Administering the platform is not holding the marking
+as_caller("platform-admin")
+r = client.delete(f"/security/resource-markings/{applied_rm_id}")
+check(r.status_code == 403, "strip by an administrator with no grant on the marking -> 403")
+still_marked("marking still present after an administrator's strip")
+
+# A caller WITH remove -> 200, audited under their own name
+as_caller("remover")
+r = client.delete(f"/security/resource-markings/{applied_rm_id}?actor=remover")
+check(r.status_code == 200 and r.json()["stripped"] is True, "strip by a caller with REMOVE -> 200")
 r = client.get("/security/resource-markings/ds-2")
 check("m-pii" not in r.json()["marking_ids"], "marking gone after authorized strip")
 check(audit_count("security.marking.stripped", "ds-2") == 1, "strip audited")
+db = SessionLocal()
+try:
+    stripped = db.query(models_action.AuditLog).filter(
+        models_action.AuditLog.event_type == "security.marking.stripped").one()
+    check(stripped.actor == "remover", f"the strip is audited as its caller, not {stripped.actor!r}")
+finally:
+    db.close()
 
-# No actor -> no enforcement
+# A full (legacy) grant holds REMOVE too
+as_caller("legacy")
 r = client.delete(f"/security/resource-markings/{legacy_rm_id}")
-check(r.status_code == 200, "strip without actor -> 200 (no enforcement)")
+check(r.status_code == 200, "strip by a caller with a full grant -> 200")
 
 # Strip missing resource-marking -> 404
 r = client.delete("/security/resource-markings/does-not-exist")
 check(r.status_code == 404, "strip unknown resource-marking -> 404")
+as_caller(None)
+
+# Grants name who issued them. A grant is how an administrator comes to hold REMOVE.
+db = SessionLocal()
+try:
+    grant_actors = {row.actor for row in db.query(models_action.AuditLog).filter(
+        models_action.AuditLog.event_type.in_(["security.marking.granted", "security.marking.permission_granted"])).all()}
+    check(grant_actors == {"local-admin"}, f"marking grants are audited as their caller: {grant_actors}")
+finally:
+    db.close()
 
 
 print(f"\n{passed} assertions passed")

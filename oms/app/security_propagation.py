@@ -45,12 +45,6 @@ class ResourceMarkingCreate(BaseModel):
     actor: Optional[str] = None
 
 
-class ResourceMarkingStripRequest(BaseModel):
-    # OPT-IN enforcement: when an actor is supplied, stripping a marking requires
-    # the actor to hold the REMOVE permission. When omitted no enforcement.
-    actor: Optional[str] = None
-
-
 class AccessDecisionRequest(BaseModel):
     principal: str
     resource_type: str = "dataset"
@@ -98,13 +92,17 @@ def strip_resource_marking(
     resource_marking_id: str,
     actor: Optional[str] = None,
     db: Session = Depends(get_db),
+    principal: production_auth.Principal = Depends(production_auth.require_permission("administer")),
 ):
     """Strip (remove) a marking from a resource.
 
-    OPT-IN enforcement: when an ``actor`` is supplied (query param), removing a
-    marking requires the actor to hold the REMOVE permission on that marking
-    (Foundry "remove marking" / expand-access). When omitted, no enforcement
-    happens, preserving the permissive default of the rest of this module.
+    Removing a mandatory marking widens who may see the resource, so it requires the
+    calling principal to hold REMOVE, or a full grant, on the marking. The route checked
+    only when a caller-supplied ``actor`` was present, and then checked that name rather
+    than the caller: with none it stripped anything, and with another's name it stripped
+    under theirs (R15 of GOAL_REPAIR_2026-08-23). ``actor`` is still accepted when it
+    names the caller and refused when it names anyone else. Administering the platform
+    is not holding the marking -- every caller of this router already administers.
     """
     rm = db.get(ResourceMarking, resource_marking_id)
     if not rm:
@@ -112,20 +110,23 @@ def strip_resource_marking(
             status_code=404,
             detail=f"ResourceMarking '{resource_marking_id}' not found",
         )
-    if actor is not None and not _sec.principal_has_marking_permission(
-        db, actor, rm.marking_id, "remove"
-    ):
+    if actor is not None and actor != principal.id:
         raise HTTPException(
             status_code=403,
-            detail=f"Actor '{actor}' lacks REMOVE permission on marking '{rm.marking_id}'",
+            detail=f"A marking is stripped as the calling principal '{principal.id}'; a request may not name '{actor}'",
+        )
+    if not _sec.principal_has_marking_permission(db, principal.id, rm.marking_id, "remove"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Principal '{principal.id}' lacks REMOVE permission on marking '{rm.marking_id}'",
         )
     resource_id = rm.resource_id
     marking_id = rm.marking_id
     db.delete(rm)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=actor or "system",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id,
                                   event_type="security.marking.stripped",
                                   subject_type=rm.resource_type, subject_id=resource_id,
-                                  payload={"marking_id": marking_id, "actor": actor}))
+                                  payload={"marking_id": marking_id, "actor": principal.id}))
     db.commit()
     return {"stripped": True, "id": resource_marking_id,
             "resource_id": resource_id, "marking_id": marking_id}
