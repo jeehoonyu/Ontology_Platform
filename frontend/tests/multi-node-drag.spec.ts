@@ -77,6 +77,16 @@ test("three selected nodes move together and commit once", async ({ page }, test
   }
   expect(saves.length, "one drag of three nodes sent more than one layout request").toBe(1);
 
+  // One drag, one history entry: one `Undo move` puts all three back with one more save,
+  // and leaves nothing of the drag to take back.
+  await page.getByRole("button", { name: "Undo move" }).click();
+  for (const index of [0, 1, 2]) {
+    await expect.poll(() => leftOf(page, index), { message: `one Undo did not put selected node ${index + 1} back` })
+      .toBeCloseTo(before[index], 0);
+  }
+  await expect(page.getByRole("button", { name: "Undo move" }), "one drag left more than one Undo behind").toBeDisabled();
+  expect(saves.length, "one Undo of a three-node drag sent more than one layout request").toBe(2);
+
   // Escape clears the selection, leaving only the primary node highlighted.
   await page.locator(".workbench-status-strip").click();
   await page.keyboard.press("Escape");

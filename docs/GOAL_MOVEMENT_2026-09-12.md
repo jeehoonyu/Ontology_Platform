@@ -649,7 +649,11 @@ test first proves the drag was live.
 - **Undo for a multi-node drag.** Was listed here to ride with `GOAL_PANES` M5, and it
   did: `moveNodes` commits a drag of any number of pipeline nodes through
   `commitPositions`, one history entry, so one `Undo move` puts every node back.
-  (Corrected 2026-09-23; this line still said it was not built.)
+  (Corrected 2026-09-23; this line still said it was not built.) Since 2026-09-23,
+  `multi-node-drag.spec.ts` holds it: after the three-node drag, one `Undo move` puts all
+  three back with one more save and leaves nothing to undo. With the history entry
+  remembering only the dragged node, it failed at `one Undo did not put selected node 2
+  back`, 496 for 380.
 
 ## What this is not
 
