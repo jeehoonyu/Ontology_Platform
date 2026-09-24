@@ -2,8 +2,8 @@
 
 Stated 2026-09-12, from [`FOUNDRY_UI_RESEARCH_2026-09-12.md`](FOUNDRY_UI_RESEARCH_2026-09-12.md),
 which extends the [platform review](FOUNDRY_PLATFORM_UI_REVIEW_2026-09-11.md). Runs
-alongside [`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), open at M5, and
-[`GOAL_HONEST_UI_2026-09-11.md`](GOAL_HONEST_UI_2026-09-11.md), open at N5.
+alongside [`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), open at M8, and
+[`GOAL_HONEST_UI_2026-09-11.md`](GOAL_HONEST_UI_2026-09-11.md), open at N7.
 
 ## Why this, out of a plan with eight work packages
 
@@ -646,8 +646,10 @@ test first proves the drag was live.
   left for its own goal.
 - **Map camera stability, rendering cost under repeated resizes, narrow-screen
   presentation.** P2, each with its own measurement.
-- **Undo for a multi-node drag.** Rides with `GOAL_PANES` M5, which introduces the
-  multi-node drag.
+- **Undo for a multi-node drag.** Was listed here to ride with `GOAL_PANES` M5, and it
+  did: `moveNodes` commits a drag of any number of pipeline nodes through
+  `commitPositions`, one history entry, so one `Undo move` puts every node back.
+  (Corrected 2026-09-23; this line still said it was not built.)
 
 ## What this is not
 

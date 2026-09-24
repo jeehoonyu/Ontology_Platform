@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -39,14 +40,20 @@ OMS = REPO_ROOT / "oms"
 # The static checks: they read the tree and judge it, need no service, and finish
 # in seconds. Ordered cheapest-first so a failure surfaces early.
 # Two of these run and report FAIL because the work they describe is genuinely
-# unfinished -- Tier B stands at 7 of 10 and no external team has submitted an
+# unfinished -- Tier B is not accepted and no external team has submitted an
 # evaluation. `test_check_homes.py` already settled how to treat them: they are
 # required to *complete*, never to pass, because "asserting those pass would be
 # asserting work is finished that is not". A runner that painted them red every
 # run would be teaching its reader to ignore red.
 REPORTING = {
-    "validate_tier_b_evidence": "Tier B stands at 7 of 10 and is not claimed",
+    "validate_tier_b_evidence": "Tier B stands at {count} and is not claimed",
     "validate_external_evaluations": "no external team has submitted an evaluation",
+}
+# A note that repeats a number takes it from what the check printed. The Tier B note
+# carried "7 of 10" as a literal: migrations 0043-0045 made those seven gates stale, the
+# validator said 0 of 10, and every run went on printing 7.
+REPORTED_COUNTS = {
+    "validate_tier_b_evidence": re.compile(r"(\d+ of \d+) gates satisfied"),
 }
 
 FAST_CHECKS = [
@@ -99,7 +106,12 @@ def run_check(name: str) -> Result:
         # It had to run; what it reported is the product's state, not this run's.
         crashed = bool(completed.stderr and "Traceback" in completed.stderr)
         detail = REPORTING[name]
-        code = 1 if crashed else 0
+        counted = REPORTED_COUNTS.get(name)
+        said = counted.search(completed.stdout or "") if counted else None
+        if counted:
+            detail = detail.format(count=said.group(1)) if said else "it printed no count"
+        # A report that stopped saying its count has stopped reporting, and fails.
+        code = 1 if crashed or (counted and not said) else 0
     elif code:
         lines = [line for line in (completed.stdout or "").splitlines() if line.strip()]
         detail = lines[-1][:100] if lines else (completed.stderr or "")[-100:]

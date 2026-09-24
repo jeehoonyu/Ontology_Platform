@@ -14,7 +14,7 @@ of them looked covered for exactly that reason while never running.
 
 Two of the five legitimately exit nonzero today, and both are gated accordingly:
 
-  validate_tier_b_evidence       Tier B stands at 7 of 10 and is not claimed
+  validate_tier_b_evidence       Tier B is not accepted
   validate_external_evaluations  no external team has submitted an evaluation
 
 Asserting those pass would be asserting work is finished that is not. They are
@@ -82,6 +82,14 @@ code, output = run("validate_tier_b_evidence", validate_tier_b_evidence)
 check(isinstance(code, int), "the Tier B audit completes", code)
 check("of 10 gates satisfied" in output,
       "and reports a gate count rather than dying silently", output[-300:])
+# `verify.py` repeats that count in its note. It carried "7 of 10" as a literal, and went
+# on printing 7 after migrations 0043-0045 left the validator saying 0.
+import re  # noqa: E402
+import verify  # noqa: E402
+stated = re.search(r"(\d+ of \d+) gates satisfied", output).group(1)
+noted = verify.run_check("validate_tier_b_evidence")
+check(noted.ok and noted.detail == f"Tier B stands at {stated} and is not claimed",
+      f"verify's Tier B note is not the validator's count, {stated}", noted.detail)
 
 code, output = run("validate_external_evaluations", validate_external_evaluations)
 check(isinstance(code, int), "the external-evaluation validator completes", code)

@@ -2,7 +2,7 @@
 
 Stated 2026-09-11, from [`FOUNDRY_PLATFORM_UI_REVIEW_2026-09-11.md`](FOUNDRY_PLATFORM_UI_REVIEW_2026-09-11.md)
 and its [companion canvas plan](FOUNDRY_UI_IMPROVEMENT_PLAN_2026-09-11.md). Runs alongside
-[`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), which is open at M5.
+[`GOAL_PANES_2026-09-11.md`](GOAL_PANES_2026-09-11.md), which is open at M8.
 
 ## Why these two, out of a review that lists twenty-four workspaces
 
