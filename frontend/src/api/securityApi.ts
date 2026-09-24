@@ -56,11 +56,11 @@ export function grantMarking(markingId: string, principal: string): Promise<Mark
   return postJson<MarkingGrant>(`/markings/${encodeURIComponent(markingId)}/grant`, { principal });
 }
 
+// Applied as the signed-in caller, who needs APPLY on the marking (R15).
 export function assignResourceMarking(body: {
   resource_type?: string;
   resource_id: string;
   marking_id: string;
-  actor?: string;
 }): Promise<ResourceMarkingResult> {
   return postJson<ResourceMarkingResult>("/security/resource-markings", body);
 }

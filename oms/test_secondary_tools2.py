@@ -62,6 +62,9 @@ ok(client.post("/data-assets", json={"id": "clean", "display_name": "clean", "ki
 ok(client.post("/data-assets", json={"id": "mart", "display_name": "mart", "kind": "dataset", "asset_schema": {}, "records": []}), "mart ds")
 ok(client.post("/pipelines", json={"id": "p1", "display_name": "p1", "input_asset_id": "raw", "output_asset_id": "clean", "steps": []}), "pipe1")
 ok(client.post("/pipelines", json={"id": "p2", "display_name": "p2", "input_asset_id": "clean", "output_asset_id": "mart", "steps": []}), "pipe2")
+# Applying a marking needs the caller's own APPLY (R15); the caller here is the local one.
+ok(client.post("/security/resource-markings", json={"resource_type": "dataset", "resource_id": "raw", "marking_id": "pii"}), "assign without APPLY", expect=403)
+ok(client.post("/markings/pii/grant-permission", json={"principal": me, "permission": "apply"}), "grant APPLY to the caller")
 ok(client.post("/security/resource-markings", json={"resource_type": "dataset", "resource_id": "raw", "marking_id": "pii"}), "assign pii to raw")
 prop = ok(client.post("/security/markings/propagate", params={"dataset_id": "raw"}), "propagate")
 assert prop["downstream_count"] == 2, prop                       # clean + mart

@@ -142,7 +142,7 @@ function MarkingsSection({ refreshKey, onChange }: SectionProps) {
 
   const [newMarking, setNewMarking] = useState({ display_name: "", category: "PII", description: "" });
   const [grant, setGrant] = useState({ marking_id: "", principal: "" });
-  const [resource, setResource] = useState({ resource_id: "", marking_id: "", actor: "" });
+  const [resource, setResource] = useState({ resource_id: "", marking_id: "" });
   const [decision, setDecision] = useState({ principal: "", resource_id: "" });
   const [decisionResult, setDecisionResult] = useState<AccessDecisionResult | null>(null);
 
@@ -266,13 +266,6 @@ function MarkingsSection({ refreshKey, onChange }: SectionProps) {
                 ))}
               </select>
             </Field>
-            <Field label="Actor (optional, enforces APPLY)">
-              <input
-                value={resource.actor}
-                onChange={(event) => setResource({ ...resource, actor: event.target.value })}
-                placeholder="leave blank to skip enforcement"
-              />
-            </Field>
             <div className="button-row">
               <button
                 disabled={!resource.resource_id || !resource.marking_id}
@@ -280,10 +273,9 @@ function MarkingsSection({ refreshKey, onChange }: SectionProps) {
                   run(async () => {
                     await assignResourceMarking({
                       resource_id: resource.resource_id,
-                      marking_id: resource.marking_id,
-                      actor: resource.actor || undefined
+                      marking_id: resource.marking_id
                     });
-                    setResource({ resource_id: "", marking_id: "", actor: "" });
+                    setResource({ resource_id: "", marking_id: "" });
                     onChange();
                   })
                 }

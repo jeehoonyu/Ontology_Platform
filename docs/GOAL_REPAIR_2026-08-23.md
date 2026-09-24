@@ -78,7 +78,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R10** | The unbounded-read scan sees the write paths | scan covers writes | ceiling records 0 while inspecting a 2-entry dict; 7 unbounded sites known and unseen | **Open** — widen the scan before fixing |
 | **R13** | The request-cost ratchet can see the route whose cost defect created it | POST measured | GET only; `POST /pipeline-builder/workers/run-next` is outside it | **Open** |
 | **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
-| **R15** | No route grants a privilege the role model withholds, or authorizes from its own request body | 0 | 6 found while classifying R6 | **Open** — see below |
+| **R15** | No route grants a privilege the role model withholds, or authorizes from its own request body | 0 | 6 found while classifying R6 | **Open** — 1 left. All six named findings are closed, and two found beside them (2026-09-23; see "R15: what each finding became"). What is left: the marking grant routes check no `manage` on the marking, so an administrator can grant themselves REMOVE, now under their own name. Closing it needs someone to decide who manages a new marking |
 | **R12** | The suite passes on a host that is not the one it was written on | 243 of 243 | 237 of 243; six encoded Windows or x86 assumptions, one of them a product defect | **Met** — **243 of 243**, `verify.py` 21 of 21 in 12.0 min. Tier A went from 5 met / 1 unmet to **7 met / 0 unmet** |
 | **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
 
@@ -629,7 +629,7 @@ no grant on the marking got 200 both ways.
   name, which they were not. Requiring `manage` to grant needs someone to decide who manages
   a new marking. The sibling `POST /security/resource-markings` still takes an opt-in
   `actor` for APPLY. It fails safe, since applying narrows access, but its trail is still
-  the caller's choice.
+  the caller's choice. *Closed 2026-09-23, below.*
 
 **`automate_ops`, 2026-09-23.** T5 closed the approval gate but not the scope. The action
 lookup read any project's ActionType by id. A probe as a caller who could execute only in
@@ -698,6 +698,23 @@ snapshot restore produces exactly those rows: it nulls every listener secret and
   listener, 200 for 401. Restored, `webhooks_ops.py` is byte for byte what it was.
 - **Not closed here.** There is still no route to rebind a secret, so a restored listener
   stays refused until it is deleted and recreated. That is the safe side of the same gap.
+
+**Applying a marking, 2026-09-23.** The strip's sibling, `POST /security/resource-markings`,
+checked APPLY only when the body named an actor, and then checked that name. That is
+authorizing from the request body. The owner's decision D withdrew that for markings, so
+applying now takes the strip's rule.
+- **The fix.** The caller's own APPLY, or a full grant, is required, with no administer
+  bypass. The body may name only the caller, and the audit names the caller.
+- **The screen.** The Security screen's "Actor (optional, enforces APPLY)" field is gone.
+- **Proven by** `oms/test_security_governance.py`, 44 assertions, and
+  `test_secondary_tools2.py`, which now grants the local caller APPLY before assigning.
+  Refused: an administrator with no grant, a caller naming a holder, and a caller holding
+  only REMOVE. A holder of APPLY and a full grant succeed, audited as themselves.
+- **Negative runs.** Three mutations each failed at their named assertion: the opt-in
+  check, a named actor lending APPLY, and the audit as `system`. Restored,
+  `security_propagation.py` is byte for byte what it was.
+- **Not browser-tested.** No browser test assigns a marking, so the removed field is held
+  only by the type check.
 
 ## Non-completion rule
 

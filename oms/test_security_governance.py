@@ -146,35 +146,7 @@ r = client.post("/markings/nope/grant-permission", json={"principal": "x", "perm
 check(r.status_code == 404, "grant-permission on missing marking -> 404")
 
 
-print("== Assign enforcement: APPLY required only when actor supplied ==")
-
-# No actor -> no enforcement (historical behavior preserved)
-r = client.post("/security/resource-markings", json={"resource_id": "ds-1", "marking_id": "m-pii"})
-check(r.status_code == 201, "assign without actor -> 201 (no enforcement)")
-
-# Actor WITHOUT apply -> 403
-r = client.post("/security/resource-markings",
-                json={"resource_id": "ds-2", "marking_id": "m-pii", "actor": "remover"})
-check(r.status_code == 403, "assign with actor lacking APPLY -> 403")
-
-# Actor WITH apply -> 201
-r = client.post("/security/resource-markings",
-                json={"resource_id": "ds-2", "marking_id": "m-pii", "actor": "applier"})
-check(r.status_code == 201, "assign with actor holding APPLY -> 201")
-applied_rm_id = r.json()["id"]
-
-# Full/permissive (legacy) actor can also assign
-r = client.post("/security/resource-markings",
-                json={"resource_id": "ds-3", "marking_id": "m-pii", "actor": "legacy"})
-check(r.status_code == 201, "assign with full-grant actor -> 201")
-legacy_rm_id = r.json()["id"]
-
-# Assign to a missing marking still -> 404
-r = client.post("/security/resource-markings", json={"resource_id": "ds-4", "marking_id": "nope"})
-check(r.status_code == 404, "assign unknown marking -> 404")
-
-
-print("== Strip (DELETE) enforcement: the caller's own REMOVE, always (R15) ==")
+print("== Assign enforcement: the caller's own APPLY, always (R15) ==")
 
 from app import production_auth  # noqa: E402
 
@@ -186,6 +158,48 @@ def as_caller(principal_id):
         return
     caller = production_auth.Principal(principal_id, principal_id, None, ["administrator"], ["*"])
     api.dependency_overrides[production_auth.current_principal] = lambda: caller
+
+
+# A caller with no grant on the marking -> 403, whether or not the body names anyone
+as_caller("platform-admin")
+r = client.post("/security/resource-markings", json={"resource_id": "ds-1", "marking_id": "m-pii"})
+check(r.status_code == 403, "assign by an administrator with no grant on the marking -> 403")
+r = client.post("/security/resource-markings",
+                json={"resource_id": "ds-1", "marking_id": "m-pii", "actor": "applier"})
+check(r.status_code == 403, "assign naming a principal with APPLY, by one without it -> 403")
+
+# A caller WITHOUT apply -> 403
+as_caller("remover")
+r = client.post("/security/resource-markings", json={"resource_id": "ds-2", "marking_id": "m-pii"})
+check(r.status_code == 403, "assign by a caller lacking APPLY -> 403")
+
+# A caller WITH apply -> 201, audited as the caller
+as_caller("applier")
+r = client.post("/security/resource-markings",
+                json={"resource_id": "ds-2", "marking_id": "m-pii", "actor": "applier"})
+check(r.status_code == 201, "assign by a caller holding APPLY -> 201")
+applied_rm_id = r.json()["id"]
+db = SessionLocal()
+try:
+    assigned = db.query(models_action.AuditLog).filter(
+        models_action.AuditLog.event_type == "security.marking.assigned").all()
+    check([row.actor for row in assigned] == ["applier"], f"the assignment is audited as its caller: {[row.actor for row in assigned]}")
+finally:
+    db.close()
+
+# A full (legacy) grant can also assign
+as_caller("legacy")
+r = client.post("/security/resource-markings", json={"resource_id": "ds-3", "marking_id": "m-pii"})
+check(r.status_code == 201, "assign by a caller with a full grant -> 201")
+legacy_rm_id = r.json()["id"]
+
+# Assign to a missing marking still -> 404
+r = client.post("/security/resource-markings", json={"resource_id": "ds-4", "marking_id": "nope"})
+check(r.status_code == 404, "assign unknown marking -> 404")
+as_caller(None)
+
+
+print("== Strip (DELETE) enforcement: the caller's own REMOVE, always (R15) ==")
 
 
 def still_marked(label):

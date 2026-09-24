@@ -39,9 +39,7 @@ class ResourceMarkingCreate(BaseModel):
     resource_type: str = "dataset"
     resource_id: str
     marking_id: str
-    # OPT-IN enforcement: when an actor is supplied, assigning a marking to a
-    # resource requires the actor to hold the APPLY permission on that marking.
-    # When omitted (None) no enforcement happens, preserving historical behavior.
+    # May repeat the caller's own id; a request naming anyone else is refused.
     actor: Optional[str] = None
 
 
@@ -56,28 +54,35 @@ def _markings_for(db: Session, resource_id: str) -> Set[str]:
 
 
 @router.post("/security/resource-markings", status_code=201)
-def assign_marking(body: ResourceMarkingCreate, db: Session = Depends(get_db)):
+def assign_marking(body: ResourceMarkingCreate, db: Session = Depends(get_db),
+                   principal: production_auth.Principal = Depends(production_auth.require_permission("administer"))):
+    """Apply a marking to a resource, as the calling principal, who must hold APPLY.
+
+    The check ran only when the body named an actor, and then checked that name: a
+    request naming nobody applied any marking, and one naming a holder of APPLY applied it
+    under theirs. That is authorizing from the request body, which R15 of
+    GOAL_REPAIR_2026-08-23 withdraws for markings as the strip was; applying fails safe,
+    since it narrows access, but the trail was the caller's to choose.
+    """
     if not db.get(_sec.Marking, body.marking_id):
         raise HTTPException(status_code=404, detail=f"Marking '{body.marking_id}' not found")
-    # OPT-IN enforcement: only check APPLY when an actor is supplied. Assigning a
-    # marking to a resource requires the APPLY permission (Foundry "apply marking").
-    if body.actor is not None and not _sec.principal_has_marking_permission(
-        db, body.actor, body.marking_id, "apply"
-    ):
+    if body.actor is not None and body.actor != principal.id:
         raise HTTPException(
             status_code=403,
-            detail=(
-                f"Actor '{body.actor}' lacks APPLY permission on marking "
-                f"'{body.marking_id}'"
-            ),
+            detail=f"A marking is applied as the calling principal '{principal.id}'; a request may not name '{body.actor}'",
+        )
+    if not _sec.principal_has_marking_permission(db, principal.id, body.marking_id, "apply"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Principal '{principal.id}' lacks APPLY permission on marking '{body.marking_id}'",
         )
     rm = ResourceMarking(id=uuid.uuid4().hex, resource_type=body.resource_type,
                          resource_id=body.resource_id, marking_id=body.marking_id, created_at=_now())
     db.add(rm)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=body.actor or "system",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id,
                                   event_type="security.marking.assigned",
                                   subject_type=body.resource_type, subject_id=body.resource_id,
-                                  payload={"marking_id": body.marking_id, "actor": body.actor}))
+                                  payload={"marking_id": body.marking_id, "actor": principal.id}))
     db.commit()
     return {"id": rm.id, "resource_id": body.resource_id, "marking_id": body.marking_id}
 
