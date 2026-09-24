@@ -119,8 +119,8 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `components/canvas/PipelineCanvas.tsx` | 131 | `PipelineCanvas` | `id` | prefix dropped |
 | `components/canvas/PipelineCanvas.tsx` | 303 | `PipelineCanvas` | `action.label` | text |
 | `components/canvas/PipelineCanvas.tsx` | 511 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
-| `components/layout/Pane.tsx` | 376 | `usePaneLayout` | `active` | prefix dropped |
-| `components/layout/Pane.tsx` | 377 | `usePaneLayout` | `over` | prefix dropped |
+| `components/layout/Pane.tsx` | 384 | `usePaneLayout` | `active` | prefix dropped |
+| `components/layout/Pane.tsx` | 385 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `lib/builderKernel.ts` | 22 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `workspaces/Analytics.tsx` | 62 | `truncate` | `text` | text |

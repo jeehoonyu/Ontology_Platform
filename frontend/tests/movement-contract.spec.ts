@@ -1144,6 +1144,48 @@ test.describe("a pane that moves keeps what was typed into it", () => {
 });
 
 /**
+ * A collapsed pane keeps what it holds. V13 of the goal. V12 recorded that a collapse
+ * unmounted a pane's contents the way a move does, so an expand mounted them afresh and
+ * anything a component kept for itself started again. The review panel's tab is such a
+ * thing: V12 left it to start again on a move, because it is where a person was looking.
+ * A collapse is not a move -- the pane has not gone anywhere -- and now keeps it.
+ */
+test.describe("a collapsed pane keeps what it holds", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; one layout is enough to hold a collapse.");
+  });
+
+  test("the review panel's tab survives the Inspector collapsing and expanding", async ({ page }) => {
+    await page.goto("/workspace/workshop");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const review = page.locator(".artifact-review-panel");
+    await expect(review, "the Inspector's review panel did not render").toBeVisible();
+    await page.getByRole("button", { name: "Reset panes" }).click();
+    const proposals = review.getByRole("tab", { name: /Proposals/ });
+    await proposals.click();
+    await expect(proposals).toHaveAttribute("aria-selected", "true");
+
+    await paneControls(page, "Inspector");
+    const collapse = page.getByRole("button", { name: "Collapse Inspector" });
+    await expect(collapse, "the collapse control does not say its pane is open").toHaveAttribute("aria-expanded", "true");
+    await collapse.click();
+    await expect(review, "a collapsed pane still shows what it holds").toBeHidden();
+    await expect(page.getByRole("tab", { name: /Proposals/ }), "a collapsed pane's contents are still in the accessibility tree")
+      .toHaveCount(0);
+
+    await paneControls(page, "Inspector");
+    const expand = page.getByRole("button", { name: "Expand Inspector" });
+    await expect(expand, "the expand control does not say its pane is closed").toHaveAttribute("aria-expanded", "false");
+    await expand.click();
+    await expect(review).toBeVisible();
+    await expect(proposals, "expanding the pane mounted the review panel afresh, back on Comments")
+      .toHaveAttribute("aria-selected", "true");
+  });
+});
+
+/**
  * A pipeline node picked up on a canvas already scrolled sideways. V10 of the goal,
  * found while V8 was verified: the node was displaced by the canvas's scroll
  * offset before any key was pressed, and the drop committed it -- scrolled 103px

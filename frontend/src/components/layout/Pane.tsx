@@ -112,6 +112,7 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
     setMenuOpen(false);
     menuButton.current?.focus();
   };
+  const bodyId = `pane-body-${id}`;
   // The same three controls whether they sit in the header or behind the menu:
   // the same names, so a keyboard, a screen reader and a test find the same
   // thing, and only one set is ever rendered.
@@ -120,6 +121,8 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
       <button
         type="button"
         aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`}
+        aria-expanded={!collapsed}
+        aria-controls={bodyId}
         onClick={() => {
           onCollapse();
           if (narrow) setMenuOpen(false);
@@ -194,7 +197,12 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
           }}
         >{controls}</div>
       ) : null}
-      {collapsed ? null : <div className="pane-body">{children}</div>}
+      {/* V13 of GOAL_MOVEMENT_2026-09-12. A collapsed pane hides what it holds and keeps it
+          mounted. It used to render nothing, so an expand mounted the contents afresh: a tab,
+          a table page, an open disclosure, a finished agent run -- anything a component kept
+          for itself -- went back to where it starts, the way a pane move still does (V9, V12).
+          Hidden, it takes no space, no focus and no screen reader's attention. */}
+      <div className="pane-body" id={bodyId} hidden={collapsed}>{children}</div>
     </section>
   );
 }

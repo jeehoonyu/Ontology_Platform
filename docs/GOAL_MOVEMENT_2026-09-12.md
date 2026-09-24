@@ -553,6 +553,44 @@ Three things in that table are the defect the research describes:
   - No route exceeds its payload ceiling or sends more requests when it opens.
   - The fast tier passes 23 of 23.
 
+- **V13 — A collapsed pane keeps what it holds.** **Met** — 2026-09-23. Proven by
+  `a collapsed pane keeps what it holds` in `movement-contract.spec.ts`.
+
+  **V12 recorded the gap.** It said a collapse unmounts a pane's contents the way a move
+  does. `Pane` rendered nothing in place of a collapsed pane's body, so an expand mounted
+  what it held afresh. Anything a component kept for itself started again: the review
+  panel's tab, a table's page, an open disclosure, and an agent run's result. A move changes
+  a pane's parent and has to remount. A collapse does not: the pane stays where it was.
+
+  **The body is now hidden, not removed.** A collapsed pane's body carries the `hidden`
+  attribute. It takes no space, no focus and no place in the accessibility tree, and it
+  stays mounted. A `.pane-body[hidden]` rule keeps it hidden if a later rule gives pane
+  bodies a `display`. No rule does today, so nothing yet tests that guard. The collapse
+  button now names the body with `aria-controls` and says whether it is open with
+  `aria-expanded`. It could not name the body before, because a collapsed pane had none.
+  Hiding a pane still unmounts it, and so does moving one; V12's held state is still what
+  brings a moved pane's input back.
+
+  - **The test.** It opens the Workshop, switches the Inspector's review panel to Proposals
+    and collapses the Inspector. It requires the review panel hidden and its tabs gone from
+    the accessibility tree. It then expands the Inspector and requires Proposals still
+    selected. It also reads `aria-expanded`, `true` and then `false`, on the two controls.
+    It passes on desktop-1280. So do all 57 tests in `movement-contract.spec.ts`,
+    `pane-layout.spec.ts` and `shell-widths.spec.ts`. No default layout collapses a pane, so
+    no other test starts with a collapsed body.
+  - **Negative runs,** each on a rebuilt `dist`:
+    - with the body removed on collapse again, the test failed at `expanding the pane
+      mounted the review panel afresh, back on Comments`: `aria-selected` was `false`;
+    - with the body never hidden, it failed at `a collapsed pane still shows what it holds`;
+    - with no `aria-expanded`, it failed at `the collapse control does not say its pane is
+      open`.
+
+    Restored, the seven collapse and move tests in `movement-contract.spec.ts` pass, and
+    `Pane.tsx` is byte for byte what it was.
+  - **Gates.** `TABLE_TRUNCATION.md` was regenerated; only line numbers in `Pane.tsx`
+    moved. The style-scope, pane-layout, movement-contract, inert-control and
+    drag-affordance audits hold, and the fast tier passes 24 of 24.
+
 ## Order and size
 
 | Step | Touches | Commits |
@@ -567,6 +605,7 @@ Three things in that table are the defect the research describes:
 | V10 | `components/canvas/PipelineCanvas.tsx`, `styles.css`, spec, truncation reference | 1 |
 | V11 | `oms/audit_movement_contract.py`, spec, reference, baseline | 1 |
 | V12 | `OntologyPackagePanel.tsx`, `OntologyManager.tsx`, `ArtifactReviewPanel.tsx`, `AgentRuntimePanel.tsx`, `VisualBuilder.tsx`, `PipelineBuilder.tsx`, spec, truncation reference, style-scope baseline | 1 |
+| V13 | `components/layout/Pane.tsx`, `styles.css`, spec, truncation reference | 1 |
 
 Every test is run once against a build with the thing it defends removed, and every cancel
 test first proves the drag was live.

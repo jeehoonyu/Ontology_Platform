@@ -2675,6 +2675,12 @@ pre {
   flex: 0 0 auto;
 }
 
+/* A collapsed pane's body stays mounted and hidden (V13). The attribute's own
+   `display: none` loses to any rule that sets `display` on a pane body. */
+.pane-body[hidden] {
+  display: none;
+}
+
 /* The grip takes the touch gesture; nothing else on a pane does. A 22px target
    scrolls nothing, and `GOAL_DRAG_2026-08-19.md` L5 measured what happens when
    this is left off: the drag works with a mouse and not at all with a finger.
