@@ -648,7 +648,42 @@ and the count is a button that lists them.
   - **Also passing.** The 96 accessibility tests in `evaluator.spec.ts` pass at every width.
     Each of the two intermittent drag tests passes five times of five.
   - **Not shown.** That the pipeline drag failed for this reason too is inferred, not
-    reproduced: it is a pointer drag on a box read the same way, under the same bar.
+    reproduced: it is a pointer drag on a box read the same way, under the same bar. The
+    inference was wrong; see below.
+
+  **Found, 2026-09-23: the pipeline drag had its own cause.** The 0047 browser run failed it
+  once and kept the output. After the drop the canvas held four nodes, then none, so another
+  pipeline was on screen and the drop had not missed.
+  - **The mechanism, reproduced four times of four.** The page opens on the pipeline updated
+    last, and that canvas answer selects its first node. `New pipeline` selected the new draft
+    and cleared the node, but the canvas stayed the old pipeline's until the new one's arrived.
+    On a slow server the old answer can land after New pipeline's and before React draws the
+    switch, and it put the old node back as the selection. The drop was then sent to the new
+    pipeline, to connect from a node that pipeline does not have, and refused 404. The handler
+    let the error go, so the strip kept `Adding input_dataset...` and nothing appeared.
+  - **The fix.** The canvas shown is the selected pipeline's or none, and the badge says
+    loading until it arrives. A drop, Insert after and Delete node read the selected node only
+    if it is on that canvas. A refused drop says `Could not add ...` with the server's reason.
+  - **The tests,** in `evaluator.spec.ts`.
+    - `a new pipeline takes nothing from the last one's late answer` holds the old canvas answer
+      and New pipeline's, then releases them in that order. It holds the new pipeline's canvas
+      until after the drop. It requires no node on the new draft, Delete node disabled, and a
+      drop that makes one node connected from nothing.
+    - Updated last is to the second, so the test adds a node until its pipeline is the one the
+      page opens. Without that it timed out after the test before it, whose pipeline tied.
+    - `a drop the server refuses says so` answers the drop with 409 and requires the message.
+    - The three pipeline drag tests pass three runs of three together.
+  - **Negative runs,** each on a rebuilt `dist`:
+    - the canvas shown whatever pipeline it belongs to: failed at `the new draft shows the last
+      pipeline's node`;
+    - the selected id read bare: failed at `the new draft offers to delete the last pipeline's
+      node`;
+    - the error rethrown: failed at `a refused drop said nothing`, the strip reading `Adding
+      input_dataset at 198, 250...`;
+    - the committed `PipelineBuilder.tsx`: failed at the first.
+
+    Restored, the three pass, and the source is byte for byte what it was.
+  - **The full run.** After the fix, the whole suite passed on one run with none flaky: 354 tests ran and 1,014 were skipped, over 1,368. The browser evidence is re-recorded from it. One clean run is not proof against a flake, but the mechanism above is now shown, fixed, and held by a test.
 
   **Negative runs,** each on a rebuilt `dist`:
   - **N1, the draft count disconnected, as the goal asks:** failed at `typing into a node's

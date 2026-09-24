@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "c103d31d34e41089fff1f4809f3ea9bd5a7f588787418a0de9e502f399fbfdd3",
+    "bundle_source_hash": "470bb5777bf1fde8c0ade66d81f913e2c7e8c921d680e74439dbea192a0ac24a",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-24T05:43:12Z",
+    "recorded_at": "2026-09-24T06:08:26Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,39 +14,39 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 1,
-      "ran": 220,
+      "flaky": 0,
+      "ran": 223,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 200
+      "skipped": 202
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 199
+      "skipped": 201
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 200
+      "skipped": 202
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 200
+      "skipped": 202
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 200
+      "skipped": 202
     }
   },
   "tests": {
@@ -93,6 +93,7 @@
     "desktop-1280 :: a column filter keeps the rows containing its text, in any case, and counts them against the dataset": "ran",
     "desktop-1280 :: a column moves earlier and later with buttons, its values move with it, and focus stays on the button": "ran",
     "desktop-1280 :: a column widens from a select, with a single pointer and no drag": "ran",
+    "desktop-1280 :: a drop the server refuses says so": "ran",
     "desktop-1280 :: a filter follows a replacement file's fields, and does not come back with a field that went away": "ran",
     "desktop-1280 :: a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given": "ran",
     "desktop-1280 :: a filter matching nothing keeps the columns, says so, and one press brings every row back": "ran",
@@ -110,6 +111,7 @@
     "desktop-1280 :: a narrow pane hides from its menu and the Panes list brings it back": "ran",
     "desktop-1280 :: a narrow pane's menu is reached and left from the keyboard": "ran",
     "desktop-1280 :: a narrow pane's menu opens with a tap and moves the pane": "ran",
+    "desktop-1280 :: a new pipeline takes nothing from the last one's late answer": "ran",
     "desktop-1280 :: a node under a pane still moves by pixels, not by slots": "ran",
     "desktop-1280 :: a numeric column sorts by value, not by the text it shows": "ran",
     "desktop-1280 :: a pane its title crowds keeps its menu open, and the title whole": "ran",
@@ -319,6 +321,7 @@
     "laptop-1366 :: a column filter keeps the rows containing its text, in any case, and counts them against the dataset": "skipped",
     "laptop-1366 :: a column moves earlier and later with buttons, its values move with it, and focus stays on the button": "skipped",
     "laptop-1366 :: a column widens from a select, with a single pointer and no drag": "skipped",
+    "laptop-1366 :: a drop the server refuses says so": "skipped",
     "laptop-1366 :: a filter follows a replacement file's fields, and does not come back with a field that went away": "skipped",
     "laptop-1366 :: a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given": "skipped",
     "laptop-1366 :: a filter matching nothing keeps the columns, says so, and one press brings every row back": "skipped",
@@ -336,6 +339,7 @@
     "laptop-1366 :: a narrow pane hides from its menu and the Panes list brings it back": "skipped",
     "laptop-1366 :: a narrow pane's menu is reached and left from the keyboard": "skipped",
     "laptop-1366 :: a narrow pane's menu opens with a tap and moves the pane": "skipped",
+    "laptop-1366 :: a new pipeline takes nothing from the last one's late answer": "skipped",
     "laptop-1366 :: a node under a pane still moves by pixels, not by slots": "skipped",
     "laptop-1366 :: a numeric column sorts by value, not by the text it shows": "skipped",
     "laptop-1366 :: a pane its title crowds keeps its menu open, and the title whole": "skipped",
@@ -545,6 +549,7 @@
     "mobile-375 :: a column filter keeps the rows containing its text, in any case, and counts them against the dataset": "skipped",
     "mobile-375 :: a column moves earlier and later with buttons, its values move with it, and focus stays on the button": "skipped",
     "mobile-375 :: a column widens from a select, with a single pointer and no drag": "skipped",
+    "mobile-375 :: a drop the server refuses says so": "skipped",
     "mobile-375 :: a filter follows a replacement file's fields, and does not come back with a field that went away": "skipped",
     "mobile-375 :: a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given": "skipped",
     "mobile-375 :: a filter matching nothing keeps the columns, says so, and one press brings every row back": "skipped",
@@ -562,6 +567,7 @@
     "mobile-375 :: a narrow pane hides from its menu and the Panes list brings it back": "skipped",
     "mobile-375 :: a narrow pane's menu is reached and left from the keyboard": "skipped",
     "mobile-375 :: a narrow pane's menu opens with a tap and moves the pane": "skipped",
+    "mobile-375 :: a new pipeline takes nothing from the last one's late answer": "skipped",
     "mobile-375 :: a node under a pane still moves by pixels, not by slots": "skipped",
     "mobile-375 :: a numeric column sorts by value, not by the text it shows": "skipped",
     "mobile-375 :: a pane its title crowds keeps its menu open, and the title whole": "skipped",
@@ -771,6 +777,7 @@
     "tablet-1024 :: a column filter keeps the rows containing its text, in any case, and counts them against the dataset": "skipped",
     "tablet-1024 :: a column moves earlier and later with buttons, its values move with it, and focus stays on the button": "skipped",
     "tablet-1024 :: a column widens from a select, with a single pointer and no drag": "skipped",
+    "tablet-1024 :: a drop the server refuses says so": "skipped",
     "tablet-1024 :: a filter follows a replacement file's fields, and does not come back with a field that went away": "skipped",
     "tablet-1024 :: a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given": "skipped",
     "tablet-1024 :: a filter matching nothing keeps the columns, says so, and one press brings every row back": "skipped",
@@ -788,6 +795,7 @@
     "tablet-1024 :: a narrow pane hides from its menu and the Panes list brings it back": "skipped",
     "tablet-1024 :: a narrow pane's menu is reached and left from the keyboard": "skipped",
     "tablet-1024 :: a narrow pane's menu opens with a tap and moves the pane": "skipped",
+    "tablet-1024 :: a new pipeline takes nothing from the last one's late answer": "skipped",
     "tablet-1024 :: a node under a pane still moves by pixels, not by slots": "skipped",
     "tablet-1024 :: a numeric column sorts by value, not by the text it shows": "skipped",
     "tablet-1024 :: a pane its title crowds keeps its menu open, and the title whole": "skipped",
@@ -997,6 +1005,7 @@
     "tablet-768 :: a column filter keeps the rows containing its text, in any case, and counts them against the dataset": "skipped",
     "tablet-768 :: a column moves earlier and later with buttons, its values move with it, and focus stays on the button": "skipped",
     "tablet-768 :: a column widens from a select, with a single pointer and no drag": "skipped",
+    "tablet-768 :: a drop the server refuses says so": "skipped",
     "tablet-768 :: a filter follows a replacement file's fields, and does not come back with a field that went away": "skipped",
     "tablet-768 :: a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given": "skipped",
     "tablet-768 :: a filter matching nothing keeps the columns, says so, and one press brings every row back": "skipped",
@@ -1014,6 +1023,7 @@
     "tablet-768 :: a narrow pane hides from its menu and the Panes list brings it back": "skipped",
     "tablet-768 :: a narrow pane's menu is reached and left from the keyboard": "skipped",
     "tablet-768 :: a narrow pane's menu opens with a tap and moves the pane": "skipped",
+    "tablet-768 :: a new pipeline takes nothing from the last one's late answer": "skipped",
     "tablet-768 :: a node under a pane still moves by pixels, not by slots": "skipped",
     "tablet-768 :: a numeric column sorts by value, not by the text it shows": "skipped",
     "tablet-768 :: a pane its title crowds keeps its menu open, and the title whole": "skipped",
@@ -1223,6 +1233,7 @@
     "wide-1600 :: a column filter keeps the rows containing its text, in any case, and counts them against the dataset": "skipped",
     "wide-1600 :: a column moves earlier and later with buttons, its values move with it, and focus stays on the button": "skipped",
     "wide-1600 :: a column widens from a select, with a single pointer and no drag": "skipped",
+    "wide-1600 :: a drop the server refuses says so": "skipped",
     "wide-1600 :: a filter follows a replacement file's fields, and does not come back with a field that went away": "skipped",
     "wide-1600 :: a filter is announced on Enter and on leaving a changed box, not while typing, and its sentence stays as given": "skipped",
     "wide-1600 :: a filter matching nothing keeps the columns, says so, and one press brings every row back": "skipped",
@@ -1240,6 +1251,7 @@
     "wide-1600 :: a narrow pane hides from its menu and the Panes list brings it back": "skipped",
     "wide-1600 :: a narrow pane's menu is reached and left from the keyboard": "skipped",
     "wide-1600 :: a narrow pane's menu opens with a tap and moves the pane": "skipped",
+    "wide-1600 :: a new pipeline takes nothing from the last one's late answer": "skipped",
     "wide-1600 :: a node under a pane still moves by pixels, not by slots": "skipped",
     "wide-1600 :: a numeric column sorts by value, not by the text it shows": "skipped",
     "wide-1600 :: a pane its title crowds keeps its menu open, and the title whole": "skipped",

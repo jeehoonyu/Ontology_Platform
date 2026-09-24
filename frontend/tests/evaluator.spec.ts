@@ -1040,6 +1040,131 @@ test("pipeline creates a graph and accepts a dragged node", async ({ page }, tes
   await expect(page.getByText(/Added input_dataset at drop location/)).toBeVisible();
 });
 
+test("a new pipeline takes nothing from the last one's late answer", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful pipeline workflow once on desktop.");
+  // The test above failed now and then in long runs, with the canvas showing four
+  // nodes and then none. The page opens on the pipeline updated last, and its
+  // canvas answer selects that pipeline's first node. On a slow server that answer
+  // and New pipeline's arrive together, the old one last. This holds both and lets
+  // them land in that order, and holds the new pipeline's own canvas until after
+  // the drop, which is the long run's timing made certain.
+  const older = await (await page.request.post("/pipeline-builder/graphs", { data: {
+    display_name: "The pipeline before", description: "", nodes: [], edges: [], parameters: {}, status: "DRAFT"
+  } })).json();
+  // Updated last is to the second, so a pipeline from the test before can tie with
+  // this one and be opened instead. Add a node until this is the one the page opens.
+  await expect.poll(async () => {
+    expect((await page.request.post(`/pipeline-builder/graphs/${older.id}/nodes`, { data: {
+      node_type: "input_dataset", position: { x: 120, y: 120 }, actor: "evaluator"
+    } })).ok()).toBeTruthy();
+    return (await (await page.request.get("/ui-state/pipeline")).json()).selected_canvas?.graph.id;
+  }, { intervals: [1100], timeout: 10_000 }).toBe(older.id);
+
+  const gate = () => {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    return { open, opened };
+  };
+  const olderSent = gate(), olderLands = gate(), createSent = gate(), createLands = gate(), newCanvasLands = gate();
+  let olderHeld = false;
+  let createdId = "";
+  await page.route("**/ui-state/pipeline/*/canvas*", async (route) => {
+    const url = route.request().url();
+    if (!olderHeld && url.includes(older.id)) {
+      olderHeld = true;
+      const response = await route.fetch();
+      olderSent.open();
+      await olderLands.opened;
+      return route.fulfill({ response });
+    }
+    if (createdId && url.includes(createdId)) {
+      await newCanvasLands.opened;
+      return route.continue();
+    }
+    return route.continue();
+  });
+  await page.route("**/pipeline-builder/graphs", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const response = await route.fetch();
+    createdId = (await response.json()).id;
+    createSent.open();
+    await createLands.opened;
+    return route.fulfill({ response });
+  });
+  const creates: string[] = [];
+  page.on("response", (response) => {
+    const request = response.request();
+    if (request.method() === "POST" && /\/pipeline-builder\/graphs\/[^/]+\/nodes$/.test(response.url())) {
+      creates.push(`${response.status()} from ${JSON.parse(request.postData() || "{}").connect_from_node_id ?? "nothing"}`);
+    }
+  });
+
+  await page.goto("/workspace/pipeline");
+  await olderSent.opened;
+  await page.getByRole("button", { name: "New pipeline" }).click();
+  await createSent.opened;
+  createLands.open();
+  olderLands.open();
+  await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+
+  const canvas = page.locator(".pipeline-canvas");
+  await expect(canvas.locator(".pipeline-node"), "the new draft shows the last pipeline's node").toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete node" }),
+    "the new draft offers to delete the last pipeline's node").toBeDisabled();
+
+  const source = page.getByRole("button", { name: "Input Dataset input" });
+  const canvasBox = await canvas.boundingBox();
+  const sourceBox = await source.boundingBox();
+  const startX = (sourceBox?.x || 0) + (sourceBox?.width || 0) / 2;
+  const startY = (sourceBox?.y || 0) + (sourceBox?.height || 0) / 2;
+  const targetX = (canvasBox?.x || 0) + (canvasBox?.width || 0) / 2;
+  const targetY = (canvasBox?.y || 0) + (canvasBox?.height || 0) / 3;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(startX + ((targetX - startX) * step) / 8, startY + ((targetY - startY) * step) / 8);
+  }
+  await page.mouse.up();
+
+  await expect(canvas.locator(".pipeline-node"), "the drop made no node").toHaveCount(1);
+  expect(creates, "the drop connected from the last pipeline's node").toEqual(["200 from nothing"]);
+  newCanvasLands.open();
+  await expect(page.getByText(/Added input_dataset at drop location/)).toBeVisible();
+  await expect(canvas.locator(".pipeline-node")).toHaveCount(1);
+});
+
+test("a drop the server refuses says so", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful pipeline workflow once on desktop.");
+  // A refused drop threw past its handler: the strip kept `Adding ...` and the
+  // canvas kept nothing, so the drop simply did not happen as far as anyone could see.
+  await page.route(/\/pipeline-builder\/graphs\/[^/]+\/nodes$/, (route) => route.request().method() === "POST"
+    ? route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "Graph is locked for review" }) })
+    : route.continue());
+  await page.goto("/workspace/pipeline");
+  await page.getByRole("button", { name: "New pipeline" }).click();
+  await expect(page.getByText(/Pipeline draft created/)).toBeVisible();
+  const canvas = page.locator(".pipeline-canvas");
+  await expect(canvas.locator(".pipeline-node")).toHaveCount(0);
+
+  const source = page.getByRole("button", { name: "Input Dataset input" });
+  const canvasBox = await canvas.boundingBox();
+  const sourceBox = await source.boundingBox();
+  const startX = (sourceBox?.x || 0) + (sourceBox?.width || 0) / 2;
+  const startY = (sourceBox?.y || 0) + (sourceBox?.height || 0) / 2;
+  const targetX = (canvasBox?.x || 0) + (canvasBox?.width || 0) / 2;
+  const targetY = (canvasBox?.y || 0) + (canvasBox?.height || 0) / 3;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(startX + ((targetX - startX) * step) / 8, startY + ((targetY - startY) * step) / 8);
+  }
+  await page.mouse.up();
+
+  await expect(page.locator(".strip-message"), "a refused drop said nothing").toContainText(
+    /Could not add input_dataset: .*locked for review/);
+  await expect(canvas.locator(".pipeline-node")).toHaveCount(0);
+});
+
 test("pipeline preview runs through durable worker evidence", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful Pipeline execution workflow once on desktop.");
   const suffix = Date.now();

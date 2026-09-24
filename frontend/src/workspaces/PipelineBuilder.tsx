@@ -90,7 +90,15 @@ export function PipelineBuilder() {
   // GOAL_PANES_2026-09-11. The primary node still drives details, preview and the
   // context menu; this only widens what a node drag moves.
   const [selection, setSelection] = useState<string[]>([]);
-  const [canvas, setCanvas] = useState<PipelineCanvasState | null>(null);
+  const [loadedCanvas, setCanvas] = useState<PipelineCanvasState | null>(null);
+  // The canvas shown is the selected pipeline's or none. A new pipeline kept the
+  // last one's canvas until its own arrived, and an answer for the last one could
+  // land after the switch: measured, the new draft showed the old node, and a drop
+  // on it was sent to connect from that node and refused 404, with nothing said.
+  const canvas = loadedCanvas && loadedCanvas.graph.id === selectedGraphId ? loadedCanvas : null;
+  // The selected node, if it is on that canvas. The id itself can outlive its
+  // pipeline, so nothing that writes reads it bare.
+  const nodeOnCanvas = canvas?.nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : "";
   const [canvasFailed, setCanvasFailed] = useState(false);
   const [preview, setPreview] = useState<NodePreview | null>(null);
   const [suggestions, setSuggestions] = useState<NodeSuggestions | null>(null);
@@ -310,7 +318,7 @@ export function PipelineBuilder() {
   }
 
   async function insertAfter(nodeType = quickAddType) {
-    const nodeId = selectedNodeId || canvas?.nodes[0]?.id;
+    const nodeId = nodeOnCanvas || canvas?.nodes[0]?.id;
     if (!selectedGraphId || !nodeId) return;
     const nextCanvas = await insertPipelineNode(selectedGraphId, nodeId, nodeType);
     setCanvas(nextCanvas);
@@ -322,10 +330,14 @@ export function PipelineBuilder() {
   async function addNodeAtDrop(position: { x: number; y: number }, nodeType: string) {
     if (!selectedGraphId) return;
     setActionStatus(`Adding ${nodeType} at ${Math.round(position.x)}, ${Math.round(position.y)}...`);
-    const nextCanvas = await createPipelineNode(selectedGraphId, nodeType, position, selectedNodeId || undefined);
-    setCanvas(nextCanvas);
-    setSelectedNodeId(nextCanvas.selected_node?.id || selectedNodeId);
-    setActionStatus(`Added ${nodeType} at drop location. Layout is saved.`);
+    try {
+      const nextCanvas = await createPipelineNode(selectedGraphId, nodeType, position, nodeOnCanvas || undefined);
+      setCanvas(nextCanvas);
+      setSelectedNodeId(nextCanvas.selected_node?.id || selectedNodeId);
+      setActionStatus(`Added ${nodeType} at drop location. Layout is saved.`);
+    } catch (error) {
+      setActionStatus(`Could not add ${nodeType}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     setRefreshKey((key) => key + 1);
   }
 
@@ -701,7 +713,7 @@ export function PipelineBuilder() {
     }
   }
 
-  async function removeNode(nodeId = selectedNodeId) {
+  async function removeNode(nodeId = nodeOnCanvas) {
     if (!selectedGraphId || !nodeId) return;
     setActionStatus(`Deleting ${nodeId}...`);
     const nextCanvas = await deletePipelineNode(selectedGraphId, nodeId);
@@ -799,7 +811,7 @@ export function PipelineBuilder() {
               <button onClick={() => void undoLast()} disabled={!moves.length}>
                 Undo {moves[moves.length - 1]?.kind ?? "move"}
               </button>
-              <button onClick={() => removeNode()} disabled={!selectedNodeId}>Delete node</button>
+              <button onClick={() => removeNode()} disabled={!nodeOnCanvas}>Delete node</button>
               <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>
               <button onClick={() => run("preview")} disabled={!selectedGraphId || Boolean(busyAction)}>Preview</button>
               <button onClick={() => run("deliver")} disabled={!selectedGraphId || Boolean(busyAction)}>{busyAction === "deliver" ? "Queueing..." : "Deploy"}</button>
