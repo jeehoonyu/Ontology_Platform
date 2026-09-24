@@ -847,14 +847,15 @@ def _open_approvals(db: Session, principal: production_auth.Principal) -> Tuple[
 
 
 def _incidents(db: Session, principal: production_auth.Principal) -> Tuple[List[Dict[str, Any]], int, int]:
-    """The 20 most recently updated incidents, how many there are, and how many are not closed."""
+    """The 20 most recently updated incidents, how many there are, and how many are open
+    (`ops_control.incident_is_open`, the definition Operations counts by)."""
     ops_control._ensure_tables(db)
     query = semantic_scope.accessible_query(db, principal, ops_control.Incident)
     rows = query.order_by(ops_control.Incident.updated_at.desc()).limit(20).all()
     incidents = [ops_control._incident_dict(row) for row in rows]
     if len(rows) < 20:
-        return incidents, len(rows), sum(1 for row in rows if row.status != "CLOSED")
-    return incidents, query.count(), query.filter(ops_control.Incident.status != "CLOSED").count()
+        return incidents, len(rows), sum(1 for row in rows if ops_control.incident_is_open(row.status))
+    return incidents, query.count(), query.filter(ops_control.open_incident_clause()).count()
 
 
 def _visible_object(db: Session, principal: production_auth.Principal, object_id: str) -> Optional[models.ObjectInstance]:

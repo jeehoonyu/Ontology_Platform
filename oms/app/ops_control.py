@@ -33,6 +33,25 @@ def severity_rank(value: Any, unknown: int) -> int:
     return SEVERITY_RANK.get(str(value or "").strip().lower(), unknown)
 
 
+# An incident is open until it is resolved or closed. Operations used to count three statuses
+# as open (OPEN, TRIAGE, INVESTIGATING) and the Command Center everything but CLOSED, so a
+# RESOLVED incident was open on one screen and not the other, and a status neither list named
+# was open only on the Command Center. Status is free text, so the definition names the two
+# ways an incident ends and treats anything else as still open. Both screens read this, and
+# `CLOSED_INCIDENT_STATUSES` in frontend/src/api/opsApi.ts mirrors it for the Resolve button;
+# test_incident_open_definition.py holds the two equal.
+CLOSED_INCIDENT_STATUSES = ("RESOLVED", "CLOSED")
+
+
+def incident_is_open(status: Any) -> bool:
+    return status not in CLOSED_INCIDENT_STATUSES
+
+
+def open_incident_clause():
+    """`incident_is_open`, as a filter on `Incident` for a query that counts in SQL."""
+    return Incident.status.notin_(CLOSED_INCIDENT_STATUSES)
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -918,7 +937,7 @@ def evaluate_alert_rules_inline(db: Session, *, limit: int = 500, source: Option
 def ops_summary(db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("view"))):
     _ensure_tables(db)
     open_alerts = semantic_scope.accessible_query(db, principal, AlertEvent).filter(AlertEvent.status == "OPEN").all()
-    open_incidents = semantic_scope.accessible_query(db, principal, Incident).filter(Incident.status.in_(["OPEN", "TRIAGE", "INVESTIGATING"])).all()
+    open_incidents = semantic_scope.accessible_query(db, principal, Incident).filter(open_incident_clause()).all()
     pending_approvals = semantic_scope.accessible_query(db, principal, models_action.ApprovalRequest).filter(models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value).all()
     failed_pipelines = semantic_scope.accessible_query(db, principal, models.PipelineRun).filter(models.PipelineRun.status == "FAILED").order_by(models.PipelineRun.created_at.desc()).limit(10).all()
     latest_events = semantic_scope.accessible_query(db, principal, OpsEvent).order_by(OpsEvent.created_at.desc()).limit(10).all()

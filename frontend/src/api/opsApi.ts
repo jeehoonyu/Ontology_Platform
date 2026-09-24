@@ -11,6 +11,11 @@ export type OpsNotification = { id: string; severity: string; title: string; mes
 export type OpsSummary = { events: number; open_alerts: number; open_incidents: number; runbooks: number; pending_approvals: number; unread_notifications: number; severity_counts: Record<string, number>; latest_events: OpsEvent[]; latest_alerts: AlertEvent[]; latest_incidents: Incident[] };
 export type ReliabilitySummary = { status: string; data_contracts: number; latest_contract_status: Record<string, number>; backfills: number; lineage_impact_runs: number; latest_contract_runs: JsonObject[]; contract_runs?: number; contract_run_window?: number };
 
+// An incident is open until it is resolved or closed: `CLOSED_INCIDENT_STATUSES` in ops_control.py,
+// which Operations and the Command Center count by. test_incident_open_definition.py holds the two equal.
+export const CLOSED_INCIDENT_STATUSES: readonly string[] = ["RESOLVED", "CLOSED"];
+export const incidentIsOpen = (status: string) => !CLOSED_INCIDENT_STATUSES.includes(status);
+
 export const getOpsSummary = () => api<OpsSummary>("/ops/summary");
 export const listOpsEvents = () => api<OpsEvent[]>("/ops/events?limit=250");
 export const ingestOpsEvent = (body: { source: string; event_type: string; severity: string; title: string; message?: string }) => postJson<OpsEvent>("/ops/events/ingest", body);

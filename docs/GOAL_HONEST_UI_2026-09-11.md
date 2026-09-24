@@ -2416,6 +2416,38 @@ plan, and it is measured there.
   (296 to 301), with no shape repeated more often than before. The Command Center opens with 11
   requests at 447 KB.
 
+  **Followed up, 2026-09-23.** Three items from "Not fixed here" are closed.
+  - The 422 on a first bootstrap is fixed. So are the three reads that named no project. Both
+    landed in 626aacf and are recorded in GOAL_TENANCY_2026-08-27, "The Command Center".
+  - The two screens now count open incidents one way. `ops_control.CLOSED_INCIDENT_STATUSES` is
+    `("RESOLVED", "CLOSED")`: an incident is open until it is resolved or closed. `/ops/summary`
+    counts by it, and so does the Command Center, on the rows it loaded and in SQL past its 20.
+    The Resolve button reads its mirror in `opsApi.ts`.
+  - Two behaviours change. The Command Center no longer counts a RESOLVED incident as open.
+    Operations now counts as open any status it did not name: status is free text, and a
+    runbook step can set any word. The button was off only for RESOLVED, so it now also refuses
+    to resolve a CLOSED incident a second time.
+  - **Proven by** `oms/test_incident_open_definition.py`, 42 assertions. It holds the frontend's
+    copy equal to the server's. It then runs six statuses below the window and 18 more
+    incidents past it. At each stage `/ops/summary` and the Command Center must both read the
+    open count from `/ops/incidents`. Operations must list the MITIGATED incident and neither
+    the RESOLVED nor the CLOSED one. A browser test in `evaluator.spec.ts` serves five
+    incidents. It requires Resolve on OPEN, TRIAGE and MITIGATED, and off on RESOLVED and
+    CLOSED.
+  - `test_command_center_counts.py`, `test_command_center_tenancy.py` and the Command Center
+    count test in `truncation-sites.spec.ts` computed the old rule. They now read the shared
+    definition and pass.
+  - **Negative runs.** Operations' three statuses restored failed below the window: 4 open, not
+    5. The Command Center's `!= "CLOSED"` restored over its loaded rows failed below the
+    window: 6, not 5. The same test in SQL failed past it: 24, not 17. The frontend's copy
+    without CLOSED failed at the parity check. The button's RESOLVED-only test failed in the
+    browser at "Resolve is offered for a CLOSED incident". Restored, the four sources are byte
+    for byte what they were.
+  - **Still open from that list.** The pump's incident still links only alerts that were among
+    the 20 newest at some run, now `default`'s. The report's evidence ids list the 20 loaded
+    approvals and incidents with nothing said. The legacy shell's recommendation card names
+    the newest approval as the approval.
+
 ## Order and size
 
 | Step | Touches | Commits |

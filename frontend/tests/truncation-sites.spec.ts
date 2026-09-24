@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { expect, test, type APIResponse, type Locator, type Page } from "@playwright/test";
+import { incidentIsOpen } from "../src/api/opsApi";
 
 /**
  * The two tables `audit_table_truncation` found cutting in silence.
@@ -1068,7 +1069,7 @@ test.describe("a list the gate cannot see says what it is not showing", () => {
     const openAlerts = (await settled(await page.request.get("/ops/alerts?status=OPEN"), "open alerts") as unknown[]).length;
     const openApprovals = (await settled(await page.request.get("/approvals?status=PENDING"), "pending approvals") as unknown[]).length;
     const incidents = await settled(await page.request.get("/ops/incidents"), "incidents") as Array<{ status: string }>;
-    const openIncidents = incidents.filter((incident) => incident.status !== "CLOSED").length;
+    const openIncidents = incidents.filter((incident) => incidentIsOpen(incident.status)).length;
     for (const [label, count] of [["alerts", openAlerts], ["approvals", openApprovals], ["incidents", openIncidents]] as const) {
       expect(count, `the fixture did not reach past the 20 ${label} the scenario loads`).toBeGreaterThan(20);
     }

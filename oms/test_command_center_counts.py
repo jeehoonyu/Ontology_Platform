@@ -19,6 +19,7 @@ tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tmpdir.name, 'command_center_counts.db')}"
 
 from fastapi.testclient import TestClient  # noqa: E402
+from app import ops_control  # noqa: E402
 from app.main import app  # noqa: E402
 
 client = TestClient(app)
@@ -47,7 +48,7 @@ def truth():
     return {
         "open_alerts": len(alerts),
         "open_approvals": len(approvals),
-        "open_incidents": sum(1 for row in incidents if row["status"] != "CLOSED"),
+        "open_incidents": sum(1 for row in incidents if ops_control.incident_is_open(row["status"])),
         "incident_count": len(incidents),
     }
 

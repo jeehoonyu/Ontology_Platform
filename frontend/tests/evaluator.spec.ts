@@ -201,6 +201,24 @@ test("Operational Control promotes events through alerts, incidents, runbooks, a
   await expect(page.getByRole("status")).toContainText("Notification acknowledged");
 });
 
+test("Resolve is offered for every open incident and no resolved or closed one", async ({ page }) => {
+  // An incident is open until it is resolved or closed (CLOSED_INCIDENT_STATUSES, ops_control.py).
+  // The button used to be off only for RESOLVED, so a CLOSED incident could be resolved again, and
+  // a status the screen did not name was treated as open only by accident.
+  const incidents = ["OPEN", "TRIAGE", "MITIGATED", "RESOLVED", "CLOSED"].map((status, index) => ({
+    id: `stub_incident_${index}`, display_name: `Stub incident ${status}`, severity: "medium", status, owner: null,
+    linked_objects: [], alert_ids: [], approval_ids: [], runbook_execution_ids: [], timeline: [], created_at: 1, updated_at: 1
+  }));
+  await page.route((url) => url.pathname === "/ops/incidents", (route) => route.fulfill({ json: incidents }));
+  await page.goto("/workspace/ops");
+  await page.getByRole("button", { name: "Incidents", exact: true }).click();
+  for (const { display_name, status } of incidents) {
+    const resolve = page.locator(".ops-incident-list article").filter({ hasText: display_name }).getByRole("button", { name: "Resolve" });
+    if (["RESOLVED", "CLOSED"].includes(status)) await expect(resolve, `Resolve is offered for a ${status} incident`).toBeDisabled();
+    else await expect(resolve, `Resolve is withheld from an incident that is still ${status}`).toBeEnabled();
+  }
+});
+
 test("command palette supports keyboard navigation", async ({ page }) => {
   await page.goto("/workspace/command-center");
   await page.keyboard.press("Control+K");

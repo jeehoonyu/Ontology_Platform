@@ -107,7 +107,7 @@ def counts(project_ids):
             models_action.ApprovalRequest.status == models_action.ApprovalStatus.PENDING.value).count()
         incidents = db.query(ops_control.Incident).filter(ops_control.Incident.project_id.in_(project_ids))
         return {"open_alerts": alerts, "open_approvals": approvals,
-                "open_incidents": incidents.filter(ops_control.Incident.status != "CLOSED").count(),
+                "open_incidents": incidents.filter(ops_control.open_incident_clause()).count(),
                 "incident_count": incidents.count()}
 
 
