@@ -2906,6 +2906,35 @@ pre {
   pointer-events: none;
 }
 
+/* A node's ports: drag from the output on the right onto another node's input on the
+   left to connect them. X7 of GOAL_GRAPH_2026-09-23. */
+.node-port {
+  position: absolute;
+  z-index: 4;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #6b8ba4;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.node-port-out {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.node-port-out.dragging,
+.node-port-in.port-over {
+  background: #1e88e5;
+  border-color: #1e88e5;
+}
+
+.edge-layer .edge-wire {
+  stroke: #1e88e5;
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+
 .canvas-lasso-surface {
   position: absolute;
   inset: 0;

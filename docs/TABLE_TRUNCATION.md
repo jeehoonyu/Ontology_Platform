@@ -34,8 +34,8 @@ way to the rest names items nobody can reach.
 
 | File | Line | In | Cuts | How | Note from the true total | Rest reachable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 432 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
-| `components/canvas/PipelineCanvas.tsx` | 439 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 495 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 502 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
 | `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 223 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 72 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
@@ -100,7 +100,7 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 
 | File | Line | In | Leaves out | Says how many | Show all |
 | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 139 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
+| `components/canvas/PipelineCanvas.tsx` | 161 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
 
 ## Declared not a list
 
@@ -110,14 +110,15 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 
 ## Read as text, a prefix, a last item or a request payload
 
-35 `.slice(` calls found: 11 placed as collection cuts, 16 text, 5 a prefix dropped, 1 a last item dropped, 1 a request payload, and 1 not placed.
+38 `.slice(` calls found: 11 placed as collection cuts, 16 text, 8 a prefix dropped, 1 a last item dropped, 1 a request payload, and 1 not placed.
 
 | File | Line | In | Slice of | Read as |
 | --- | --- | --- | --- | --- |
 | `api.ts` | 15 | `request` | `text` | text |
-| `components/canvas/PipelineCanvas.tsx` | 116 | `PipelineCanvas` | `id` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 278 | `PipelineCanvas` | `action.label` | text |
-| `components/canvas/PipelineCanvas.tsx` | 448 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
+| `components/canvas/PipelineCanvas.tsx` | 110 | `PipelineCanvas` | `started` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 131 | `PipelineCanvas` | `id` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 303 | `PipelineCanvas` | `action.label` | text |
+| `components/canvas/PipelineCanvas.tsx` | 511 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
 | `components/layout/Pane.tsx` | 376 | `usePaneLayout` | `active` | prefix dropped |
 | `components/layout/Pane.tsx` | 377 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
@@ -131,8 +132,10 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 72 | `IncidentsTab` | `alerts` | request payload |
 | `workspaces/PipelineBuilder.tsx` | 566 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 686 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 769 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 722 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 722 | `PipelineBuilder` | `over` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 727 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 810 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/VisualBuilder.tsx` | 509 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 602 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 607 | `VisualBuilder` | `crypto.randomUUID()` | text |

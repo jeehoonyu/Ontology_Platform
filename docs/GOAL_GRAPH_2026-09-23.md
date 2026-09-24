@@ -527,9 +527,66 @@ and the count is a button that lists them.
   - **N5, the count written without `role="note"`:** `audit_table_truncation` failed at
     `view:PipelineCanvas.tsx::PipelineCanvas::hiddenNodes is an unfixed truncation`.
   - Restored, the tests pass, and the sources are byte for byte what they were.
-- **X7 — A port drag connects two nodes by the same command as the edge control.** **Open** —
+- **X7 — A port drag connects two nodes by the same command as the edge control.** **Met** —
   proven by `dragging an output port onto an input port inserts one edge and one Undo removes
   it`, and by the existing edge-control test still passing.
+
+  **Not the edge control's command, because it connects nothing.** The edge control on each
+  edge calls `insertAfter`, which creates a new node after the selected one and re-points that
+  node's outgoing edges. It cannot join two nodes already there, and no route could. So a port
+  drop sends X5's batch with one `add_edge`, and one `Undo connect` sends one `delete_edge`.
+  The goal's other premise did not hold either: there was no edge-control test. There is now
+  one, `the insert control on an edge still inserts a node after the selected one`. Writing
+  it found that a selected node's click menu, tall and opening to its right, sits over the
+  edge controls of a left-hand column. That overlap is older than this goal, and the test
+  selects a node whose menu is clear.
+
+  **What was built.** Every node shown has two ports. The output, on its right edge, is a
+  `useDraggable`; the input, on its left, is a `useDroppable`. Both are on `DragKit`'s shared
+  sensors. A drag draws a dashed edge from the port to the pointer, and an input port lights
+  when a port is over it. The drop outline stays off, because a port never lands on bare
+  canvas. Dropped on an input, it connects. Dropped anywhere else, it does nothing, and the
+  builder stops at a port's id before the palette drop that would create a node. Escape
+  cancels through dnd-kit.
+
+  The ports are pointer affordances, not tab stops: two per node would bury the canvas.
+  `Connect` is the way without a drag: it joins two selected nodes, the first selected
+  feeding the second. The history grows a third kind, so the Undo button names what it takes
+  back: `Undo move`, `Undo paste` or `Undo connect`.
+
+  **Proven by** five tests in `graph-editor.spec.ts`:
+  - `dragging an output port onto an input port inserts one edge and one Undo removes it`
+    reads the edges from the server after the drop and after the Undo, one command each;
+  - `Escape during a port drag connects nothing and writes nothing`;
+  - `a port dropped on bare canvas connects nothing and creates nothing`;
+  - `two selected nodes connect without a drag`;
+  - the edge-control test.
+
+  **Gates.**
+  - `MOVEMENT_CONTRACT.md` gains `pipeline-connect`, with cancel, recover and alternative all
+    met by those tests. The gap count holds at 12.
+  - `DRAG_AFFORDANCES.md` lists `port-in:` and `port-out:` among the pipeline canvas's drags,
+    and its entry names `Connect` as the way without one.
+  - `GRAPH_EDITOR_PARITY.md` reads 10 of 15, with `connect` met, and its baseline holds 4
+    gaps.
+  - On the same build, 121 tests pass across the graph-editor, multi-node, movement,
+    evaluator, drag, inert, shell, touch and concurrent-drag specs, one skipped.
+
+  **The pipeline route's payload, raised by hand again.** Its ceiling was 565,336 bytes from
+  X4's re-measure. X5 and X6 brought it to 571,329, inside the tolerance, and the ports add
+  2,401 more, 573,730, which is past it. The ceiling is set to that, and no other route's
+  moves.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the output port's draggable removed:** failed at `the port drag never started`.
+  - **N2, the builder's stop at a port's id removed.** The first round passed: a drop on an
+    input still connected, and no test dropped a port anywhere else. The bare-canvas test was
+    written for that, and with the stop removed it failed at `a port dropped on bare canvas
+    wrote something`, a node posted with the port's id as its type.
+  - **N3, a connect pushed to no history:** timed out looking for `Undo connect`.
+  - **N4, `Connect` joining the pair backwards:** failed at `Connected b to c.`, `Received:
+    "Connected c to b."`.
+  - Restored, the tests pass, and the two sources are byte for byte what they were.
 - **X8 — The strip says whether there is unsaved work.** **Open** — `Saved` or `N unsaved
   changes`, the count a button. Proven by a test that types into a node draft and reads the
   strip, shown to fail with the draft count disconnected.

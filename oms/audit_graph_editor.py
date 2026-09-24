@@ -133,9 +133,10 @@ CONTROLS: Dict[str, Control] = {
     },
     "connect": {
         "original": "Drag an output circle to an input circle to connect",
-        "ours": "an insert control on each edge, which adds a new node after the selected one",
-        "file": BUILDER, "handler": "insertAfter",
-        "state": {"gap": "no port drag, and nothing connects two existing nodes"},
+        "ours": "drag a node's output port onto another's input port, or Connect two selected nodes",
+        "file": BUILDER, "handler": "connectNodes",
+        "state": {"test": "graph-editor.spec.ts::dragging an output port onto an input port inserts one "
+                          "edge and one Undo removes it"},
     },
     "context-menu": {
         "original": "Right-click a node: Copy, Paste, Open",

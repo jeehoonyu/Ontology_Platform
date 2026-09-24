@@ -643,3 +643,112 @@ test.describe("hidden nodes are a view state", () => {
     await expect(page.locator(".canvas-selection-count")).toHaveText("3 of 4 selected");
   });
 });
+
+/**
+ * A port drag connects two nodes by one command, which one Undo takes back. X7 of
+ * `GOAL_GRAPH_2026-09-23.md`. Edges are read from the server; the screen draws them,
+ * and a drawing is not what was saved.
+ */
+async function portCentre(page: Page, selector: string) {
+  const box = await page.locator(selector).boundingBox();
+  expect(box, `${selector} is not on the canvas`).toBeTruthy();
+  return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+}
+
+/** Picks up a node's output port and carries it onto another node's input port, live. */
+async function startPortDrag(page: Page, from: string, to: string) {
+  const start = await portCentre(page, `[data-port-out="${from}"]`);
+  const end = await portCentre(page, `[data-port-in="${to}"]`);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (let step = 1; step <= 12; step += 1) {
+    await page.mouse.move(start.x + ((end.x - start.x) * step) / 12, start.y + ((end.y - start.y) * step) / 12);
+    await page.waitForTimeout(16);
+  }
+  await expect(page.locator(".edge-wire"), "the port drag never started").toHaveCount(1);
+  await expect(page.locator(`[data-port-in="${to}"]`), "the input port does not show it would take the edge")
+    .toHaveClass(/\bport-over\b/);
+}
+
+const storedEdges = async (page: Page, id: string) =>
+  ((await (await page.request.get(`/pipeline-builder/graphs/${id}`)).json()).edges as Array<{ source: string; target: string }>)
+    .map((edge) => `${edge.source}->${edge.target}`).sort();
+
+test.describe("a port drag connects two nodes", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; a port drag is a desktop pointer gesture.");
+  });
+
+  test("dragging an output port onto an input port inserts one edge and one Undo removes it", async ({ page }) => {
+    const { id } = await openFixture(page);
+    const sent = edits(page);
+    await startPortDrag(page, "a", "d");
+    await page.mouse.up();
+    await expect(status(page)).toHaveText("Connected a to d.");
+    expect(await storedEdges(page, id), "the drop did not add the one edge").toEqual(["a->c", "a->d", "b->d"]);
+    expect(sent, "connecting was not one command").toEqual([`POST /pipeline-builder/graphs/${id}/commands`]);
+    await expect(page.locator(".pipeline-canvas .pipeline-node"), "connecting created or lost a node").toHaveCount(4);
+
+    await page.waitForTimeout(150);
+    await page.getByRole("button", { name: "Undo connect" }).click();
+    await expect(status(page)).toHaveText("Took back the edge a to d.");
+    expect(await storedEdges(page, id), "one Undo did not take the edge back").toEqual(["a->c", "b->d"]);
+    expect(sent, "taking the edge back was not one command").toHaveLength(2);
+  });
+
+  test("Escape during a port drag connects nothing and writes nothing", async ({ page }) => {
+    const { id } = await openFixture(page);
+    const sent = edits(page);
+    await startPortDrag(page, "a", "d");
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    await expect(page.locator(".edge-wire"), "Escape left the edge being drawn").toHaveCount(0);
+    expect(sent, "a cancelled port drag wrote something").toEqual([]);
+    expect(await storedEdges(page, id)).toEqual(["a->c", "b->d"]);
+  });
+
+  test("a port dropped on bare canvas connects nothing and creates nothing", async ({ page }) => {
+    // A drop over the canvas and no port is where a palette entry lands and makes a
+    // node. A port that missed must stop before that, or it posts a node whose type
+    // is the port's id.
+    const { id } = await openFixture(page);
+    const sent = edits(page);
+    const start = await portCentre(page, '[data-port-out="a"]');
+    const stage = await page.locator(".canvas-stage").boundingBox();
+    const bare = { x: stage!.x + 200 * (stage!.width / 1500), y: stage!.y + 190 * (stage!.width / 1500) };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    for (let step = 1; step <= 12; step += 1) {
+      await page.mouse.move(start.x + ((bare.x - start.x) * step) / 12, start.y + ((bare.y - start.y) * step) / 12);
+      await page.waitForTimeout(16);
+    }
+    await expect(page.locator(".edge-wire"), "the port drag never started").toHaveCount(1);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    expect(sent, "a port dropped on bare canvas wrote something").toEqual([]);
+    expect(await storedEdges(page, id)).toEqual(["a->c", "b->d"]);
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(4);
+  });
+
+  test("two selected nodes connect without a drag", async ({ page }) => {
+    // WCAG 2.5.7: a single pointer and no drag. The first node selected feeds the second.
+    const { id } = await openFixture(page);
+    await node(page, "b").click();
+    await node(page, "c").click({ modifiers: ["Shift"] });
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
+    await expect(status(page)).toHaveText("Connected b to c.");
+    expect(await storedEdges(page, id)).toEqual(["a->c", "b->c", "b->d"]);
+  });
+
+  test("the insert control on an edge still inserts a node after the selected one", async ({ page }) => {
+    // The control beside the drag stays, and does what it always did: a new node.
+    await openFixture(page);
+    // d, not a: a selected node's click menu opens to its right, tall, and sits over the
+    // edge controls of a left column -- an overlap older than this goal.
+    await node(page, "d").click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(4);
+    await page.locator(".edge-insert").first().click();
+    await expect(page.locator(".pipeline-canvas .pipeline-node"), "the edge control inserted nothing").toHaveCount(5);
+  });
+});

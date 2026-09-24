@@ -129,6 +129,15 @@ SURFACES: Dict[str, Dict[str, Any]] = {
         "alternative": {"test": "graph-editor.spec.ts::the nodes a lasso selects can be selected "
                                 "without a drag"},
     },
+    "pipeline-connect": {
+        "file": "components/canvas/PipelineCanvas.tsx", "mechanism": "dnd-kit",
+        "moves": "an edge from one node's output port to another's input port (X7 of GOAL_GRAPH)",
+        "cancel": {"test": "graph-editor.spec.ts::Escape during a port drag connects nothing and writes "
+                           "nothing"},
+        "recover": {"test": "graph-editor.spec.ts::dragging an output port onto an input port inserts one "
+                            "edge and one Undo removes it"},
+        "alternative": {"test": "graph-editor.spec.ts::two selected nodes connect without a drag"},
+    },
     "pipeline-layout": {
         "file": "workspaces/PipelineBuilder.tsx", "mechanism": "command", "handler": "autoLayout",
         "moves": "every node of the pipeline into layers, with one click (X3 of GOAL_GRAPH)",

@@ -566,6 +566,16 @@ export function PipelineBuilder() {
     setMoves((current) => current.slice(0, -1));
     // A node deleted since has no position to restore and nothing to remove.
     const present = new Set(canvas.nodes.map((node) => node.id));
+    if (last.kind === "connect") {
+      setActionStatus(`Taking back the edge ${last.label}...`);
+      try {
+        setCanvas(await applyPipelineCommands(last.graphId, [{ op: "delete_edge", source: last.source, target: last.target }]));
+        setActionStatus(`Took back the edge ${last.label}.`);
+      } catch (error) {
+        setActionStatus(`Could not take back the edge: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
     if (last.kind === "paste") {
       const pasted = last.nodeIds.filter((id) => present.has(id));
       setActionStatus(`Taking back the paste of ${last.label}...`);
@@ -592,6 +602,31 @@ export function PipelineBuilder() {
   }
 
   const count = (n: number) => (n === 1 ? "1 node" : `${n} nodes`);
+
+  /**
+   * One edge from `source` to `target`, by one command, which one Undo takes back.
+   * X7 of GOAL_GRAPH_2026-09-23. The edge control on an edge inserts a new node and
+   * connects nothing already there, so this is the batch's `add_edge`, not that path.
+   */
+  async function connectNodes(source: string, target: string) {
+    if (!selectedGraphId || !canvas) return;
+    if (source === target) {
+      setActionStatus("A node cannot feed itself.");
+      return;
+    }
+    if (canvas.edges.some((edge) => edge.source === source && edge.target === target)) {
+      setActionStatus(`${source} already feeds ${target}.`);
+      return;
+    }
+    setActionStatus(`Connecting ${source} to ${target}...`);
+    try {
+      setCanvas(await applyPipelineCommands(selectedGraphId, [{ op: "add_edge", source, target }]));
+      setMoves((current) => [...current, { kind: "connect", graphId: selectedGraphId, label: `${source} to ${target}`, source, target }]);
+      setActionStatus(`Connected ${source} to ${target}.`);
+    } catch (error) {
+      setActionStatus(`Could not connect: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   /**
    * The selected nodes and the edges between them, to the clipboard. X5 of
@@ -681,6 +716,12 @@ export function PipelineBuilder() {
     // The canvas selected what the rectangle closed over. It must not reach the
     // palette drop below, which would read "lasso:canvas" as a node type to create.
     if (id === LASSO_ID) return;
+    // A port drag connects, or, dropped anywhere but an input port, does nothing.
+    if (id.startsWith("port-out:")) {
+      const over = String(event.over?.id ?? "");
+      if (over.startsWith("port-in:")) void connectNodes(id.slice(9), over.slice(8));
+      return;
+    }
     if (id.startsWith("node:")) {
       // A node already on the canvas: commit once, where it came to rest.
       const node = canvas?.nodes.find((item) => item.id === id.slice(5));
@@ -805,6 +846,9 @@ export function PipelineBuilder() {
               <button type="button" onClick={() => void copySelection()} disabled={!targets.length}>Copy</button>
               <button type="button" onClick={() => void pasteNodes()} disabled={!canvas}>Paste</button>
               <button type="button" onClick={() => void deleteSelected()} disabled={!targets.length}>Delete selected</button>
+              {/* Connect without dragging a port: the first node selected feeds the second. */}
+              <button type="button" onClick={() => void connectNodes(selection[0], selection[1])}
+                      disabled={selection.length !== 2 || targets.length !== 2}>Connect</button>
               <button type="button" onClick={hideSelection} disabled={!targets.length}>Hide selected</button>
               <button type="button" onClick={autoLayout} disabled={!canvas?.nodes.length}>Auto layout</button>
               <button type="button" onClick={openSearch} disabled={!canvas?.nodes.length}>Search pipeline</button>
@@ -1156,10 +1200,11 @@ function writeHidden(graphId: string, ids: string[]) {
   }
 }
 
-/** What one Undo takes back: a committed move of any number of nodes, or a paste. */
+/** What one Undo takes back: a committed move of any number of nodes, a paste, or an edge. */
 type HistoryEntry =
   | { kind: "move"; graphId: string; label: string; positions: Record<string, { x: number; y: number }> }
-  | { kind: "paste"; graphId: string; label: string; nodeIds: string[] };
+  | { kind: "paste"; graphId: string; label: string; nodeIds: string[] }
+  | { kind: "connect"; graphId: string; label: string; source: string; target: string };
 
 function PipelineNodeConfig({ details, draft, onDraft, onSave }: {
   details: PipelineNodeDetails;

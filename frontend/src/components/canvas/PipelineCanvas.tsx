@@ -36,6 +36,9 @@ function regionFrom(start: { x: number; y: number }, delta: { x: number; y: numb
   };
 }
 
+/** Where a node's ports sit, in stage pixels: out on its right edge, in on its left. */
+const PORT_Y = 29;
+
 /** A node is inside a region when its centre is. */
 function inRegion(node: PipelineNode, region: Region): boolean {
   const cx = node.position.x + NODE_WIDTH / 2;
@@ -94,13 +97,25 @@ export function PipelineCanvas({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const lassoStart = useRef<{ x: number; y: number; additive: boolean } | null>(null);
   const [lasso, setLasso] = useState<Region | null>(null);
+  // The edge a port drag is drawing, from the output port to the pointer, in stage px.
+  const [wire, setWire] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const endLasso = () => {
     lassoStart.current = null;
     setLasso(null);
   };
   useDndMonitor({
     onDragStart(event) {
-      if (String(event.active.id) !== LASSO_ID) return;
+      const started = String(event.active.id);
+      if (started.startsWith("port-out:")) {
+        const from = allNodes.find((node) => node.id === started.slice(9));
+        if (from) {
+          const x = from.position.x + NODE_WIDTH;
+          const y = from.position.y + PORT_Y;
+          setWire({ x1: x, y1: y, x2: x, y2: y });
+        }
+        return;
+      }
+      if (started !== LASSO_ID) return;
       const pointer = event.activatorEvent as PointerEvent;
       const stage = stageRef.current?.getBoundingClientRect();
       if (!stage) return;
@@ -115,9 +130,15 @@ export function PipelineCanvas({
       const id = String(event.active.id);
       if (id.startsWith("node:")) setCarry({ id: id.slice(5), x: event.delta.x, y: event.delta.y });
       else if (id === LASSO_ID && lassoStart.current) setLasso(regionFrom(lassoStart.current, event.delta, zoom));
+      else if (id.startsWith("port-out:")) {
+        setWire((current) => current && {
+          ...current, x2: current.x1 + event.delta.x / zoom, y2: current.y1 + event.delta.y / zoom,
+        });
+      }
     },
     onDragEnd(event) {
       setCarry(null);
+      setWire(null);
       const start = lassoStart.current;
       if (String(event.active.id) === LASSO_ID && start) {
         const region = regionFrom(start, event.delta, zoom);
@@ -128,6 +149,7 @@ export function PipelineCanvas({
     // Escape, or a pointer the system takes back: nothing is selected by it.
     onDragCancel() {
       setCarry(null);
+      setWire(null);
       endLasso();
     }
   });
@@ -155,9 +177,10 @@ export function PipelineCanvas({
       ref={(element) => {
         containerRef.current = element;
       }}
-      // The drop outline is for something that can land here; a lasso lands nothing.
-      className={classNames("pipeline-canvas",
-        droppable.isOver && String(droppable.active?.id ?? "") !== LASSO_ID && "drag-active")}
+      // The drop outline is for something that can land here. A lasso lands nothing,
+      // and a port lands on another node's input, never on bare canvas.
+      className={classNames("pipeline-canvas", droppable.isOver && String(droppable.active?.id ?? "") !== LASSO_ID
+        && !String(droppable.active?.id ?? "").startsWith("port-out:") && "drag-active")}
     >
       {/* The drop target sits inside the scrolling canvas rather than being it.
           dnd-kit sums scroll offsets over the scrollable ancestors of whatever a
@@ -218,7 +241,9 @@ export function PipelineCanvas({
               </g>
             );
           })}
+          {wire ? <line className="edge-wire" x1={wire.x1} y1={wire.y1} x2={wire.x2} y2={wire.y2} /> : null}
         </svg>
+        {nodes.map((node) => <NodePorts key={`ports-${node.id}`} node={node} />)}
         {(canvas?.edges || []).map((edge) => {
           const source = byId.get(edge.source);
           const target = byId.get(edge.target);
@@ -307,6 +332,44 @@ function LassoSurface() {
   // a constant here left the lasso missing from what this file registers.
   const draggable = useDraggable({ id: "lasso:canvas" });
   return <div ref={draggable.setNodeRef} className="canvas-lasso-surface" {...draggable.listeners} />;
+}
+
+/**
+ * A node's two ports. X7 of GOAL_GRAPH_2026-09-23: drag from a node's output port
+ * onto another node's input port to connect them, by the one command that adds an
+ * edge, which one Undo takes back.
+ *
+ * Both are on `DragKit`'s shared sensors, so the drag census counts them and Escape
+ * cancels a port drag the way it cancels a node drag. They are pointer affordances,
+ * not tab stops: two per node would bury the canvas in them. The way to connect
+ * without a pointer drag is `Connect`, beside the selection tools, which joins two
+ * selected nodes in the order they were selected.
+ */
+function NodePorts({ node }: { node: PipelineNode }) {
+  const output = useDraggable({ id: `port-out:${node.id}` });
+  const input = useDroppable({ id: `port-in:${node.id}` });
+  const armed = String(input.active?.id ?? "").startsWith("port-out:");
+  return (
+    <>
+      <span
+        ref={input.setNodeRef}
+        className={classNames("node-port node-port-in", armed && input.isOver && "port-over")}
+        style={{ left: node.position.x - 8, top: node.position.y + PORT_Y - 8 }}
+        data-port-in={node.id}
+        aria-hidden="true"
+        title={`${node.label}: input`}
+      />
+      <span
+        ref={output.setNodeRef}
+        className={classNames("node-port node-port-out", output.isDragging && "dragging")}
+        style={{ left: node.position.x + NODE_WIDTH - 8, top: node.position.y + PORT_Y - 8 }}
+        data-port-out={node.id}
+        aria-hidden="true"
+        title={`${node.label}: drag onto another node's input to connect`}
+        {...output.listeners}
+      />
+    </>
+  );
 }
 
 /**
