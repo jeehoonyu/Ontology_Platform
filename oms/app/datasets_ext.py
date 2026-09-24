@@ -10,6 +10,13 @@ adds that model additively over existing `data_assets` ids. Deterministic; local
 Rows written to `records` outside the log (`POST /data-assets`, an upload, a sync, a
 pipeline run) are recorded as a SNAPSHOT the first time a transaction or a branch reads
 master, so no transaction starts from rows the log never saw.
+
+Every route resolves its dataset through `semantic_scope.asset_for`, with `edit` for a
+write and `view` for a read, against the dataset's own project. The router's mount
+checks only that the caller may edit somewhere, and until 2026-09-23 that was all these
+routes checked: an editor in one project could read and write another project's
+transactions, branches, schema and uploaded file. The child tables carry no project of
+their own; a dataset id authorizes them because it is the parent's primary key.
 """
 import copy
 import csv
@@ -26,7 +33,8 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
-from . import models, models_action, storage
+from . import models, models_action, semantic_scope, storage
+from .production_auth import Principal, require_permission
 
 router = APIRouter(tags=["datasets"])
 
@@ -194,10 +202,9 @@ def _reconcile_master(db: Session, asset: models.DataAsset, primary_key: Optiona
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.post("/datasets/{dataset_id}/transactions", response_model=TransactionRead, status_code=201)
-def create_transaction(dataset_id: str, body: TransactionCreate, db: Session = Depends(get_db)):
-    asset = db.get(models.DataAsset, dataset_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+def create_transaction(dataset_id: str, body: TransactionCreate,
+                       principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    asset = semantic_scope.asset_for(db, principal, dataset_id, "edit")
     if body.txn_type not in TXN_TYPES:
         raise HTTPException(status_code=422, detail=f"txn_type must be one of {sorted(TXN_TYPES)}")
     base = _reconcile_master(db, asset, body.primary_key) if body.branch == "master" else None
@@ -217,22 +224,24 @@ def create_transaction(dataset_id: str, body: TransactionCreate, db: Session = D
         asset.records = _fold(base + [txn])
         asset.updated_at = _now()
         committed["dataset_rows"] = len(asset.records)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="dataset.transaction.committed",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.transaction.committed",
                                   subject_type="dataset", subject_id=dataset_id, payload=committed))
     db.commit(); db.refresh(txn)
     return txn
 
 
 @router.get("/datasets/{dataset_id}/transactions", response_model=List[TransactionRead])
-def list_transactions(dataset_id: str, branch: str = Query(default="master"), db: Session = Depends(get_db)):
+def list_transactions(dataset_id: str, branch: str = Query(default="master"),
+                      principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    semantic_scope.asset_for(db, principal, dataset_id, "view")
     return _txns_for(db, dataset_id, branch)
 
 
 @router.get("/datasets/{dataset_id}/view")
 def dataset_view(dataset_id: str, branch: str = Query(default="master"),
-                 as_of_seq: Optional[int] = Query(default=None), db: Session = Depends(get_db)):
-    if not db.get(models.DataAsset, dataset_id):
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+                 as_of_seq: Optional[int] = Query(default=None),
+                 principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
+    semantic_scope.asset_for(db, principal, dataset_id, "view")
     rows = _fold(_txns_for(db, dataset_id, branch), up_to_seq=as_of_seq)
     return {"dataset_id": dataset_id, "branch": branch, "as_of_seq": as_of_seq,
             "row_count": len(rows), "rows": rows}
@@ -240,10 +249,10 @@ def dataset_view(dataset_id: str, branch: str = Query(default="master"),
 
 @router.get("/datasets/{dataset_id}/changes")
 def dataset_changes(dataset_id: str, branch: str = Query(default="master"),
-                    since_seq: int = Query(default=-1), db: Session = Depends(get_db)):
+                    since_seq: int = Query(default=-1),
+                    principal: Principal = Depends(require_permission("view")), db: Session = Depends(get_db)):
     """Incremental delta: rows introduced by APPEND/UPDATE transactions after `since_seq`."""
-    if not db.get(models.DataAsset, dataset_id):
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    semantic_scope.asset_for(db, principal, dataset_id, "view")
     delta: List[Dict[str, Any]] = []
     latest = since_seq
     for t in _txns_for(db, dataset_id, branch):
@@ -255,10 +264,9 @@ def dataset_changes(dataset_id: str, branch: str = Query(default="master"),
 
 
 @router.post("/datasets/{dataset_id}/branches", status_code=201)
-def create_branch(dataset_id: str, body: BranchCreate, db: Session = Depends(get_db)):
-    asset = db.get(models.DataAsset, dataset_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+def create_branch(dataset_id: str, body: BranchCreate,
+                  principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    asset = semantic_scope.asset_for(db, principal, dataset_id, "edit")
     branch = DatasetBranch(id=uuid.uuid4().hex, dataset_id=dataset_id, name=body.name,
                            base_branch=body.base_branch, created_at=_now())
     db.add(branch)
@@ -271,7 +279,7 @@ def create_branch(dataset_id: str, body: BranchCreate, db: Session = Depends(get
     db.add(DatasetTransaction(id=uuid.uuid4().hex, dataset_id=dataset_id, branch=body.name, txn_type="SNAPSHOT",
                               primary_key="id", records=base_rows, row_count=len(base_rows), status="COMMITTED",
                               seq=0, created_at=_now()))
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="dataset.branch.created",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.branch.created",
                                   subject_type="dataset", subject_id=dataset_id, payload={"branch": body.name}))
     db.commit()
     return {"id": branch.id, "dataset_id": dataset_id, "name": body.name, "base_branch": body.base_branch,
@@ -279,7 +287,9 @@ def create_branch(dataset_id: str, body: BranchCreate, db: Session = Depends(get
 
 
 @router.get("/datasets/{dataset_id}/branches")
-def list_branches(dataset_id: str, db: Session = Depends(get_db)):
+def list_branches(dataset_id: str, principal: Principal = Depends(require_permission("view")),
+                  db: Session = Depends(get_db)):
+    semantic_scope.asset_for(db, principal, dataset_id, "view")
     rows = db.query(DatasetBranch).filter(DatasetBranch.dataset_id == dataset_id).all()
     return [{"id": b.id, "name": b.name, "base_branch": b.base_branch, "created_at": b.created_at} for b in rows]
 
@@ -288,9 +298,9 @@ def list_branches(dataset_id: str, db: Session = Depends(get_db)):
 # Dataset schema (declared {name, type} columns) — PUT upserts, GET returns it
 # ---------------------------------------------------------------------------
 @router.put("/datasets/{dataset_id}/schema", response_model=DatasetSchemaRead)
-def put_dataset_schema(dataset_id: str, body: DatasetSchemaUpsert, db: Session = Depends(get_db)):
-    if not db.get(models.DataAsset, dataset_id):
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+def put_dataset_schema(dataset_id: str, body: DatasetSchemaUpsert,
+                       principal: Principal = Depends(require_permission("edit")), db: Session = Depends(get_db)):
+    semantic_scope.asset_for(db, principal, dataset_id, "edit")
     cols = [{"name": c.name, "type": c.type} for c in body.columns]
     now = _now()
     row = db.get(DatasetSchemaDef, dataset_id)
@@ -300,7 +310,7 @@ def put_dataset_schema(dataset_id: str, body: DatasetSchemaUpsert, db: Session =
     else:
         row = DatasetSchemaDef(dataset_id=dataset_id, columns=cols, created_at=now, updated_at=now)
         db.add(row)
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor="system", event_type="dataset.schema.upserted",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id, event_type="dataset.schema.upserted",
                                   subject_type="dataset", subject_id=dataset_id,
                                   payload={"column_count": len(cols)}))
     db.commit(); db.refresh(row)
@@ -309,7 +319,9 @@ def put_dataset_schema(dataset_id: str, body: DatasetSchemaUpsert, db: Session =
 
 
 @router.get("/datasets/{dataset_id}/schema", response_model=DatasetSchemaRead)
-def get_dataset_schema(dataset_id: str, db: Session = Depends(get_db)):
+def get_dataset_schema(dataset_id: str, principal: Principal = Depends(require_permission("view")),
+                       db: Session = Depends(get_db)):
+    semantic_scope.asset_for(db, principal, dataset_id, "view")
     row = db.get(DatasetSchemaDef, dataset_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No schema declared for dataset '{dataset_id}'")
@@ -409,14 +421,13 @@ async def upload_dataset_file(
     file: UploadFile = File(...),
     format: Optional[str] = Form(default=None),
     mode: str = Form(default="replace"),   # replace | append
+    principal: Principal = Depends(require_permission("edit")),
     db: Session = Depends(get_db),
 ):
     """Ingest a real file (CSV/JSON/JSONL/Parquet) into a dataset: parse rows, infer
     the schema, and keep the raw file in object storage. Backward compatible with the
     inline-records model — the parsed rows land in `records` just like an API insert."""
-    asset = db.get(models.DataAsset, dataset_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail=f"DataAsset '{dataset_id}' not found")
+    asset = semantic_scope.asset_for(db, principal, dataset_id, "edit")
     if mode not in ("replace", "append"):
         raise HTTPException(status_code=422, detail="mode must be 'replace' or 'append'")
     raw = await file.read()
@@ -430,7 +441,7 @@ async def upload_dataset_file(
     asset.source_format = fmt
     asset.updated_at = _now()
     db.add(models_action.AuditLog(
-        id=uuid.uuid4().hex, actor="system", event_type="data.asset.uploaded",
+        id=uuid.uuid4().hex, actor=principal.id, event_type="data.asset.uploaded",
         subject_type="data_asset", subject_id=dataset_id,
         payload={"format": fmt, "records": len(parsed), "mode": mode, "bytes": len(raw)}))
     db.commit()
@@ -442,10 +453,9 @@ async def upload_dataset_file(
 
 
 @router.get("/data-assets/{dataset_id}/download")
-def download_dataset_file(dataset_id: str, db: Session = Depends(get_db)):
-    asset = db.get(models.DataAsset, dataset_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail=f"DataAsset '{dataset_id}' not found")
+def download_dataset_file(dataset_id: str, principal: Principal = Depends(require_permission("view")),
+                          db: Session = Depends(get_db)):
+    asset = semantic_scope.asset_for(db, principal, dataset_id, "view")
     data = storage.open_bytes(asset.file_ref)
     if data is None:
         raise HTTPException(status_code=404, detail="no uploaded file stored for this dataset")

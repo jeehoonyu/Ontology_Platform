@@ -364,6 +364,41 @@ So the approval gate is closed in both and the scope is closed in one. Adding th
 migration and belongs to T2, where the same shape will come up again — a table that holds
 tenant work without recording which tenant.
 
+## `datasets_ext`, 2026-09-23: ten routes behind a tier
+
+`GOAL_REPAIR_2026-08-23` named `datasets_ext` among the modules that "reach across projects
+because none of them calls `semantic_scope`". It served ten routes, four writes and six
+reads, and the only guard was the router's mount at `edit`: a tier, with no project in it.
+Seven handlers loaded the dataset by id. Three, the transaction list, the branch list and
+the schema read, never loaded it at all. So an editor in any project could read and write
+any project's transaction log, branches, declared schema and uploaded file.
+
+Every route now resolves the dataset through `semantic_scope.asset_for` against its own
+project: `edit` for the transaction, branch, schema and upload writes, and `view` for the
+reads. The audit rows of those writes name the caller instead of `system`. The baseline the
+system records of rows the log never saw still says `system`, because it is the system's.
+The child tables carry no project of their own. A dataset id authorizes them because it is
+their parent's primary key, so no column and no migration was needed.
+
+- **Proven by** `oms/test_datasets_ext_tenancy.py`, 39 assertions. It runs all ten routes as
+  an editor of the dataset's project, and all succeed. It runs them again against another
+  project's dataset: all ten are refused with 403, and that dataset's rows, file, log,
+  branches and schema are untouched. It runs them a third time against a dataset that does
+  not exist, and all ten return 404. The five older test files that drive these routes pass
+  unchanged, with 190 assertions between them.
+- **Negative runs.** With the download reading the dataset by id again, the test failed at
+  `GET download on another project's dataset is refused`. The foreign dataset had no file,
+  so it reached the "no uploaded file" check where a file would have been served. With the
+  branch list not loading the dataset, the test failed at `GET branches on another
+  project's dataset is refused: 200`. Restored, `datasets_ext.py` is byte for byte what it
+  was.
+- **The census.** Unscoped reads fall from 360 to 353, and the ceiling is lowered to match.
+  `row_used_reference` falls from 193 to 190 and `existence_only_reference` from 167 to 163.
+- **One thing seen and left.** An upload replaces `asset_schema` wholesale, which drops the
+  legacy `project_id` marker `main.py` writes there. `asset_for` reads the column, not the
+  marker, so nothing here depends on it. The marker belongs to T11, where a resource's
+  project is to be recorded in one place.
+
 ## Non-completion rule
 
 Inherited unchanged: no condition is marked met without objective evidence, partial progress
