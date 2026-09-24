@@ -335,6 +335,14 @@ function CommandPalette({ onClose, onOpen }: { onClose: () => void; onOpen: (vie
   );
 }
 
+/**
+ * Every part of this bar is drawn from the first render, with a word in place of what has
+ * not arrived. The readiness disclosure used to appear only once `/project/readiness`
+ * answered, and the job counts once `/jobs/summary` did -- and below 640px each part is its
+ * own row. Whatever workspace sat under the bar moved down when they landed, so a pointer
+ * aimed at a node a moment earlier came down on the canvas beside it. That is why two drag
+ * tests failed now and then in a long run and never alone.
+ */
 function BackendConnection({ readiness, loading, error, jobs, jobsError }: { readiness: ProjectReadiness | null; loading: boolean; error: string; jobs: JobSummary | null; jobsError: string }) {
   const status = error ? "OFFLINE" : loading ? "CHECKING" : readiness?.status || "UNKNOWN";
   const failedJobs = jobs?.counts.FAILED || 0;
@@ -348,19 +356,21 @@ function BackendConnection({ readiness, loading, error, jobs, jobsError }: { rea
           <strong>{jobs.counts.QUEUED || 0}</strong> queued
           <strong>{failedJobs}</strong> failed
           <strong>{jobs.active_workers}</strong> workers
-        </span> : jobsError ? <small>Execution status unavailable</small> : null}
+        </span> : <span className="execution-health">{jobsError ? "Execution status unavailable" : "Execution status loading"}</span>}
         {readiness?.summary ? (
           <small>
             {asString(readiness.summary.ready_checks, "0")}/{asString(readiness.summary.check_count, "0")} checks ready
           </small>
-        ) : null}
+        ) : <small>{error ? "Readiness checks unavailable" : loading ? "Readiness checks loading" : "No readiness checks"}</small>}
       </div>
-      {readiness ? (
-        <DeveloperEvidence title="Developer evidence: readiness checks">
-          <DataTable rows={readiness.checks || []} />
-          <DataTable rows={readiness.recommended_actions || []} empty="No recommended actions." />
-        </DeveloperEvidence>
-      ) : null}
+      <DeveloperEvidence title="Developer evidence: readiness checks">
+        {readiness ? (
+          <>
+            <DataTable rows={readiness.checks || []} />
+            <DataTable rows={readiness.recommended_actions || []} empty="No recommended actions." />
+          </>
+        ) : <p>{error ? "The readiness checks could not be loaded." : "The readiness checks are loading."}</p>}
+      </DeveloperEvidence>
     </div>
   );
 }

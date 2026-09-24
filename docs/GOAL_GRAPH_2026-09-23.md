@@ -621,6 +621,29 @@ and the count is a button that lists them.
   dragged node` from X6. Both are mouse drags on a canvas that fail now and then in long runs
   and pass alone, and both are named here to be looked at.
 
+  **Found, 2026-09-23: the bar above the workspace moved it.** The backend status bar above
+  every workspace drew its readiness disclosure only once `/project/readiness` answered. It
+  drew its job counts only once `/jobs/summary` did, and below 640px each part is its own row.
+  In a long run the server answers slowly. The workspace drew first, the test read a node's
+  box, and the bar then pushed everything down: 63px on desktop. The pointer came down on the
+  canvas beside the node and panned it.
+  - **The mechanism, reproduced.** A throwaway test reads a graph node's box, lets a held
+    readiness answer land, then drags. With the old bar it failed with `the drag did not move
+    the node`, the long run's own message. With the fix it passes.
+  - **The fix.** The bar draws every part from its first render: the disclosure with a
+    loading line, and the job counts and the checks count as words until they arrive. The
+    job-count placeholder uses the counts' own element, because a `<small>` there still moved
+    the workspace 4px at 375px.
+  - **The test.** `the Platform Graph does not move when readiness and job counts land`, in
+    `shell-widths.spec.ts`, runs at all six widths. It holds both answers until the
+    workspace has drawn, releases them, and requires the heading to move at most 1px.
+  - **Negative runs.** With the old bar, the test failed on desktop at 63px. With the
+    `<small>` placeholder, it failed at 375px at 4px. Restored, it passes at every width.
+  - **Also passing.** The 96 accessibility tests in `evaluator.spec.ts` pass at every width.
+    Each of the two intermittent drag tests passes five times of five.
+  - **Not shown.** That the pipeline drag failed for this reason too is inferred, not
+    reproduced: it is a pointer drag on a box read the same way, under the same bar.
+
   **Negative runs,** each on a rebuilt `dist`:
   - **N1, the draft count disconnected, as the goal asks:** failed at `typing into a node's
     form did not count as unsaved`.

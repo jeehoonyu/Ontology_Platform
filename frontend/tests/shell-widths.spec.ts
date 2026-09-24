@@ -243,3 +243,37 @@ test.describe("the pipeline status strip says what is true", () => {
   });
 });
 
+
+/**
+ * The workspace stays where it is when the backend's status arrives. The bar above every
+ * workspace drew its readiness disclosure only once `/project/readiness` answered, and its
+ * job counts only once `/jobs/summary` did; below 640px each part is its own row. The
+ * workspace moved down under a pointer already aimed at it, which is why two drag tests
+ * failed now and then in long runs. Both answers are held here until the workspace has drawn.
+ */
+test.describe("the workspace stays put when the backend's status arrives", () => {
+  test("the Platform Graph does not move when readiness and job counts land", async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const late = (url: URL) => url.pathname === "/project/readiness" || url.pathname === "/jobs/summary";
+    await page.route(late, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto("/workspace/graph");
+    const heading = page.getByRole("heading", { name: "Platform Graph", exact: true });
+    await expect(heading).toBeVisible();
+    await expect(page.locator(".backend-connection"), "the status was not held back").toContainText("CHECKING");
+    const before = await heading.boundingBox();
+
+    const landed = Promise.all([late, late].map((_, index) => page.waitForResponse((response) =>
+      new URL(response.url()).pathname === (index ? "/jobs/summary" : "/project/readiness"))));
+    release();
+    await landed;
+    await expect(page.locator(".backend-connection .execution-health")).toBeVisible();
+    await expect(page.locator(".backend-connection")).not.toContainText("CHECKING");
+    const after = await heading.boundingBox();
+    const moved = Math.round((after!.y - before!.y) * 10) / 10;
+    expect(Math.abs(moved), `the workspace moved ${moved}px when the backend's status arrived`).toBeLessThanOrEqual(1);
+  });
+});
