@@ -764,6 +764,13 @@ export function PipelineBuilder() {
     setRefreshKey((key) => key + 1);
   }
 
+  // Node configurations typed and not saved, on this pipeline. X8 of GOAL_GRAPH: the
+  // original shows a filled Saved state and lists unsaved work; positions save on drop
+  // here, so what can be unsaved is a node's configuration. A draft is dropped when
+  // what is typed is back to what is saved, so a count here is a real difference.
+  const unsavedNodes = (canvas?.nodes || []).filter((node) => nodeDrafts[`${selectedGraphId}/${node.id}`]);
+  const [unsavedOpen, setUnsavedOpen] = useState(false);
+
   // S5 of GOAL_SHELL_2026-09-23. The badge read `canvas?.validation.status ||
   // "loading"`, so it said loading with no pipeline selected and after a canvas
   // had failed to load, when nothing was loading. It says loading only while the
@@ -802,7 +809,24 @@ export function PipelineBuilder() {
           <Toolbar groups={canvas?.toolbar_groups || state.value?.selected_canvas?.toolbar_groups || []} />
           <div className="workbench-status-strip">
             <StatusBadge value={stripStatus} />
-            <span>{actionStatus}</span>
+            {unsavedNodes.length ? (
+              <button type="button" className="unsaved-changes" aria-expanded={unsavedOpen}
+                      onClick={() => setUnsavedOpen((open) => !open)}>
+                {unsavedNodes.length === 1 ? "1 unsaved change" : `${unsavedNodes.length} unsaved changes`}
+              </button>
+            ) : canvas ? <span className="saved-state">Saved</span> : null}
+            <span className="strip-message">{actionStatus}</span>
+            {unsavedOpen && unsavedNodes.length ? (
+              <ul className="unsaved-list" aria-label="Unsaved changes">
+                {unsavedNodes.map((node) => (
+                  <li key={node.id}>
+                    <button type="button" onClick={() => selectNode(node.id)}>
+                      {node.label} ({node.id}): configuration not saved
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
           <DndContext sensors={sensors} collisionDetection={slotAwareCollision} onDragStart={(event) => {
             dragging.current = true;
@@ -1234,15 +1258,23 @@ function PipelineNodeConfig({ details, draft, onDraft, onSave }: {
     setError("");
   }, [details.node_id, details.node.label, JSON.stringify(sourceConfig)]);
 
+  // What the server holds, in the form's own terms, so a draft typed back to it is no
+  // draft. X8 of GOAL_GRAPH: the strip counts drafts as unsaved changes, and a field
+  // changed and changed back is not a change.
+  const saved = { label: details.node.label,
+                  values: Object.fromEntries(fields.map((field) => [field.name, displayConfigValue(sourceConfig[field.name], field.type)])) };
+  const differs = (nextLabel: string, nextValues: Record<string, string>) => nextLabel !== saved.label
+    || fields.some((field) => (nextValues[field.name] ?? "") !== (saved.values[field.name] ?? ""));
+
   function changeLabel(next: string) {
     setLabel(next);
-    onDraft({ label: next, values });
+    onDraft(differs(next, values) ? { label: next, values } : null);
   }
 
   function changeValue(name: string, value: string) {
     const next = { ...values, [name]: value };
     setValues(next);
-    onDraft({ label, values: next });
+    onDraft(differs(label, next) ? { label, values: next } : null);
   }
 
   async function save() {

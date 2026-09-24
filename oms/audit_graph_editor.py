@@ -152,9 +152,11 @@ CONTROLS: Dict[str, Control] = {
     },
     "save-state": {
         "original": "Explicit Save, a filled Saved state, View changes for unsaved work",
-        "ours": "positions save on drop; node configuration is held in drafts",
-        "file": BUILDER, "handler": "moveNodes",
-        "state": {"gap": "nothing says whether there is unsaved work"},
+        "ours": "positions save on drop; the strip says Saved, or how many node configurations "
+                "are typed and not saved, as a button that lists them",
+        "file": BUILDER, "handler": "unsavedNodes",
+        "state": {"test": "graph-editor.spec.ts::a typed node configuration counts as unsaved until it "
+                          "is saved"},
     },
     "hotkeys": {
         "original": "Help, View hotkeys",

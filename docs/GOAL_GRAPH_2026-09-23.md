@@ -587,9 +587,57 @@ and the count is a button that lists them.
   - **N4, `Connect` joining the pair backwards:** failed at `Connected b to c.`, `Received:
     "Connected c to b."`.
   - Restored, the tests pass, and the two sources are byte for byte what they were.
-- **X8 — The strip says whether there is unsaved work.** **Open** — `Saved` or `N unsaved
+- **X8 — The strip says whether there is unsaved work.** **Met** — `Saved` or `N unsaved
   changes`, the count a button. Proven by a test that types into a node draft and reads the
   strip, shown to fail with the draft count disconnected.
+
+  **What was built.** Positions save on drop, and every edit this goal added commits as it is
+  made, so what can be unsaved on this canvas is a node's configuration: typed into its form
+  and held as a draft (V9) until `Save configuration`. The strip now reads `Saved` when no
+  node on the pipeline has a draft. Otherwise it shows a button, `1 unsaved change` or
+  `N unsaved changes`. The button lists the nodes, each one a button that opens that node's
+  form.
+
+  The count was only worth showing once a draft meant a difference. The form used to record
+  one on every keystroke, so a field changed and changed back still counted. It now drops a
+  draft whose label and fields equal what the server holds, in the form's own terms. The
+  action message beside the count has its own class, `strip-message`, now that the strip
+  holds more than one line of text.
+
+  **Proven by** `a typed node configuration counts as unsaved until it is saved`, which:
+  - reads `Saved` on a pipeline with nothing typed;
+  - types a label, and reads `1 unsaved change` and the node listed under it;
+  - types the label back, and reads `Saved` again;
+  - types it once more, fills the fields a Filter requires, saves, and reads `Saved`.
+
+  Its first version saved without the required fields, and the form, rightly, would not
+  submit. `GRAPH_EDITOR_PARITY.md` reads 11 of 15, with `save-state` met, and its baseline
+  holds 3 gaps.
+
+  On the same build, 161 tests pass across the graph-editor, movement, shell, multi-node,
+  evaluator, truncation, drag, inert and pane specs, one skipped. One failed, `platform graph
+  positions are kept on this device, and it says so`, at `the drag did not move the node`; it
+  passed four times out of four alone. It joins `pipeline creates a graph and accepts a
+  dragged node` from X6. Both are mouse drags on a canvas that fail now and then in long runs
+  and pass alone, and both are named here to be looked at.
+
+  **Negative runs,** each on a rebuilt `dist`:
+  - **N1, the draft count disconnected, as the goal asks:** failed at `typing into a node's
+    form did not count as unsaved`.
+  - **N2, a draft kept when it is typed back to what is saved:** failed at `a field changed and
+    changed back still counts as unsaved`.
+  - **N3, `Saved` shown whatever is typed:** failed with `Saved` found beside an unsaved change.
+  - Restored, the test passes, and `PipelineBuilder.tsx` is byte for byte what it was.
+
+  **Where this goal stops.** Eleven of the fifteen controls are met. Three are gaps:
+  - a right-click menu;
+  - redo;
+  - a Fit that fits the graph to the canvas rather than returning to one zoom.
+
+  The fourth, organisation for a large graph, was not taken. The successor is the one this
+  goal named: the Workshop composer, whose section census
+  [`GOAL_MOVEMENT_2026-09-12.md`](GOAL_MOVEMENT_2026-09-12.md) asks for before any drop label
+  can be honest.
 
 ## Order and size
 

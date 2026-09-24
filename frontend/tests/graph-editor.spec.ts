@@ -63,7 +63,7 @@ async function openFixture(page: Page, nodes: FixtureNode[] = FOUR,
 
 /** The status strip's message. */
 function status(page: Page) {
-  return page.locator(".workbench-status-strip > span:not(.badge)");
+  return page.locator(".workbench-status-strip .strip-message");
 }
 
 /**
@@ -750,5 +750,51 @@ test.describe("a port drag connects two nodes", () => {
     await expect(page.locator(".pipeline-canvas .pipeline-node")).toHaveCount(4);
     await page.locator(".edge-insert").first().click();
     await expect(page.locator(".pipeline-canvas .pipeline-node"), "the edge control inserted nothing").toHaveCount(5);
+  });
+});
+
+/**
+ * The strip says whether there is unsaved work. X8 of `GOAL_GRAPH_2026-09-23.md`.
+ * Positions save on drop; what can be unsaved is a node's configuration, typed into
+ * its form and held as a draft until it is saved.
+ */
+test.describe("the strip says whether there is unsaved work", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the fixtures are stateful.");
+  });
+
+  test("a typed node configuration counts as unsaved until it is saved", async ({ page }) => {
+    await openFixture(page);
+    const strip = page.locator(".workbench-status-strip");
+    await expect(strip.locator(".saved-state"), "a pipeline with nothing typed does not say it is saved")
+      .toHaveText("Saved");
+
+    await node(page, "a").click();
+    const label = page.getByLabel("Node label");
+    const original = await label.inputValue();
+    await label.fill(`${original} renamed`);
+    const unsaved = strip.getByRole("button", { name: "1 unsaved change" });
+    await expect(unsaved, "typing into a node's form did not count as unsaved").toBeVisible();
+    await expect(strip.locator(".saved-state")).toHaveCount(0);
+
+    await unsaved.click();
+    await expect(strip.getByRole("list", { name: "Unsaved changes" }), "the count does not list what is unsaved")
+      .toContainText("(a): configuration not saved");
+
+    // Typed back to what is saved, it is not a change.
+    await label.fill(original);
+    await expect(strip.locator(".saved-state"), "a field changed and changed back still counts as unsaved")
+      .toHaveText("Saved");
+
+    await label.fill(`${original} renamed`);
+    await expect(strip.getByRole("button", { name: "1 unsaved change" })).toBeVisible();
+    // A Filter's field, operator and value are required, and the form will not submit
+    // without them.
+    await page.getByLabel("Field *").fill("risk");
+    await page.getByLabel("Operator *").selectOption("gte");
+    await page.getByLabel("Value *").fill("1");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect(strip.locator(".saved-state"), "saving the configuration left it counted as unsaved")
+      .toHaveText("Saved");
   });
 });
