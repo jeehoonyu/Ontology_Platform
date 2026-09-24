@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, JSON, String, UniqueConstraint
+from sqlalchemy import Integer, JSON, String, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .database import Base, get_db
@@ -118,12 +118,48 @@ def assert_project_permission(db: Session, principal: Principal, project_id: str
         })
 
 
+# A principal's accessible projects, remembered on the session until it next writes a project
+# or a membership, commits or rolls back. Every `semantic_scope.accessible_query` asks, and each
+# answer cost two membership reads per candidate project: the Command Center, which reads
+# through seven of them, repeated one membership query 14 times per request for a viewer scoped
+# to one project (suite-cost census, 2026-09-23). A principal holding "*" costs nothing either way.
+_ACCESSIBLE = "tenancy.accessible_project_ids"
+
+
+@event.listens_for(Session, "after_flush")
+def _forget_after_tenancy_write(session: Session, _flush_context) -> None:
+    touched = list(session.new) + list(session.dirty) + list(session.deleted)
+    if any(isinstance(row, (PlatformProject, ProjectMembership)) for row in touched):
+        session.info.pop(_ACCESSIBLE, None)
+
+
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_rollback")
+def _forget_after_transaction(session: Session) -> None:
+    session.info.pop(_ACCESSIBLE, None)
+
+
 def accessible_project_ids(db: Session, principal: Principal, permission: str = "view") -> Optional[Set[str]]:
     if "*" in principal.project_ids:
         return None
+    key = (principal.id, tuple(principal.project_ids), tuple(principal.permissions), principal.organization_id, permission)
+    remembered = db.info.setdefault(_ACCESSIBLE, {})
+    if key in remembered:
+        return set(remembered[key])
+    answer = _accessible_project_ids(db, principal, permission)
+    remembered[key] = frozenset(answer)
+    return answer
+
+
+def _accessible_project_ids(db: Session, principal: Principal, permission: str) -> Set[str]:
     candidates = set(principal.project_ids)
     candidates.update(row.project_id for row in db.query(ProjectMembership).filter(ProjectMembership.principal_id == principal.id).all())
-    return {project_id for project_id in candidates if permission in project_permissions(db, principal, project_id) or "*" in project_permissions(db, principal, project_id)}
+    answer: Set[str] = set()
+    for project_id in candidates:
+        granted = project_permissions(db, principal, project_id)  # once per project, not once per test
+        if permission in granted or "*" in granted:
+            answer.add(project_id)
+    return answer
 
 
 def _organization_dict(row: PlatformOrganization) -> dict:

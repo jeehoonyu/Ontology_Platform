@@ -477,6 +477,22 @@ An administrator of every project sees what they saw before.
     and its handler declares no permission.
   - The Command Center still counts an incident as open when its status is anything but
     `CLOSED`, where Operations counts three statuses. That is the next item, not this one.
+- **What it cost, found later the same day.** The suite-cost census, re-run to move the head
+  to 0046, found the Command Center's routes repeating one membership query 14 times per
+  request, against a baseline of 4.
+  - **The cause.** Every loader this change put through `semantic_scope.accessible_query`
+    re-derived the viewer's projects. Each derivation read the viewer's memberships, then
+    each candidate project's permissions twice.
+  - **The fix.** `tenancy.accessible_project_ids` now remembers its answer on the session. It
+    forgets it when the session writes a project or a membership, commits or rolls back. Each
+    candidate project's permissions are read once. For the test's viewer, the Command Center
+    reads memberships 3 times: the route's own check on `default`, and one derivation.
+  - **Proven by** `oms/test_command_center_tenancy.py`, now 44 assertions. It counts the
+    statements, and checks that a membership written in the session changes the answer at
+    once. Without the memo it read memberships 27 times. Without the forgetting, the new
+    membership went unseen. Restored, `tenancy.py` is byte for byte what it was.
+  - **Other tests.** Twenty other tenancy test files pass. A principal holding `*` never
+    reached either path.
 
 ## Non-completion rule
 

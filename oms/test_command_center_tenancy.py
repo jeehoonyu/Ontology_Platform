@@ -187,6 +187,33 @@ for label, body in (("asset", {"asset_id": "beta-asset"}), ("work order", {"work
     check(pending_approvals() == approvals, f"a refused triage of another project's {label} staged an approval",
           (approvals, pending_approvals()))
 
+# The viewer's projects are worked out once per request. Every loader above reads through
+# `semantic_scope.accessible_query`, and each re-derived the viewer's projects with two
+# membership reads: the Command Center repeated one membership query 14 times (suite-cost
+# census, 2026-09-23).
+import sys  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from request_cost import counting  # noqa: E402
+from app import tenancy  # noqa: E402
+from app.database import engine as _counted  # noqa: E402
+
+with counting(_counted) as statements:
+    ok(client.get("/ui-state/command-center"), "the Command Center, counted")
+membership_reads = [s for s in statements if "FROM platform_project_memberships" in s]
+# Three: the route's own check on `default`, and working out the viewer's projects once.
+check(len(membership_reads) <= 3, f"the Command Center read the viewer's memberships {len(membership_reads)} times", None)
+
+# ...and the remembered answer is forgotten the moment a membership is written.
+with SessionLocal() as db:
+    before = tenancy.accessible_project_ids(db, viewer, "view")
+    db.add(tenancy.ProjectMembership(id="viewer-beta", project_id=FOREIGN, principal_id=viewer.id, role="viewer",
+                                     permissions=["view"], created_at=1, updated_at=1))
+    db.flush()
+    after = tenancy.accessible_project_ids(db, viewer, "view")
+    db.rollback()
+check(FOREIGN not in before and FOREIGN in after,
+      f"a membership written in the session did not change the viewer's projects: {before} -> {after}", None)
+
 app.dependency_overrides.clear()
 # ...and the parameter still selects an asset for a caller who may view it.
 admin_named = ok(client.get("/scenarios/asset-reliability/summary", params={"asset_id": "beta-asset"}),
