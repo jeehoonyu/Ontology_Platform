@@ -1524,20 +1524,31 @@ def list_model_endpoints(project_id: Optional[str] = None, principal: production
 
 # --- Action Execution Engine ---
 
+ACTION_IDEMPOTENCY_TTL_SECONDS = models_action.IDEMPOTENCY_TTL_SECONDS
+
+
 @app.post("/api/v1/actions/execute", response_model=schemas.ActionExecutionResponse)
 @app.post("/actions/execute", response_model=schemas.ActionExecutionResponse)
 def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depends(get_db), principal: production_auth.Principal = Depends(production_auth.require_permission("execute"))):
     if not isinstance(principal, production_auth.Principal):
         principal = production_auth._local_principal()
     action_type = _action_for(db, request.action_type_id, principal, "execute")
-    # 1. Idempotency Check
+    # 1. Idempotency Check. A key is the project's, for a day (R11): the same key in another
+    # project is a different key, and an expired one is reused as if it were new. It is read
+    # before the approval, so a retry of an approved action within the day gets its first
+    # result back rather than being refused as a second run.
+    now = now_ts()
     existing_key = db.query(models_action.IdempotencyKey).filter(
-        models_action.IdempotencyKey.key == request.idempotency_key
+        models_action.IdempotencyKey.project_id == action_type.project_id,
+        models_action.IdempotencyKey.key == request.idempotency_key,
     ).first()
-    
+    expired_key = None
+    if existing_key and existing_key.expires_at is not None and existing_key.expires_at <= now:
+        expired_key, existing_key = existing_key, None
+
     if existing_key:
-        if existing_key.project_id != action_type.project_id or existing_key.action_type_id != action_type.id:
-            raise HTTPException(status_code=409, detail="Idempotency key is already bound to another project or action")
+        if existing_key.action_type_id != action_type.id:
+            raise HTTPException(status_code=409, detail="Idempotency key is already bound to another action")
         return schemas.ActionExecutionResponse(
             status="SUCCESS_CACHED",
             message="Action previously executed.",
@@ -1557,12 +1568,13 @@ def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depend
         or str(rules.get("risk_level", "")).lower() in {"high", "critical"}
     )
 
+    approval = None
     if requires_approval:
-        approval = None
         if request.approval_request_id:
+            # Locked: two runs of one approval under different keys must not both see it unspent.
             approval = db.query(models_action.ApprovalRequest).filter(
                 models_action.ApprovalRequest.id == request.approval_request_id
-            ).first()
+            ).with_for_update().first()
             if not approval:
                 _not_found("ApprovalRequest", request.approval_request_id)
             if approval.project_id != action_type.project_id:
@@ -1571,6 +1583,11 @@ def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depend
                 raise HTTPException(status_code=403, detail="ApprovalRequest is not approved")
             if approval.action_type_id != request.action_type_id or approval.parameters != request.parameters:
                 raise HTTPException(status_code=403, detail="ApprovalRequest does not match this action request")
+            # An approval runs its action once. It was reusable under any new key (R11).
+            if approval.consumed_at is not None:
+                raise HTTPException(status_code=409, detail=(
+                    f"ApprovalRequest '{approval.id}' was already executed "
+                    f"(outbox event '{approval.consumed_by_outbox_event_id}'); request a new approval"))
         else:
             approval_id = str(uuid.uuid4())
             approval = models_action.ApprovalRequest(
@@ -1632,16 +1649,28 @@ def execute_action(request: schemas.ActionExecutionRequest, db: Session = Depend
             status=models_action.ActionStatus.PENDING.value
         )
         db.add(outbox_event)
-        
-        # Save Idempotency Key
+        if approval is not None:
+            approval.consumed_at = now
+            approval.consumed_by_outbox_event_id = outbox_id
+
+        # Save Idempotency Key. An expired row for the same key is overwritten, not duplicated.
         response_data = {"outbox_event_id": outbox_id, "mutated_object_ids": mutated_object_ids}
-        idemp_key = models_action.IdempotencyKey(
-            key=request.idempotency_key,
-            project_id=action_type.project_id,
-            action_type_id=request.action_type_id,
-            response_payload=response_data
-        )
-        db.add(idemp_key)
+        if approval is not None:
+            response_data["approval_request_id"] = approval.id
+        if expired_key is not None:
+            expired_key.action_type_id = request.action_type_id
+            expired_key.response_payload = response_data
+            expired_key.created_at = now
+            expired_key.expires_at = now + ACTION_IDEMPOTENCY_TTL_SECONDS
+        else:
+            db.add(models_action.IdempotencyKey(
+                key=request.idempotency_key,
+                project_id=action_type.project_id,
+                action_type_id=request.action_type_id,
+                response_payload=response_data,
+                created_at=now,
+                expires_at=now + ACTION_IDEMPOTENCY_TTL_SECONDS,
+            ))
 
         create_audit_log(
             db,

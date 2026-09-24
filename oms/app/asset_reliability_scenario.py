@@ -140,6 +140,9 @@ def _approval_dict(row: models_action.ApprovalRequest) -> Dict[str, Any]:
         "reason": row.reason,
         "created_at": row.created_at,
         "decided_at": row.decided_at,
+        # An approval runs its action once (R11); the screen stops offering to run a spent one.
+        "consumed_at": row.consumed_at,
+        "consumed_by_outbox_event_id": row.consumed_by_outbox_event_id,
     }
 
 

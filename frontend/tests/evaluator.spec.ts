@@ -254,6 +254,33 @@ test("Cipher operations run as the signed-in caller, with a licence granted on t
   await expect(decrypt, "the caller's own licence did not authorize the decrypt").toContainText("browser secret");
 });
 
+test("a spent approval offers no second run", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the reply is served.");
+  // R11: an approval runs its action once. The panel offered "Execute approved action" for as
+  // long as the approval read APPROVED, and a second press is now refused by the server.
+  const spent = {
+    id: "spent_approval", action_type_id: "escalate_work_order", requester: "fixture", parameters: {},
+    status: "APPROVED", created_at: 1, decided_at: 2, consumed_at: 3, consumed_by_outbox_event_id: "spent-outbox"
+  };
+  await page.route((url) => url.pathname === "/api/v1/industrial/workflows/asset-reliability/workflow-state", (route) =>
+    route.fulfill({ json: { project_id: "default", status: "NOT_CONFIGURED", steps: [], evidence_links: [], summary: { object_count: 0 } } }));
+  await page.route((url) => url.pathname === "/ui-state/command-center", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json() as { summary?: Record<string, unknown>; workflow?: { summary?: Record<string, unknown> } };
+    for (const summary of [body.summary, body.workflow?.summary]) {
+      if (!summary) continue;
+      summary.latest_approval = spent;
+      summary.approvals = [spent];
+      summary.latest_action = null;
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto("/workspace/command-center");
+  const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Governed Approval and Action", exact: true }) });
+  await expect(panel.getByRole("note").filter({ hasText: "has run its action" }), "a spent approval is not said to be spent").toBeVisible();
+  await expect(panel.getByRole("button", { name: "Execute approved action" }), "a spent approval still offers a run").toHaveCount(0);
+});
+
 test("command palette supports keyboard navigation", async ({ page }) => {
   await page.goto("/workspace/command-center");
   await page.keyboard.press("Control+K");

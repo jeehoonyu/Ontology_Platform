@@ -847,7 +847,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             for row in _for_project(db.query(models.ActionType), models.ActionType.project_id, project_id).all()
         ],
         "approval_requests": [
-            _row_dict(row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at"])
+            _row_dict(row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at", "consumed_at", "consumed_by_outbox_event_id"])
             for row in _for_project(db.query(models_action.ApprovalRequest), models_action.ApprovalRequest.project_id, project_id).all()
         ],
         "action_outbox": [
@@ -855,7 +855,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
             for row in _for_project(db.query(models_action.OutboxEvent), models_action.OutboxEvent.project_id, project_id).all()
         ],
         "action_idempotency_keys": [
-            _row_dict(row, ["key", "project_id", "action_type_id", "response_payload", "created_at"])
+            _row_dict(row, ["key", "project_id", "action_type_id", "response_payload", "created_at", "expires_at"])
             for row in _for_project(db.query(models_action.IdempotencyKey), models_action.IdempotencyKey.project_id, project_id).all()
         ],
         "model_endpoints": [
@@ -1603,6 +1603,28 @@ def _upsert_model(db: Session, model_cls: Any, data: Dict[str, Any], fields: Lis
             setattr(existing, key, value)
         return "updated"
     db.add(model_cls(**clean))
+    return "created"
+
+
+def _upsert_idempotency_key(db: Session, data: Dict[str, Any]) -> str:
+    """An idempotency key is (project, key) and lasts a day (R11 of GOAL_REPAIR_2026-08-23).
+
+    `_upsert_model` needs an `id`, which a key row has never had, so every key in a snapshot
+    was skipped without a word and a restore lost them all. A snapshot written before keys
+    expired carries no `expires_at`; the key expires a day after it was written, as the
+    migration dates keys already in a database.
+    """
+    if not data.get("key"):
+        return "skipped"
+    fields = {name: data[name] for name in ("action_type_id", "response_payload", "created_at", "expires_at") if name in data}
+    if fields.get("expires_at") is None:
+        fields["expires_at"] = (fields.get("created_at") or _now()) + models_action.IDEMPOTENCY_TTL_SECONDS
+    existing = db.get(models_action.IdempotencyKey, (data["project_id"], data["key"]))
+    if existing:
+        for name, value in fields.items():
+            setattr(existing, name, value)
+        return "updated"
+    db.add(models_action.IdempotencyKey(project_id=data["project_id"], key=data["key"], **fields))
     return "created"
 
 
@@ -2617,13 +2639,13 @@ def import_project(
         track(_upsert_model(db, models.ActionType, row, ["id", "project_id", "display_name", "description", "parameters", "rules"]))
     for row in snapshot.get("approval_requests") or []:
         row.setdefault("project_id", "default")
-        track(_upsert_model(db, models_action.ApprovalRequest, row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at"]))
+        track(_upsert_model(db, models_action.ApprovalRequest, row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at", "consumed_at", "consumed_by_outbox_event_id"]))
     for row in snapshot.get("action_outbox") or []:
         row.setdefault("project_id", "default")
         track(_upsert_model(db, models_action.OutboxEvent, row, ["id", "project_id", "action_type_id", "payload", "status", "created_at"]))
     for row in snapshot.get("action_idempotency_keys") or []:
         row.setdefault("project_id", "default")
-        track(_upsert_model(db, models_action.IdempotencyKey, row, ["key", "project_id", "action_type_id", "response_payload", "created_at"]))
+        track(_upsert_idempotency_key(db, row))
     for row in snapshot.get("model_endpoints") or []:
         row.setdefault("project_id", "default")
         row.setdefault("created_at", now)

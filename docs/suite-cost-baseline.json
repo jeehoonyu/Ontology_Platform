@@ -1,7 +1,7 @@
 {
   "provenance": {
-    "migration_head": "0046_dataset_txn_seq_unique",
-    "recorded_at": "2026-09-24T04:45:16Z",
+    "migration_head": "0047_approval_consumption",
+    "recorded_at": "2026-09-24T05:34:30Z",
     "stale_after": "migration head"
   },
   "repeat_ceiling": 6,
@@ -310,7 +310,7 @@
     "GET /approvals": {
       "worst_repeat": 0,
       "queries": 4,
-      "calls": 11
+      "calls": 12
     },
     "GET /apps/carbon": {
       "worst_repeat": 0,
@@ -1274,7 +1274,7 @@
     },
     "GET /runtime/observability/summary": {
       "worst_repeat": 20,
-      "queries": 95,
+      "queries": 107,
       "calls": 15
     },
     "GET /runtime/pilot-evidence": {
@@ -1585,12 +1585,12 @@
     "POST /action-types": {
       "worst_repeat": 2,
       "queries": 29,
-      "calls": 27
+      "calls": 29
     },
     "POST /actions/execute": {
       "worst_repeat": 2,
-      "queries": 43,
-      "calls": 41
+      "queries": 44,
+      "calls": 51
     },
     "POST /admin/access-check": {
       "worst_repeat": 3,
@@ -1694,7 +1694,7 @@
     },
     "POST /agents/{agent_id}/sessions": {
       "worst_repeat": 8,
-      "queries": 59,
+      "queries": 58,
       "calls": 1
     },
     "POST /aip/agents/workers/run-next": {
@@ -2030,7 +2030,7 @@
     "POST /approvals/{approval_id}/decision": {
       "worst_repeat": 2,
       "queries": 27,
-      "calls": 7
+      "calls": 8
     },
     "POST /apps/carbon": {
       "worst_repeat": 0,
@@ -2589,7 +2589,7 @@
     },
     "POST /jobs/claim": {
       "worst_repeat": 13,
-      "queries": 58,
+      "queries": 55,
       "calls": 47
     },
     "POST /jobs/{job_id}/cancel": {
@@ -2885,7 +2885,7 @@
     "POST /object-types": {
       "worst_repeat": 2,
       "queries": 26,
-      "calls": 90
+      "calls": 91
     },
     "POST /object-types/{object_type_id}/implement-interface": {
       "worst_repeat": 4,
@@ -2895,7 +2895,7 @@
     "POST /objects": {
       "worst_repeat": 3,
       "queries": 25,
-      "calls": 165
+      "calls": 166
     },
     "POST /observability/checks/build-status": {
       "worst_repeat": 0,
@@ -3034,7 +3034,7 @@
     },
     "POST /ontology/environments/{environment_name}/rollback": {
       "worst_repeat": 4,
-      "queries": 41,
+      "queries": 43,
       "calls": 2
     },
     "POST /ontology/health/run": {
@@ -3219,7 +3219,7 @@
     },
     "POST /pipeline-builder/workers/run-next": {
       "worst_repeat": 1004,
-      "queries": 4203,
+      "queries": 4204,
       "calls": 44
     },
     "POST /pipelines": {
@@ -3254,12 +3254,12 @@
     },
     "POST /project/demo/reset": {
       "worst_repeat": 49,
-      "queries": 808,
+      "queries": 825,
       "calls": 1
     },
     "POST /project/import": {
       "worst_repeat": 94,
-      "queries": 299,
+      "queries": 300,
       "calls": 19
     },
     "POST /project/import/validate": {
@@ -3359,7 +3359,7 @@
     },
     "POST /scenarios/asset-reliability/bootstrap": {
       "worst_repeat": 44,
-      "queries": 717,
+      "queries": 716,
       "calls": 7
     },
     "POST /scenarios/asset-reliability/run-triage": {

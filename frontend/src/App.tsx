@@ -527,7 +527,7 @@ function CommandCenter() {
   }
 
   async function executeApprovedAction() {
-    if (!approval || approval.status !== "APPROVED") return;
+    if (!approval || approval.status !== "APPROVED" || approval.consumed_at) return;
     setGovernanceBusy(true);
     setGovernanceError(null);
     try {
@@ -758,8 +758,11 @@ function CommandCenter() {
                 </div>
               </>
             ) : null}
-            {approval.status === "APPROVED" && !actionMatchesApproval ? (
+            {approval.status === "APPROVED" && !approval.consumed_at && !actionMatchesApproval ? (
               <button onClick={() => void executeApprovedAction()} disabled={governanceBusy}><PlayCircle size={15} /> Execute approved action</button>
+            ) : null}
+            {approval.consumed_at && !actionMatchesApproval ? (
+              <p className="panel-description" role="note">This approval has run its action; a new one needs a new approval.</p>
             ) : null}
             {actionMatchesApproval && latestAction ? (
               <div className="action-evidence" aria-label="Governed action evidence">

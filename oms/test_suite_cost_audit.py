@@ -145,10 +145,11 @@ writes = [name for name in real["routes"]
 check(len(writes) > 300, len(writes))
 
 # The surface this ratchet exists for: write routes above the ceiling, which the
-# GET walk never issues. If this ever reads zero the gate has lost its subject.
+# GET walk never issues. If this ever reads zero the gate has lost its subject. It is
+# not held to a size: the debt may only fall, and a floor fails the day it is paid.
 debt = {name: entry for name, entry in real["routes"].items()
         if entry["worst_repeat"] > REPEAT_CEILING}
-check(len(debt) >= 30, len(debt))
+check(len(debt) > 0, len(debt))
 check(any(name.startswith(("POST", "PUT", "PATCH", "DELETE")) for name in debt), debt)
 check("POST /pipeline-builder/workers/run-next" in debt, sorted(debt)[:5])
 check(debt["POST /pipeline-builder/workers/run-next"]["worst_repeat"] >= 1000, debt)

@@ -476,7 +476,9 @@ def _stage_approval(db: Session, *, project_id: str, action_type_id: str, object
         models_action.ApprovalRequest.project_id == project_id,
         models_action.ApprovalRequest.action_type_id == action_type_id,
     ).order_by(models_action.ApprovalRequest.created_at.desc()).all()
-    approval = next((row for row in existing if row.parameters == parameters and row.status in {"PENDING", "APPROVED"}), None)
+    # A consumed approval has run its action and cannot run it again (R11), so it is not reused.
+    approval = next((row for row in existing if row.parameters == parameters and row.status in {"PENDING", "APPROVED"}
+                     and row.consumed_at is None), None)
     if approval:
         return approval
     approval = models_action.ApprovalRequest(

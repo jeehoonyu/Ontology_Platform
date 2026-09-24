@@ -374,6 +374,8 @@ class ApprovalRequest(BaseModel):
     reason: Optional[str] = None
     created_at: int
     decided_at: Optional[int] = None
+    consumed_at: Optional[int] = None
+    consumed_by_outbox_event_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

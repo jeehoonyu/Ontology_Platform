@@ -192,10 +192,13 @@ cached = ok(client.post("/actions/execute", json={
 }), "replay approved action")
 assert cached["status"] == "SUCCESS_CACHED"
 
+# A key is its project's (R11): the same key in another project is a different key, and it
+# neither collides with alpha's nor reveals that alpha used it.
 app.dependency_overrides[production_auth.current_principal] = lambda: beta
-ok(client.post("/actions/execute", json={
+beta_run = ok(client.post("/actions/execute", json={
     "action_type_id": "beta-note-case", "parameters": {}, "idempotency_key": "alpha-close-once", "actor": "beta",
-}), "reject cross-project idempotency collision", 409)
+}), "the same key in another project is a different key")
+assert beta_run["status"] == "SUCCESS", beta_run
 
 app.dependency_overrides[production_auth.current_principal] = lambda: alpha
 snapshot = ok(client.get("/project/export"), "export governed automation")
@@ -210,7 +213,7 @@ with SessionLocal() as db:
     approval = db.get(models_action.ApprovalRequest, approval_id)
     assert approval.project_id == "alpha-automation" and approval.requester == "alpha-automation-user"
     outbox = db.get(models_action.OutboxEvent, executed["outbox_event_id"])
-    receipt = db.get(models_action.IdempotencyKey, "alpha-close-once")
+    receipt = db.get(models_action.IdempotencyKey, ("alpha-automation", "alpha-close-once"))
     assert outbox.project_id == receipt.project_id == "alpha-automation"
     decision_audit = db.query(models_action.AuditLog).filter(models_action.AuditLog.event_type == "action.approval.decided").one()
     assert decision_audit.actor == "alpha-automation-approver"

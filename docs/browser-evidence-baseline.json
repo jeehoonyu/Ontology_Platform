@@ -1,12 +1,12 @@
 {
   "provenance": {
-    "migration_head": "0046_dataset_txn_seq_unique",
-    "bundle_source_hash": "33d43404332158af312f1e6a3215fcab94598078e7f433bcad7f5d4110458cf2",
+    "migration_head": "0047_approval_consumption",
+    "bundle_source_hash": "c103d31d34e41089fff1f4809f3ea9bd5a7f588787418a0de9e502f399fbfdd3",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-24T04:53:56Z",
+    "recorded_at": "2026-09-24T05:43:12Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,7 +14,7 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 0,
+      "flaky": 1,
       "ran": 220,
       "skipped": 5
     },
@@ -22,31 +22,31 @@
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 199
+      "skipped": 200
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 198
+      "skipped": 199
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 199
+      "skipped": 200
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 199
+      "skipped": 200
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 199
+      "skipped": 200
     }
   },
   "tests": {
@@ -129,6 +129,7 @@
     "desktop-1280 :: a second editor sees the first editor's selection on the node within seconds": "ran",
     "desktop-1280 :: a slot resizes with a single pointer and no drag": "ran",
     "desktop-1280 :: a source field maps onto a property without a drag": "ran",
+    "desktop-1280 :: a spent approval offers no second run": "ran",
     "desktop-1280 :: a table showing everything it was given says nothing": "ran",
     "desktop-1280 :: a touch user can add the first node to a pipeline": "ran",
     "desktop-1280 :: a truncated table names the rows it left out": "ran",
@@ -354,6 +355,7 @@
     "laptop-1366 :: a second editor sees the first editor's selection on the node within seconds": "skipped",
     "laptop-1366 :: a slot resizes with a single pointer and no drag": "skipped",
     "laptop-1366 :: a source field maps onto a property without a drag": "skipped",
+    "laptop-1366 :: a spent approval offers no second run": "skipped",
     "laptop-1366 :: a table showing everything it was given says nothing": "skipped",
     "laptop-1366 :: a touch user can add the first node to a pipeline": "skipped",
     "laptop-1366 :: a truncated table names the rows it left out": "skipped",
@@ -579,6 +581,7 @@
     "mobile-375 :: a second editor sees the first editor's selection on the node within seconds": "skipped",
     "mobile-375 :: a slot resizes with a single pointer and no drag": "skipped",
     "mobile-375 :: a source field maps onto a property without a drag": "skipped",
+    "mobile-375 :: a spent approval offers no second run": "skipped",
     "mobile-375 :: a table showing everything it was given says nothing": "skipped",
     "mobile-375 :: a touch user can add the first node to a pipeline": "skipped",
     "mobile-375 :: a truncated table names the rows it left out": "skipped",
@@ -804,6 +807,7 @@
     "tablet-1024 :: a second editor sees the first editor's selection on the node within seconds": "skipped",
     "tablet-1024 :: a slot resizes with a single pointer and no drag": "skipped",
     "tablet-1024 :: a source field maps onto a property without a drag": "skipped",
+    "tablet-1024 :: a spent approval offers no second run": "skipped",
     "tablet-1024 :: a table showing everything it was given says nothing": "skipped",
     "tablet-1024 :: a touch user can add the first node to a pipeline": "skipped",
     "tablet-1024 :: a truncated table names the rows it left out": "skipped",
@@ -1029,6 +1033,7 @@
     "tablet-768 :: a second editor sees the first editor's selection on the node within seconds": "skipped",
     "tablet-768 :: a slot resizes with a single pointer and no drag": "skipped",
     "tablet-768 :: a source field maps onto a property without a drag": "skipped",
+    "tablet-768 :: a spent approval offers no second run": "skipped",
     "tablet-768 :: a table showing everything it was given says nothing": "skipped",
     "tablet-768 :: a touch user can add the first node to a pipeline": "skipped",
     "tablet-768 :: a truncated table names the rows it left out": "skipped",
@@ -1254,6 +1259,7 @@
     "wide-1600 :: a second editor sees the first editor's selection on the node within seconds": "skipped",
     "wide-1600 :: a slot resizes with a single pointer and no drag": "skipped",
     "wide-1600 :: a source field maps onto a property without a drag": "skipped",
+    "wide-1600 :: a spent approval offers no second run": "skipped",
     "wide-1600 :: a table showing everything it was given says nothing": "skipped",
     "wide-1600 :: a touch user can add the first node to a pipeline": "skipped",
     "wide-1600 :: a truncated table names the rows it left out": "skipped",

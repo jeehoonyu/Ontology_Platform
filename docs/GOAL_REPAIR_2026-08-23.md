@@ -80,7 +80,7 @@ R6 and R9 must ship their measurement before their fix or the fix is unrecordabl
 | **R14** | A new alembic revision does not redden the suite | 0 tests pinning the head literal | 27 of 243 asserted `version == "0042_stream_outer_joins"` after `upgrade head`; 55 files repo-wide | **Met** — 0 pins. Proven by adding a throwaway revision and re-running everything: 6 of 243 at the moved head, the same 6 as at `0042`. `oms/test_migration_head_not_pinned.py`, 259 files scanned |
 | **R15** | No route grants a privilege the role model withholds, or authorizes from its own request body | 0 | 6 found while classifying R6 | **Open** — 1 left. All six named findings are closed, and two found beside them (2026-09-23; see "R15: what each finding became"). What is left: the marking grant routes check no `manage` on the marking, so an administrator can grant themselves REMOVE, now under their own name. Closing it needs someone to decide who manages a new marking |
 | **R12** | The suite passes on a host that is not the one it was written on | 243 of 243 | 237 of 243; six encoded Windows or x86 assumptions, one of them a product defect | **Met** — **243 of 243**, `verify.py` 21 of 21 in 12.0 min. Tier A went from 5 met / 1 unmet to **7 met / 0 unmet** |
-| **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Open** |
+| **R11** | Approvals are consumed, and idempotency keys are tenant-scoped and expiring | both | an approval is reusable with a fresh key; keys have no project and no TTL | **Met** — 2026-09-23, migration `0047_approval_consumption` (decision E). An approval is consumed by the run it authorizes, and a key is `(project, key)` for a day. `oms/test_approval_consumption.py` and its migration test; see "R11: one approval, one run" |
 
 ## R6: 258 to 75, and what choosing the permission turned up
 
@@ -715,6 +715,91 @@ applying now takes the strip's rule.
   `security_propagation.py` is byte for byte what it was.
 - **Not browser-tested.** No browser test assigns a marking, so the removed field is held
   only by the type check.
+
+## R11: one approval, one run
+
+Re-read on 2026-09-23. The execute route checked an approval for being APPROVED and nothing
+more. A probe approved one request and ran it under keys k1, k2 and k3: three SUCCESS
+responses and three outbox events naming the same approval. The keys had a `project_id`
+column but were keyed by `key` alone and never expired. A key another project had used came
+back 409 with a message saying so, and a key used once was held forever. The owner chose the
+full fix (decision E): consume approvals and backfill the ones that already ran, key by
+project, and give every key a day, old keys included.
+
+- **Approvals.** `approval_requests` gains `consumed_at` and `consumed_by_outbox_event_id`.
+  - **At run time.** The run that executes an approved action sets them, in the same
+    transaction as its outbox event. The approval is read under a row lock, so two runs with
+    different keys cannot both see it unspent. A second run is 409, naming the outbox event
+    that spent it.
+  - **What stays.** `status` stays APPROVED, which five callers read as the decision.
+  - **A retry.** The key is read before the approval, so a retry with the same key within
+    the day still gets its first result back.
+  - **Industrial staging.** It no longer hands back a spent approval as the one to run.
+  - **The screen.** The Command Center stops offering "Execute approved action" for a spent
+    approval and says why.
+- **Keys.** `idempotency_keys` is keyed by `(project_id, key)` and gains `expires_at`, a day
+  after the key was written.
+  - The same key in two projects is two keys, and neither learns of the other.
+  - An expired key is overwritten in place and runs as new.
+  - Snapshots carry the new columns. Keys now import at all: `_upsert_model` needs an `id`,
+    which a key row never had, so every key in a snapshot had been skipped without a word.
+- **The migration, `0047_approval_consumption`.**
+  - **The backfill.** It consumes every approval that an `action_outbox.payload` names in
+    its `approval_request_id`, by the earliest such run. That payload is the only durable
+    link, and the route has written it since approvals existed.
+  - **Key expiry.** Keys expire a day after `created_at`, or at the migration if they have
+    none.
+  - **The key rebuild.** It is done in batch mode, keeping the project index.
+  - **The downgrade.** It refuses while one key is used by two projects, rather than choosing
+    whose receipt to lose.
+- **Proven by** `oms/test_approval_consumption.py`, 27 assertions:
+  - one approval runs once, and a second key is refused with no second outbox event;
+  - the same key replays within the day;
+  - two projects each use one key, without disturbing each other;
+  - an expired key runs as new, overwriting its row;
+  - an expired key does not revive a spent approval.
+
+  `oms/test_approval_consumption_migration.py` rebuilds the old shape at 0046 and seeds an
+  approval run twice, one never run, a pending one, and keys that are old, recent and
+  undated. It requires the backfill to pick the earliest run, the expiries dated, the new
+  primary key with both indexes, the downgrade refused and then clean, and the chain applied
+  twice. A browser test in `evaluator.spec.ts` serves a spent approval and requires the note
+  and no Execute button. Thirty neighbouring test files pass, including every migration test
+  that passes through 0047.
+- **What moved in other tests.** `test_governed_automation_tenancy.py` expected another
+  project's reuse of a key to be refused with 409. It now requires success, and reads the
+  receipt by `(project, key)`.
+- **Negative runs.** Nine mutations each failed at their named check:
+  - a consumed approval running again;
+  - a run not consuming its approval;
+  - a key read across projects;
+  - a key that never expires;
+  - an expired key inserted twice, a 500;
+  - no consumption backfill;
+  - old keys never dated;
+  - keys left keyed by `key` alone;
+  - the screen offering a spent approval.
+
+  Restored, every source is byte for byte what it was.
+- **Not shown.** The key rebuild's Postgres branch drops `idempotency_keys_pkey` before
+  recreating it. It is written from the dialect's naming, and not run here, because no
+  Postgres is available.
+- **The head moved again**, and the four head-bound baselines are re-measured at 0047.
+  - **The census.** It recorded 4,243 requests over 702 route and method pairs, 26 of them
+    above the ceiling of 6, and no route repeats a shape more than before.
+  - **Execute and import.** `POST /actions/execute` costs one statement more at its dearest
+    call, because an approved run now also writes the approval it spends. `POST
+    /project/import` costs one more, because keys are now written rather than skipped.
+  - **Demo reset and observability.** `POST /project/demo/reset` read 825 statements
+    against 808, and `GET /runtime/observability/summary` read 107 against 95. The same
+    scripts, run in a worktree at 282d3d9, give 825 and 107, so neither is this change.
+  - **Readiness.** `GET /project/readiness` read ×22 against ×33. That count follows
+    timing, as recorded on 2026-09-11, so it stays at 33. It is the one entry set by hand.
+- **Found on the way.** `test_suite_cost_audit.py` required at least 30 routes above the
+  ceiling. The baseline written at 282d3d9 has 26, because the debt was paid down, so that
+  test had failed since that commit. It now requires only that some debt remains: the debt
+  may only fall, and any floor fails the day it is paid. A baseline with no debt still fails
+  it, which a negative run confirmed.
 
 ## Non-completion rule
 

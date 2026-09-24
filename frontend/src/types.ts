@@ -116,6 +116,9 @@ export interface ApprovalRequest {
   reason?: string | null;
   created_at: number;
   decided_at?: number | null;
+  // When the approved action ran; an approval runs its action once (R11).
+  consumed_at?: number | null;
+  consumed_by_outbox_event_id?: string | null;
 }
 
 export interface GovernedActionEvidence {
