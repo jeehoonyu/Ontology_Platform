@@ -2483,6 +2483,21 @@ plan, and it is measured there.
     returns first, so the no-order mutation passed. The test now updates one written in the
     middle. Restored, both sources are byte for byte what they were.
 
+  **And Operations' Refresh.** Every refresh replaced the whole page with a loading screen.
+  That meant the Refresh button, and the refresh each action ends with. Every tab unmounted,
+  so the feed's filter and sort, and anything typed into a form, went back to where they
+  start.
+  - Only the first load replaces the page now. Later refreshes keep it, and Refresh is off
+    while one runs.
+  - **Proven by** `Refresh keeps the feed's filter and sort, and what was typed into a form`,
+    in `grid-sites.spec.ts`. It filters the feed to three events of its own and sorts them
+    by severity. It refreshes and requires the filter, the sort and the order intact. It then
+    types a rule name on Alerts, refreshes, and requires the name kept.
+  - With the loading screen back on every refresh, the test failed at `Refresh took the
+    feed's sort off`, `none` for `descending`. Restored, `OpsWorkspace.tsx` is byte for byte
+    what it was.
+  - Nothing holds Refresh being off during a refresh.
+
 ## Order and size
 
 | Step | Touches | Commits |

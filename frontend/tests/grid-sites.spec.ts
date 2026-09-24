@@ -254,6 +254,43 @@ test.describe("the census sites sort the way the census said a person needs", ()
     await expect.poll(() => valuesOf(panel, "title"), { message: "the feed did not return to the order it arrived in" }).toEqual(arrival);
   });
 
+  test("Refresh keeps the feed's filter and sort, and what was typed into a form", async ({ page }) => {
+    // Every refresh -- the button, and the one each action ends with -- replaced the page with
+    // a loading screen, so every tab unmounted: the feed's filter and sort, and a half-typed
+    // rule, went back to where they start.
+    const source = `grid-refresh-${Date.now()}`;
+    for (const severity of ["low", "critical", "medium"]) {
+      await settled(await page.request.post("/ops/events/ingest", { data: {
+        source, event_type: "grid.refresh", severity, title: `Refresh ${severity}`
+      } }));
+    }
+    await page.goto("/workspace/ops");
+    const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+    const refreshed = async () => {
+      const summary = page.waitForResponse((response) => new URL(response.url()).pathname === "/ops/summary");
+      await refresh.click();
+      await summary;
+      await expect(refresh, "the refresh did not finish").toBeEnabled();
+    };
+    const panel = panelTitled(page, "Live Operational Feed");
+    await filterTo(panel, "source", source);
+    await expect(panel.locator("tbody tr")).toHaveCount(3);
+    const severity = header(panel, "severity");
+    await severity.getByRole("button").click();
+    await expect(severity).toHaveAttribute("aria-sort", "descending");
+
+    await refreshed();
+    await expect(severity, "Refresh took the feed's sort off").toHaveAttribute("aria-sort", "descending");
+    await expect(panel.locator("tbody tr"), "Refresh took the feed's filter off").toHaveCount(3);
+    await expect.poll(() => valuesOf(panel, "severity")).toEqual(["critical", "medium", "low"]);
+
+    await page.getByRole("button", { name: "Alerts", exact: true }).click();
+    const ruleName = page.getByLabel("Alert rule name");
+    await ruleName.fill(`Typed before a refresh ${source}`);
+    await refreshed();
+    await expect(ruleName, "Refresh threw away a rule name that had not been sent").toHaveValue(`Typed before a refresh ${source}`);
+  });
+
   test.describe("in one locale and zone, so a text sort of the times is wrong the same way every run", () => {
     test.use({ locale: "en-US", timezoneId: "UTC" });
 

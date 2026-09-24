@@ -20,9 +20,12 @@ export function OpsWorkspace() {
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
   const act = async (label: string, task: () => Promise<void>) => { setBusy(label); setError(""); setNotice(""); try { await task(); setNotice(label); } catch (cause) { setError(cause instanceof Error ? cause.message : `${label} failed`); } finally { setBusy(""); } };
-  if (loading) return <LoadingState label="Loading operational control plane..." />;
+  // Only the first load replaces the page. A refresh -- the button, or the one every action
+  // ends with -- used to as well, so every tab unmounted: the feed's sort and filter and every
+  // form's typing went back to where they start. Now the page stays while its data reloads.
+  if (loading && !summary) return <LoadingState label="Loading operational control plane..." />;
   return <Page title="Operational Control Plane" subtitle="Events, alert evaluation, incidents, governed runbooks, reliability, and team notifications">
-    <div className="ops-topbar"><button onClick={() => void refresh()} disabled={!!busy}><RefreshCw size={15} />Refresh</button><button className="primary" onClick={() => void act("Alert rules evaluated", async () => { await evaluateAlerts(); await refresh(); })} disabled={!!busy}><Siren size={15} />Evaluate alerts</button></div>
+    <div className="ops-topbar"><button onClick={() => void refresh()} disabled={!!busy || loading} aria-busy={loading}><RefreshCw size={15} />Refresh</button><button className="primary" onClick={() => void act("Alert rules evaluated", async () => { await evaluateAlerts(); await refresh(); })} disabled={!!busy}><Siren size={15} />Evaluate alerts</button></div>
     <ErrorBanner message={error} />{notice ? <div className="inline-success" role="status">{notice}</div> : null}
     <div className="ops-metrics"><Metric label="Operational events" value={summary?.events || 0} /><Metric label="Open alerts" value={summary?.open_alerts || 0} /><Metric label="Open incidents" value={summary?.open_incidents || 0} /><Metric label="Pending approvals" value={summary?.pending_approvals || 0} /><Metric label="Unread notifications" value={summary?.unread_notifications || 0} /></div>
     <nav className="ops-tabs" aria-label="Operational control views">{TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
