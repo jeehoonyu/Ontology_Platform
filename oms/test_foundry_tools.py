@@ -161,11 +161,14 @@ assert "***" in str(masked), f"score should be masked for u2: {masked}"
 
 # ---------------------------------------------------------- 16. cipher
 ok(client.post("/cipher/channels", json={"id": "ch1", "display_name": "Channel", "mode": "encrypt", "key_ref": "k1"}), "cipher channel")
+# Operations run as the caller, who needs a licence of their own (R15). Here that is the local caller.
+me = os.getenv("LOCAL_AUTH_USER", "local-admin")
+ok(client.post("/cipher/encrypt", json={"channel_id": "ch1", "value": "secret"}), "cipher encrypt without a licence", expect=403)
+ok(client.post("/cipher/channels/ch1/licenses", json={"principal": me, "license_type": "data_manager"}), "cipher license")
 enc = ok(client.post("/cipher/encrypt", json={"channel_id": "ch1", "value": "secret"}), "cipher encrypt")
-ok(client.post("/cipher/channels/ch1/licenses", json={"principal": "u1"}), "cipher license")
-dec = ok(client.post("/cipher/decrypt", json={"channel_id": "ch1", "ciphertext": enc["ciphertext"], "principal": "u1"}), "cipher decrypt")
+dec = ok(client.post("/cipher/decrypt", json={"channel_id": "ch1", "ciphertext": enc["ciphertext"]}), "cipher decrypt")
 assert dec["value"] == "secret", dec
-ok(client.post("/cipher/decrypt", json={"channel_id": "ch1", "ciphertext": enc["ciphertext"], "principal": "u2"}), "cipher decrypt denied", expect=403)
+ok(client.post("/cipher/decrypt", json={"channel_id": "ch1", "ciphertext": enc["ciphertext"], "principal": "u2"}), "cipher decrypt naming another principal", expect=403)
 
 # ------------------------------------------------------- 17. marketplace
 ok(client.post("/devops/products", json={"id": "prod1", "display_name": "Control Tower"}), "product create")

@@ -17,6 +17,15 @@ Docs (palantir.com/docs/foundry/cipher):
 
 This module PRESERVES the original endpoints/behavior and ADDS the governance,
 justification, hashing, and canonical-wrapper features.
+
+Who is asking (R15 of GOAL_REPAIR_2026-08-23). Every operation authorizes the calling
+principal against a licence *that principal* holds on the channel. A request body used
+to name the principal instead: encrypt and hash skipped the check when it named nobody,
+decrypt let an administrator name anyone, and a licence id matched whoever held it.
+Granting a licence answered to `edit`, so an editor could issue themselves an `admin`
+licence and pass every check after it. Now the grant and channel creation require
+`administer`, the operations require `execute` and the caller's own licence, and a
+body may name the caller and no one else.
 """
 
 import binascii
@@ -45,6 +54,9 @@ LICENSE_TYPES = {"operational_user", "data_manager", "admin"}
 # operation -> set of license types permitted to run it
 OPERATION_PERMISSIONS = {
     "encrypt": {"data_manager", "admin"},
+    # A token is reversible through the vault (bulk decrypt), so issuing one is an
+    # encrypt-class operation.
+    "tokenize": {"data_manager", "admin"},
     "decrypt": {"operational_user", "data_manager", "admin"},
     "hash": {"operational_user", "data_manager", "admin"},
     "manage_channels": {"admin"},
@@ -137,8 +149,9 @@ class CipherLicenseRead(BaseModel):
 class EncryptRequest(BaseModel):
     channel_id: str
     value: str
-    # Caller identity used to authorize the operation against a license.
-    # May be a license id OR a principal. Optional to preserve legacy callers.
+    # The caller is who the authenticated request says. `principal` may repeat the
+    # caller's own id and is refused when it names anyone else; `license_id` narrows
+    # the check to one of the caller's own licences.
     license_id: Optional[str] = None
     principal: Optional[str] = None
 
@@ -150,6 +163,8 @@ class EncryptResponse(BaseModel):
 class TokenizeRequest(BaseModel):
     channel_id: str
     value: str
+    license_id: Optional[str] = None
+    principal: Optional[str] = None
 
 
 class TokenizeResponse(BaseModel):
@@ -172,7 +187,7 @@ class HashResponse(BaseModel):
 class DecryptRequest(BaseModel):
     channel_id: str
     ciphertext: str
-    principal: str
+    principal: Optional[str] = None
     # Required only when the channel sets require_justification=True (audited).
     justification: Optional[str] = None
     license_id: Optional[str] = None
@@ -193,48 +208,57 @@ def _get_channel_or_404(channel_id: str, db: Session) -> CipherChannel:
     return channel
 
 
-def _resolve_license(
-    channel_id: str,
-    db: Session,
-    license_id: Optional[str] = None,
-    principal: Optional[str] = None,
-) -> Optional[CipherLicense]:
-    """Resolve a CipherLicense for the channel via an explicit license id or a principal."""
-    q = db.query(CipherLicense).filter(CipherLicense.channel_id == channel_id)
-    if license_id:
-        return q.filter(CipherLicense.id == license_id).first()
-    if principal:
-        return q.filter(CipherLicense.principal == principal).first()
-    return None
+def caller_named(caller: production_auth.Principal, named: Optional[str]) -> None:
+    """A request may name its caller, and no one else."""
+    if named and named != caller.id:
+        raise HTTPException(
+            status_code=403,
+            detail=(f"Cipher operations are authorized for the calling principal '{caller.id}'; "
+                    f"a request may not name '{named}'"),
+        )
 
 
-def _authorize(
+def authorize(
     operation: str,
     channel_id: str,
     db: Session,
+    caller: production_auth.Principal,
     license_id: Optional[str] = None,
-    principal: Optional[str] = None,
+    named: Optional[str] = None,
 ) -> CipherLicense:
     """
-    Enforce that the caller holds a license whose TYPE permits `operation`.
-    Raises 403 when no license is found or its type does not permit the operation.
+    The caller's own licence on the channel that permits `operation`, or 403.
+
+    Only licences whose `principal` is the caller count; `license_id` narrows to one of
+    them and never reaches someone else's. A decrypt also needs `can_decrypt`.
     """
-    lic = _resolve_license(channel_id, db, license_id=license_id, principal=principal)
-    if not lic:
+    caller_named(caller, named)
+    query = db.query(CipherLicense).filter(
+        CipherLicense.channel_id == channel_id,
+        CipherLicense.principal == caller.id,
+    )
+    if license_id:
+        query = query.filter(CipherLicense.id == license_id)
+    held = query.all()
+    if not held:
         raise HTTPException(
             status_code=403,
-            detail=f"No Cipher license found for this channel to perform '{operation}'",
+            detail=f"Principal '{caller.id}' holds no Cipher license on this channel to perform '{operation}'",
         )
     permitted = OPERATION_PERMISSIONS.get(operation, set())
-    if lic.license_type not in permitted:
+    usable = [lic for lic in held
+              if lic.license_type in permitted and (operation != "decrypt" or lic.can_decrypt)]
+    if not usable:
+        types = sorted({lic.license_type for lic in held})
         raise HTTPException(
             status_code=403,
             detail=(
-                f"License type '{lic.license_type}' is not permitted to perform "
-                f"'{operation}' (requires one of {sorted(permitted)})"
+                f"License type {', '.join(repr(t) for t in types)} is not permitted to perform "
+                f"'{operation}' (requires one of {sorted(permitted)}"
+                + (" with decrypt enabled" if operation == "decrypt" else "") + ")"
             ),
         )
-    return lic
+    return usable[0]
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +266,9 @@ def _authorize(
 # ---------------------------------------------------------------------------
 
 @router.post("/cipher/channels", response_model=CipherChannelRead)
-def create_cipher_channel(body: CipherChannelCreate, db: Session = Depends(get_db)):
+def create_cipher_channel(body: CipherChannelCreate, db: Session = Depends(get_db),
+                          caller: production_auth.Principal = Depends(
+                              production_auth.require_permission("administer"))):
     if body.mode not in {"encrypt", "tokenize"}:
         raise HTTPException(status_code=422, detail="mode must be 'encrypt' or 'tokenize'")
     channel_id = body.id or uuid.uuid4().hex
@@ -259,6 +285,11 @@ def create_cipher_channel(body: CipherChannelCreate, db: Session = Depends(get_d
         created_at=int(time.time()),
     )
     db.add(channel)
+    db.add(models_action.AuditLog(
+        id=uuid.uuid4().hex, actor=caller.id, event_type="cipher.channel.created",
+        subject_type="cipher_channel", subject_id=channel_id,
+        payload={"mode": body.mode, "algorithm": body.algorithm},
+    ))
     db.commit()
     db.refresh(channel)
     return channel
@@ -274,7 +305,10 @@ def create_cipher_license(
     channel_id: str,
     body: CipherLicenseCreate,
     db: Session = Depends(get_db),
+    caller: production_auth.Principal = Depends(production_auth.require_permission("administer")),
 ):
+    """Grant `body.principal` a licence. Answers to `administer`: a licence is what every
+    operation checks, so whoever can issue one holds every operation."""
     _get_channel_or_404(channel_id, db)
     if body.license_type not in LICENSE_TYPES:
         raise HTTPException(
@@ -291,6 +325,12 @@ def create_cipher_license(
         created_at=int(time.time()),
     )
     db.add(lic)
+    db.add(models_action.AuditLog(
+        id=uuid.uuid4().hex, actor=caller.id, event_type="cipher.license.granted",
+        subject_type="cipher_channel", subject_id=channel_id,
+        payload={"license_id": license_id, "principal": body.principal,
+                 "license_type": body.license_type, "can_decrypt": body.can_decrypt},
+    ))
     db.commit()
     db.refresh(lic)
     return lic
@@ -301,19 +341,13 @@ def create_cipher_license(
 # ---------------------------------------------------------------------------
 
 @router.post("/cipher/encrypt", response_model=EncryptResponse)
-def encrypt_value(body: EncryptRequest, db: Session = Depends(get_db)):
+def encrypt_value(body: EncryptRequest, db: Session = Depends(get_db),
+                  caller: production_auth.Principal = Depends(
+                      production_auth.require_permission("execute"))):
     channel = _get_channel_or_404(body.channel_id, db)
     if channel.mode != "encrypt":
         raise HTTPException(status_code=422, detail="Channel mode is not 'encrypt'")
-
-    # Governance: encrypt requires a data_manager or admin license. Only enforce
-    # when the caller identifies itself (license_id/principal) so legacy callers
-    # that omit identity keep their original behavior.
-    if body.license_id or body.principal:
-        _authorize(
-            "encrypt", body.channel_id, db,
-            license_id=body.license_id, principal=body.principal,
-        )
+    authorize("encrypt", body.channel_id, db, caller, license_id=body.license_id, named=body.principal)
 
     inner = "enc:" + body.value.encode().hex()
     # Canonical wrapper: CIPHER::<rid>::<ciphertext>::CIPHER
@@ -322,17 +356,22 @@ def encrypt_value(body: EncryptRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/cipher/tokenize", response_model=TokenizeResponse)
-def tokenize_value(body: TokenizeRequest, db: Session = Depends(get_db)):
+def tokenize_value(body: TokenizeRequest, db: Session = Depends(get_db),
+                   caller: production_auth.Principal = Depends(
+                       production_auth.require_permission("execute"))):
     channel = _get_channel_or_404(body.channel_id, db)
     if channel.mode != "tokenize":
         raise HTTPException(status_code=422, detail="Channel mode is not 'tokenize'")
+    authorize("tokenize", body.channel_id, db, caller, license_id=body.license_id, named=body.principal)
     crc = binascii.crc32(body.value.encode()) & 0xFFFFFFFF
     token = "tok_" + format(crc, "08x")
     return TokenizeResponse(token=token)
 
 
 @router.post("/cipher/hash", response_model=HashResponse)
-def hash_value(body: HashRequest, db: Session = Depends(get_db)):
+def hash_value(body: HashRequest, db: Session = Depends(get_db),
+               caller: production_auth.Principal = Depends(
+                   production_auth.require_permission("execute"))):
     """Deterministic hash of a value, peppered by the channel key_ref. sha256|sha512."""
     channel = _get_channel_or_404(body.channel_id, db)
     if body.algorithm not in VALID_HASH_ALGORITHMS:
@@ -341,13 +380,8 @@ def hash_value(body: HashRequest, db: Session = Depends(get_db)):
             detail=f"algorithm must be one of {sorted(VALID_HASH_ALGORITHMS)}",
         )
 
-    # Governance: hashing is permitted to all license types, but a caller that
-    # identifies itself must still hold a license for this channel.
-    if body.license_id or body.principal:
-        _authorize(
-            "hash", body.channel_id, db,
-            license_id=body.license_id, principal=body.principal,
-        )
+    # Every licence type may hash, but only with a licence of the caller's own.
+    authorize("hash", body.channel_id, db, caller, license_id=body.license_id, named=body.principal)
 
     # Pepper with the channel's key reference so digests are channel-scoped yet
     # deterministic for identical (value, channel) pairs.
@@ -355,31 +389,6 @@ def hash_value(body: HashRequest, db: Session = Depends(get_db)):
     hasher = hashlib.sha256 if body.algorithm == "sha256" else hashlib.sha512
     digest = hasher(material).hexdigest()
     return HashResponse(algorithm=body.algorithm, digest=digest)
-
-
-def _decrypting_principal(principal, named: str | None) -> str:
-    """Whose decrypt licence is checked -- the caller's, not the body's.
-
-    Both decrypt paths looked up a `CipherLicense` whose `principal` column equals
-    a string taken from the request body, so the caller named themselves and the
-    check asked only whether *somebody* held a licence. Anyone who knew a
-    licensed principal's name could decrypt with it.
-
-    The caller's own identity is the answer. Naming a different principal is
-    delegation, which stays possible for `administer` because operational
-    recovery needs it, and is refused for everyone else. T3 of
-    GOAL_TENANCY_2026-08-27.
-    """
-    if not named or named == principal.id:
-        return principal.id
-    if principal.allows("administer"):
-        return named
-    from fastapi import HTTPException
-
-    raise HTTPException(
-        status_code=403,
-        detail=("decrypt is authorized for the calling principal; naming a different "
-                "principal requires the 'administer' permission"))
 
 
 @router.post("/cipher/decrypt", response_model=DecryptResponse)
@@ -395,23 +404,12 @@ def decrypt_value(body: DecryptRequest, db: Session = Depends(get_db),
     if channel.require_justification and (not body.justification or not body.justification.strip()):
         raise HTTPException(status_code=422, detail="justification is required to decrypt on this channel")
 
-    # Governance: a license must exist and permit decrypt for this principal.
-    lic = (
-        db.query(CipherLicense)
-        .filter(
-            CipherLicense.channel_id == body.channel_id,
-            CipherLicense.principal == _decrypting_principal(principal, body.principal),
-            CipherLicense.can_decrypt.is_(True),
-        )
-        .first()
-    )
-    if not lic:
-        raise HTTPException(status_code=403, detail="Principal does not have decrypt permission for this channel")
-    if lic.license_type not in OPERATION_PERMISSIONS["decrypt"]:
-        raise HTTPException(
-            status_code=403,
-            detail=f"License type '{lic.license_type}' is not permitted to decrypt",
-        )
+    # The caller's own licence. T3 of GOAL_TENANCY_2026-08-27 stopped a body naming
+    # just anyone, and kept naming another principal for `administer` as delegation.
+    # R15 removes that too: an administrator who must decrypt grants themselves a
+    # licence, which is audited, rather than borrowing someone else's.
+    lic = authorize("decrypt", body.channel_id, db, principal,
+                    license_id=body.license_id, named=body.principal)
 
     # Accept both the canonical wrapper and the legacy "enc:" form.
     inner = body.ciphertext
@@ -435,12 +433,13 @@ def decrypt_value(body: DecryptRequest, db: Session = Depends(get_db),
     db.add(
         models_action.AuditLog(
             id=uuid.uuid4().hex,
-            actor=body.principal,
+            actor=principal.id,
             event_type="cipher.decrypt",
             subject_type="cipher_channel",
             subject_id=body.channel_id,
             payload={
-                "principal": body.principal,
+                "principal": principal.id,
+                "license_id": lic.id,
                 "channel_id": body.channel_id,
                 "justification": body.justification,
                 "license_type": lic.license_type,

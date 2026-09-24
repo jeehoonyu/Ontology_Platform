@@ -64,14 +64,6 @@ def _require_channel(db: Session, channel_id: str):
     return ch
 
 
-def _can_decrypt(db: Session, channel_id: str, principal: str) -> bool:
-    return db.query(_cipher.CipherLicense).filter(
-        _cipher.CipherLicense.channel_id == channel_id,
-        _cipher.CipherLicense.principal == principal,
-        _cipher.CipherLicense.can_decrypt == True,  # noqa: E712
-    ).first() is not None
-
-
 class BulkTransformRequest(BaseModel):
     channel_id: str
     records: List[Dict[str, Any]]
@@ -108,11 +100,12 @@ def bulk_transform(body: BulkTransformRequest, db: Session = Depends(get_db),
                    principal: production_auth.Principal = Depends(
                        production_auth.require_permission("execute"))):
     _require_channel(db, body.channel_id)
-    # Bulk decryption is the single-value route in a loop, so it answers to the
-    # same rule: the caller's licence, not one named in the body.
-    if body.mode == "decrypt" and not _can_decrypt(
-            db, body.channel_id, _cipher._decrypting_principal(principal, body.principal)):
-        raise HTTPException(status_code=403, detail="principal lacks a decrypt license for this channel")
+    if body.mode not in ("encrypt", "tokenize", "decrypt"):
+        raise HTTPException(status_code=422, detail=f"Unknown mode '{body.mode}'")
+    # A bulk transform is the single-value route in a loop, so every mode answers to
+    # the same rule: the caller's own licence, never one named in the body. Encrypt
+    # and tokenize checked none at all. R15 of GOAL_REPAIR_2026-08-23.
+    _cipher.authorize(body.mode, body.channel_id, db, principal, named=body.principal)
 
     out: List[Dict[str, Any]] = []
     transformed = 0
@@ -138,7 +131,7 @@ def bulk_transform(body: BulkTransformRequest, db: Session = Depends(get_db),
             transformed += 1
         out.append(new)
 
-    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=body.principal or "system",
+    db.add(models_action.AuditLog(id=uuid.uuid4().hex, actor=principal.id,
                                   event_type=f"cipher.bulk.{body.mode}", subject_type="cipher_channel",
                                   subject_id=body.channel_id, payload={"field": body.field, "rows": transformed}))
     db.commit()

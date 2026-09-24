@@ -242,6 +242,7 @@ export type CipherChannel = {
   created_at: number;
 };
 
+export type CipherLicense = { id: string; channel_id: string; principal: string; license_type: string; can_decrypt: boolean; created_at: number };
 export type EncryptResult = { ciphertext: string };
 export type DecryptResult = { value: string };
 export type HashResult = { algorithm: string; digest: string };
@@ -261,10 +262,19 @@ export function createCipherChannel(body: {
   return postJson<CipherChannel>("/cipher/channels", body);
 }
 
+// Grants need `administer`. Every operation below runs as the signed-in caller, against a
+// licence the caller holds on the channel; none takes a principal (R15).
+export function grantCipherLicense(channelId: string, body: {
+  principal: string;
+  license_type: string;
+  can_decrypt?: boolean;
+}): Promise<CipherLicense> {
+  return postJson<CipherLicense>(`/cipher/channels/${encodeURIComponent(channelId)}/licenses`, body);
+}
+
 export function cipherEncrypt(body: {
   channel_id: string;
   value: string;
-  principal?: string;
   license_id?: string;
 }): Promise<EncryptResult> {
   return postJson<EncryptResult>("/cipher/encrypt", body);
@@ -273,7 +283,6 @@ export function cipherEncrypt(body: {
 export function cipherDecrypt(body: {
   channel_id: string;
   ciphertext: string;
-  principal: string;
   justification?: string;
   license_id?: string;
 }): Promise<DecryptResult> {
@@ -284,7 +293,6 @@ export function cipherHash(body: {
   channel_id: string;
   value: string;
   algorithm: string;
-  principal?: string;
   license_id?: string;
 }): Promise<HashResult> {
   return postJson<HashResult>("/cipher/hash", body);

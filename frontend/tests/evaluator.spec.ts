@@ -219,6 +219,41 @@ test("Resolve is offered for every open incident and no resolved or closed one",
   }
 });
 
+test("Cipher operations run as the signed-in caller, with a licence granted on the screen", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Runs once; the channel and licence are stateful.");
+  // R15: the forms took a principal to act as, so a caller could borrow anyone's licence, and
+  // an encrypt that named nobody checked none. Now the caller is whoever is signed in.
+  const channel = `browser_cipher_${Date.now()}`;
+  const created = await page.request.post("/cipher/channels", { data: {
+    id: channel, display_name: `Browser cipher ${channel}`, mode: "encrypt", key_ref: "kms:browser", require_justification: false
+  } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  await page.goto("/workspace/security");
+  await page.getByRole("button", { name: "Cipher", exact: true }).click();
+  const panel = (title: string) => page.locator(".panel").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+  await expect(page.getByLabel(/^Principal \(/), "a form still asks whom to act as").toHaveCount(0);
+
+  const encrypt = panel("Encrypt");
+  await encrypt.getByLabel("Channel (encrypt mode)").selectOption(channel);
+  await encrypt.getByLabel("Plaintext value").fill("browser secret");
+  await encrypt.getByRole("button", { name: "Encrypt", exact: true }).click();
+  await expect(page.locator(".error-state"), "an encrypt with no licence was not refused").toContainText("holds no Cipher license");
+
+  const grant = panel("Grant a Licence");
+  await expect(grant, "the screen does not say whom the operations run as").toContainText(/run as you \(\S+\)/);
+  await grant.getByLabel("Licence channel").selectOption(channel);
+  await grant.getByLabel("Licence type").selectOption("data_manager");
+  await grant.getByRole("button", { name: "Grant licence" }).click();
+  await expect(grant.getByRole("status")).toContainText(`Granted data_manager on ${channel} to`);
+
+  await encrypt.getByRole("button", { name: "Encrypt", exact: true }).click();
+  await expect(encrypt, "the caller's own licence did not authorize the encrypt").toContainText(`CIPHER::${channel}::`);
+  await encrypt.getByRole("button", { name: "Send to decrypt" }).click();
+  const decrypt = panel("Decrypt (justification audited)");
+  await decrypt.getByRole("button", { name: "Decrypt", exact: true }).click();
+  await expect(decrypt, "the caller's own licence did not authorize the decrypt").toContainText("browser secret");
+});
+
 test("command palette supports keyboard navigation", async ({ page }) => {
   await page.goto("/workspace/command-center");
   await page.keyboard.press("Control+K");

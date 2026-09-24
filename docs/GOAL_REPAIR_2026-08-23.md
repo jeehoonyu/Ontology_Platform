@@ -131,7 +131,7 @@ cannot close:
   elsewhere, so an editor can re-home another project's object type.
 - **`cipher`**: `POST /cipher/decrypt` authorizes off a principal named in the request body, and
   `/cipher/encrypt` and `/cipher/hash` skip their licence check entirely when the caller supplies
-  neither `license_id` nor `principal`.
+  neither `license_id` nor `principal`. *Closed 2026-09-23; see "R15: what each finding became".*
 - **`security_propagation`**: `DELETE /security/resource-markings/{id}` strips a mandatory access
   marking, and its only check is opt-in on a caller-supplied query parameter.
 
@@ -540,6 +540,63 @@ exactly the types that had been edited. And a property retired with `status: "ar
 kept its `required` flag, so retiring one made every later write fail against a schema
 nobody meant to apply. Enforcing the six constraints without those two would have been more
 validation and less checking.
+
+## R15: what each finding became
+
+Re-read against the code on 2026-09-23, before anything was changed. Three of the six had
+been closed by GOAL_TENANCY: `ontology_core` by T6, the unauthenticated listener by T4, and
+`slate_runtime` by T5. `automate_ops` had its approval gate from T5, but not its scope.
+`cipher` was half closed by T3, and the marking strip not at all.
+
+**`cipher`, 2026-09-23.** T3 had made decrypt check the caller's licence, but an
+administrator could still name anyone. Encrypt and hash checked no licence when the body
+named nobody. A licence id matched whoever held it. And granting a licence answered only to
+the `edit` a middleware inferred. An operator gave themselves an `admin` licence (200) and
+then decrypted with it (200): the licence gate checked for exactly what anyone could issue
+themselves. The owner decided (decision D) to close it the way decrypt was closed, accepting
+that a call naming no identity now gets 403 instead of 200.
+- **Who may grant.** Granting a licence and creating a channel need `administer`, and both
+  are audited with the caller's id.
+- **Who may operate.** Encrypt, hash, decrypt and tokenize need `execute` and a licence of
+  the caller's own that permits the operation. The bulk transform needs the same, in every
+  mode.
+- **What a body may say.** A body may name the caller and no one else, so a client that
+  sends its own id keeps working and one that names someone else is refused. A `license_id`
+  narrows to one of the caller's own licences. The decrypt and bulk-transform audits name
+  the caller.
+- **Tokenize.** It was not named in the finding and had the same hole. It now takes
+  encrypt's licence types, because a token is reversible through the vault.
+- **The Security screen.** Its forms asked whom to act as. They now run as the signed-in
+  caller, and a new Grant a Licence panel issues one, defaulting to that caller.
+- **Proven by** `oms/test_cipher.py`, rewritten to act as real callers: 51 assertions. An
+  operator cannot create a channel or grant themselves an `admin` licence. Each operation
+  is refused without the caller's own licence, even when the body names a licensed
+  principal or quotes another's licence id. An administrator can no longer decrypt on
+  someone else's licence. Every grant, and the one authorized decrypt, is audited with its
+  caller. `test_foundry_tools.py` and `test_secondary_tools2.py` now grant the local caller
+  a licence first, and pass.
+- **The browser test.** `Cipher operations run as the signed-in caller, with a licence
+  granted on the screen`, in `evaluator.spec.ts`. The screen must ask no one's principal,
+  and an encrypt without a licence must be refused. It then grants a `data_manager` licence
+  from the screen, encrypts, and decrypts.
+- **Negative runs.** Eight backend mutations each failed at their named assertion:
+  - the grant answering to anyone;
+  - channel creation answering to anyone;
+  - encrypt checking only when the body names someone;
+  - a body naming anyone;
+  - a licence id reaching whoever holds it;
+  - administer delegating decrypt again;
+  - tokenize checking no licence;
+  - the bulk transform checking none.
+
+  One browser mutation, a grant that does not default to the caller, failed at the encrypt
+  that followed it. Restored, all three sources are byte for byte what they were.
+- **The census.** `audit_auth_coverage` falls from 16 unauthorized mutating handlers to 11,
+  and its ceiling with it.
+- **Not closed here.** The encryption is still hex, and `GET /cipher/channels` still
+  returns `key_ref`, the hash pepper, to any viewer. This change closes authorization, not
+  confidentiality. Licences granted before it under free-text names match no signed-in
+  principal, so they now authorize nothing until re-granted to a real id.
 
 ## Non-completion rule
 

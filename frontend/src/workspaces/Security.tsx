@@ -10,6 +10,7 @@ import {
   StatusBadge
 } from "../components/data/DataDisplay";
 import { useAsyncState } from "../hooks/useAsyncState";
+import { getAuthSession } from "../api/authApi";
 import { classNames } from "../utils/format";
 import {
   assignResourceMarking,
@@ -19,6 +20,7 @@ import {
   cipherEncrypt,
   cipherHash,
   createCipherChannel,
+  grantCipherLicense,
   createClassification,
   createClearance,
   createMarking,
@@ -852,11 +854,18 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
     algorithm: "AES-GCM",
     require_justification: true
   });
-  const [encrypt, setEncrypt] = useState({ channel_id: "", value: "", principal: "" });
+  // Every operation runs as the signed-in caller, against a licence the caller holds on the
+  // channel. The forms took a principal to act as, which let a caller borrow anyone's licence,
+  // and an encrypt or hash that named nobody checked none (R15).
+  const session = useAsyncState(getAuthSession, []);
+  const me = session.value?.principal_id || "";
+  const [grant, setGrant] = useState({ channel_id: "", principal: "", license_type: "operational_user" });
+  const [granted, setGranted] = useState("");
+  const [encrypt, setEncrypt] = useState({ channel_id: "", value: "" });
   const [encryptResult, setEncryptResult] = useState<EncryptResult | null>(null);
-  const [decrypt, setDecrypt] = useState({ channel_id: "", ciphertext: "", principal: "", justification: "" });
+  const [decrypt, setDecrypt] = useState({ channel_id: "", ciphertext: "", justification: "" });
   const [decryptResult, setDecryptResult] = useState<DecryptResult | null>(null);
-  const [hash, setHash] = useState({ channel_id: "", value: "", algorithm: "sha256", principal: "" });
+  const [hash, setHash] = useState({ channel_id: "", value: "", algorithm: "sha256" });
   const [hashResult, setHashResult] = useState<HashResult | null>(null);
 
   const channelOptions = channels.value || [];
@@ -934,6 +943,48 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
           </div>
         </Panel>
       </div>
+      <Panel title="Grant a Licence">
+        <p className="panel-description">
+          Encrypt, hash and decrypt run as you{me ? <> (<strong>{me}</strong>)</> : null}, against a licence you hold on the
+          channel. Granting one needs the administer permission.
+        </p>
+        <div className="metadata-edit-grid">
+          <Field label="Channel">
+            <select aria-label="Licence channel" value={grant.channel_id} onChange={(event) => setGrant({ ...grant, channel_id: event.target.value })}>
+              <option value="">Choose channel</option>
+              {channelOptions.map((channel) => (
+                <option key={channel.id} value={channel.id}>
+                  {channel.display_name} ({channel.id})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Principal">
+            <input aria-label="Licence principal" value={grant.principal} placeholder={me} onChange={(event) => setGrant({ ...grant, principal: event.target.value })} />
+          </Field>
+          <Field label="Licence type">
+            <select aria-label="Licence type" value={grant.license_type} onChange={(event) => setGrant({ ...grant, license_type: event.target.value })}>
+              <option value="operational_user">operational_user (decrypt, hash)</option>
+              <option value="data_manager">data_manager (encrypt, tokenize, decrypt, hash)</option>
+              <option value="admin">admin (every operation)</option>
+            </select>
+          </Field>
+          <div className="button-row">
+            <button
+              disabled={!grant.channel_id || !(grant.principal || me)}
+              onClick={() =>
+                run(async () => {
+                  const licence = await grantCipherLicense(grant.channel_id, { principal: grant.principal || me, license_type: grant.license_type });
+                  setGranted(`Granted ${licence.license_type} on ${licence.channel_id} to ${licence.principal}`);
+                })
+              }
+            >
+              Grant licence
+            </button>
+          </div>
+        </div>
+        {granted ? <p role="status">{granted}</p> : null}
+      </Panel>
       <div className="two-col">
         <Panel title="Encrypt">
           <div className="metadata-edit-grid">
@@ -950,9 +1001,6 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
             <Field label="Plaintext value">
               <input value={encrypt.value} onChange={(event) => setEncrypt({ ...encrypt, value: event.target.value })} />
             </Field>
-            <Field label="Principal (optional, enforces license)">
-              <input value={encrypt.principal} onChange={(event) => setEncrypt({ ...encrypt, principal: event.target.value })} />
-            </Field>
             <div className="button-row">
               <button
                 disabled={!encrypt.channel_id || !encrypt.value}
@@ -961,8 +1009,7 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
                     setEncryptResult(
                       await cipherEncrypt({
                         channel_id: encrypt.channel_id,
-                        value: encrypt.value,
-                        principal: encrypt.principal || undefined
+                        value: encrypt.value
                       })
                     );
                   })
@@ -994,22 +1041,18 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
             <Field label="Ciphertext">
               <input value={decrypt.ciphertext} onChange={(event) => setDecrypt({ ...decrypt, ciphertext: event.target.value })} />
             </Field>
-            <Field label="Principal (needs decrypt license)">
-              <input value={decrypt.principal} onChange={(event) => setDecrypt({ ...decrypt, principal: event.target.value })} />
-            </Field>
             <Field label="Justification">
               <input value={decrypt.justification} onChange={(event) => setDecrypt({ ...decrypt, justification: event.target.value })} />
             </Field>
             <div className="button-row">
               <button
-                disabled={!decrypt.channel_id || !decrypt.ciphertext || !decrypt.principal}
+                disabled={!decrypt.channel_id || !decrypt.ciphertext}
                 onClick={() =>
                   run(async () => {
                     setDecryptResult(
                       await cipherDecrypt({
                         channel_id: decrypt.channel_id,
                         ciphertext: decrypt.ciphertext,
-                        principal: decrypt.principal,
                         justification: decrypt.justification || undefined
                       })
                     );
@@ -1044,9 +1087,6 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
               <option value="sha512">sha512</option>
             </select>
           </Field>
-          <Field label="Principal (optional, enforces license)">
-            <input value={hash.principal} onChange={(event) => setHash({ ...hash, principal: event.target.value })} />
-          </Field>
           <div className="button-row">
             <button
               disabled={!hash.channel_id || !hash.value}
@@ -1056,8 +1096,7 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
                     await cipherHash({
                       channel_id: hash.channel_id,
                       value: hash.value,
-                      algorithm: hash.algorithm,
-                      principal: hash.principal || undefined
+                      algorithm: hash.algorithm
                     })
                   );
                 })
@@ -1072,7 +1111,7 @@ function CipherSection({ refreshKey, onChange }: SectionProps) {
       <DeveloperEvidence title="Developer evidence: Cipher governance">
         <KeyValueGrid
           data={{
-            note: "encrypt requires data_manager/admin license; decrypt requires a can_decrypt license and (when the channel demands it) a justification; hashing accepts any license type.",
+            note: "every operation runs as the signed-in caller, with the execute permission and a licence the caller holds on the channel: encrypt and tokenize need data_manager or admin; decrypt needs a can_decrypt licence and, when the channel demands it, a justification; hashing accepts any licence type. Granting a licence needs administer.",
             license_endpoint: "POST /cipher/channels/{id}/licenses"
           }}
         />

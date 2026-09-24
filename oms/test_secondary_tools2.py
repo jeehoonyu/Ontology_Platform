@@ -36,19 +36,23 @@ keys = ok(client.get("/cipher/channels/ch/keys"), "keys")
 assert len(keys) == 2 and sum(1 for k in keys if k["active"]) == 1, keys
 
 rows = [{"id": 1, "ssn": "111-22-3333"}, {"id": 2, "ssn": "444-55-6666"}]
+# Every mode needs a licence of the caller's own (R15); the caller here is the local one.
+me = os.getenv("LOCAL_AUTH_USER", "local-admin")
+ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": rows, "field": "ssn", "mode": "encrypt"}), "bulk encrypt (no license)", expect=403)
+ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": rows, "field": "ssn", "mode": "decrypt"}), "bulk decrypt (no license)", expect=403)
+# grant license then encrypt and decrypt
+ok(client.post("/cipher/channels/ch/licenses", json={"principal": me, "license_type": "data_manager"}), "license")
 enc = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": rows, "field": "ssn", "mode": "encrypt"}), "bulk encrypt")
 assert all(r["ssn"].startswith("enc:") for r in enc["records"]), enc["records"]
-dec = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": enc["records"], "field": "ssn", "mode": "decrypt", "principal": "u1"}), "bulk decrypt (no license)", expect=403)
-# grant license then decrypt
-ok(client.post("/cipher/channels/ch/licenses", json={"principal": "u1"}), "license")
-dec2 = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": enc["records"], "field": "ssn", "mode": "decrypt", "principal": "u1"}), "bulk decrypt")
+ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": enc["records"], "field": "ssn", "mode": "decrypt", "principal": "u1"}), "bulk decrypt naming another principal", expect=403)
+dec2 = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": enc["records"], "field": "ssn", "mode": "decrypt"}), "bulk decrypt")
 assert dec2["records"][0]["ssn"] == "111-22-3333", dec2["records"]
 # tokenize is consistent + reversible via vault
 tok = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": rows, "field": "ssn", "mode": "tokenize"}), "tokenize")
 assert tok["records"][0]["ssn"].startswith("tok_"), tok
 tok_again = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": [rows[0]], "field": "ssn", "mode": "tokenize"}), "tokenize again")
 assert tok_again["records"][0]["ssn"] == tok["records"][0]["ssn"], "token must be consistent"
-detok = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": tok["records"], "field": "ssn", "mode": "decrypt", "principal": "u1"}), "detokenize")
+detok = ok(client.post("/cipher/bulk-transform", json={"channel_id": "ch", "records": tok["records"], "field": "ssn", "mode": "decrypt"}), "detokenize")
 assert detok["records"][0]["ssn"] == "111-22-3333", detok
 
 # ================= Security: markings propagation + access decision =================
