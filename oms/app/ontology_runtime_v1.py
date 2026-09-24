@@ -901,8 +901,11 @@ def bind_ontology_contract(
     return result
 
 
-def _property_specs(db: Session, object_type: models.ObjectType) -> tuple[Dict[str, Any], Optional[ontology_core.ObjectTypeProfile]]:
-    profile = db.get(ontology_core.ObjectTypeProfile, object_type.id)
+def _property_specs(db: Session, object_type: models.ObjectType,
+                    profiles: Optional[Dict[str, ontology_core.ObjectTypeProfile]] = None,
+                    ) -> tuple[Dict[str, Any], Optional[ontology_core.ObjectTypeProfile]]:
+    """`profiles` is every profile the caller needs, by object type id, read once."""
+    profile = profiles.get(object_type.id) if profiles is not None else db.get(ontology_core.ObjectTypeProfile, object_type.id)
     raw = profile.properties if profile and isinstance(profile.properties, dict) else (object_type.properties or {})
     return ({name: spec for name, spec in raw.items() if not str(name).startswith("__")}, profile)
 
@@ -917,12 +920,17 @@ def _upsert_resource(
     definition: Dict[str, Any],
     revision_id: Optional[str],
     object_type_id: Optional[str] = None,
+    known: Optional[Dict[tuple, "OntologyResourceDefinition"]] = None,
 ) -> OntologyResourceDefinition:
-    row = db.query(OntologyResourceDefinition).filter(
-        OntologyResourceDefinition.project_id == project_id,
-        OntologyResourceDefinition.resource_kind == kind,
-        OntologyResourceDefinition.resource_id == resource_id,
-    ).first()
+    """`known` is the project's resources by (kind, resource id), read once by the caller."""
+    if known is not None:
+        row = known.get((kind, resource_id))
+    else:
+        row = db.query(OntologyResourceDefinition).filter(
+            OntologyResourceDefinition.project_id == project_id,
+            OntologyResourceDefinition.resource_kind == kind,
+            OntologyResourceDefinition.resource_id == resource_id,
+        ).first()
     now = _now()
     if row:
         changed = row.definition != definition or row.display_name != display_name or row.status != "ACTIVE"
@@ -950,6 +958,8 @@ def _upsert_resource(
         updated_at=now,
     )
     db.add(row)
+    if known is not None:
+        known[(kind, resource_id)] = row
     return row
 
 
@@ -971,13 +981,26 @@ def materialize_semantic_definitions(
         object_types = [row for row in object_types if row.id in selected]
     revision_id = revision_id or _active_revision_id(db, project_id)
     now = _now()
+    # One read per table for the project, not one per object type, property and resource.
+    # Creating an action type re-materializes every definition in its project, and each
+    # lookup below was its own query: after the demo bootstrap one POST /action-types read
+    # property definitions 32 times and resources once per object type (suite-cost census,
+    # 2026-09-23). Unwritten rows are added to these maps as they are made.
+    known_properties = {row.id: row for row in db.query(OntologyPropertyDefinition).filter(
+        OntologyPropertyDefinition.project_id == project_id).all()}
+    known_resources = {(row.resource_kind, row.resource_id): row for row in db.query(OntologyResourceDefinition).filter(
+        OntologyResourceDefinition.project_id == project_id).all()}
+    type_ids = [row.id for row in object_types]
+    profiles = {row.object_type_id: row for row in db.query(ontology_core.ObjectTypeProfile).filter(
+        ontology_core.ObjectTypeProfile.object_type_id.in_(type_ids)).all()} if type_ids else {}
     active_property_ids: set[str] = set()
     counts: Dict[str, int] = {"object_types": 0, "properties": 0, "constraints": 0, "links": 0, "actions": 0, "dependencies": 0}
 
     for object_type in object_types:
-        specs, profile = _property_specs(db, object_type)
+        specs, profile = _property_specs(db, object_type, profiles)
         _upsert_resource(
             db,
+            known=known_resources,
             project_id=project_id,
             kind="object_type",
             resource_id=object_type.id,
@@ -997,7 +1020,7 @@ def materialize_semantic_definitions(
             spec = dict(raw_spec) if isinstance(raw_spec, dict) else {"base_type": str(raw_spec)}
             definition_id = _stable_id(project_id, object_type.id, property_name)
             active_property_ids.add(definition_id)
-            row = db.get(OntologyPropertyDefinition, definition_id)
+            row = known_properties.get(definition_id)
             base_type = str(spec.get("base_type") or spec.get("type") or "string")
             if not row:
                 row = OntologyPropertyDefinition(
@@ -1011,6 +1034,7 @@ def materialize_semantic_definitions(
                     updated_at=now,
                 )
                 db.add(row)
+                known_properties[definition_id] = row
             row.display_name = str(spec.get("display_name") or property_name)
             row.base_type = base_type
             row.required = bool(spec.get("required"))
@@ -1028,6 +1052,7 @@ def materialize_semantic_definitions(
             if constraints:
                 _upsert_resource(
                     db,
+                    known=known_resources,
                     project_id=project_id,
                     kind="constraint",
                     resource_id=f"{object_type.id}.{property_name}",
@@ -1062,7 +1087,7 @@ def materialize_semantic_definitions(
         if selected and not ({link.source_object_type_id, link.target_object_type_id} & selected):
             continue
         _upsert_resource(
-            db, project_id=project_id, kind="link_type", resource_id=link.id,
+            db, known=known_resources, project_id=project_id, kind="link_type", resource_id=link.id,
             display_name=link.display_name, revision_id=revision_id,
             definition={
                 "description": link.description,
@@ -1073,7 +1098,7 @@ def materialize_semantic_definitions(
         )
         counts["links"] += 1
         _upsert_resource(
-            db, project_id=project_id, kind="dependency", resource_id=f"link:{link.id}",
+            db, known=known_resources, project_id=project_id, kind="dependency", resource_id=f"link:{link.id}",
             display_name=f"Dependency for {link.display_name}", revision_id=revision_id,
             definition={"source": link.source_object_type_id, "target": link.target_object_type_id, "via": link.id},
         )
@@ -1084,7 +1109,7 @@ def materialize_semantic_definitions(
         if selected and target_types and not (set(target_types) & selected):
             continue
         _upsert_resource(
-            db, project_id=project_id, kind="action_type", resource_id=action.id,
+            db, known=known_resources, project_id=project_id, kind="action_type", resource_id=action.id,
             display_name=action.display_name, revision_id=revision_id,
             definition={"description": action.description, "parameters": action.parameters or {}, "rules": action.rules or {}, "target_object_types": target_types},
         )

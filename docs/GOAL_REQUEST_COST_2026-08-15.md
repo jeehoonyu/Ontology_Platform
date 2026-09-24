@@ -438,6 +438,32 @@ one targeted query. That is `/health/ready` again in miniature, and it is fixed.
   equivalence fixture missed both because it contained no crossed row; the audit missed the
   second because it silently matched nothing; the suite caught it because a restore is a
   real use of the data. **A fixture proves what it contains. A suite proves what it does.**
+
+- **Found by the census, 2026-09-23: `POST /action-types` read the ontology one row at a time.**
+  Re-running the suite-cost census to move the head to 0046 found this route at 32 repeats of
+  one statement, against a baseline of 11. The route was unchanged since the baseline. A test
+  added since, `test_command_center_counts.py`, created an action type in a project the demo
+  bootstrap had already filled, and that exposed it.
+  - **The cause.** Creating an action type re-materializes every definition in its project,
+    and `materialize_semantic_definitions` looked up each property definition, each object
+    type's profile and each resource definition with its own query. So the cost grew with the
+    ontology, not with the request.
+  - **The fix.** It now reads each of the three tables once for the project and works from
+    those maps, adding the rows it creates. Resources are keyed by kind and resource id, the
+    same match the per-row query made.
+  - **The effect.** In that test, the request fell from 76 statements and a worst repeat of 32
+    to 24 statements and 2.
+  - **Proven by** `oms/test_semantic_materialize_cost.py`, 21 assertions. It builds twelve
+    object types of five properties, and requires creating an action type to repeat no
+    statement more than twice. It requires the materialization to stay right: sixty
+    definitions, none twice, one resource per type. A second action type must bump no
+    unchanged version.
+  - **Negative runs.** Without the property preload, the request repeated a statement 60
+    times. With a query per resource, 13. With a read per profile, 12. A variant that kept the
+    preload but looked each property up with `db.get` passed, correctly: the preload had
+    already put every row in the session's identity map, so `db.get` asked the database
+    nothing. The ontology tests that exercise materialization pass, and the source is byte
+    for byte what it was after each run.
 ## What this is not
 
 Not a performance goal. Nothing here promises a route gets faster, and no threshold in it is
