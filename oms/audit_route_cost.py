@@ -1,9 +1,10 @@
 """What a workspace route costs to open, and a ceiling it may not exceed.
 
-`audit_route_payload` answers what the *bundle* costs -- bytes of JavaScript and
-CSS, computed statically from the build manifest. That is half the question. A
-user opening a screen also waits on the requests it issues once it is running,
-and nothing counted those. The map makes 25; the median screen makes 13.
+`audit_route_payload` answers what the *bundle* costs -- bytes of JavaScript,
+CSS and fonts, computed statically from the build manifest and `dist/`. That is
+half the question. A user opening a screen also waits on the requests it issues
+once it is running, and nothing counted those. The map makes 25; the median
+screen makes 13.
 
 Which of these three numbers may be gated was decided by measuring twice rather
 than by judgement, the way the suite-cost census had to demonstrate 695 of 695
