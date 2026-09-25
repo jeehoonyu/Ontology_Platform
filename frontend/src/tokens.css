@@ -18,8 +18,8 @@
  * are named and a default picked. A value that was not read says so.
  *
  * `docs/UI_CONFIG.md` says where each value was read and how it is used.
- * This file is not imported yet; `docs/GOAL_LOOK_2026-09-24.md` U3 wires it in,
- * after U1 counts the style table and U2 makes the payload gate see fonts.
+ * `main.tsx` imports this file before `styles.css` (`docs/GOAL_LOOK_2026-09-24.md`
+ * U3), after U1 counted the style table and U2 made the payload gate see fonts.
  * `audit_style_scope` reads styles.css alone and never sees this file, so it
  * holds custom properties and nothing else; `audit_style_tokens` refuses a class
  * or a plain declaration here.
@@ -507,8 +507,9 @@
      styles.css refers to seven custom properties that nothing defines, 39
      times (the Decision and Ops screens and .runtime-slo-row). Each such
      declaration is invalid at computed-value time, so the property computes as
-     unset (inherited or initial), and those screens draw no borders, grounds or
-     active-tab marks today. These aliases restore what each rule always meant.
+     unset (inherited or initial), and those screens drew no borders, grounds or
+     active-tab marks until U3 imported this file. These aliases restore what each
+     rule always meant.
      They are debt: in GOAL_LOOK U10's last commit the 39 call sites move to real
      token names and this block is deleted, without waiting for the plan's Tabs
      primitive. `audit_style_tokens` reports every use until then. */

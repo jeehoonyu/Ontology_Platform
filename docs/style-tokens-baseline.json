@@ -1,18 +1,10 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-25T03:43:10Z"
+    "recorded_at": "2026-09-25T20:49:02Z"
   },
   "note": "Custom properties referenced and defined by no imported stylesheet. Ceilings, not floors: each may fall and must never rise. U3 of GOAL_LOOK_2026-09-24 takes both to zero.",
-  "undefined_names": [
-    "--accent",
-    "--border",
-    "--line",
-    "--muted",
-    "--surface",
-    "--surface-strong",
-    "--text"
-  ],
-  "undefined_names_ceiling": 7,
-  "undefined_references_ceiling": 39
+  "undefined_names": [],
+  "undefined_names_ceiling": 0,
+  "undefined_references_ceiling": 0
 }

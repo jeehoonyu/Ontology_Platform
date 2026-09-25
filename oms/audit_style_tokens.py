@@ -11,16 +11,18 @@ count rather than a feeling.
 defines and no component sets inline is invalid at computed-value time, and the
 browser drops the whole declaration. `styles.css` does this 39 times, with seven
 names (`--border`, `--muted`, `--accent`, `--surface`, `--surface-strong`,
-`--text`, `--line`), which is why the Decision and Ops screens draw no borders,
-grounds or active-tab marks. A reference with a fallback, `var(--x, 4px)`,
-renders its fallback and is reported, not counted.
+`--text`, `--line`), which is why the Decision and Ops screens drew no borders,
+grounds or active-tab marks until U3 imported `tokens.css`. A reference with a
+fallback, `var(--x, 4px)`, renders its fallback and is reported, not counted.
+Once `tokens.css` is imported, its own reads count too: a typo on the right of an
+alias would drop every declaration the alias serves.
 
 "Live" is the word the first draft got wrong. `tokens.css` already defines all
-seven names, in an alias block written for U3, but nothing imports it yet. Counting
-every stylesheet under `frontend/src` read 0 undefined names on a tree where all
-39 declarations are still dropped. Only stylesheets something imports -- a TS or
-TSX `import "….css"`, or a `<link>` in `index.html` -- define anything here, and
-third-party sheets resolve through `node_modules`.
+seven names, in an alias block written for U3, and nothing imported it then.
+Counting every stylesheet under `frontend/src` read 0 undefined names on a tree
+where all 39 declarations were still dropped. Only stylesheets something imports
+-- a TS or TSX `import "….css"`, or a `<link>` in `index.html` -- define anything
+here, and third-party sheets resolve through `node_modules`.
 
 **Raw colour literals.** Hex of 3, 4, 6 or 8 digits and `rgb()`, `rgba()`,
 `hsl()`, `hsla()`, outside `tokens.css`: in stylesheet declaration values (never
@@ -37,9 +39,10 @@ exactly `"#add"` would count. Nothing in the tree is such a string today.
     token file would couple screens where nothing could see it.
   - *Gated:* `docs/STYLE_TOKENS.md` disagreeing with the source.
   - *Reported, not gated:* radius and height literals, uses of the legacy alias
-    names, and tokens nothing references. The look goal is not a rule that every
-    radius come from a token -- GOAL_UI_ENHANCEMENT J3 warned against a gate that
-    enforces uniformity -- so those are counts to read, not ceilings to meet.
+    names, and tokens nothing reads, directly or through another token (a token
+    only an unread token reads is not in effect). The look goal is not a rule
+    that every radius come from a token -- GOAL_UI_ENHANCEMENT J3 warned against a
+    gate that enforces uniformity -- so those are counts to read, not ceilings.
 
   python oms/audit_style_tokens.py
   python oms/audit_style_tokens.py --write         # regenerate the reference
@@ -224,6 +227,28 @@ def references(own_live: Iterable[Path], sources: Iterable[Path],
     return found
 
 
+_TOKEN_DECLARATION = re.compile(r"(?<![\w-])(--[A-Za-z0-9_-]+)\s*:\s*([^;]*)")
+
+
+def in_effect_tokens(text: str, read_outside: Set[str]) -> Set[str]:
+    """Tokens something outside tokens.css reads, directly or through other tokens.
+
+    `--accent: var(--text-selected)` puts --text-selected in effect only because
+    styles.css reads --accent; a token read only by a token nobody reads is not."""
+    reads: Dict[str, Set[str]] = {}
+    for block in _BLOCK.findall(_COMMENT_CSS.sub(" ", text)):
+        for name, value in _TOKEN_DECLARATION.findall(block):
+            reads.setdefault(name, set()).update(n for n, _ in _VAR.findall(value))
+    found = {name for name in read_outside if name in reads}
+    pending = list(found)
+    while pending:
+        for name in reads.get(pending.pop(), ()):
+            if name in reads and name not in found:
+                found.add(name)
+                pending.append(name)
+    return found
+
+
 def token_file_problems(text: str) -> List[str]:
     """tokens.css may hold custom properties on :root and nothing else."""
     body = _COMMENT_CSS.sub(" ", text)
@@ -268,6 +293,18 @@ def scan(src: Path = FRONTEND_SRC, index: Path = INDEX_HTML,
             continue
         undefined.setdefault(name, Counter())[where] += 1
 
+    # Once imported, tokens.css's own reads are in effect too: the alias block
+    # and every token built from another. A typo on the right of an alias would
+    # drop each declaration the alias serves, and nothing else would notice.
+    if tokens in live:
+        for name, where, has_fallback in references([tokens], [], root):
+            if name in defined:
+                continue
+            if has_fallback:
+                fallback[name] += 1
+                continue
+            undefined.setdefault(name, Counter())[where] += 1
+
     colours: Dict[str, int] = {}
     radii: Counter = Counter()
     heights = 0
@@ -291,10 +328,12 @@ def scan(src: Path = FRONTEND_SRC, index: Path = INDEX_HTML,
 
     token_names: List[str] = []
     token_problems: List[str] = []
+    in_effect: Set[str] = set()
     if tokens.exists():
         token_text = _read(tokens)
         token_names = sorted(set(_DEFINE_CSS.findall(_COMMENT_CSS.sub(" ", token_text))))
         token_problems = token_file_problems(token_text)
+        in_effect = in_effect_tokens(token_text, referenced)
 
     tokens_live = tokens in live
     return {
@@ -308,7 +347,7 @@ def scan(src: Path = FRONTEND_SRC, index: Path = INDEX_HTML,
         "heights": heights,
         "tokens_live": tokens_live,
         "token_count": len(token_names),
-        "tokens_unreferenced": (len([n for n in token_names if n not in referenced])
+        "tokens_unreferenced": (len([n for n in token_names if n not in in_effect])
                                 if tokens_live else None),
         "token_problems": token_problems,
     }
@@ -377,8 +416,8 @@ def render(found: Dict[str, Any]) -> str:
                  + ", ".join(f"`{n}` ×{c}" for n, c in alias.items()) + "). U10 moves these "
                  "call sites to real token names and deletes the alias block.")
     if found["tokens_live"]:
-        lines.append(f"- **Tokens nothing references:** {found['tokens_unreferenced']} of "
-                     f"{found['token_count']}.")
+        lines.append(f"- **Tokens nothing reads,** directly or through another token: "
+                     f"{found['tokens_unreferenced']} of {found['token_count']}.")
     else:
         lines.append(f"- **Tokens defined in `tokens.css`:** {found['token_count']}, none in "
                      f"effect until it is imported.")

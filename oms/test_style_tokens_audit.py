@@ -93,6 +93,26 @@ check(found["undefined"] == {}, "once imported, tokens.css defines --border")
 check(found["tokens_live"] is True, "tokens.css is imported")
 check(audit.totals(found)[2] == 0, "a colour inside tokens.css is the table, not a raw literal")
 
+# An imported tokens.css's own reads are in effect: a typo on the right of an
+# alias drops every declaration the alias serves.
+src, index, tokens = tree({
+    "src/main.tsx": 'import "./tokens.css";\nimport "./styles.css";\n',
+    "src/styles.css": ".a { color: var(--muted); border-color: var(--rule); }\n",
+    "src/tokens.css": (":root {\n  --text-muted: #5f6b7c;\n  --muted: var(--text-mutd);\n"
+                       "  --divider: #ccc;\n  --rule: var(--divider);\n  --gap: 4px;\n"
+                       "  --unused-a: var(--unused-b);\n  --unused-b: 2px;\n}\n"),
+    "index.html": "<html></html>\n",
+})
+found = audit.scan(src, index, tokens)
+check(found["undefined"] == {"--text-mutd": {"src/tokens.css": 1}},
+      f"a var() inside an imported tokens.css must name a defined property: {found['undefined']}")
+# In effect: --muted and --rule (styles.css reads them) and --divider (through
+# --rule); --text-mutd is undefined, not a token. Not: --text-muted, --gap, and
+# --unused-a/--unused-b, which only each other read.
+check(found["tokens_unreferenced"] == 4,
+      f"a token only another in-effect token reads is in effect, and one read only by "
+      f"an unread token is not: {found['tokens_unreferenced']} unread, expected 4")
+
 src, index, tokens = tree({
     "src/main.tsx": 'import "./styles.css";\n',
     "src/Pane.tsx": 'const s = { "--slot-width": `${size}px` };\n',
