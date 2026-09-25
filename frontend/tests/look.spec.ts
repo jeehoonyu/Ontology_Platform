@@ -94,4 +94,42 @@ test.describe("GOAL_LOOK", () => {
     }
     expect.soft((await read(".decision-tabs button")).fontSize, "a button's text").toBe("14px");
   });
+
+  // U6. The original's default button: 30px, padding 4px 8px, radius 4, #f7f8f9,
+  // and --shadow-button's ring. The ring is drawn as the border (tokens.css says
+  // why), so it reads as a 1px border in the ring's colour plus the drop shadow.
+  // Primary takes the intent fill, and a deliberately small control keeps its size.
+  test("A default button is 30px tall with the original's ring shadow", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    await expect(page.getByRole("heading", { name: "Decision Intelligence" })).toBeVisible();
+    const box = (locator: ReturnType<Page["locator"]>) => locator.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        height: `${Math.round(node.getBoundingClientRect().height)}px`,
+        border: `${style.borderTopWidth} ${style.borderTopStyle} ${style.borderTopColor}`,
+        shadow: style.boxShadow, background: style.backgroundColor, color: style.color,
+        radius: style.borderTopLeftRadius, padding: style.padding,
+      };
+    });
+    expect.soft(await box(page.locator(".decision-topbar").getByRole("button", { name: "Refresh" })), "a default button")
+      .toEqual({
+        height: "30px", border: "1px solid rgba(69, 78, 91, 0.325)",
+        shadow: "rgba(17, 20, 24, 0.1) 0px 1px 2px 0px", background: "rgb(247, 248, 249)",
+        color: "rgb(28, 33, 39)", radius: "4px", padding: "4px 8px",
+      });
+    const primary = await box(page.getByRole("button", { name: "Evaluate risk" }));
+    expect.soft({ background: primary.background, color: primary.color, height: primary.height }, "a primary button")
+      .toEqual({ background: "rgb(45, 114, 210)", color: "rgb(255, 255, 255)", height: "30px" });
+
+    // The canvas pane is wide at 1280, so its controls are in its header rather
+    // than behind ⋯ (the library pane, at 220px, always uses the menu).
+    await page.goto("/workspace/pipeline");
+    const collapse = page.getByRole("button", { name: "Collapse Pipeline" });
+    await expect(collapse).toBeVisible();
+    const small = parseFloat((await box(collapse)).height);
+    expect.soft(small, "a pane control was raised to the control height").toBeLessThan(30);
+    // The canvas toolbar is a dense row of text actions: the original's small size.
+    expect.soft((await box(page.getByRole("button", { name: "Select all" }))).height,
+                "a canvas tool is the small button").toBe("24px");
+  });
 });

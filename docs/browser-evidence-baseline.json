@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "fc0602d830a71d77ee8ead297fed7de93e8497560bcb1dcc9ff49b3cce927eb8",
+    "bundle_source_hash": "4e244680036f442401720dcc328672788616e1f262065db381eb42ae6d2c27b7",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-25T22:29:49Z",
+    "recorded_at": "2026-09-25T23:20:50Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,42 +15,43 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 229,
+      "ran": 230,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 208
+      "skipped": 209
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 207
+      "skipped": 208
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 208
+      "skipped": 209
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 208
+      "skipped": 209
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 208
+      "skipped": 209
     }
   },
   "tests": {
     "desktop-1280 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
+    "desktop-1280 :: A default button is 30px tall with the original's ring shadow": "ran",
     "desktop-1280 :: AIP agent runtime exposes durable policy and citation evidence": "ran",
     "desktop-1280 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "ran",
     "desktop-1280 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "ran",
@@ -285,6 +286,7 @@
     "desktop-1280 :: workshop is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: zoom reaches its bounds and stops there": "ran",
     "laptop-1366 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
+    "laptop-1366 :: A default button is 30px tall with the original's ring shadow": "skipped",
     "laptop-1366 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "laptop-1366 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "laptop-1366 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -519,6 +521,7 @@
     "laptop-1366 :: workshop is aligned, human-readable, and accessible": "ran",
     "laptop-1366 :: zoom reaches its bounds and stops there": "skipped",
     "mobile-375 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
+    "mobile-375 :: A default button is 30px tall with the original's ring shadow": "skipped",
     "mobile-375 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "mobile-375 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "mobile-375 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -753,6 +756,7 @@
     "mobile-375 :: workshop is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: zoom reaches its bounds and stops there": "skipped",
     "tablet-1024 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
+    "tablet-1024 :: A default button is 30px tall with the original's ring shadow": "skipped",
     "tablet-1024 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "tablet-1024 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-1024 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -987,6 +991,7 @@
     "tablet-1024 :: workshop is aligned, human-readable, and accessible": "ran",
     "tablet-1024 :: zoom reaches its bounds and stops there": "skipped",
     "tablet-768 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
+    "tablet-768 :: A default button is 30px tall with the original's ring shadow": "skipped",
     "tablet-768 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "tablet-768 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-768 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -1221,6 +1226,7 @@
     "tablet-768 :: workshop is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: zoom reaches its bounds and stops there": "skipped",
     "wide-1600 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
+    "wide-1600 :: A default button is 30px tall with the original's ring shadow": "skipped",
     "wide-1600 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "wide-1600 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "wide-1600 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",

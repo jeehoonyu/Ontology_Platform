@@ -377,6 +377,12 @@
   --control-icon-color: #5f6b7c;
   --control-icon-gap: 7px;                   /* measured on menu items; assumed for buttons */
   --button-bg: #f7f8f9;                      /* default button: fill + --shadow-button */
+  /* SHIP CHOICE: --shadow-button's two parts, for a stylesheet that draws the ring
+     as the border. About a hundred rules in styles.css recolour or remove a
+     button's border (selected rows, tabs, chips); drawn as an inset shadow, the
+     ring would sit inside every one of them. Same colour, same place, same look. */
+  --button-ring: rgba(69, 78, 91, 0.325);
+  --shadow-button-drop: 0 1px 2px 0 rgba(17, 20, 24, 0.1);
   --button-bg-dark: #404854;
   --input-bg: #ffffff;
   --input-padding: 0 8px;                    /* Blueprint's default, not read live; 0 8px 0 30px with a leading icon (Files search) */

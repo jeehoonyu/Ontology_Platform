@@ -27,17 +27,77 @@ textarea {
   min-width: 0;
 }
 
-button,
-.legacy-button {
-  border: 1px solid #c6d0d7;
-  background: #ffffff;
-  color: #17344a;
-  border-radius: 7px;
-  padding: 8px 12px;
+/* The original's default button (GOAL_LOOK U6; UI_CONFIG "Controls"). It sits
+   in :where(), at no specificity, so every rule that styles a button in context
+   still wins. The ring is the border rather than --shadow-button's inset shadow:
+   rules below recolour or remove a button's border, and an inset ring would sit
+   inside each of them. The height is a minimum; some buttons wrap on purpose,
+   and the deliberately small ones (edge insert, pane controls, grips, splitter)
+   set `min-height: 0`. */
+:where(button, .legacy-button) {
+  min-height: var(--control-height);
+  border: 1px solid var(--button-ring);
+  background: var(--button-bg);
+  box-shadow: var(--shadow-button-drop);
+  color: var(--text-rest);
+  border-radius: var(--radius);
+  padding: var(--control-padding);
   cursor: pointer;
   text-decoration: none;
-  line-height: 1.2;
   white-space: nowrap;
+}
+
+:where(button, .legacy-button):focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
+/* Variants. Primary and success take their hover and active fills from the
+   intent table; `.primary-action` was a one-off primary and joins it. Disabled
+   stays the one rule below (opacity), since no disabled button was read. */
+:where(button, .legacy-button).primary,
+.primary-action {
+  background: var(--intent-primary-rest);
+  color: var(--intent-primary-foreground);
+}
+
+:where(button, .legacy-button).primary:hover,
+.primary-action:hover {
+  background: var(--intent-primary-hover);
+}
+
+:where(button, .legacy-button).primary:active,
+.primary-action:active {
+  background: var(--intent-primary-active);
+}
+
+:where(button, .legacy-button).success {
+  background: var(--intent-success-rest);
+  color: var(--intent-success-foreground);
+}
+
+:where(button, .legacy-button).success:hover {
+  background: var(--intent-success-hover);
+}
+
+:where(button, .legacy-button).success:active {
+  background: var(--intent-success-active);
+}
+
+:where(button, .legacy-button).minimal {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+:where(button, .legacy-button).minimal:hover {
+  background: var(--surface-minimal-hover);
+}
+
+:where(button, .legacy-button).outlined {
+  border-color: var(--border-strong);
+  background: transparent;
+  box-shadow: none;
 }
 
 button:hover,
@@ -101,6 +161,7 @@ button:hover,
 }
 
 .decision-tabs button {
+  box-shadow: none;
   min-height: 40px;
   flex: 0 0 auto;
   border: 0;
@@ -337,6 +398,7 @@ button:hover,
 }
 
 .ops-tabs button {
+  box-shadow: none;
   flex: 0 0 auto;
   min-height: 40px;
   border: 0;
@@ -589,6 +651,7 @@ button:disabled {
 }
 
 .nav-item {
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -774,6 +837,7 @@ button:disabled {
 }
 
 .builder-breakpoint-control button {
+  box-shadow: none;
   min-height: 28px;
   padding: 4px 7px;
   border: 0;
@@ -786,12 +850,6 @@ button:disabled {
   background: #fff;
   color: #176b8f;
   box-shadow: 0 1px 3px rgb(24 46 58 / 18%);
-}
-
-.primary-action {
-  background: #176b8f;
-  border-color: #176b8f;
-  color: #fff;
 }
 
 .operation-message {
@@ -813,6 +871,8 @@ button:disabled {
 }
 
 .operation-message button {
+  min-height: 0;
+  box-shadow: none;
   padding: 1px 5px;
   border: 0;
 }
@@ -1467,6 +1527,7 @@ button:disabled {
 }
 
 .artifact-review-tabs button {
+  box-shadow: none;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -2410,6 +2471,7 @@ pre {
 }
 
 .resource-row {
+  box-shadow: none;
   width: 100%;
   display: grid;
   gap: 3px;
@@ -2475,6 +2537,7 @@ pre {
 .workspace-header nav button,
 .manager-nav button,
 .bottom-drawer nav button {
+  box-shadow: none;
   border-color: transparent;
   background: transparent;
   border-radius: 0;
@@ -2641,6 +2704,7 @@ pre {
 
 .pane-controls button,
 .pane-controls select {
+  min-height: 0;
   font-size: 11px;
   padding: 2px 6px;
 }
@@ -2660,6 +2724,7 @@ pre {
 
 .pane-menu button,
 .pane-menu select {
+  min-height: 0;
   font-size: 11px;
   padding: 2px 6px;
 }
@@ -2691,6 +2756,8 @@ pre {
    this is left off: the drag works with a mouse and not at all with a finger.
    Written here before a finger measures it this time. */
 .pane-grip {
+  min-height: 0;
+  box-shadow: none;
   display: grid;
   place-items: center;
   width: 22px;
@@ -2704,6 +2771,8 @@ pre {
 }
 
 .pane-splitter {
+  min-height: 0;
+  box-shadow: none;
   flex: 0 0 auto;
   width: 7px;
   padding: 0;
@@ -2798,8 +2867,10 @@ pre {
 }
 
 .canvas-tools button {
+  /* The original's small button (GOAL_LOOK U6): a dense toolbar of text actions. */
+  min-height: var(--control-height-small);
   font-size: 12px;
-  padding: 2px 8px;
+  padding: var(--control-padding-small);
 }
 
 /* Saved, or how many node configurations are typed and not saved, as a button that
@@ -2810,6 +2881,8 @@ pre {
 }
 
 .unsaved-changes {
+  min-height: 0;
+  box-shadow: none;
   font-size: 12px;
   padding: 1px 8px;
   color: #6b5500;
@@ -3002,6 +3075,7 @@ pre {
 }
 
 .edge-insert {
+  min-height: 0;
   position: absolute;
   z-index: 3;
   width: 22px;
@@ -3484,6 +3558,7 @@ pre {
 }
 
 .node-context-menu button {
+  box-shadow: none;
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   align-items: center;
@@ -4331,6 +4406,7 @@ pre {
 }
 
 .segmented-control button {
+  box-shadow: none;
   min-height: 28px;
   padding: 4px 8px;
   color: #596770;
@@ -5101,6 +5177,8 @@ pre {
 }
 
 .drag-handle {
+  min-height: 0;
+  box-shadow: none;
   display: grid;
   place-items: center;
   width: 22px;
@@ -5385,6 +5463,7 @@ pre {
 }
 
 .recent-links button {
+  box-shadow: none;
   padding: 5px 7px;
   border: 0;
   background: transparent;
@@ -5418,6 +5497,7 @@ pre {
 }
 
 .auth-identity button {
+  box-shadow: none;
   width: 30px;
   height: 30px;
   padding: 0;
@@ -5468,6 +5548,7 @@ pre {
 }
 
 .command-palette > div > button {
+  box-shadow: none;
   width: 100%;
   display: grid;
   gap: 2px;
@@ -5762,6 +5843,7 @@ pre {
 .explorer-saved-list > button,
 .explorer-action-list > button,
 .map-layer-list > button {
+  box-shadow: none;
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -5869,6 +5951,7 @@ pre {
 }
 
 .facet-card-react > button {
+  box-shadow: none;
   position: relative;
   width: 100%;
   min-height: 30px;
@@ -5958,6 +6041,8 @@ pre {
 }
 
 .object-link {
+  min-height: 0;
+  box-shadow: none;
   max-width: 180px;
   padding: 0;
   overflow: hidden;
@@ -6097,6 +6182,7 @@ pre {
 }
 
 .map-feature-list button {
+  box-shadow: none;
   width: 100%;
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr);
@@ -6342,6 +6428,7 @@ pre {
 }
 
 .modelops-tabs button {
+  box-shadow: none;
   flex: 0 0 auto;
   min-height: 40px;
   border: 0;
