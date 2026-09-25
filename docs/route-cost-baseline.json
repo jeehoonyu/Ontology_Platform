@@ -1,74 +1,74 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-13T15:00:30Z"
+    "recorded_at": "2026-09-25T21:41:42Z"
   },
   "note": "What each workspace route costs to open, measured in a browser. Requests and bytes are gated; settled_ms is recorded and never gated, because two runs agreed on the first two for 16 of 16 routes and on timing for none of them.",
   "bytes_tolerance": 0.15,
   "routes": {
     "analytics": {
-      "requests": 11,
-      "bytes": 458159
+      "requests": 13,
+      "bytes": 508830
     },
     "automate": {
-      "requests": 11,
-      "bytes": 454790
+      "requests": 13,
+      "bytes": 505461
     },
     "command-center": {
-      "requests": 11,
-      "bytes": 455214
+      "requests": 13,
+      "bytes": 506124
     },
     "control-panel": {
-      "requests": 15,
-      "bytes": 568135
+      "requests": 17,
+      "bytes": 618990
     },
     "decision": {
-      "requests": 13,
-      "bytes": 469797
+      "requests": 15,
+      "bytes": 523003
     },
     "delivery": {
-      "requests": 16,
-      "bytes": 460545
+      "requests": 18,
+      "bytes": 511217
     },
     "graph": {
-      "requests": 14,
-      "bytes": 647588
+      "requests": 16,
+      "bytes": 699217
     },
     "imports": {
-      "requests": 12,
-      "bytes": 452665
+      "requests": 14,
+      "bytes": 503359
     },
     "map": {
-      "requests": 25,
-      "bytes": 924836
+      "requests": 27,
+      "bytes": 975603
     },
     "models": {
-      "requests": 15,
-      "bytes": 472855
+      "requests": 17,
+      "bytes": 523526
     },
     "object-explorer": {
-      "requests": 13,
-      "bytes": 458252
+      "requests": 15,
+      "bytes": 509861
     },
     "ontology": {
-      "requests": 20,
-      "bytes": 780491
+      "requests": 22,
+      "bytes": 834203
     },
     "ops": {
-      "requests": 20,
-      "bytes": 535150
+      "requests": 22,
+      "bytes": 586508
     },
     "pipeline": {
-      "requests": 15,
-      "bytes": 566693
+      "requests": 17,
+      "bytes": 634047
     },
     "security": {
-      "requests": 11,
-      "bytes": 471661
+      "requests": 13,
+      "bytes": 523548
     },
     "validation": {
-      "requests": 12,
-      "bytes": 571374
+      "requests": 14,
+      "bytes": 622045
     }
   }
 }

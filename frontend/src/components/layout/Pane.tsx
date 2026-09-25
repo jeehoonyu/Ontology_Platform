@@ -82,7 +82,8 @@ function Pane({ id, title, collapsed, anchored, hidden, actions, onMove, onColla
   // frame already has the menu rather than a clipped title. Narrow is below 280px,
   // or wherever the whole title and the three controls do not fit side by side:
   // at 320 the pipeline's library pane is 287px and `Add data / transforms` still
-  // lost 17 of its 125 pixels to them.
+  // lost 17 of its 125 pixels to them. That was in Segoe UI; in the bundled Source
+  // Sans 3 (GOAL_LOOK U4) the title is 111px and fits, and the test widens it.
   useLayoutEffect(() => {
     const element = section.current;
     if (!element) return;

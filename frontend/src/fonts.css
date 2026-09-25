@@ -1,0 +1,51 @@
+/* The face the original renders in: Source Sans 3, the open-source successor of
+ * the Source-Sans-Pro the original's text nodes name first. GOAL_LOOK U4, on the
+ * owner's decisions G (a) and L (a) of 2026-09-25.
+ *
+ * Source Sans 3 is Adobe's, under the SIL Open Font License 1.1
+ * (assets/fonts/LICENSE.txt, the package's licence file as downloaded; its first
+ * line names Google Inc., whose font build the package carries). The three latin
+ * subsets were downloaded once, on 2026-09-25, from the npm package
+ * @fontsource/source-sans-3@5.3.0 through
+ * https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.3.0/files/ :
+ *
+ *   source-sans-3-latin-400-normal.woff2  15,696 B
+ *     sha256 0f73f35e08cde0a2f10c109c6e01d71459d97e4099ecd9a50f1b6c0209e4de2b
+ *   source-sans-3-latin-400-italic.woff2  15,808 B
+ *     sha256 3c230c03425a2866e4b57954f3173fc149dba2634e9ee32c681b41d96c7f06fe
+ *   source-sans-3-latin-600-normal.woff2  15,668 B
+ *     sha256 14527d193b0e30bc32ef931549a246cdfd286573bb12869b7e052b8101a39d38
+ *   LICENSE.txt                            4,314 B
+ *     sha256 18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3
+ *
+ * Only 400 and 600 ship, as the original uses only those. With
+ * `font-synthesis: none`, a 650, 700 or 800 in styles.css renders at 600, the
+ * nearest weight there is. No unicode-range is declared: a character the latin
+ * subset lacks falls through, glyph by glyph, to the next family in
+ * --font-family. `index.html` preloads 400 and 600; the italic is fetched only if
+ * something renders italic.
+ */
+
+@font-face {
+  font-family: "Source Sans 3";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/source-sans-3-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Sans 3";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/source-sans-3-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Sans 3";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/source-sans-3-latin-600-normal.woff2") format("woff2");
+}

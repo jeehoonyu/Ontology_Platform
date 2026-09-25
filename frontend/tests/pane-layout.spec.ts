@@ -338,6 +338,22 @@ test.describe("a narrow pane's controls are one tap away", () => {
     // an open menu changes the pane's height, which measures it again. Measured
     // from the menu button alone, the controls would seem to fit, the menu would
     // close itself and the title would be clipped again.
+    //
+    // The title crowded its pane in Segoe UI (125px). In the bundled Source Sans 3
+    // (GOAL_LOOK U4) it is 111px and fits, and the pane never gets narrower than
+    // 287px, so no width crowds it any more. Longer titles still do, as U7's 14px
+    // pane titles will, so the title is widened here, before the first render, to
+    // the crowding it had. The rule under test is the pane's, not the font's.
+    await page.addInitScript(() => {
+      // Parsing ends before module scripts run, so the first render measures it.
+      const widen = () => {
+        const style = document.createElement("style");
+        style.textContent = ".pane-header strong { letter-spacing: 1px; }";
+        document.head.appendChild(style);
+      };
+      if (document.head) widen();
+      else document.addEventListener("readystatechange", widen, { once: true });
+    });
     await page.setViewportSize({ width: 320, height: 700 });
     await page.reload();
     await expect(menu(page), "a crowded pane at 320 offers no menu").toBeVisible();

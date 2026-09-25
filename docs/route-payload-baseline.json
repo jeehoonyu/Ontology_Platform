@@ -1,28 +1,28 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-25T20:49:36Z"
+    "recorded_at": "2026-09-25T21:27:01Z"
   },
   "note": "Bytes a browser downloads to render each workspace route from cold: the entry closure plus that route's lazy chunk closure. May fall, must never rise beyond the tolerance.",
   "tolerance_kb": 8,
-  "shared_closure_bytes": 463979,
+  "shared_closure_bytes": 511615,
   "routes": {
-    "Analytics": 474527,
-    "Automate": 471158,
-    "ControlPanel": 584683,
-    "DataMedia": 548064,
-    "DecisionWorkspace": 488700,
-    "Delivery": 476904,
-    "Fusion": 474365,
-    "MapWorkspace": 644985,
-    "ModelOps": 489092,
-    "ObjectExplorer": 475556,
-    "OntologyManager": 799292,
-    "OpsWorkspace": 551773,
-    "PipelineBuilder": 588652,
-    "PlatformGraph": 664648,
-    "Security": 489245,
-    "Vertex": 483753,
-    "VisualBuilder": 710361
+    "Analytics": 522163,
+    "Automate": 518794,
+    "ControlPanel": 632319,
+    "DataMedia": 595700,
+    "DecisionWorkspace": 536336,
+    "Delivery": 524540,
+    "Fusion": 522001,
+    "MapWorkspace": 692621,
+    "ModelOps": 536728,
+    "ObjectExplorer": 523192,
+    "OntologyManager": 846928,
+    "OpsWorkspace": 599409,
+    "PipelineBuilder": 636288,
+    "PlatformGraph": 712284,
+    "Security": 536881,
+    "Vertex": 531389,
+    "VisualBuilder": 757997
   }
 }

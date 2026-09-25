@@ -49,4 +49,30 @@ test.describe("GOAL_LOOK", () => {
     expect.soft(await styleOf(page, ".ops-topbar", ["border-top-width", "border-top-style", "border-top-color"]))
       .toEqual({ "border-top-width": "1px", "border-top-style": "solid", "border-top-color": ruleColour });
   });
+
+  // U4. fonts.css bundles Source Sans 3. A computed style names the family
+  // whether or not the face loaded, so this asks Chrome which font drew the
+  // glyphs: a title (bold, drawn by the 600 face) and a subtitle (the 400 face).
+  // The files' own names read "Source Sans 3 ExtraLight ...": they were cut from
+  // Google's variable font, whose default instance is ExtraLight; their OS/2
+  // weights are 400 and 600, and their style names say Regular and SemiBold.
+  test("The page text renders in the bundled face, not a system font", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    await expect(page.getByRole("heading", { name: "Decision Intelligence" })).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("DOM.enable");
+    await cdp.send("CSS.enable");
+    const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+    for (const [selector, style] of [[".page-header h1", "SemiBold"], [".page-header p", "Regular"]]) {
+      const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+      const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
+      expect.soft(fonts.map((font) => ({
+        bundled: font.isCustomFont,
+        family: font.familyName.startsWith("Source Sans 3") ? "Source Sans 3" : font.familyName,
+        style: font.postScriptName?.split("-").pop(),
+      })), `${selector}: ${JSON.stringify(fonts)}`)
+        .toEqual([{ bundled: true, family: "Source Sans 3", style }]);
+    }
+  });
 });
