@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "50c7218e332d89e458abe5449e20bc5109688967fc1cc03dd5a5396ebd25cd74",
+    "bundle_source_hash": "fc0602d830a71d77ee8ead297fed7de93e8497560bcb1dcc9ff49b3cce927eb8",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-25T22:13:20Z",
+    "recorded_at": "2026-09-25T22:29:49Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 226,
+      "ran": 229,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 205
+      "skipped": 208
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 204
+      "skipped": 207
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 205
+      "skipped": 208
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 205
+      "skipped": 208
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 205
+      "skipped": 208
     }
   },
   "tests": {
@@ -180,6 +180,9 @@
     "desktop-1280 :: graph is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: imports is aligned, human-readable, and accessible": "ran",
     "desktop-1280 :: investigations is aligned, human-readable, and accessible": "ran",
+    "desktop-1280 :: is as tall as its contents on a short page at 1024": "ran",
+    "desktop-1280 :: is as tall as its contents on a short page at 1100": "ran",
+    "desktop-1280 :: is as tall as its contents on a short page at 768": "ran",
     "desktop-1280 :: job telemetry says it holds the latest 50, and a cost sort says it ranks only those": "ran",
     "desktop-1280 :: legacy command-center renders when explicitly requested": "ran",
     "desktop-1280 :: legacy ontology renders when explicitly requested": "ran",
@@ -411,6 +414,9 @@
     "laptop-1366 :: graph is aligned, human-readable, and accessible": "ran",
     "laptop-1366 :: imports is aligned, human-readable, and accessible": "ran",
     "laptop-1366 :: investigations is aligned, human-readable, and accessible": "ran",
+    "laptop-1366 :: is as tall as its contents on a short page at 1024": "skipped",
+    "laptop-1366 :: is as tall as its contents on a short page at 1100": "skipped",
+    "laptop-1366 :: is as tall as its contents on a short page at 768": "skipped",
     "laptop-1366 :: job telemetry says it holds the latest 50, and a cost sort says it ranks only those": "skipped",
     "laptop-1366 :: legacy command-center renders when explicitly requested": "ran",
     "laptop-1366 :: legacy ontology renders when explicitly requested": "ran",
@@ -642,6 +648,9 @@
     "mobile-375 :: graph is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: imports is aligned, human-readable, and accessible": "ran",
     "mobile-375 :: investigations is aligned, human-readable, and accessible": "ran",
+    "mobile-375 :: is as tall as its contents on a short page at 1024": "skipped",
+    "mobile-375 :: is as tall as its contents on a short page at 1100": "skipped",
+    "mobile-375 :: is as tall as its contents on a short page at 768": "skipped",
     "mobile-375 :: job telemetry says it holds the latest 50, and a cost sort says it ranks only those": "skipped",
     "mobile-375 :: legacy command-center renders when explicitly requested": "ran",
     "mobile-375 :: legacy ontology renders when explicitly requested": "ran",
@@ -873,6 +882,9 @@
     "tablet-1024 :: graph is aligned, human-readable, and accessible": "ran",
     "tablet-1024 :: imports is aligned, human-readable, and accessible": "ran",
     "tablet-1024 :: investigations is aligned, human-readable, and accessible": "ran",
+    "tablet-1024 :: is as tall as its contents on a short page at 1024": "skipped",
+    "tablet-1024 :: is as tall as its contents on a short page at 1100": "skipped",
+    "tablet-1024 :: is as tall as its contents on a short page at 768": "skipped",
     "tablet-1024 :: job telemetry says it holds the latest 50, and a cost sort says it ranks only those": "skipped",
     "tablet-1024 :: legacy command-center renders when explicitly requested": "ran",
     "tablet-1024 :: legacy ontology renders when explicitly requested": "ran",
@@ -1104,6 +1116,9 @@
     "tablet-768 :: graph is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: imports is aligned, human-readable, and accessible": "ran",
     "tablet-768 :: investigations is aligned, human-readable, and accessible": "ran",
+    "tablet-768 :: is as tall as its contents on a short page at 1024": "skipped",
+    "tablet-768 :: is as tall as its contents on a short page at 1100": "skipped",
+    "tablet-768 :: is as tall as its contents on a short page at 768": "skipped",
     "tablet-768 :: job telemetry says it holds the latest 50, and a cost sort says it ranks only those": "skipped",
     "tablet-768 :: legacy command-center renders when explicitly requested": "ran",
     "tablet-768 :: legacy ontology renders when explicitly requested": "ran",
@@ -1335,6 +1350,9 @@
     "wide-1600 :: graph is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: imports is aligned, human-readable, and accessible": "ran",
     "wide-1600 :: investigations is aligned, human-readable, and accessible": "ran",
+    "wide-1600 :: is as tall as its contents on a short page at 1024": "skipped",
+    "wide-1600 :: is as tall as its contents on a short page at 1100": "skipped",
+    "wide-1600 :: is as tall as its contents on a short page at 768": "skipped",
     "wide-1600 :: job telemetry says it holds the latest 50, and a cost sort says it ranks only those": "skipped",
     "wide-1600 :: legacy command-center renders when explicitly requested": "ran",
     "wide-1600 :: legacy ontology renders when explicitly requested": "ran",

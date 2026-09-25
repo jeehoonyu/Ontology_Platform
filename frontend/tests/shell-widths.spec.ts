@@ -277,3 +277,37 @@ test.describe("the workspace stays put when the backend's status arrives", () =>
     expect(Math.abs(moved), `the workspace moved ${moved}px when the backend's status arrived`).toBeLessThanOrEqual(1);
   });
 });
+
+test.describe("the top bar at a narrow width", () => {
+  // At 1100 and below, `.app-shell` is one grid column with `min-height: 100vh`.
+  // With no row sizes, a page shorter than the window gave its spare height to
+  // both rows, so the top bar stretched: 70px on Ops at 768 where 60 is its
+  // content, and 92px once body text went to 14px (GOAL_LOOK U5) made the page
+  // shorter. The bar is as tall as its contents, however short the page.
+  const WINDOW = 10_000;
+  for (const width of [768, 1024, 1100]) {
+    test(`is as tall as its contents on a short page at ${width}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== "desktop-1280", "Runs once; this test sets its own viewport.");
+      // Taller than any page, so the page is short whatever earlier tests seeded.
+      await page.setViewportSize({ width, height: WINDOW });
+      await page.goto("/workspace/ops");
+      await expect(page.getByRole("heading", { name: "Operational Control Plane" })).toBeVisible();
+      const { bar, content, page: pageHeight } = await page.locator(".sidebar").evaluate((sidebar: HTMLElement) => {
+        const style = getComputedStyle(sidebar);
+        const tallest = Math.max(...[...sidebar.children].map((child) => (child as HTMLElement).offsetHeight));
+        return {
+          bar: sidebar.offsetHeight,
+          content: Math.round(tallest + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+                              + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)),
+          // Where the content ends, not the workspace: after the fix the workspace
+          // row fills the window by design.
+          page: Math.max(...[...document.querySelector(".workspace")!.children]
+            .map((child) => child.getBoundingClientRect().bottom + window.scrollY)),
+        };
+      });
+      expect(pageHeight, `the content ends at ${pageHeight}px, not above the window's ${WINDOW}, so this proves nothing`)
+        .toBeLessThan(WINDOW);
+      expect(bar, `the top bar is ${bar}px for ${content}px of contents`).toBeLessThanOrEqual(content + 1);
+    });
+  }
+});
