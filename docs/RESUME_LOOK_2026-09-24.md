@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-25, after U4. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-25, after U5. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -15,8 +15,11 @@ it before trusting it.
 | `e81cf4e` | Route cost fixed: the 663-byte `graphLayout` chunk folded into `dragdrop-vendor`, so graph and pipeline are back at their request ceilings |
 | `4302225` | **U3**: `tokens.css` imported before `styles.css`; the seven undefined names resolve; `frontend/tests/look.spec.ts` begins |
 | `00a620d` | **U4**: Source Sans 3 (400, 400 italic, 600) bundled from `@fontsource/source-sans-3@5.3.0` in `frontend/src/assets/fonts/`, with `fonts.css`, the preloads and `var(--font-family)` |
+| `32d53a0` | This note |
+| `0133bd8` | **U5**: body text 14px on an 18px line |
+| `5e4bbdb` | The narrow top bar kept to its contents on short pages (`.app-shell` rows `auto 1fr`), found while measuring U5 |
 
-GOAL_LOOK: **U1–U4 are Met; U5–U11 are Open.** Nothing has been pushed. Never push
+GOAL_LOOK: **U1–U5 are Met; U6–U11 are Open.** Nothing has been pushed. Never push
 tags.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
@@ -43,29 +46,35 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
    | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 661, held by U10 |
    | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
-   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 2 passed (needs a current build) |
+   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 3 passed (needs a current build) |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: U5, body text 14px on an 18px line
+## Next: U6, buttons and inputs
 
-The owner decided K (a). `:root` takes `font-size: var(--font-size-medium)` and
-`line-height: var(--line-height-default)`; explicit sizes stay. It gets a commit of its own.
-- **Before the change,** run `evaluator.spec.ts` twice on the U4 build and keep both screenshot
-  sets. What differs between those two runs is noise, and is masked when before and after are
-  compared. Don't reuse the census images: the face changed every one at U4, and one was taken
-  mid-load.
-- **The test:** `look.spec.ts::The body text is 14px on an 18px line`, shown to read 16px and
-  `normal` with the change reverted and dist rebuilt.
-- **Re-check** shell-widths, truncation-sites and the graph-editor fixtures (all in the full
-  run). Watch for tests whose premise is a text width, as pane-layout's crowded title was at U4.
-- **Then** run the full six-project run, re-record the browser-evidence baseline (the gates table
-  asks for it at U5), and re-check route payload and route cost; neither should move.
+This is two commits: buttons, then inputs. The values are in [`UI_CONFIG.md`](UI_CONFIG.md)
+and `tokens.css` (`--control-height`, `--button-bg`, `--shadow-button`, `--shadow-input`,
+`--shadow-input-focus`).
+- **The base `button` rule** (`styles.css`, around line 30) today has padding 8px 12px, radius
+  7, a 1px `#c6d0d7` border and `line-height: 1.2`. It takes `min-height: var(--control-height)`
+  (a minimum: some buttons wrap to two lines on purpose), padding 4px 8px, radius 4,
+  `--button-bg` with `--shadow-button`, and a focus ring.
+- **Variants:** primary, success, minimal and outlined. The 21 `className="primary"` sites get a
+  rule at last.
+- **Opt out in the same commit:** the edge insert, pane controls, grip, grid sort and node menu
+  buttons keep their sizes.
+- **Before the change,** record every button box on the evaluator routes (a before-and-after
+  census listed in the commit), and take the screenshot before set twice, as for U5.
+- **Tests:** `look.spec.ts::A default button is 30px tall with the original's ring shadow` and
+  `look.spec.ts::A text input is 30px with an inset ring and a blue focus ring`, each shown to
+  fail with its rule reverted.
+- **Watch** the tests whose premise is a width or a height: pane-layout's crowded title,
+  truncation-sites, shell-widths, the graph editor and the movement contract.
 
-After U5: U6 (buttons and inputs), U7 (headings, panels, panes, tables; pane titles at 14px is a
-sub-commit of its own), U8 (status tags), U9 (sidebar colours), and U10 (primitives; the aliases
-retire). U11 means writing the plan's A goal document.
+After U6: U7 (headings, panels, panes, tables; pane titles at 14px is a sub-commit of its own),
+U8 (status tags), U9 (sidebar colours), and U10 (primitives; the aliases retire). U11 means
+writing the plan's A goal document.
 
 ## How each step is measured
 
@@ -123,12 +132,12 @@ retire). U11 means writing the plan's A goal document.
 
 ## Numbers to hold on to
 
-| Measure | Value after U4 |
+| Measure | Value after U5 |
 | --- | --- |
-| Route payload | shared closure 511,615 B (U3 +13,218 B, U4 +47,636 B); every route re-baselined in the open |
+| Route payload | shared closure 511,615 B (U3 +13,218 B, U4 +47,636 B); U5 and the top-bar fix moved it by no more than the tolerance |
 | Route cost | 266 requests on open across 16 routes (U4 added the two preloaded faces to each) |
-| Six-project run | 356 passed (the census's 354 plus two look tests), 1,024 skipped, 0 failed, 0 flaky; baseline re-recorded at U4 |
-| Style tokens | 0 undefined names and references; 39 legacy alias uses (U10 retires them); 381 of 396 tokens unread |
+| Six-project run | 360 passed, 1,044 skipped, 0 failed, 0 flaky; baseline re-recorded after the top-bar fix (1,404 entries) |
+| Style tokens | 0 undefined names and references; 39 legacy alias uses (U10 retires them); 379 of 396 tokens unread |
 | Raw colours outside `tokens.css` | 661 (U10 lowers it) |
 
 ## Other open threads
