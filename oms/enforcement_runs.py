@@ -149,6 +149,11 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "purpose": "the pipeline canvas's gap to the original's graph controls is a kept table",
         "runs_in": "suite",
     },
+    "audit_style_tokens": {
+        "purpose": "a var() nothing defines drops its whole declaration, and a raw colour is "
+                   "one more value outside the table the look goal adopts",
+        "runs_in": "suite",
+    },
     "audit_route_coverage": {
         "purpose": "typed routes stay reachable through /api/v1",
         "runs_in": "suite",

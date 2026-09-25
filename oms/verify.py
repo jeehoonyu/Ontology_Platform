@@ -77,6 +77,7 @@ FAST_CHECKS = [
     "audit_table_truncation",
     "audit_movement_contract",
     "audit_graph_editor",
+    "audit_style_tokens",
     "validate_docs_conformance",
     "validate_schema_freeze",
     "validate_tier_b_evidence",
