@@ -299,8 +299,21 @@ text (not white on `rgb(108,156,223)`, 2.82:1), and muted text on dark is `#abb3
 ## Owner decisions
 
 Lettered from G, continuing [`GOAL_REPAIR`](GOAL_REPAIR_2026-08-23.md) (D, E) and
-[`GOAL_HONEST_UI`](GOAL_HONEST_UI_2026-09-11.md) (F). None is decided; each is recorded when made
-as "Decided YYYY-MM-DD: … (options offered: …)".
+[`GOAL_HONEST_UI`](GOAL_HONEST_UI_2026-09-11.md) (F). Each is recorded when made as "Decided
+YYYY-MM-DD: … (options offered: …)". Four were decided by the repository owner on 2026-09-25,
+each offered with the options in its row and its recommendation marked:
+
+- **Decided 2026-09-25: J (a)**, import `tokens.css` whole, re-baselining route payload in the
+  open (options offered: whole; only referenced tokens).
+- **Decided 2026-09-25: G (a) and L (a)**, Source Sans 3 400, 400 italic and 600, vendored as
+  latin woff2 with the licence and a checksum header, downloaded once with the owner's go-ahead
+  (options offered: Source Sans 3 vendored; Source Sans 3 from npm; system-ui with no files).
+- **Decided 2026-09-25: K (a)**, body text 14px on an 18px line, in its own commit (options
+  offered: 14px / 18px; keep 16px).
+- **Decided 2026-09-25: H (a)**, the sidebar takes the original's colours now and keeps 286px
+  (options offered: colour only; colour and 230px; leave it).
+
+I, M and N are not yet decided; GOAL_LOOK assumes their option (a). O–T wait for their waves.
 
 | Decision | Question | Options | Recommendation |
 | --- | --- | --- | --- |

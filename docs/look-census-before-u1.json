@@ -1,0 +1,578 @@
+{
+  "note": "The census GOAL_LOOK names 'before U1', recorded 2026-09-25 at 836a67d. The bundle is the one before U1: since 2709b61 the only frontend change is tokens.css, which nothing imports, and the rebuild produced the same asset names. U4 and U5 compare against it.",
+  "step": "before-u1",
+  "commit": "836a67d",
+  "bundle": {
+    "assets": [
+      "AgentRuntimePanel-BsYDML1m.js",
+      "Analytics-C-fTgolO.js",
+      "Automate-CYt3xNVX.js",
+      "ControlPanel-fe9eE6Ld.js",
+      "DataGrid-Zn_uDG3E.js",
+      "DataMedia-Bkzw1R3M.js",
+      "DecisionWorkspace-Dy9HiDML.js",
+      "Delivery-D45UN5NB.js",
+      "dragdrop-vendor-D75Pm4y-.js",
+      "Fusion-jfxGhEBE.js",
+      "graphLayout-BvdXNCX0.js",
+      "icons-vendor-DA1LW7UN.js",
+      "index-97a2ETvX.css",
+      "index-BnuhLJ6X.css",
+      "index-CwjlEeip.js",
+      "index-XSXVDZGu.js",
+      "MapWorkspace-C5iiAHKs.js",
+      "MapWorkspace-CIGW-MKW.css",
+      "ModelOps-BKcNDpwi.js",
+      "ObjectExplorer-DB332fKx.js",
+      "objectExplorerApi-BXVBixGV.js",
+      "OntologyManager-DeZ3RdrY.js",
+      "OpsWorkspace-OOd2GQ0r.js",
+      "Pane-DvP8EGq8.js",
+      "PipelineBuilder-CKDkZkc1.js",
+      "PipelineCanvas-AR1j9AVi.js",
+      "PlatformGraph-CZ5BuuMI.js",
+      "query-vendor-DsAkZLzI.js",
+      "Security-Bk04gXbk.js",
+      "Vertex-8zW9OfSw.js",
+      "VisualBuilder-BIPY0TI0.js",
+      "with-selector-B_uZ2XAe.js"
+    ],
+    "sha256": "c41e7df2e9865c93502336a568ed42819e6beb9f7dfeee3253e15e1ef24b8c82",
+    "provenance": {
+      "source_hash": "02d710cdb91345d1fd61a468d812ef8635d28b05b10406ff2df42be479b022ed",
+      "built_at": 1790368087,
+      "inputs": 74
+    }
+  },
+  "browser_run": {
+    "viewports": {
+      "mobile-375": {
+        "ran": 27,
+        "skipped": 201,
+        "failed": 0,
+        "flaky": 0
+      },
+      "tablet-768": {
+        "ran": 26,
+        "skipped": 202,
+        "failed": 0,
+        "flaky": 0
+      },
+      "tablet-1024": {
+        "ran": 26,
+        "skipped": 202,
+        "failed": 0,
+        "flaky": 0
+      },
+      "desktop-1280": {
+        "ran": 223,
+        "skipped": 5,
+        "failed": 0,
+        "flaky": 0
+      },
+      "laptop-1366": {
+        "ran": 26,
+        "skipped": 202,
+        "failed": 0,
+        "flaky": 0
+      },
+      "wide-1600": {
+        "ran": 26,
+        "skipped": 202,
+        "failed": 0,
+        "flaky": 0
+      }
+    },
+    "duration_ms": 486916.292,
+    "expected": 354,
+    "unexpected": 0,
+    "flaky": 0,
+    "skipped": 1014
+  },
+  "route_cost": {
+    "command-center": {
+      "requests": 11,
+      "bytes": 460105,
+      "settled_ms": 1328
+    },
+    "ontology": {
+      "requests": 20,
+      "bytes": 788184,
+      "settled_ms": 646
+    },
+    "pipeline": {
+      "requests": 16,
+      "bytes": 588730,
+      "settled_ms": 633
+    },
+    "object-explorer": {
+      "requests": 13,
+      "bytes": 463842,
+      "settled_ms": 635
+    },
+    "imports": {
+      "requests": 12,
+      "bytes": 457340,
+      "settled_ms": 650
+    },
+    "map": {
+      "requests": 25,
+      "bytes": 929584,
+      "settled_ms": 667
+    },
+    "models": {
+      "requests": 15,
+      "bytes": 477507,
+      "settled_ms": 644
+    },
+    "decision": {
+      "requests": 13,
+      "bytes": 476984,
+      "settled_ms": 628
+    },
+    "ops": {
+      "requests": 20,
+      "bytes": 540489,
+      "settled_ms": 690
+    },
+    "graph": {
+      "requests": 15,
+      "bytes": 653895,
+      "settled_ms": 636
+    },
+    "validation": {
+      "requests": 12,
+      "bytes": 576026,
+      "settled_ms": 720
+    },
+    "control-panel": {
+      "requests": 15,
+      "bytes": 572971,
+      "settled_ms": 635
+    },
+    "security": {
+      "requests": 11,
+      "bytes": 477529,
+      "settled_ms": 622
+    },
+    "analytics": {
+      "requests": 11,
+      "bytes": 462811,
+      "settled_ms": 636
+    },
+    "delivery": {
+      "requests": 16,
+      "bytes": 465198,
+      "settled_ms": 652
+    },
+    "automate": {
+      "requests": 11,
+      "bytes": 459442,
+      "settled_ms": 637
+    }
+  },
+  "screenshots": {
+    "where": "look-census/before-u1/screenshots (local, not in git)",
+    "count": 56,
+    "files": [
+      {
+        "file": "contract-issues-grid.png",
+        "bytes": 13538,
+        "width": 180,
+        "height": 529,
+        "sha256": "c6bc7cdf827b444f5648bfe4450fd1fc6c0796cdf5e22ecee7bc81ac4d5b4958"
+      },
+      {
+        "file": "desktop-1280-command-center.png",
+        "bytes": 112856,
+        "width": 1280,
+        "height": 900,
+        "sha256": "50d942612d2a8eb426ace21e1e40a2aa5faceaad7a24f9fd5ab0e2581397afff"
+      },
+      {
+        "file": "desktop-1280-decision.png",
+        "bytes": 94154,
+        "width": 1280,
+        "height": 900,
+        "sha256": "ea072cc490137b4571a05689f00c9f84d755d60ae2c790c24ef92ea5e21c60c7"
+      },
+      {
+        "file": "desktop-1280-industrial-connect-to-report.png",
+        "bytes": 106259,
+        "width": 1280,
+        "height": 900,
+        "sha256": "9675272ca214da9662adb6862ee16e51e311aa7f30f7db804b29f908eed3359f"
+      },
+      {
+        "file": "desktop-1280-map.png",
+        "bytes": 388722,
+        "width": 1280,
+        "height": 900,
+        "sha256": "ae462f1a7f1ac8e89bb0c996028e82fb1947a68900bc6854010559d7c3ee105d"
+      },
+      {
+        "file": "desktop-1280-models.png",
+        "bytes": 98259,
+        "width": 1280,
+        "height": 900,
+        "sha256": "3dac45f0259ce0a696403a199ab951622bd3697a706ef3c356d5db2f931536d8"
+      },
+      {
+        "file": "desktop-1280-object-explorer.png",
+        "bytes": 110697,
+        "width": 1280,
+        "height": 900,
+        "sha256": "7b9c88b98241fc424008c78b9192947f8067fedab81d51ac83dedec4c12817db"
+      },
+      {
+        "file": "desktop-1280-ontology.png",
+        "bytes": 115028,
+        "width": 1280,
+        "height": 900,
+        "sha256": "b1c970e4e54d6264bdf1ca000b78f878bc4229c9568a83fa19550c28d0598195"
+      },
+      {
+        "file": "desktop-1280-ops.png",
+        "bytes": 99481,
+        "width": 1280,
+        "height": 900,
+        "sha256": "95e7dbe40c126bd641737ad24ec463d71e39227865fa5657a9d6d9359253fcab"
+      },
+      {
+        "file": "desktop-1280-pipeline.png",
+        "bytes": 135479,
+        "width": 1280,
+        "height": 900,
+        "sha256": "12aa3f48b368823272ebabab0635ad896c2936dfcc22f98e20d0963f6ac25aa3"
+      },
+      {
+        "file": "desktop-1280-workshop.png",
+        "bytes": 143046,
+        "width": 1280,
+        "height": 900,
+        "sha256": "4279d8f2eb535a44466eb5b283a66ed9e078e541e66397ddea5fadaf733c86a3"
+      },
+      {
+        "file": "laptop-1366-command-center.png",
+        "bytes": 100971,
+        "width": 1366,
+        "height": 768,
+        "sha256": "d64bc34fd98e52bb2c4d597bf13014ce23ad7f5c2269acafb9252e3ac812eb78"
+      },
+      {
+        "file": "laptop-1366-decision.png",
+        "bytes": 90538,
+        "width": 1366,
+        "height": 768,
+        "sha256": "f930d1168b994840d4ce6816217c0308bc10951bdebd773f90ee91a1bea32f7a"
+      },
+      {
+        "file": "laptop-1366-map.png",
+        "bytes": 417267,
+        "width": 1366,
+        "height": 768,
+        "sha256": "e99be70a2badfb236c7f04237f4dd9b1f1633ad20e1d00fa9ae380e15f5d4575"
+      },
+      {
+        "file": "laptop-1366-models.png",
+        "bytes": 98822,
+        "width": 1366,
+        "height": 768,
+        "sha256": "235f63a3ce93168443275eb30a3df4b7e5bf0f7d645cb80d4b4e998725589146"
+      },
+      {
+        "file": "laptop-1366-object-explorer.png",
+        "bytes": 103979,
+        "width": 1366,
+        "height": 768,
+        "sha256": "9b6b3a79b7b9078ef2087f26c6ebbe47c7e6fed0da927d7eceaed80bd8f18667"
+      },
+      {
+        "file": "laptop-1366-ontology.png",
+        "bytes": 77857,
+        "width": 1366,
+        "height": 768,
+        "sha256": "99ef5571aaa4e2011cbfa138e6d44293127d1b380d45d87f433fc6d4efd9793e"
+      },
+      {
+        "file": "laptop-1366-ops.png",
+        "bytes": 97459,
+        "width": 1366,
+        "height": 768,
+        "sha256": "022a8ae08ded3aa7591086b2cd9cf0dda79cdef0ab09d549065298670eb5d5eb"
+      },
+      {
+        "file": "laptop-1366-pipeline.png",
+        "bytes": 119044,
+        "width": 1366,
+        "height": 768,
+        "sha256": "b2a80e4307e3944251e89d6573cc656ad5c3f1615fbb818131c31881cc0de359"
+      },
+      {
+        "file": "laptop-1366-workshop.png",
+        "bytes": 70936,
+        "width": 1366,
+        "height": 768,
+        "sha256": "6e0dbeec84ae9532f1bdb292bbbe10383235d779f6e9ae1c0a68357047b1ec95"
+      },
+      {
+        "file": "mobile-375-command-center.png",
+        "bytes": 240652,
+        "width": 375,
+        "height": 6160,
+        "sha256": "e2891341549a69174637ba7b0900f79e7083bb9c133f0e21c513fe37f2a86725"
+      },
+      {
+        "file": "mobile-375-decision.png",
+        "bytes": 63295,
+        "width": 375,
+        "height": 1855,
+        "sha256": "f3da768ad34fbec6ec8680e2948e1bc3c1237c8bf43b4697b5339e06d9004467"
+      },
+      {
+        "file": "mobile-375-map.png",
+        "bytes": 320321,
+        "width": 375,
+        "height": 2219,
+        "sha256": "5e17ec7c92bf049fc5676b59e22af1beade03eb61e76e909bf33931182bc3e83"
+      },
+      {
+        "file": "mobile-375-models.png",
+        "bytes": 71702,
+        "width": 375,
+        "height": 2041,
+        "sha256": "2e8a7ccc5d5ee4aea7d4488d97141b0f747ec6d39bef98cac2e5aa5d8ac93cab"
+      },
+      {
+        "file": "mobile-375-object-explorer.png",
+        "bytes": 58773,
+        "width": 375,
+        "height": 1524,
+        "sha256": "e3334dc0a1a9231d11f577466168ac8a66de8c8f58b7a2985822667e74d956f8"
+      },
+      {
+        "file": "mobile-375-ontology.png",
+        "bytes": 59910,
+        "width": 375,
+        "height": 1613,
+        "sha256": "fd71ca4813afae1f89e0a600db3a466757acea453b2b42639dd434268c1e6845"
+      },
+      {
+        "file": "mobile-375-ops.png",
+        "bytes": 55419,
+        "width": 375,
+        "height": 1602,
+        "sha256": "fe30e907514823f42c8e652331b89ef6ee249f308dbbd8ce9ca87e36e059fa7f"
+      },
+      {
+        "file": "mobile-375-pipeline.png",
+        "bytes": 147901,
+        "width": 375,
+        "height": 4776,
+        "sha256": "3fb5fbb925ab75feca869dff1ede9bd16c25e2c24fc59444580bea1c24b074c9"
+      },
+      {
+        "file": "mobile-375-workshop.png",
+        "bytes": 25232,
+        "width": 375,
+        "height": 916,
+        "sha256": "48f20078a9882d767e75206cce5892f7d609f6b4e5b2fa078ec2f0f06e9859f1"
+      },
+      {
+        "file": "tablet-1024-command-center.png",
+        "bytes": 254722,
+        "width": 1024,
+        "height": 4867,
+        "sha256": "be158ef3c36909b70f9c856ae5a44eba268aecdd33253306fde2d6df864446e4"
+      },
+      {
+        "file": "tablet-1024-decision.png",
+        "bytes": 64573,
+        "width": 1024,
+        "height": 996,
+        "sha256": "ca1307007df2e6b99056abe129860fe08631a744377650e72a63098469c7e0f4"
+      },
+      {
+        "file": "tablet-1024-map.png",
+        "bytes": 658218,
+        "width": 1024,
+        "height": 1334,
+        "sha256": "c7ca679925b4514d797d3c58566a4c38be858c87f5c7f5751a9001df1d70bd5c"
+      },
+      {
+        "file": "tablet-1024-models.png",
+        "bytes": 70942,
+        "width": 1024,
+        "height": 1022,
+        "sha256": "0a8af40d786086f494fbdea25ee1aa3e35c65880d22e26748289edb67c15859b"
+      },
+      {
+        "file": "tablet-1024-object-explorer.png",
+        "bytes": 61275,
+        "width": 1024,
+        "height": 844,
+        "sha256": "9db790d605b4bb2d0665a2942de1c5363cd541a3369eaa1bbfaba36f925b08a2"
+      },
+      {
+        "file": "tablet-1024-ontology.png",
+        "bytes": 68087,
+        "width": 1024,
+        "height": 1299,
+        "sha256": "e51c0e85388d49dd43d49de604d5ecf853dff3531a71e15014f9509ba40d23be"
+      },
+      {
+        "file": "tablet-1024-ops.png",
+        "bytes": 57278,
+        "width": 1024,
+        "height": 969,
+        "sha256": "b728bd6be91dc359948b87aa5fbd59acb691440a5a86a9c6e5dc122ef612040d"
+      },
+      {
+        "file": "tablet-1024-pipeline.png",
+        "bytes": 163275,
+        "width": 1024,
+        "height": 2487,
+        "sha256": "b1ae3360e43449b812bcc2a13823d053c4d23d638ddd4e463b8fe0d8efeabf76"
+      },
+      {
+        "file": "tablet-1024-workshop.png",
+        "bytes": 30177,
+        "width": 1024,
+        "height": 768,
+        "sha256": "71d921d2e154c94154649e1155b138c986314e68f77f2c68cbad2486249dd2da"
+      },
+      {
+        "file": "tablet-768-command-center.png",
+        "bytes": 249338,
+        "width": 768,
+        "height": 4951,
+        "sha256": "1b34fca4428efe6e045aadfce2fcfc8565fc5079955f2a1ca0ffb8ae77983810"
+      },
+      {
+        "file": "tablet-768-decision.png",
+        "bytes": 63376,
+        "width": 768,
+        "height": 1070,
+        "sha256": "3c16c7e96b596ad3afd5e2dd128fc94c4857af05d323d0cfd1cb33a05b18bc46"
+      },
+      {
+        "file": "tablet-768-map.png",
+        "bytes": 488654,
+        "width": 768,
+        "height": 1408,
+        "sha256": "ea481f0bdc6c1b1d61c09459da7407ee0a32043442f7de8a0108c3c4f846a5a8"
+      },
+      {
+        "file": "tablet-768-models.png",
+        "bytes": 72514,
+        "width": 768,
+        "height": 1096,
+        "sha256": "878976bf1e61dbc70a35ff4107ac5474e7119af9b996019396b28bc2590ab8f1"
+      },
+      {
+        "file": "tablet-768-object-explorer.png",
+        "bytes": 61339,
+        "width": 768,
+        "height": 1024,
+        "sha256": "249f67f878797e441c41158744baf5fbe7b4ac80d89e21cea471e7cf66a3cf01"
+      },
+      {
+        "file": "tablet-768-ontology.png",
+        "bytes": 66345,
+        "width": 768,
+        "height": 1299,
+        "sha256": "6da4d88aa918f3351d75bd548a4795372c31e327aca6049503cee92b02296e37"
+      },
+      {
+        "file": "tablet-768-ops.png",
+        "bytes": 57193,
+        "width": 768,
+        "height": 1043,
+        "sha256": "1a764e3e25685c960520c3b259e87e5cacfd4179db2337b8f539015fc8bc44bd"
+      },
+      {
+        "file": "tablet-768-pipeline.png",
+        "bytes": 124678,
+        "width": 768,
+        "height": 2318,
+        "sha256": "509d4f2d8a5f0eb813edef116efd8c26b55d9e7b9557eb8af578d1eec70abfa5"
+      },
+      {
+        "file": "tablet-768-workshop.png",
+        "bytes": 30561,
+        "width": 768,
+        "height": 1024,
+        "sha256": "65f65ad480450831c52ea7b290b200820e84eb33aa2bd8435656e16caf96280b"
+      },
+      {
+        "file": "wide-1600-command-center.png",
+        "bytes": 128148,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "11a738acfd4b3981f83c7ef87cfa9a0df181a854fbcfd732821e1b55d91353cf"
+      },
+      {
+        "file": "wide-1600-decision.png",
+        "bytes": 101042,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "70137aae3fbbeb25027e6bd877a54a63d38783b8279c26b979a84783467cd5af"
+      },
+      {
+        "file": "wide-1600-map.png",
+        "bytes": 761569,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "757da8236328371bb104da332f0bfc75fe894507c8ff5e2782c3e43cbde4c0c3"
+      },
+      {
+        "file": "wide-1600-models.png",
+        "bytes": 108949,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "a8886fcf2920f7c277c5a50d95f3d4409574e279120f56c40cd499d6e27e5324"
+      },
+      {
+        "file": "wide-1600-object-explorer.png",
+        "bytes": 133513,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "7b2083c16cd2ba0d8c4b4ae3ce40c002300f0ca696c706a6d89649659718c953"
+      },
+      {
+        "file": "wide-1600-ontology.png",
+        "bytes": 140133,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "5ade24297b76a6a313431501f63dd702ba3047f06e8a208e267d4b36043e1ab3"
+      },
+      {
+        "file": "wide-1600-ops.png",
+        "bytes": 86268,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "8f7e7d204428de51797b5b589ce3c76bb16c7b319737d51c34207f6cbf74c0b8"
+      },
+      {
+        "file": "wide-1600-pipeline.png",
+        "bytes": 150008,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "3758409cf6bcb389b6659b61463127836d3d003fa3d43583ef01dc0c11f71c1a"
+      },
+      {
+        "file": "wide-1600-workshop.png",
+        "bytes": 166175,
+        "width": 1600,
+        "height": 1000,
+        "sha256": "8996333bed38cb8535fca9e47948728062e1bc4dd6acd45e8c8aa9e67abd10b6"
+      }
+    ]
+  },
+  "verdicts": {
+    "fast_tier": "25 of 25 passed",
+    "browser_evidence": "PASS against docs/browser-evidence-baseline.json: 354 ran, 1014 skipped, 0 failed, 0 flaky",
+    "route_payload": "PASS: shared closure 450,142 B",
+    "route_cost": "FAIL, identical in two runs: graph 15 requests (ceiling 14) and pipeline 16 (ceiling 15). Both load assets/graphLayout-*.js, a 663 B chunk Rollup split out when 1f7fee5 (2026-09-23) moved columnLayout and layersOf into src/lib/graphLayout.ts, imported by PipelineBuilder and PlatformGraph."
+  }
+}
