@@ -1,0 +1,522 @@
+/*
+ * Design tokens, read from the product this one is modelled on.
+ *
+ * Values come from the live enrollment, read on 2026-09-24: the :root table from
+ * document.styleSheets, the rest with getComputedStyle on sixteen surfaces in
+ * fifteen captures (home, Quicksearch, Notifications, the Applications
+ * launcher, Files, a project folder, a dataset, Object Explorer home, an
+ * exploration, an Object View, a menu, a Workshop module at runtime, the
+ * Pipeline Builder, the Ontology Manager, an app landing page and a dialog),
+ * unless a line says SHIP CHOICE. A SHIP CHOICE is ours to make: a font we can
+ * bundle, a fallback, an alias for a name our stylesheet already uses.
+ *
+ * The original is Blueprint 6. Its :root carries 206 custom properties, 205 of
+ * them --bp-* in five families (emphasis, intent, palette, surface, typography);
+ * the first half of this file keeps that structure so a value can be traced.
+ * The second half is component values Blueprint does not publish as tokens,
+ * measured on the screens each comment names; where screens differ, the variants
+ * are named and a default picked. A value that was not read says so.
+ *
+ * `docs/UI_CONFIG.md` says where each value was read and how it is used.
+ * This file is not imported yet; `docs/GOAL_LOOK_2026-09-24.md` U3 wires it in,
+ * after U1 counts the style table and U2 makes the payload gate see fonts.
+ * `audit_style_scope` reads styles.css alone and never sees this file, so it
+ * holds custom properties and nothing else; `audit_style_tokens` refuses a class
+ * or a plain declaration here.
+ *
+ * Hairlines: every 1px border in the original computes as one device pixel
+ * (0.666667 CSS px at a 1.5 ratio) because Chromium snaps border widths;
+ * box-shadow rules (0 1px / 0 -1px) compute at 1 CSS px and are not snapped.
+ * A 1px border here gives the same result; do not write 0.5px.
+ */
+
+:root {
+  /* =================================================================== palette
+     All 87 steps, as the original's :root lists them. Step 3 is the rest
+     colour an intent uses; 1 and 2 are darker, 4 and 5 lighter. */
+  --palette-black: #111418;
+  --palette-white: #ffffff;
+  --palette-dark-gray-1: #1c2127;
+  --palette-dark-gray-2: #252a31;
+  --palette-dark-gray-3: #2f343c;
+  --palette-dark-gray-4: #383e47;
+  --palette-dark-gray-5: #404854;
+  --palette-gray-1: #5f6b7c;
+  --palette-gray-2: #738091;
+  --palette-gray-3: #8f99a8;
+  --palette-gray-4: #abb3bf;
+  --palette-gray-5: #c5cbd3;
+  --palette-light-gray-1: #d3d8de;
+  --palette-light-gray-2: #dce0e5;
+  --palette-light-gray-3: #e5e8eb;
+  --palette-light-gray-4: #edeff2;
+  --palette-light-gray-5: #f6f7f9;
+
+  --palette-blue-1: #184a90;
+  --palette-blue-2: #215db0;
+  --palette-blue-3: #2d72d2;
+  --palette-blue-4: #4c90f0;
+  --palette-blue-5: #8abbff;
+  --palette-green-1: #165a36;
+  --palette-green-2: #1c6e42;
+  --palette-green-3: #238551;
+  --palette-green-4: #32a467;
+  --palette-green-5: #72ca9b;
+  --palette-orange-1: #77450d;
+  --palette-orange-2: #935610;
+  --palette-orange-3: #c87619;
+  --palette-orange-4: #ec9a3c;
+  --palette-orange-5: #fbb360;
+  --palette-red-1: #8e292c;
+  --palette-red-2: #ac2f33;
+  --palette-red-3: #cd4246;
+  --palette-red-4: #e76a6e;
+  --palette-red-5: #fa999c;
+
+  --palette-vermilion-1: #96290d;
+  --palette-vermilion-2: #b83211;
+  --palette-vermilion-3: #d33d17;
+  --palette-vermilion-4: #eb6847;
+  --palette-vermilion-5: #ff9980;
+  --palette-rose-1: #a82255;
+  --palette-rose-2: #c22762;
+  --palette-rose-3: #db2c6f;
+  --palette-rose-4: #f5498b;
+  --palette-rose-5: #ff66a1;
+  --palette-violet-1: #5c255c;
+  --palette-violet-2: #7c327c;
+  --palette-violet-3: #9d3f9d;
+  --palette-violet-4: #bd6bbd;
+  --palette-violet-5: #d69fd6;
+  --palette-indigo-1: #5642a6;
+  --palette-indigo-2: #634dbf;
+  --palette-indigo-3: #7961db;   /* the Workshop COP module header; not "violet" */
+  --palette-indigo-4: #9881f3;
+  --palette-indigo-5: #bdadff;
+  --palette-cerulean-1: #0c5174;
+  --palette-cerulean-2: #0f6894;
+  --palette-cerulean-3: #147eb3;
+  --palette-cerulean-4: #3fa6da;
+  --palette-cerulean-5: #68c1ee;
+  --palette-turquoise-1: #004d46;
+  --palette-turquoise-2: #007067;
+  --palette-turquoise-3: #00a396;
+  --palette-turquoise-4: #13c9ba;
+  --palette-turquoise-5: #7ae1d8;
+  --palette-forest-1: #1d7324;
+  --palette-forest-2: #238c2c;
+  --palette-forest-3: #29a634;
+  --palette-forest-4: #43bf4d;
+  --palette-forest-5: #62d96b;
+  --palette-lime-1: #43501b;
+  --palette-lime-2: #5a701a;
+  --palette-lime-3: #8eb125;
+  --palette-lime-4: #b6d94c;
+  --palette-lime-5: #d4f17e;
+  --palette-gold-1: #5c4405;
+  --palette-gold-2: #866103;
+  --palette-gold-3: #d1980b;
+  --palette-gold-4: #f0b726;
+  --palette-gold-5: #fbd065;
+  --palette-sepia-1: #5e4123;
+  --palette-sepia-2: #7a542e;
+  --palette-sepia-3: #946638;
+  --palette-sepia-4: #af855a;
+  --palette-sepia-5: #d0b090;
+
+  /* =================================================================== intents
+     rest = step 3, hover = 2, active = 1, disabled = 4 (default: gray-1,
+     dark-gray-5, dark-gray-4, gray-3). For primary, success, warning and danger
+     the same values serve as the original's surface-background-color-<intent>-*
+     tokens; the default surface is #fff / #f6f7f9 / #edeff2 / #fff
+     (--surface-card, --surface-hover, --surface-active). */
+  --intent-primary-rest: #2d72d2;
+  --intent-primary-hover: #215db0;
+  --intent-primary-active: #184a90;
+  --intent-primary-disabled: #4c90f0;
+  --intent-primary-foreground: #ffffff;
+  --intent-success-rest: #238551;
+  --intent-success-hover: #1c6e42;
+  --intent-success-active: #165a36;
+  --intent-success-disabled: #32a467;
+  --intent-success-foreground: #ffffff;
+  --intent-warning-rest: #c87619;
+  --intent-warning-hover: #935610;
+  --intent-warning-active: #77450d;
+  --intent-warning-disabled: #ec9a3c;
+  --intent-warning-foreground: #111418;
+  --intent-danger-rest: #cd4246;
+  --intent-danger-hover: #ac2f33;
+  --intent-danger-active: #8e292c;
+  --intent-danger-disabled: #e76a6e;
+  --intent-danger-foreground: #ffffff;
+  --intent-default-rest: #5f6b7c;
+  --intent-default-hover: #404854;
+  --intent-default-active: #383e47;
+  --intent-default-disabled: #8f99a8;
+  --intent-default-foreground: #ffffff;
+  --button-warning-rest: #fbb360;  /* the original's one --bp6-button-* alias: orange-5 */
+
+  /* ================================================================ typography */
+  /* SHIP CHOICE: the original renders Source-Sans-Pro (the first family of all
+     78 text nodes on home; the "Helvetica, sans-serif" fallback is from the
+     morning read). Source Sans 3 is its open-source successor; bundle 400,
+     400 italic and 600. Its own Blueprint token is a system stack, kept below
+     for reference without its blueprint-icons-16 icon font. */
+  --font-family: "Source Sans 3", "Source Sans Pro", Source-Sans-Pro, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-family-blueprint-default: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  /* SHIP CHOICE: the original's grid loads Source Code Pro 400 and its token is
+     "monospace". We do not bundle Source Code Pro, so it is left out rather than
+     rendering one way on machines that have it and another way on those without. */
+  --font-family-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* the scale Blueprint publishes */
+  --font-size-x-small: 10px;
+  --font-size-small: 12px;       /* hints, table headers, section labels, timestamps, counts */
+  --font-size-medium: 14px;      /* body: almost everything renders at it */
+  --font-size-large: 16px;
+  --font-size-heading-small: 16px;
+  --font-size-heading-medium: 20px;
+  --font-size-heading-large: 24px;
+  --font-size-heading-x-large: 28px;
+  --font-size-heading-display: 46px;
+  --font-size-code-small: 12px;
+  --font-size-code-medium: 13px;
+  --font-size-code-large: 14px;
+
+  /* the tiers screens actually use (size / line-height, weight 600 unless noted) */
+  --font-title-display: 400 36px/40px var(--font-family);  /* home "Welcome back" only */
+  --font-title-hero: 600 22px/25px var(--font-family);     /* app landing hero ("Contour") */
+  --font-title-page: 600 18px/23px var(--font-family);     /* object type title, a project's "Files" */
+  --font-title-app: 600 16px/19px var(--font-family);      /* app name in the app header */
+  --font-title-section: 600 16px/16px var(--font-family);  /* home card and section headings */
+  --font-title-card: 600 14px/16px var(--font-family);     /* section-card and panel titles */
+  --font-title-empty: 600 18px/20px var(--font-family);    /* NonIdealState title, in --text-muted */
+  --font-value-prominent: 600 22px/28px var(--font-family);/* Object View prominent values */
+  --font-value-kpi: 400 24px/31px var(--font-family);      /* Workshop metric values */
+
+  --font-weight-default: 400;
+  --font-weight-bold: 600;
+  /* A 400 italic face is loaded everywhere ("No value", empty states, descriptions).
+     700 loads on chart pages for chart labels (700 and 900 also appear as outliers
+     on notification titles); nothing renders at 500. */
+  --line-height-default: 1.28581;  /* 18px at 14px */
+  --line-height-large: 1.5;        /* long-form text: walkthrough body 14px/21px */
+  --line-height-menu: 22px;        /* menu items and facet rows, 14px/22px */
+
+  --text-rest: #1c2127;
+  --text-hover: #111418;
+  --text-active: #252a31;
+  --text-muted: #5f6b7c;
+  --text-disabled: #8f99a8;
+  --text-link: #215db0;
+  --text-selected: #215db0;          /* selected tab, nav item, list row */
+  --text-selected-strong: #184a90;   /* on a 30% blue fill: pills, dialog nav */
+  --text-label: #5f6b7c;             /* 12px 400 labels (14px for key/value keys); uppercase only in light table headers */
+  --text-section-label: #abb3bf;     /* 12px 600 uppercase: dark nav and filter labels */
+  --text-muted-2: #404854;           /* count tags, app name on landing headers */
+  --text-on-dark: #f6f7f9;
+  --text-muted-on-dark: #abb3bf;
+  --text-link-on-dark: #8abbff;
+  --text-primary-rest: #2d72d2;      /* intent text: rest / hover (active and disabled are the intent tokens') */
+  --text-primary-hover: #215db0;
+  --text-success-rest: #238551;
+  --text-success-hover: #1c6e42;     /* success tag text */
+  --text-warning-rest: #c87619;
+  --text-warning-hover: #935610;     /* warning tag text ("Example") */
+  --text-danger-rest: #cd4246;
+  --text-danger-hover: #ac2f33;
+
+  /* ================================================================== surfaces */
+  --surface-app: #f6f7f9;            /* the ground most apps sit on */
+  --surface-card: #ffffff;           /* content cards, panels, tables */
+  --surface-container: #f6f7f9;      /* elevation-0 container cards: on white on home; on the #f6f7f9 page in Files, edged only by --shadow-0 */
+  --surface-canvas: #edeff2;         /* graph canvas, document tab strip */
+  --surface-hover: #f6f7f9;          /* default surface hover */
+  --surface-active: #edeff2;         /* default surface active; file-table row hover */
+  --surface-minimal-hover: rgba(143, 153, 168, 0.15);  /* menu item, minimal button, unselected pill */
+  --surface-minimal-hover-weak: rgba(143, 153, 168, 0.1);
+  --surface-minimal-active: rgba(143, 153, 168, 0.3);  /* launcher active category */
+  --surface-selected: rgba(45, 114, 210, 0.1);         /* selected tab tint, list row, menu choice */
+  --surface-selected-strong: rgba(45, 114, 210, 0.2);  /* project vertical tab */
+  --surface-selected-pill: rgba(45, 114, 210, 0.3);    /* selected pill toggle, dialog nav */
+  --surface-selected-resource-nav: rgba(138, 187, 255, 0.1); /* Ontology Manager nav */
+  --surface-selected-neutral: rgba(56, 62, 71, 0.16);  /* segmented control, icon rail */
+  --surface-layer-default: rgba(95, 107, 124, 0.05);
+  --surface-layer-primary: rgba(45, 114, 210, 0.05);
+  --surface-layer-success: rgba(35, 133, 81, 0.05);
+  --surface-layer-warning: rgba(200, 118, 25, 0.05);
+  --surface-layer-danger: rgba(205, 66, 70, 0.05);
+  --surface-code: rgba(255, 255, 255, 0.7);
+
+  /* ============================================================ lines and edges
+     Most rendered dividers are black-ink alpha, drawn as a border or as a
+     0 1px / 0 -1px box-shadow. Some apps use a solid light gray instead. */
+  --divider: rgba(17, 20, 24, 0.15);        /* header rules, table header rule, file rows, panel edges */
+  --divider-weak: rgba(17, 20, 24, 0.1);    /* project-table rows, drawer edges */
+  --divider-faint: rgba(17, 20, 24, 0.08);  /* result-list rows */
+  --border-default: rgba(95, 107, 124, 0.12);
+  --border-strong: rgba(95, 107, 124, 0.25);   /* outlined buttons, active rail item */
+  --border-primary: rgba(33, 93, 176, 0.6);    /* outlined primary buttons */
+  --border-hairline: #dce0e5;       /* Ontology Manager nav and header, PB rail and panel header */
+  --border-header: #d3d8de;         /* resource and app-landing headers, tab bars, input rings */
+  --border-panel: #e5e8eb;          /* dataset side panel, resizer */
+  --border-toolbar: #c5cbd3;        /* grid toolbar; also the graph node stroke */
+  --border-width: 1px;
+
+  /* ==================================================================== radius */
+  --radius: 4px;                    /* the default: cards, buttons, inputs, tags, menus, dialogs */
+  --radius-small: 2px;              /* graph node rects, legend swatches, bars */
+  --radius-section: 3px;            /* Workshop inner cards, the graph legend */
+  --radius-banner: 5px;             /* the home AI-assistant banner */
+  --radius-dialog-dark: 8px;        /* the dark Quicksearch dialog */
+  --radius-search-files: 18px;      /* 36px pill search (Files) */
+  --radius-pill: 20px;              /* 40px enterprise search (home), round submit button */
+  --radius-round: 30px;             /* Blueprint round tags, pill toggles, pill searches */
+  --radius-circle: 50%;             /* avatars, unread dots, step numbers */
+
+  /* ==================================================================== space
+     4px is the unit (--bp-surface-spacing). Measured paddings are not all on
+     it: 2, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 17, 20, 24, 30, 35, 50. */
+  --space: 4px;
+
+  /* =================================================================== shadows */
+  --shadow-0: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 0 5px 0 rgba(0, 0, 0, 0.02);   /* cards: the edge is the ring */
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --shadow-2: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-3: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-4: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 25px 50px -12px rgba(0, 0, 0, 0.3);
+  /* as computed on popovers, menus, tooltips and light dialogs: shadow-3 with an ink ring */
+  --shadow-overlay: 0 0 0 1px rgba(17, 20, 24, 0.1), 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-ring: 0 0 0 1px rgba(17, 20, 24, 0.15);   /* table boxes, icon rails; the graph legend adds 0 0 5px rgba(0,0,0,.02) */
+  --shadow-floating-search: 0 2px 6px 0 rgba(17, 20, 24, 0.2); /* Object Explorer pill search, with a 1px ink/.2 border */
+  --shadow-button: inset 0 0 0 1px rgba(69, 78, 91, 0.325), 0 1px 2px 0 rgba(17, 20, 24, 0.1);
+  /* SHIP CHOICE: not read live; capture 12 names "the dark raised-button ring" and records no value */
+  --shadow-button-dark: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 1px 2px 0 rgba(17, 20, 24, 0.2);
+  --shadow-input: inset 0 0 0 1px rgba(17, 20, 24, 0.2), inset 0 1px 1px rgba(17, 20, 24, 0.3);
+  --shadow-input-dark: inset 0 0 0 1px rgba(255, 255, 255, 0.2), inset 0 -1px 1px rgba(255, 255, 255, 0.3);
+  --shadow-input-focus: 0 0 0 3px rgba(76, 144, 240, 0.3);   /* with a 1px #4c90f0 border */
+  --shadow-checkbox: inset 0 0 0 1px #738091;
+  --shadow-dialog-dark: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 20px 25px -5px rgba(0, 0, 0, 0.3),
+    inset 0 0 0.5px 0 rgba(255, 255, 255, 0.3), inset 0 0.5px 0 0 rgba(255, 255, 255, 0.08), 0 10px 30px -5px rgba(0, 0, 0, 0.3);
+  --shadow-docked-panel: inset -7px 0 20px -7px rgba(17, 20, 24, 0.5);   /* walkthrough panel's right edge */
+
+  /* ========================================================= layers and motion */
+  --z-0: 0;
+  --z-1: 10;
+  --z-2: 20;
+  --z-3: 30;
+  --z-4: 40;
+  --overlay-backdrop: rgba(17, 20, 24, 0.7);   /* behind light and dark dialogs alike */
+
+  --focus-color: #2d72d2;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --focus-input-border: #4c90f0;
+  --transition-duration: 0.1s;
+  --transition-ease: cubic-bezier(0.4, 1, 0.75, 0.9);
+  --transition-ease-bounce: cubic-bezier(0.54, 1.12, 0.38, 1.11);
+
+  /* ================================================================ dark scope
+     Dark is a set of surfaces, not a page mode. The original applies it to the
+     sidebar, Workshop modules at runtime, and the global overlays (Quicksearch,
+     the Applications launcher, the walkthrough panel, the home AI banner),
+     beside light editors in the same session. */
+  --dark-surface-sunken: #1c2127;   /* launcher, walkthrough panel, Quicksearch footer, Workshop table section */
+  --dark-surface-sidebar: #252a31;  /* sidebar, Quicksearch dialog, Workshop KPI tile */
+  --dark-surface-app: #2f343c;      /* Workshop page and inner cards */
+  --dark-surface-raised: #383e47;   /* Workshop body section, dark table header, sidebar hover */
+  --dark-surface-control: #404854;  /* selected dark segment, tooltip */
+  --dark-surface-input: rgba(17, 20, 24, 0.3);
+  --dark-border: rgba(17, 20, 24, 0.4);
+  --dark-divider: rgba(255, 255, 255, 0.2);
+  --dark-text: #f6f7f9;
+  --dark-text-muted: #abb3bf;
+  --dark-link: #8abbff;
+
+  /* ============================================================ the shell */
+  --shell-sidebar-width: 230px;              /* includes a 1px right border rgba(17,20,24,.4) */
+  --shell-sidebar-bg: #252a31;
+  --shell-sidebar-text: #f6f7f9;
+  --shell-sidebar-icon: #abb3bf;             /* #f6f7f9 on the active item */
+  --shell-sidebar-header-height: 50px;       /* logo + collapse; rule box-shadow 0 1px rgba(17,20,24,.4) */
+  --shell-sidebar-item-height: 32px;         /* 36px for the current-app item under APPLICATIONS */
+  --shell-sidebar-item-padding: 0 17px;      /* 16px icon, then 12px to the label */
+  --shell-sidebar-item-hover: #383e47;
+  --shell-sidebar-item-active: #1c2127;      /* label 600 */
+  --shell-sidebar-group-gap: 21px;
+  --shell-sidebar-section-label: 12px;       /* "APPLICATIONS": 600, uppercase, --text-section-label */
+  --shell-sidebar-hint: #abb3bf;             /* "ctrl + J" at the right, 14px */
+  --shell-unread-dot: #fbb360;               /* 10px, with a 1px #2f343c ring */
+
+  --shell-header-height: 50px;               /* app header content; a 1px rule may sit below */
+  --shell-header-rule: 0 1px 0 0 rgba(17, 20, 24, 0.15);
+  --shell-app-tile: 50px;                    /* app icon tile, flush left; landing tiles tinted app-hue/.1 */
+  --shell-resource-header-height: 51px;      /* 50 + 1px --border-header: resource editors, landings */
+  --shell-menubar-button-height: 20px;       /* "File ▾  Settings ▾  Help ▾" under the breadcrumb */
+  --shell-doc-tabs-height: 40px;             /* Object Explorer tab strip, bg --surface-canvas */
+  --shell-doc-tab-width: 180px;              /* white when active, padding 0 10px 0 15px */
+  --shell-nav-width: 300px;                  /* a resource navigation column (Ontology Manager) */
+  --shell-nav-item-height: 35px;             /* padding 10px, radius 4 */
+  --shell-nav-group-border: rgba(220, 224, 229, 0.5);
+  --shell-project-nav-width: 260px;          /* vertical tabs 240 x 40, 16px/40px 400 */
+  --shell-facet-panel-width: 250px;
+  --shell-launcher-width: 1300px;            /* Applications launcher: 1300 x 750, categories 250 */
+  --shell-quicksearch-width: 1200px;
+  --shell-walkthrough-width: 450px;          /* docked, resizable, dark */
+
+  /* ============================================================ controls */
+  --control-height: 30px;                    /* buttons, inputs, selects; a min-height, not a height */
+  --control-height-small: 24px;
+  --control-height-large: 40px;
+  --control-padding: 4px 8px;
+  --control-padding-small: 0 8px;
+  --control-icon: 16px;
+  --control-icon-color: #5f6b7c;
+  --control-icon-gap: 7px;                   /* measured on menu items; assumed for buttons */
+  --button-bg: #f7f8f9;                      /* default button: fill + --shadow-button */
+  --button-bg-dark: #404854;
+  --input-bg: #ffffff;
+  --input-padding: 0 8px;                    /* Blueprint's default, not read live; 0 8px 0 30px with a leading icon (Files search) */
+  --input-icon-inset: 30px;
+  --search-home-height: 40px;                /* 1200 wide, radius --radius-pill, 16px text, padding 0 15px */
+  --search-files-height: 36px;
+  --search-floating-height: 42px;            /* Object Explorer pill card, 700 wide, radius --radius-round */
+  --checkbox-size: 16px;                     /* radius 4, --shadow-checkbox; 13px on dark */
+
+  --tab-bar-height: 40px;                    /* underline tabs in their own bar under a resource header (dataset) */
+  --tab-header-height: 50px;                 /* tabs sitting in a 50px header (Graph | Proposals | History) */
+  --tab-bottom-panel-height: 35px;           /* tint tabs in a bottom panel */
+  --tab-indicator: 3px;                      /* underline; its colour was not read (tab text is --text-selected) */
+  --tab-gap: 20px;
+  --tab-pill-height: 40px;                   /* Files top tabs: padding 0 10px, radius 4, --surface-selected */
+
+  --segmented-height: 30px;                  /* selected: white + --shadow-button, or --surface-selected-neutral */
+  --pill-toggle-height: 30px;                /* radius --radius-round, padding 6px 10px */
+  --tag-height: 20px;
+  --tag-padding: 2px 6px;
+  --tag-radius: 4px;                         /* round tags: --radius-round (Workshop count tag radius 50px, padding 2px 7px; org-badge padding not read) */
+  --tag-bg-minimal: rgba(143, 153, 168, 0.15);
+  --tag-new-bg: rgba(122, 225, 216, 0.3);    /* "New": turquoise-5 at 30%, text #004d46 10px 600 */
+
+  /* ============================================================ overlays */
+  --popover-radius: 4px;
+  --menu-padding: 4px;
+  --menu-item-height: 30px;                  /* two-line items 52px; padding 4px 8px; radius 4 */
+  --menu-item-padding: 4px 8px;
+  --menu-divider: rgba(17, 20, 24, 0.15);    /* 1px, 4px vertical margin, full width */
+  --tooltip-bg: #404854;
+  --tooltip-text: #f6f7f9;
+  --tooltip-padding: 8px 12px;
+  --notifications-width: 480px;              /* popover with an arrow; entries padding 16px, 48px gutter */
+  --dialog-top: 23vh;                        /* Quicksearch only (top at y=285 of 1249); light dialogs are centred vertically */
+  --dialog-width-resource: 690px;            /* resource details dialog, 135px nav + 555px pane */
+
+  /* ============================================================ panels and sections */
+  --section-header-height: 50px;             /* bp-section cards: padding 0 20px, title --font-title-card */
+  --section-header-padding: 0 20px;
+  --card-padding: 20px;
+  --panel-header-height: 44px;               /* Pipeline Builder side panel: padding 6px 8px, rule --border-hairline */
+  --panel-header-padding: 6px 8px;
+  --panel-side-width: 335px;
+  --panel-icon-rail-width: 51px;             /* PB: white, 1px --border-hairline on its left, 5px padding, 40px buttons */
+  --panel-icon-rail-width-narrow: 40px;      /* Files / project: 30px buttons, --shadow-ring */
+  --panel-rail-button: 40px;
+  --panel-bottom-tab-height: 35px;
+  --panel-bottom-collapsed-height: 42px;     /* a collapsed drawer ("SQL console") */
+  --panel-resizer: 11px;
+  --panel-dataset-width: 513px;              /* the dataset About panel; sections padding 10px 10px 15px */
+
+  /* ============================================================ tables */
+  --table-header-height: 30px;               /* bg --surface-app (white in Contour), 12px 400 uppercase muted */
+  --table-header-height-home: 40px;
+  --table-header-rule: 0 1px 0 0 rgba(17, 20, 24, 0.15);
+  --table-row-height: 40px;
+  --table-row-height-list: 42px;             /* object type catalog */
+  --table-row-height-recent: 44px;           /* home Recent */
+  --table-row-height-two-line: 57px;         /* name + path */
+  --table-row-rule: 0 -1px 0 0 rgba(17, 20, 24, 0.15);
+  --table-cell-padding: 0 11px;              /* the first cell starts 20px in */
+  --table-cell-padding-first: 20px;
+  --table-row-hover: #edeff2;                /* project-folder table rows: name turns --text-selected */
+  --table-row-hover-recent: rgba(45, 114, 210, 0.1);  /* home Recent: text turns #2d72d2 */
+  --table-header-height-dark: 50px;          /* bg #383e47, 12px/13.2px 600 #abb3bf, not uppercase */
+  --table-body-dark: #2f343c;                /* ledger striping even / odd */
+  --table-cell-border-dark: rgba(17, 20, 24, 0.4);
+  --table-selection-dark: rgba(138, 187, 255, 0.75);  /* drawn as a region outline */
+
+  /* ============================================================ graph (graph units = CSS px at zoom 1) */
+  --graph-node-width: 200px;
+  --graph-node-height: 60px;                 /* grows by input rows: a two-input join is 110 */
+  --graph-node-bg: #ffffff;
+  --graph-node-radius: 2px;
+  --graph-node-stroke: #c5cbd3;              /* 1px */
+  --graph-node-band-height: 30px;            /* 30x30 icon cell + (width - 30) coloured band */
+  --graph-node-icon-cell: #edeff2;           /* holds a 20px icon */
+  --graph-node-icon: 20px;
+  --graph-node-title-size: 14px;             /* 600, white on a coloured band, dark on the white band */
+  --graph-node-meta-size: 14px;              /* 400, --text-muted: "18 columns" */
+  --graph-node-input-size: 12px;             /* join input rows: "Left dataset" */
+  --graph-port-size: 14px;                   /* centred on the edge at y = band height */
+  --graph-edge: #abb3bf;
+  --graph-edge-width: 2px;
+  --graph-canvas: #edeff2;
+  --graph-band-ungrouped: #ffffff;           /* bands take the LEGEND group's colour; ungrouped is white */
+  --graph-group-seed-input: #8f99a8;         /* seeds a user could start groups from, as seen: */
+  --graph-group-seed-join: #238551;
+  --graph-group-seed-clean: #d1980b;
+  --graph-group-seed-output: #147eb3;
+  --graph-legend-width: 310px;               /* bg --surface-app, radius --radius-section, --shadow-ring + 0 0 5px rgba(0,0,0,.02) */
+  --graph-legend-swatch: 14px;               /* radius 2 */
+  --graph-zoom-button: 30px;                 /* stacked bottom-left: in / out / fit */
+
+  /* ============================================================ objects */
+  --object-tile-list: 20px;                  /* hue at 10% fill + 1px hue at 25% */
+  --object-tile-result: 28px;
+  --object-tile-header: 36px;                /* full hue, white glyph */
+  --object-tile-title: 40px;
+  --object-view-width: 1060px;
+  --object-view-header-height: 60px;
+  --object-prominent-cell-padding: 16px;     /* value --font-value-prominent, label 14px --text-muted */
+  --object-property-row: 28px;
+  --object-result-row: 60px;                 /* separated by --divider-faint */
+
+  /* ============================================================ charts */
+  --chart-bar: #2d72d2;                      /* value labels inside the bar, 12px white */
+  --chart-card-header-height: 49px;          /* padding 8px 16px */
+  --chart-option-row-height: 47px;           /* bg --surface-app */
+  --chart-listogram-row: 30px;               /* label, count right, bar radius 2 */
+
+  /* ============================================================ dashboards (dark) */
+  --module-header-height: 44px;              /* author colour (COP: --palette-indigo-3), padding 10px 16px */
+  --kpi-tile-bg: #252a31;                    /* tiles joined edge to edge, 1px --dark-border */
+  --kpi-label-size: 12px;                    /* 400, --dark-text-muted, not uppercase */
+  --kpi-value-size: 24px;                    /* 400, line 31px; blue-3 / orange-3 / gold-3 by meaning */
+  --dashboard-inner-radius: 3px;
+  --dashboard-filter-row: 30px;              /* padding 4px 10px; checkbox 13px */
+  --dashboard-tab-row: 44px;                 /* selected: #2d72d2 */
+
+  /* ============================================================ banners */
+  --banner-announcement-bg: rgba(253, 204, 0, 0.1);    /* border rgba(253,204,0,.4), text rgb(185,150,0) 600 */
+  --banner-info-bg: #f6f7f9;                           /* inset rule --border-header */
+  --count-pill-bg: rgba(76, 144, 240, 0.1);            /* border rgba(76,144,240,.4), text #4c90f0 */
+
+  /* ================================================ SHIP CHOICE: legacy names
+     styles.css refers to seven custom properties that nothing defines, 39
+     times (the Decision and Ops screens and .runtime-slo-row). Each such
+     declaration is invalid at computed-value time, so the property computes as
+     unset (inherited or initial), and those screens draw no borders, grounds or
+     active-tab marks today. These aliases restore what each rule always meant.
+     They are debt: in GOAL_LOOK U10's last commit the 39 call sites move to real
+     token names and this block is deleted, without waiting for the plan's Tabs
+     primitive. `audit_style_tokens` reports every use until then. */
+  --border: var(--divider);                 /* 12 references */
+  --surface: var(--surface-card);           /* 5 */
+  --surface-strong: var(--surface-app);     /* 6 */
+  --accent: var(--text-selected);           /* 7; #215db0, not #2d72d2, which is 4.40:1 on #f6f7f9 */
+  --muted: var(--text-muted);               /* 7 */
+  --text: var(--text-rest);                 /* 1 */
+  --line: var(--divider-weak);              /* 1 */
+}
