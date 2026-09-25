@@ -20,8 +20,18 @@ export default defineConfig({
           // from 12 requests on open to 13. Any route that loads DragKit needs
           // dnd-kit anyway, so folding it in costs no route a byte it was not
           // already fetching.
+          //
+          // `graphLayout` rides here too, for the same round trip at a price.
+          // It is 663 bytes, imported by the pipeline and the platform graph,
+          // and Rollup gave it its own chunk: `audit_route_cost` measured graph
+          // at 15 requests on open (ceiling 14) and pipeline at 16 (ceiling 15)
+          // after `1f7fee5` moved the layout into `src/lib`. This chunk is one
+          // every route already loads, so the two graph screens lose a request
+          // and the other fifteen routes pay 619 bytes each for it. Grouping it
+          // with the store shim both graph screens load instead split that shim
+          // and gave five other routes a request each.
           "dragdrop-vendor": ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities",
-                              "./src/components/dnd/DragKit.tsx"],
+                              "./src/components/dnd/DragKit.tsx", "./src/lib/graphLayout.ts"],
           "query-vendor": ["@tanstack/react-query"],
           "icons-vendor": ["lucide-react"]
         }
