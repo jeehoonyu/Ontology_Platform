@@ -75,4 +75,23 @@ test.describe("GOAL_LOOK", () => {
         .toEqual([{ bundled: true, family: "Source Sans 3", style }]);
     }
   });
+
+  // U5. The original's body is 14px on an 18px line (Blueprint's 1.28581). Text
+  // with no size of its own inherits both, like a page subtitle. A button takes
+  // the size through `font: inherit` and keeps its own `line-height: 1.2`, which
+  // U6's button rule replaces; explicit values stay.
+  test("The body text is 14px on an 18px line", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    await expect(page.getByRole("heading", { name: "Decision Intelligence" })).toBeVisible();
+    const read = (selector: string) => page.locator(selector).first().evaluate((node) => {
+      const style = getComputedStyle(node);
+      // 1.28581 x 14 is 18.0013px; a line is whole pixels on screen.
+      const line = style.lineHeight === "normal" ? "normal" : `${Math.round(parseFloat(style.lineHeight))}px`;
+      return { fontSize: style.fontSize, lineHeight: line };
+    });
+    for (const selector of [":root", ".page-header p"]) {
+      expect.soft(await read(selector), selector).toEqual({ fontSize: "14px", lineHeight: "18px" });
+    }
+    expect.soft((await read(".decision-tabs button")).fontSize, "a button's text").toBe("14px");
+  });
 });

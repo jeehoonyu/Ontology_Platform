@@ -1,6 +1,8 @@
 :root {
   color-scheme: light;
   font-family: var(--font-family);
+  font-size: var(--font-size-medium);
+  line-height: var(--line-height-default);
   color: #17212b;
   background: #eef2f1;
   font-synthesis: none;

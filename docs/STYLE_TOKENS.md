@@ -40,4 +40,4 @@ Counts to read, not ceilings to meet: the goal is not a rule that every value co
 - **Radius literals:** 111 across 12 distinct values: `4px` ×20, `5px` ×20, `8px` ×18, `6px` ×15, `50%` ×10, `7px` ×9, `0` ×8, `3px` ×7, `2px` ×1, `8px 8px 0 0` ×1, `999px` ×1, `9px` ×1.
 - **Height literals** (`height`, `min-height`, `max-height` in px): 90.
 - **Legacy alias names in use:** 39 (`--border` ×12, `--surface` ×5, `--surface-strong` ×6, `--accent` ×7, `--muted` ×7, `--text` ×1, `--line` ×1). U10 moves these call sites to real token names and deletes the alias block.
-- **Tokens nothing reads,** directly or through another token: 381 of 396.
+- **Tokens nothing reads,** directly or through another token: 379 of 396.

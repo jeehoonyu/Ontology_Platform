@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "3acf1e75a86e73b3430577718164e3bd1253717b11e02f4253b01e1de2ae34d4",
+    "bundle_source_hash": "50c7218e332d89e458abe5449e20bc5109688967fc1cc03dd5a5396ebd25cd74",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-25T21:49:44Z",
+    "recorded_at": "2026-09-25T22:13:20Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 225,
+      "ran": 226,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 204
+      "skipped": 205
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 203
+      "skipped": 204
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 204
+      "skipped": 205
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 204
+      "skipped": 205
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 204
+      "skipped": 205
     }
   },
   "tests": {
@@ -84,6 +84,7 @@
     "desktop-1280 :: Select all, parents and children write the one selection and send nothing": "ran",
     "desktop-1280 :: Shift held when a lasso begins adds to the selection": "ran",
     "desktop-1280 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "ran",
+    "desktop-1280 :: The body text is 14px on an 18px line": "ran",
     "desktop-1280 :: The page text renders in the bundled face, not a system font": "ran",
     "desktop-1280 :: Up Arrow during a keyboard drag moves the node, not the zoom": "ran",
     "desktop-1280 :: Vertex's seed list says how many objects the type holds and reaches every one": "ran",
@@ -314,6 +315,7 @@
     "laptop-1366 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "laptop-1366 :: Shift held when a lasso begins adds to the selection": "skipped",
     "laptop-1366 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
+    "laptop-1366 :: The body text is 14px on an 18px line": "skipped",
     "laptop-1366 :: The page text renders in the bundled face, not a system font": "skipped",
     "laptop-1366 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "laptop-1366 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -544,6 +546,7 @@
     "mobile-375 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "mobile-375 :: Shift held when a lasso begins adds to the selection": "skipped",
     "mobile-375 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
+    "mobile-375 :: The body text is 14px on an 18px line": "skipped",
     "mobile-375 :: The page text renders in the bundled face, not a system font": "skipped",
     "mobile-375 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "mobile-375 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -774,6 +777,7 @@
     "tablet-1024 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "tablet-1024 :: Shift held when a lasso begins adds to the selection": "skipped",
     "tablet-1024 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
+    "tablet-1024 :: The body text is 14px on an 18px line": "skipped",
     "tablet-1024 :: The page text renders in the bundled face, not a system font": "skipped",
     "tablet-1024 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "tablet-1024 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -1004,6 +1008,7 @@
     "tablet-768 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "tablet-768 :: Shift held when a lasso begins adds to the selection": "skipped",
     "tablet-768 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
+    "tablet-768 :: The body text is 14px on an 18px line": "skipped",
     "tablet-768 :: The page text renders in the bundled face, not a system font": "skipped",
     "tablet-768 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "tablet-768 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -1234,6 +1239,7 @@
     "wide-1600 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "wide-1600 :: Shift held when a lasso begins adds to the selection": "skipped",
     "wide-1600 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
+    "wide-1600 :: The body text is 14px on an 18px line": "skipped",
     "wide-1600 :: The page text renders in the bundled face, not a system font": "skipped",
     "wide-1600 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "wide-1600 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
