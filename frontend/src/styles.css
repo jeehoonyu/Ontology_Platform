@@ -2740,8 +2740,11 @@ pre {
   background: var(--surface-app);
 }
 
+/* The original's side-panel title (GOAL_LOOK U7): 14px at 600. It stays a
+   <strong>; Pane measures it against the controls to decide on the ⋯ menu. */
 .pane-header strong {
-  font-size: 12px;
+  font-size: var(--font-size-medium);
+  font-weight: var(--font-weight-bold);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

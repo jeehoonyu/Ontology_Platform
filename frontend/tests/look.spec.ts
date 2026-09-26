@@ -190,6 +190,18 @@ test.describe("GOAL_LOOK", () => {
     });
   });
 
+  // U7. A pane's title is the original's side-panel title, 14px at 600, and it is
+  // still the <strong> the pane measures against its controls, not a heading.
+  test("A pane title is 14px bold, and it is still the pane's strong", async ({ page }) => {
+    await page.goto("/workspace/pipeline");
+    const title = page.getByRole("region", { name: "Pipeline", exact: true }).locator(".pane-header strong");
+    await expect(title).toHaveText("Pipeline");
+    expect.soft(await title.evaluate((node) => ({
+      tag: node.tagName.toLowerCase(),
+      font: `${getComputedStyle(node).fontSize} ${getComputedStyle(node).fontWeight}`,
+    })), "a pane title").toEqual({ tag: "strong", font: "14px 600" });
+  });
+
   // U7. The original's tables: a 30px header in 12px 400 uppercase muted text on
   // the app ground, 40px rows, 0 11px cells, and an ink rule under each row. The
   // Object Explorer's table is read with objects in it.

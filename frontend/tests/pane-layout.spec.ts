@@ -339,11 +339,10 @@ test.describe("a narrow pane's controls are one tap away", () => {
     // from the menu button alone, the controls would seem to fit, the menu would
     // close itself and the title would be clipped again.
     //
-    // The title crowded its pane in Segoe UI (125px). In the bundled Source Sans 3
-    // (GOAL_LOOK U4) it is 111px and fits, and the pane never gets narrower than
-    // 287px, so no width crowds it any more. Longer titles still do, as U7's 14px
-    // pane titles will, so the title is widened here, before the first render, to
-    // the crowding it had. The rule under test is the pane's, not the font's.
+    // The title crowded its pane in Segoe UI (125px) and stopped in the bundled
+    // Source Sans 3 (111px, GOAL_LOOK U4). At U7's 14px it crowds again on its own
+    // (about 130px). The title is still widened here, before the first render, so
+    // the test does not hang on a font's metrics: the rule under test is the pane's.
     await page.addInitScript(() => {
       // Parsing ends before module scripts run, so the first render measures it.
       const widen = () => {
