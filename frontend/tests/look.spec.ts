@@ -169,6 +169,27 @@ test.describe("GOAL_LOOK", () => {
     expect.soft((await edge(railPanel)).shadow, "a panel in the resources rail").toBe(ring);
   });
 
+  // U7. A pane is ruled with the divider, as the original's side panels are, and so
+  // is the line under its header.
+  test("A pane and its header are ruled with the divider", async ({ page }) => {
+    await page.goto("/workspace/pipeline");
+    const pane = page.getByRole("region", { name: "Pipeline", exact: true });
+    await expect(pane).toBeVisible();
+    expect.soft(await pane.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const header = getComputedStyle(node.querySelector(".pane-header")!);
+      return {
+        edge: `${style.borderTopWidth} ${style.borderTopStyle} ${style.borderTopColor}`,
+        radius: style.borderTopLeftRadius,
+        headerRule: `${header.borderBottomWidth} ${header.borderBottomStyle} ${header.borderBottomColor}`,
+        headerGround: header.backgroundColor,
+      };
+    }), "a pane").toEqual({
+      edge: `1px solid ${ruleColour}`, radius: "3px",
+      headerRule: `1px solid ${ruleColour}`, headerGround: "rgb(246, 247, 249)",
+    });
+  });
+
   // U6. The original's text field: 30px, 0 8px, radius 4, white, the ring (drawn as
   // the border) and an inset shade; on focus the ring turns #4c90f0 and a 3px halo
   // replaces the shade. A select takes the same height.

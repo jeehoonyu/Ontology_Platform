@@ -2712,9 +2712,11 @@ pre {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: #ffffff;
-  border: 1px solid #d7dedf;
-  border-radius: 3px;
+  /* GOAL_LOOK U7: a pane is ruled with the divider, as the original's side
+     panels are; its header and ⋯ strip carry the same rule below them. */
+  background: var(--surface-card);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-section);
   overflow: hidden;
 }
 
@@ -2723,8 +2725,8 @@ pre {
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
-  border-bottom: 1px solid #d7dedf;
-  background: #f3f6f7;
+  border-bottom: 1px solid var(--divider);
+  background: var(--surface-app);
 }
 
 .pane-header strong {
@@ -2757,8 +2759,8 @@ pre {
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
-  border-bottom: 1px solid #d7dedf;
-  background: #f3f6f7;
+  border-bottom: 1px solid var(--divider);
+  background: var(--surface-app);
 }
 
 .pane-menu button,
