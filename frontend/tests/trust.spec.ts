@@ -187,4 +187,35 @@ test.describe("GOAL_FOUNDATIONS A3", () => {
     expect.soft(body.severity, "the event's severity").toBe("critical");
     expect.soft(body.source, "the event's source").toBe("decision");
   });
+
+  // e. Vertex's six layout buttons and its filter changed nothing on the canvas: the
+  // mini-graph dropped the server's positions, drew every node on one ellipse, and
+  // ignored the filter's fade.
+  test("Vertex's layouts move the nodes and its filter fades them", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    const name = `Layouts ${Date.now()}`;
+    expect((await page.request.post("/vertex/graphs", { data: {
+      display_name: name, seed_object_ids: ["asset_pump_4", "facility_1"], layout_type: "grid",
+    } })).ok()).toBeTruthy();
+    await page.goto("/workspace/vertex");
+    await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+    const nodes = page.locator(".mini-graph g");
+    await expect(nodes).toHaveCount(2);
+    const positions = () => nodes.evaluateAll((groups) => groups.map((group) => group.getAttribute("transform")));
+    const layout = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Layout", exact: true }) });
+
+    await layout.getByRole("button", { name: "grid", exact: true }).click();
+    await expect(page.getByText('Layout changed to "grid".')).toBeVisible();
+    const grid = await positions();
+    await layout.getByRole("button", { name: "radial", exact: true }).click();
+    await expect(page.getByText('Layout changed to "radial".')).toBeVisible();
+    expect(await positions(), "radial places the nodes differently from grid").not.toEqual(grid);
+
+    const filter = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Filter (fade non-matching)" }) });
+    await filter.getByPlaceholder("status").fill("asset_class");
+    await filter.getByRole("combobox").selectOption("exists");
+    await filter.getByRole("button", { name: "Apply filter" }).click();
+    await expect(page.getByText(/1 matched, 1 faded/)).toBeVisible();
+    await expect(page.locator(".mini-graph g.faded"), "the node the filter faded").toHaveCount(1);
+  });
 });

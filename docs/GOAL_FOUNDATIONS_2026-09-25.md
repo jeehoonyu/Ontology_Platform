@@ -145,7 +145,7 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   inside the 8 KB tolerance. `docs/INERT_CONTROLS.md` (350 → 351 controls, the Try again button)
   and `docs/TABLE_TRUNCATION.md` (moved lines) were regenerated, and the browser-evidence
   baseline was re-recorded.
-- **A3 — Each screen claims only what it does.** **Open** — five commits, one per screen, each
+- **A3 — Each screen claims only what it does.** **Met** — five commits, one per screen, each
   with a test that fails on the old behaviour:
   - **a.** Platform Graph's subtitle drops "expand neighborhoods", unless a fetch that adds
     nodes lands with it. The test selects a node, turns on Neighbors, and checks the copy against
@@ -225,6 +225,32 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Negative run: the event form wired back to the rule's fields failed "the rule's minimum
     severity". Restored byte for byte; the hash matched (`2ab6019b38ef4737`).
   - Measured: the full six-project run passed 384 of 384, with none retried.
+
+  **e. Vertex.** Made true rather than removed, because the server already computes the
+  layouts.
+  - `toGraphNodes` now passes the server's x/y on. `MiniGraph`, used by Vertex alone, draws
+    positioned nodes at those coordinates, scaled to fit the canvas; nodes without positions
+    still sit on the ellipse.
+  - A node the filter faded is drawn at 30% opacity.
+  - Six buttons still give four pictures, because the server treats auto as grid and circular
+    as radial (`vertex_ops.py:314-324`). That is the server's vocabulary, not a claim the canvas
+    breaks.
+  - Proven by `trust.spec.ts::Vertex's layouts move the nodes and its filter fades them`. With
+    the asset scenario loaded, it builds a graph from `asset_pump_4` and `facility_1`. Grid then
+    radial must place the two nodes differently. Filtering on `asset_class exists` must report
+    1 matched and 1 faded, and draw one faded node.
+  - `docs/TABLE_TRUNCATION.md` now reads `MiniGraph`'s 40-node cut as "held as shown", where it
+    said "mapped". It is still unfixed and counted among the 11.
+
+  **Negative runs,** against a rebuilt dist:
+  - The server's positions dropped again: grid and radial drew the same picture.
+  - The fade ignored again: no faded node.
+  - Both files were restored byte for byte, and the hash matched (`ad5dcb6d597a0a6b`).
+
+  **Measured.** The full six-project run passed 385 of 385, with none retried. Route cost and
+  the payload hold.
+
+  **A3 is Met:** five screens, five commits, each with a test that fails on the old behaviour.
 - **A4 — The grant forms say they do not govern data access.** **Open** — until decision O,
   Security's project grants and Control Panel's role grants each carry "does not govern data
   access" beside the form, and the backend docstrings stop claiming otherwise. To be proven by

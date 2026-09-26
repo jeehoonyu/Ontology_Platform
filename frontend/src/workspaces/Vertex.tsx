@@ -70,13 +70,16 @@ function coerceFilterValue(raw: string): JsonValue {
 
 // MiniGraph reads id/kind/type/label on nodes and source/target on edges — map
 // the Vertex node/edge dicts (object_type_id, source_object_id, ...) onto them.
+// The server's layout is carried in x/y, and the filter's result in `faded`; both
+// were dropped here once, so no layout button or filter changed the canvas.
 function toGraphNodes(graph: VertexGraph | null): TableRow[] {
   return (graph?.nodes || []).map((node) => ({
     id: node.id,
     type: node.object_type_id,
     label: node.object_type_id ? `${node.object_type_id}: ${node.id}` : node.id,
     is_seed: node.is_seed ?? false,
-    faded: node.faded ?? false
+    faded: node.faded ?? false,
+    ...(typeof node.x === "number" && typeof node.y === "number" ? { x: node.x, y: node.y } : {})
   }));
 }
 

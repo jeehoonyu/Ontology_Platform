@@ -34,8 +34,8 @@ way to the rest names items nobody can reach.
 
 | File | Line | In | Cuts | How | Note from the true total | Rest reachable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 495 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
-| `components/canvas/PipelineCanvas.tsx` | 502 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 509 | `MiniGraph` | `nodes` (slice) | held as shown | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 518 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
 | `workspaces/DecisionWorkspace.tsx` | 128 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 73 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
@@ -118,7 +118,7 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `components/canvas/PipelineCanvas.tsx` | 110 | `PipelineCanvas` | `started` | prefix dropped |
 | `components/canvas/PipelineCanvas.tsx` | 131 | `PipelineCanvas` | `id` | prefix dropped |
 | `components/canvas/PipelineCanvas.tsx` | 303 | `PipelineCanvas` | `action.label` | text |
-| `components/canvas/PipelineCanvas.tsx` | 511 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
+| `components/canvas/PipelineCanvas.tsx` | 527 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
 | `components/layout/Pane.tsx` | 385 | `usePaneLayout` | `active` | prefix dropped |
 | `components/layout/Pane.tsx` | 386 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |

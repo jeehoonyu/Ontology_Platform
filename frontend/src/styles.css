@@ -3549,6 +3549,11 @@ pre {
   font-weight: 800;
 }
 
+/* Vertex's filter fades what does not match (GOAL_FOUNDATIONS A3e). */
+.mini-graph g.faded {
+  opacity: 0.3;
+}
+
 .workbench-page {
   margin: -22px;
   min-height: calc(100vh - 1px);

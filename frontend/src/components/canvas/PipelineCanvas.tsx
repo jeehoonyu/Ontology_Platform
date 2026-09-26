@@ -489,10 +489,26 @@ function drawerRows(
   return [];
 }
 
+// Nodes that carry positions (Vertex's server layouts) are drawn at them, scaled
+// to fit the canvas; nodes without sit on an ellipse. A faded node (Vertex's filter)
+// is drawn faded (GOAL_FOUNDATIONS A3e: before, both were ignored).
+function fitToCanvas(nodes: TableRow[], width: number, height: number, margin = 40): Array<TableRow & { x: number; y: number }> {
+  const xs = nodes.map((node) => node.x as number);
+  const ys = nodes.map((node) => node.y as number);
+  const [minX, minY] = [Math.min(...xs), Math.min(...ys)];
+  const [spanX, spanY] = [Math.max(...xs) - minX, Math.max(...ys) - minY];
+  const scale = Math.min(spanX ? (width - 2 * margin) / spanX : Infinity, spanY ? (height - 2 * margin) / spanY : Infinity);
+  const k = Number.isFinite(scale) ? scale : 1;
+  const [offsetX, offsetY] = [(width - spanX * k) / 2, (height - spanY * k) / 2];
+  return nodes.map((node) => ({ ...node, x: offsetX + ((node.x as number) - minX) * k, y: offsetY + ((node.y as number) - minY) * k }));
+}
+
 export function MiniGraph({ nodes, edges }: { nodes: TableRow[]; edges: TableRow[] }) {
   const width = 940;
   const height = 380;
-  const positioned: Array<TableRow & { x: number; y: number }> = nodes.slice(0, 40).map((node, index) => {
+  const shown = nodes.slice(0, 40);
+  const placed = shown.length > 0 && shown.every((node) => typeof node.x === "number" && typeof node.y === "number");
+  const positioned: Array<TableRow & { x: number; y: number }> = placed ? fitToCanvas(shown, width, height) : shown.map((node, index) => {
     const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1);
     return { ...node, x: width / 2 + Math.cos(angle) * 320, y: height / 2 + Math.sin(angle) * 135 };
   });
@@ -506,7 +522,7 @@ export function MiniGraph({ nodes, edges }: { nodes: TableRow[]; edges: TableRow
         return <line key={index} x1={Number(source.x)} y1={Number(source.y)} x2={Number(target.x)} y2={Number(target.y)} />;
       })}
       {positioned.map((node) => (
-        <g key={asString(node.id)} transform={`translate(${Number(node.x)}, ${Number(node.y)})`}>
+        <g key={asString(node.id)} className={classNames(node.faded === true && "faded")} transform={`translate(${Number(node.x)}, ${Number(node.y)})`}>
           <circle r="18" />
           <text y="4">{asString(node.kind || node.type || "?").slice(0, 2).toUpperCase()}</text>
           <title>{asString(node.label || node.title || node.id)}</title>
