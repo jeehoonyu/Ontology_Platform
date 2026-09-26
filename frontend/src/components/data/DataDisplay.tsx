@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { asString, classNames, formatValue } from "../../utils/format";
 import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
+import { intentOf, SEVERITY, STEP_STATUS, type Intent } from "./intents";
 
 export function Panel({ title, action, children, className, ariaLabel }: { title: string; action?: ReactNode; children: ReactNode; className?: string; ariaLabel?: string }) {
   return (
@@ -61,18 +62,16 @@ export function ErrorBanner({ message }: { message?: string }) {
   return <div className="state-block error-state">{message}</div>;
 }
 
-export function StatusBadge({ value }: { value?: string | number | null }) {
-  const text = String(value ?? "unknown");
-  const tone = text.toLowerCase();
+/**
+ * A status tag. Its caller says what the word means (GOAL_LOOK U8, the plan's
+ * A1): the colour comes from `intent`, never from the text, so OFFLINE cannot
+ * read as success and "inactive" cannot read as a warning. Callers take the
+ * intent from a vocabulary in ./intents, where unknown words are neutral.
+ */
+export function StatusBadge({ value, intent }: { value?: string | number | null; intent: Intent }) {
   return (
-    <span
-      className={classNames(
-        "badge",
-        tone.includes("fail") || tone.includes("critical") || tone.includes("error") ? "bad" : false,
-        tone.includes("warn") || tone.includes("pending") || tone.includes("active") ? "warn" : false
-      )}
-    >
-      {text}
+    <span className="badge" data-intent={intent}>
+      {String(value ?? "unknown")}
     </span>
   );
 }
@@ -83,7 +82,7 @@ export function WarningList({ warnings }: { warnings?: UiWarning[] }) {
     <div className="warning-list">
       {warnings.map((warning) => (
         <article key={warning.id}>
-          <StatusBadge value={warning.severity || "info"} />
+          <StatusBadge value={warning.severity || "info"} intent={intentOf(SEVERITY, warning.severity || "info")} />
           <span>{warning.message}</span>
         </article>
       ))}
@@ -237,7 +236,7 @@ export function SectionCards({ sections, onNavigate }: { sections?: UiSection[];
               <strong>{section.title}</strong>
               {section.description ? <span>{section.description}</span> : null}
             </div>
-            <StatusBadge value={section.status || "available"} />
+            <StatusBadge value={section.status || "available"} intent={intentOf(STEP_STATUS, section.status || "available")} />
           </header>
           {section.metrics ? <KeyValueGrid data={section.metrics} /> : null}
           {section.href ? (

@@ -9,6 +9,7 @@ import {
   Panel,
   StatusBadge
 } from "../components/data/DataDisplay";
+import { CHECK_RESULT, LIFECYCLE, SEVERITY, WORKER_STATUS, intentOf } from "../components/data/intents";
 import { DataGrid } from "../components/data/DataGrid";
 import { Page } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
@@ -71,7 +72,7 @@ export function ControlPanel() {
           ))}
         </nav>
         <div className="button-row">
-          <StatusBadge value={active.label} />
+          <StatusBadge value={active.label} intent="neutral" />
         </div>
       </div>
       {section === "organizations" && <OrganizationsSection />}
@@ -601,8 +602,8 @@ function RolesSection() {
           {checkResult ? (
             <>
               <div className="manager-chip-row">
-                <StatusBadge value={checkResult.allowed ? "allowed" : "denied"} />
-                {checkResult.reason ? <StatusBadge value={checkResult.reason} /> : null}
+                <StatusBadge value={checkResult.allowed ? "allowed" : "denied"} intent={checkResult.allowed ? "success" : "danger"} />
+                {checkResult.reason ? <StatusBadge value={checkResult.reason} intent="neutral" /> : null}
               </div>
               <KeyValueGrid data={checkResult} />
             </>
@@ -899,7 +900,7 @@ function UsageSection() {
           {checkResult ? (
             <>
               <div className="manager-chip-row">
-                <StatusBadge value={checkResult.within_limit ? "within limit" : "over limit"} />
+                <StatusBadge value={checkResult.within_limit ? "within limit" : "over limit"} intent={checkResult.within_limit ? "success" : "danger"} />
               </div>
               <KeyValueGrid data={checkResult} />
             </>
@@ -1007,7 +1008,7 @@ function RecoverySection() {
             exported_at: new Date(snapshot.exported_at * 1000).toLocaleString()
           }} /> : <EmptyState title="No snapshot loaded" description="Download the current state or choose a portable JSON snapshot to validate." />}
         </Panel>
-        <Panel title="Recovery Validation" action={validation ? <StatusBadge value={validation.status} /> : undefined}>
+        <Panel title="Recovery Validation" action={validation ? <StatusBadge value={validation.status} intent={intentOf(CHECK_RESULT, validation.status)} /> : undefined}>
           {busy === "validate" ? <LoadingState label="Validating snapshot..." /> : null}
           {validation ? <>
             <div className="metric-grid compact-metrics">
@@ -1027,7 +1028,7 @@ function RecoverySection() {
           <button onClick={() => runRestore(true)} disabled={!snapshot || validation?.status !== "VALID" || Boolean(busy)}>{busy === "dry-run" ? "Checking..." : "Run dry run"}</button>
           <label><span>Type RESTORE to confirm</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
           <button className="danger-button" onClick={() => runRestore(false)} disabled={!snapshot || validation?.status !== "VALID" || confirmation !== "RESTORE" || Boolean(busy)}>{busy === "restore" ? "Restoring..." : "Restore snapshot"}</button>
-          {result ? <StatusBadge value={result.status} /> : null}
+          {result ? <StatusBadge value={result.status} intent={intentOf(CHECK_RESULT, result.status)} /> : null}
         </div>
       </Panel>
     </>
@@ -1209,13 +1210,13 @@ function ExtensionsSection() {
           {registered ? (
             <div className="runtime-slo-row">
               <span><strong>{registered.plugin_id} {registered.version}</strong><small>{registered.kind} · {registered.status}</small></span>
-              <StatusBadge value={registered.status} />
+              <StatusBadge value={registered.status} intent={intentOf(LIFECYCLE, registered.status)} />
               {registered.status === "VERIFIED" ? <button onClick={() => activate(registered)}>Activate</button> : null}
             </div>
           ) : null}
         </Panel>
       </div>
-      <Panel title="Active Extensions" action={<StatusBadge value={`${activeRows.length} active`} />}>
+      <Panel title="Active Extensions" action={<StatusBadge value={`${activeRows.length} active`} intent="neutral" />}>
         {activeRows.length ? <DataTable rows={activeRows} empty="No active extensions." /> : <EmptyState title="No active extensions" description="Register a vendor trust key, verify a signed package, then activate its immutable version." />}
         {(catalog.value?.plugins || []).length ? (
           <div className="button-row extension-inspect-actions">
@@ -1237,7 +1238,7 @@ function ExtensionsSection() {
             </div>
             {!Object.keys(inputProperties).length ? <p className="muted-copy">This operation has no declared input fields.</p> : null}
           </Panel>
-          <Panel title={`${selected.plugin_id} execution evidence`} action={<div className="button-row"><StatusBadge value={selected.status} /><button onClick={() => inspect(selected)}>Refresh runs</button></div>}>
+          <Panel title={`${selected.plugin_id} execution evidence`} action={<div className="button-row"><StatusBadge value={selected.status} intent={intentOf(LIFECYCLE, selected.status)} /><button onClick={() => inspect(selected)}>Refresh runs</button></div>}>
             {executionTotal !== null && executionTotal > executions.length ? <p className="table-truncated" role="note">Loaded the latest {executions.length.toLocaleString()} of {executionTotal.toLocaleString()} runs</p> : null}
             <DataTable rows={executions.map((run) => ({ id: run.id, job_id: run.job_id || "direct", operation: run.operation, status: run.status, duration_ms: run.duration_ms, sandbox: String(run.sandbox.mode || (run.status === "QUEUED" ? "pending" : "unknown")), error: run.error || "", actor: run.actor, created_at: run.created_at }))} empty="This extension has not run yet." />
           </Panel>
@@ -1386,7 +1387,7 @@ function RuntimeOperationsSection() {
       {[pilotAvailability?.warning, pilotRpo?.warning, pilotRto?.warning]
         .filter((warning): warning is string => Boolean(warning))
         .map((warning) => <ErrorBanner key={warning} message={warning} />)}
-      <Panel title="Production Pilot Evidence" action={<StatusBadge value={pilotAvailability?.status || "COLLECTING"} />}>
+      <Panel title="Production Pilot Evidence" action={<StatusBadge value={pilotAvailability?.status || "COLLECTING"} intent={intentOf(CHECK_RESULT, pilotAvailability?.status || "COLLECTING")} />}>
         {pilotAvailability ? (
           <div className="runtime-slo-list">
             <div className="runtime-slo-row">
@@ -1397,7 +1398,7 @@ function RuntimeOperationsSection() {
                   {" · "}{Math.round(pilotAvailability.remaining_seconds / 360) / 10} hours remaining
                 </small>
               </span>
-              <StatusBadge value={pilotAvailability.integrity} />
+              <StatusBadge value={pilotAvailability.integrity} intent={intentOf(CHECK_RESULT, pilotAvailability.integrity)} />
             </div>
             <div className="runtime-slo-row">
               <span>
@@ -1408,7 +1409,7 @@ function RuntimeOperationsSection() {
                   {" · "}{pilotAvailability.measurements.outages} outages
                 </small>
               </span>
-              <StatusBadge value={pilotAvailability.migration_head ? "CURRENT" : "WAITING"} />
+              <StatusBadge value={pilotAvailability.migration_head ? "CURRENT" : "WAITING"} intent={pilotAvailability.migration_head ? "success" : "neutral"} />
             </div>
             <div className="runtime-slo-row">
               <span>
@@ -1419,7 +1420,7 @@ function RuntimeOperationsSection() {
                   {" · "}{pilotRpo?.measurements.samples ? `${pilotRpo.measurements.max_rpo_seconds}s worst gap` : "no measured gap"}
                 </small>
               </span>
-              <StatusBadge value={pilotRpo?.status || "COLLECTING"} />
+              <StatusBadge value={pilotRpo?.status || "COLLECTING"} intent={intentOf(CHECK_RESULT, pilotRpo?.status || "COLLECTING")} />
             </div>
             <div className="runtime-slo-row">
               <span>
@@ -1430,7 +1431,7 @@ function RuntimeOperationsSection() {
                   {" · "}{pilotRto?.measurements.rehearsals ? `${pilotRto.measurements.max_elapsed_seconds}s worst recovery` : "no measured recovery"}
                 </small>
               </span>
-              <StatusBadge value={pilotRto?.status || "COLLECTING"} />
+              <StatusBadge value={pilotRto?.status || "COLLECTING"} intent={intentOf(CHECK_RESULT, pilotRto?.status || "COLLECTING")} />
             </div>
           </div>
         ) : <EmptyState title="Pilot observer is not collecting" description="Enable the pilot-observability deployment profile to begin a tamper-evident availability window." />}
@@ -1452,7 +1453,7 @@ function RuntimeOperationsSection() {
               {fleet.value.sections.workers.map((worker) => (
                 <div key={worker.id} className="runtime-slo-row runtime-worker-row">
                   <span><strong>{worker.worker_name}</strong><small>{worker.active_jobs}/{worker.max_concurrency} jobs · {worker.supported_job_types.join(", ") || "all job types"}</small></span>
-                  <StatusBadge value={worker.status} />
+                  <StatusBadge value={worker.status} intent={intentOf(WORKER_STATUS, worker.status)} />
                   <button onClick={() => setDrain(worker.worker_name, worker.configured_status === "ACTIVE")}>
                     {worker.configured_status === "ACTIVE" ? "Drain" : "Resume"}
                   </button>
@@ -1494,7 +1495,7 @@ function RuntimeOperationsSection() {
               {slos.value.map((slo) => (
                 <div key={slo.id} className="runtime-slo-row">
                   <span><strong>{slo.display_name}</strong><small>{slo.metric} {slo.operator} {slo.threshold}</small></span>
-                  <StatusBadge value={slo.severity} />
+                  <StatusBadge value={slo.severity} intent={intentOf(SEVERITY, slo.severity)} />
                   <button onClick={() => evaluate(slo.id)}>Evaluate</button>
                 </div>
               ))}

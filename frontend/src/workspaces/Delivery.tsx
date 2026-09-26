@@ -32,6 +32,7 @@ import {
   Panel,
   StatusBadge
 } from "../components/data/DataDisplay";
+import { LIFECYCLE, intentOf } from "../components/data/intents";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { classNames } from "../utils/format";
 import type { TableRow } from "../types";
@@ -376,13 +377,13 @@ function InstallationCard({
           <strong>{installation.target_project}</strong>
           <span>{installation.product_id}</span>
         </div>
-        <StatusBadge value={installation.status} />
+        <StatusBadge value={installation.status} intent={intentOf(LIFECYCLE, installation.status)} />
       </header>
       <div className="manager-chip-row">
-        <StatusBadge value={installation.mode} />
-        <StatusBadge value={installation.locked ? "locked" : "unlocked"} />
-        <StatusBadge value={`channel: ${installation.release_channel}`} />
-        <StatusBadge value={installation.auto_upgrade ? "auto-upgrade" : "manual"} />
+        <StatusBadge value={installation.mode} intent="neutral" />
+        <StatusBadge value={installation.locked ? "locked" : "unlocked"} intent="neutral" />
+        <StatusBadge value={`channel: ${installation.release_channel}`} intent="neutral" />
+        <StatusBadge value={installation.auto_upgrade ? "auto-upgrade" : "manual"} intent="neutral" />
       </div>
       <KeyValueGrid data={{
         installation_id: installation.id,

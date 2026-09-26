@@ -502,7 +502,7 @@ function LookupPanel({ datasets }: { datasets: DataAssetSummary[] }) {
       <ErrorBanner message={error} />
       {result ? (
         <div className="button-row" style={{ alignItems: "center", gap: 10 }}>
-          <StatusBadge value={result.found ? "found" : "not found"} />
+          <StatusBadge value={result.found ? "found" : "not found"} intent="neutral" />
           <strong style={isFusionError(result.value) ? ERROR_STYLE : undefined}>{valueToString(result.value) || "(empty)"}</strong>
           <span className="empty" style={{ margin: 0 }}>{result.match_count} match{result.match_count === 1 ? "" : "es"}</span>
         </div>

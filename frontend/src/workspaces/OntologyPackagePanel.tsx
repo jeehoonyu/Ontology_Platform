@@ -13,6 +13,7 @@ import {
   type TenancyProject
 } from "../api/ontologyPackageApi";
 import { Panel, StatusBadge } from "../components/data/DataDisplay";
+import { CHECK_RESULT, LIFECYCLE, intentOf } from "../components/data/intents";
 
 /**
  * What a person has chosen and typed in this panel and not yet sent.
@@ -130,7 +131,7 @@ export function OntologyPackagePanel({ objectTypeId, objectTypeName, form, onFor
             }}>Create from selected type</button> : null}
             {selectedPackageId ? (
               <>
-                <div className="package-summary-row"><StatusBadge value={detail?.status || "LOADING"} /><span>{detail?.version_count || 0} versions</span><span>{detail?.active_installations || 0} installs</span></div>
+                <div className="package-summary-row"><StatusBadge value={detail?.status || "LOADING"} intent={intentOf(LIFECYCLE, detail?.status || "LOADING")} /><span>{detail?.version_count || 0} versions</span><span>{detail?.active_installations || 0} installs</span></div>
                 <label>New version<input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="1.0.0" /></label>
                 <button disabled={busy || !objectTypeId} onClick={() => run(() => captureOntologyPackageVersion(selectedPackageId, version, objectTypeId), `Captured ${version}`)}>Capture selected type</button>
                 {latestDraft ? <PackageVersionRow version={latestDraft} actionLabel="Publish" disabled={busy} onAction={() => run(() => publishOntologyPackageVersion(selectedPackageId, latestDraft), `Published ${latestDraft.version}`)} /> : null}
@@ -152,5 +153,5 @@ export function OntologyPackagePanel({ objectTypeId, objectTypeName, form, onFor
 }
 
 function PackageVersionRow({ version, actionLabel, disabled, onAction }: { version: OntologyPackageVersionSummary; actionLabel: string; disabled: boolean; onAction: () => void }) {
-  return <div className="package-version-row"><div><strong>{version.version}</strong><span title={version.checksum}>{version.checksum.slice(0, 10)}...</span></div><StatusBadge value={version.validation?.status || version.status} /><button disabled={disabled} onClick={onAction}>{actionLabel}</button></div>;
+  return <div className="package-version-row"><div><strong>{version.version}</strong><span title={version.checksum}>{version.checksum.slice(0, 10)}...</span></div><StatusBadge value={version.validation?.status || version.status} intent={version.validation?.status ? intentOf(CHECK_RESULT, version.validation.status) : intentOf(LIFECYCLE, version.status)} /><button disabled={disabled} onClick={onAction}>{actionLabel}</button></div>;
 }

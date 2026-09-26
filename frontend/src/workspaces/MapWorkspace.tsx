@@ -5,6 +5,7 @@ import L, { type GeoJSONOptions, type LatLngExpression, type Map as LeafletMap }
 import "leaflet/dist/leaflet.css";
 import { Crosshair, Layers, LocateFixed, MapPin, Plus, Radar, RefreshCw, Search, ShieldAlert } from "lucide-react";
 import { EmptyState, ErrorBanner, KeyValueGrid, LoadingState, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { intentOf, RISK_BAND } from "../components/data/intents";
 import { Page } from "../components/workbench/Workbench";
 import {
   createBuffer,
@@ -254,7 +255,7 @@ export function MapWorkspace() {
       <div className="map-workbench">
         <aside className="map-layer-rail">
           <Panel title="Layers" action={<Layers size={15} />}>
-            <div className="map-layer-list">{layers.map((item) => <button key={item.id} className={item.id === activeLayerId ? "selected" : ""} onClick={() => void loadLayer(item.id)}><span className="layer-swatch" style={{ background: riskColor(item.style) }} /><span><strong>{item.display_name}</strong><small>{item.object_type_id} · {item.geometry_field}</small></span><StatusBadge value={item.visible ? "visible" : "hidden"} /></button>)}</div>
+            <div className="map-layer-list">{layers.map((item) => <button key={item.id} className={item.id === activeLayerId ? "selected" : ""} onClick={() => void loadLayer(item.id)}><span className="layer-swatch" style={{ background: riskColor(item.style) }} /><span><strong>{item.display_name}</strong><small>{item.object_type_id} · {item.geometry_field}</small></span><StatusBadge value={item.visible ? "visible" : "hidden"} intent="neutral" /></button>)}</div>
             {!layers.length ? <div className="empty">Render an object type, then save it as a reusable operational layer.</div> : null}
             {features.length ? <><h3 className="map-subheading">Features</h3>
               {held > features.length ? <p className="table-truncated" role="note">Loaded {features.length.toLocaleString()} of {held.toLocaleString()} features. The map and this list show only these.</p> : null}
@@ -290,7 +291,7 @@ export function MapWorkspace() {
 
         <aside className="map-inspector">
           <Panel title="Selection" action={<MapPin size={15} />}>
-            {!selected ? <EmptyState title="Select a feature" description="Click an object on the map to inspect ontology properties and spatial state." /> : <><header className="map-selection-heading"><div><strong>{String(selected.properties.name || selected.properties.title || selected.id || "Selected feature")}</strong><small>{String(selected.id || selected.properties.id || "ontology object")}</small></div><StatusBadge value={String(selected.properties.risk_band || selected.properties.criticality || selected.properties.status || "active")} /></header><KeyValueGrid data={selected.properties} specs={specs} /></>}
+            {!selected ? <EmptyState title="Select a feature" description="Click an object on the map to inspect ontology properties and spatial state." /> : <><header className="map-selection-heading"><div><strong>{String(selected.properties.name || selected.properties.title || selected.id || "Selected feature")}</strong><small>{String(selected.id || selected.properties.id || "ontology object")}</small></div><StatusBadge value={String(selected.properties.risk_band || selected.properties.criticality || selected.properties.status || "active")} intent={intentOf(RISK_BAND, selected.properties.risk_band || selected.properties.criticality)} /></header><KeyValueGrid data={selected.properties} specs={specs} /></>}
           </Panel>
           <Panel title="Layer Evidence">
             <dl className="map-coordinate-summary"><div><dt>Layer</dt><dd>{layer?.display_name || "Ad hoc object view"}</dd></div><div><dt>Object type</dt><dd>{objectTypeId || "none"}</dd></div><div><dt>Geometry</dt><dd>{geometryField}</dd></div><div><dt>Geofence</dt><dd>{geofenceResult ? `${geofenceResult.summary.inside.toLocaleString()} matches` : "not evaluated"}</dd></div></dl>

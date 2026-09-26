@@ -421,7 +421,7 @@ function PipelineNodeCard({ node, zoom, selected, follow, onSelect }: {
       <strong>{node.label}</strong>
       <small>{node.row_count ?? 0} rows</small>
       <span>{node.type}</span>
-      {node.errors?.length ? <StatusBadge value="error" /> : null}
+      {node.errors?.length ? <StatusBadge value="error" intent="danger" /> : null}
     </button>
   );
 }

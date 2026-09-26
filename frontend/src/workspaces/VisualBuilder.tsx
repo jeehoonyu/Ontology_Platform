@@ -62,6 +62,7 @@ import {
   type PlatformArtifact
 } from "../api/artifactApi";
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
+import { CHECK_RESULT, JOB_STATUS, LIFECYCLE, NODE_STATUS, intentOf } from "../components/data/intents";
 import { ArtifactReviewPanel, NEW_REVIEW_DRAFT, type ReviewDraft } from "../components/workbench/ArtifactReviewPanel";
 import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
 import { AgentRuntimePanel, NEW_AGENT_DRAFT, useAgentRun, type AgentDraft } from "./AgentRuntimePanel";
@@ -726,7 +727,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
             ))}
             <small>{collaboration ? `${collaborators.data?.participants.length || 1} editing` : lease ? "Exclusive edit" : "Connecting"}</small>
           </div>
-          <StatusBadge value={dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status} />
+          <StatusBadge value={dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status} intent={intentOf(LIFECYCLE, dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status)} />
           <button title="Undo" aria-label="Undo" onClick={undo} disabled={!undoStack.current.length}><Undo2 size={16} /></button>
           <button title="Redo" aria-label="Redo" onClick={redo} disabled={!redoStack.current.length}><Redo2 size={16} /></button>
           <button title="Auto-layout nodes" onClick={layoutNodes}><AlignHorizontalSpaceAround size={16} /> Layout</button>
@@ -818,9 +819,9 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
                     <span><strong>{preview.metrics.node_count}</strong> nodes</span>
                     <span><strong>{preview.metrics.edge_count}</strong> edges</span>
                     <span><strong>{preview.metrics.duration_ms} ms</strong> duration</span>
-                    <StatusBadge value={preview.status} />
+                    <StatusBadge value={preview.status} intent={intentOf(JOB_STATUS, preview.status)} />
                   </div>
-                  <div className="preview-row-list">{preview.sample_output.slice(0, 6).map((row) => <span key={row.node_id}><strong>{row.label}</strong><small>{row.node_type}</small><StatusBadge value={row.status} /></span>)}</div>
+                  <div className="preview-row-list">{preview.sample_output.slice(0, 6).map((row) => <span key={row.node_id}><strong>{row.label}</strong><small>{row.node_type}</small><StatusBadge value={row.status} intent={intentOf(NODE_STATUS, row.status)} /></span>)}</div>
                 </>
               ) : (
                 <p>Select Preview to validate the current revision and inspect deterministic execution evidence.</p>
@@ -873,7 +874,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
             ))}
           </details>
           <details className="version-history" open={Boolean(artifact.validation_targets?.length)}>
-            <summary>Validation targets <StatusBadge value={artifact.validation?.status || "UNKNOWN"} /></summary>
+            <summary>Validation targets <StatusBadge value={artifact.validation?.status || "UNKNOWN"} intent={intentOf(CHECK_RESULT, artifact.validation?.status || "UNKNOWN")} /></summary>
             {(artifact.validation_targets || []).length ? artifact.validation_targets.map((target, index) => (
               <div className="version-row" key={`${target.path}-${index}`}><span><strong>{target.severity}</strong><small>{target.message}</small></span></div>
             )) : <div className="version-row"><span><strong>Ready</strong><small>No targeted validation issues.</small></span></div>}

@@ -85,7 +85,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function DecisionBanner({ allowed, detail }: { allowed: boolean; detail: string }) {
   return (
     <div className="button-row" style={{ alignItems: "center", gap: 10 }}>
-      <StatusBadge value={allowed ? "allowed" : "denied"} />
+      <StatusBadge value={allowed ? "allowed" : "denied"} intent={allowed ? "success" : "danger"} />
       <strong>{allowed ? "ALLOWED" : "DENIED"}</strong>
       <span>{detail}</span>
     </div>

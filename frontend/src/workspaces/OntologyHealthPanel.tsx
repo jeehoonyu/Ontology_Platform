@@ -9,6 +9,7 @@ import {
   type OntologyPolicyDecision
 } from "../api/ontologyHealthApi";
 import { Panel, StatusBadge } from "../components/data/DataDisplay";
+import { CHECK_RESULT, SEVERITY, intentOf, policyIntent } from "../components/data/intents";
 
 const SEVERITIES = ["ALL", "ERROR", "WARN", "INFO"] as const;
 
@@ -84,7 +85,7 @@ export function OntologyHealthPanel({ objectTypeId, onBack }: { objectTypeId: st
           <span className="object-icon">HC</span>
           <h2 id="ontology-health-title">Ontology Health Center</h2>
           <p>Validate identity, schema, runtime values, relationships, lineage, views, and governance.</p>
-          <div className="manager-chip-row"><StatusBadge value={summary?.status || "NOT_RUN"} /><span>{objectTypeId}</span></div>
+          <div className="manager-chip-row"><StatusBadge value={summary?.status || "NOT_RUN"} intent={intentOf(CHECK_RESULT, summary?.status || "NOT_RUN")} /><span>{objectTypeId}</span></div>
         </div>
         <div className="button-row">
           <button onClick={onBack}>Back to object</button>
@@ -94,7 +95,7 @@ export function OntologyHealthPanel({ objectTypeId, onBack }: { objectTypeId: st
       {message ? <div className="operation-message" role="status">{message}</div> : null}
 
       <div className="ontology-health-score-grid">
-        <div className="health-score"><span>Health score</span><strong>{summary?.score ?? "-"}</strong><StatusBadge value={summary?.status || "NOT_RUN"} /></div>
+        <div className="health-score"><span>Health score</span><strong>{summary?.score ?? "-"}</strong><StatusBadge value={summary?.status || "NOT_RUN"} intent={intentOf(CHECK_RESULT, summary?.status || "NOT_RUN")} /></div>
         <div><span>Errors</span><strong>{summary?.errors || 0}</strong></div>
         <div><span>Warnings</span><strong>{summary?.warnings || 0}</strong></div>
         <div><span>Objects</span><strong>{metrics.objects ?? 0}</strong></div>
@@ -107,7 +108,7 @@ export function OntologyHealthPanel({ objectTypeId, onBack }: { objectTypeId: st
           {findings.length ? findings.map((finding) => <FindingRow key={finding.id} finding={finding} onGenerateView={finding.code === "MISSING_OBJECT_VIEW" ? generateView : undefined} busy={busy} />) : <div className="health-empty"><strong>{summary?.status === "PASS" ? "No active findings" : "Run a health check"}</strong><span>{summary?.status === "PASS" ? "Identity, schema, values, lineage, and governance checks passed." : "Evaluate this object type to produce actionable evidence."}</span></div>}
         </Panel>
 
-        <Panel title="Policy Simulator" className="ontology-policy-simulator" action={<StatusBadge value={policyDecision?.decision || "WHAT_IF"} />}>
+        <Panel title="Policy Simulator" className="ontology-policy-simulator" action={<StatusBadge value={policyDecision?.decision || "WHAT_IF"} intent={policyIntent(policyDecision?.decision || "WHAT_IF")} />}>
           <p>Test a hypothetical rule without changing production policy.</p>
           <div className="policy-simulator-form">
             <label><span>Principal</span><input value={principal} onChange={(event) => setPrincipal(event.target.value)} /></label>
@@ -116,7 +117,7 @@ export function OntologyHealthPanel({ objectTypeId, onBack }: { objectTypeId: st
             <label><span>Hypothetical effect</span><select value={effect} onChange={(event) => setEffect(event.target.value as typeof effect)}><option>DENY</option><option>ALLOW</option><option>REQUIRE_APPROVAL</option><option>MASK</option><option>ROW_FILTER</option></select></label>
             <button onClick={simulate} disabled={busy || !principal.trim()}>Simulate</button>
           </div>
-          {policyDecision ? <div className="policy-decision-card"><div><StatusBadge value={policyDecision.decision} /><strong>{policyDecision.allowed ? "Allowed" : "Blocked"}</strong></div><p>{policyDecision.explanation}</p><small>{policyDecision.matched_rule_ids.length} matching rule{policyDecision.matched_rule_ids.length === 1 ? "" : "s"}</small></div> : null}
+          {policyDecision ? <div className="policy-decision-card"><div><StatusBadge value={policyDecision.decision} intent={policyIntent(policyDecision.decision)} /><strong>{policyDecision.allowed ? "Allowed" : "Blocked"}</strong></div><p>{policyDecision.explanation}</p><small>{policyDecision.matched_rule_ids.length} matching rule{policyDecision.matched_rule_ids.length === 1 ? "" : "s"}</small></div> : null}
         </Panel>
       </div>
     </section>
@@ -125,7 +126,7 @@ export function OntologyHealthPanel({ objectTypeId, onBack }: { objectTypeId: st
 
 function FindingRow({ finding, onGenerateView, busy }: { finding: OntologyHealthFinding; onGenerateView?: () => void; busy: boolean }) {
   return <article className={`ontology-health-finding severity-${finding.severity.toLowerCase()}`}>
-    <StatusBadge value={finding.severity} />
+    <StatusBadge value={finding.severity} intent={intentOf(SEVERITY, finding.severity)} />
     <div><strong>{finding.title}</strong><p>{finding.detail}</p><small>{finding.recommendation}</small></div>
     <div className="finding-meta"><span>{finding.category.replace(/_/g, " ")}</span>{finding.count > 1 ? <span>{finding.count} affected</span> : null}{onGenerateView ? <button onClick={onGenerateView} disabled={busy}>Generate view</button> : null}</div>
   </article>;

@@ -223,7 +223,7 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
         <Panel title={`Schema ${schemaRows.length}`}>
           {schemaRows.length ? (
             <>
-              <StatusBadge value={declaredSchema?.columns?.length ? "declared" : "inferred"} />
+              <StatusBadge value={declaredSchema?.columns?.length ? "declared" : "inferred"} intent="neutral" />
               <DataTable rows={schemaRows} empty="No schema columns." />
             </>
           ) : (

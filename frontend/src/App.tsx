@@ -23,6 +23,7 @@ import {
   StatusBadge,
   WarningList
 } from "./components/data/DataDisplay";
+import { APPROVAL, intentOf, JOB_STATUS, READINESS, RISK_BAND, STEP_STATUS } from "./components/data/intents";
 import { Page, PlatformFlow } from "./components/workbench/Workbench";
 import { useAsyncState } from "./hooks/useAsyncState";
 import { asRows, asString, classNames } from "./utils/format";
@@ -349,7 +350,7 @@ function BackendConnection({ readiness, loading, error, jobs, jobsError }: { rea
   return (
     <div className={classNames("backend-connection", error && "offline", status === "READY" && "ready", failedJobs > 0 && "execution-warning")}>
       <div className="backend-connection-main">
-        <StatusBadge value={status} />
+        <StatusBadge value={status} intent={intentOf(READINESS, status)} />
         <span>{error ? `Backend connection failed: ${error}` : `Backend connection: ${status}`}</span>
         {jobs ? <span className="execution-health" aria-label="Asynchronous execution health">
           <strong>{jobs.counts.RUNNING || 0}</strong> running
@@ -651,7 +652,7 @@ function CommandCenter() {
           <p>{asString(evaluatorSummary.why, "Bootstrap the sample workflow to populate evidence and recommendations.")}</p>
         </div>
         <div className="decision-card">
-          <StatusBadge value={asString(evaluatorSummary.risk_band, "not_scored")} />
+          <StatusBadge value={asString(evaluatorSummary.risk_band, "not_scored")} intent={intentOf(RISK_BAND, asString(evaluatorSummary.risk_band, "not_scored"))} />
           <strong>{asString(evaluatorSummary.decision, "Start sample data")}</strong>
           <span>{asString(evaluatorSummary.recommendation, "Load data, inspect risk, run triage, approve action, and export the report.")}</span>
         </div>
@@ -662,7 +663,7 @@ function CommandCenter() {
         <button onClick={exportReport} disabled={governanceBusy}>Export proof report</button>
         <button onClick={resetDemo} disabled={governanceBusy}>Reset demo state</button>
       </div>
-      <Panel title="Use your promoted dataset" action={<StatusBadge value={industrialResult ? "READY" : "OPTIONAL"} />}>
+      <Panel title="Use your promoted dataset" action={<StatusBadge value={industrialResult ? "READY" : "OPTIONAL"} intent={industrialResult ? "success" : "neutral"} />}>
         <p className="panel-intro">Compile a project-owned asset ontology, executable hydration pipeline, geospatial fields, and governed reliability scorecard from imported data.</p>
         <div className="form-grid industrial-onboarding-grid">
           <label><span>Project ID</span><input value={industrialSource.projectId} onChange={(event) => setIndustrialSource((value) => ({ ...value, projectId: event.target.value }))} /></label>
@@ -688,13 +689,13 @@ function CommandCenter() {
           <div><span>Execution plan</span><strong>{asString((industrialResult.resources as JsonObject | undefined)?.pipeline_plan, "not compiled")}</strong></div>
         </div> : null}
         {industrialJob ? <div className="operation-feedback" role="status" aria-label="Background onboarding status">
-          <StatusBadge value={industrialJob.status} />
+          <StatusBadge value={industrialJob.status} intent={intentOf(JOB_STATUS, industrialJob.status)} />
           <span>Background onboarding {industrialJob.progress}%</span>
           <span>Attempt {industrialJob.attempt}</span>
           {industrialJob.error ? <span>{industrialJob.error}</span> : null}
         </div> : null}
       </Panel>
-      <Panel title="Independent evaluator evidence" action={<StatusBadge value={asString((evaluatorBundle?.qualification as JsonObject | undefined)?.qualifies === true ? "QUALIFYING" : "NOT_VERIFIED")} />}>
+      <Panel title="Independent evaluator evidence" action={<StatusBadge value={asString((evaluatorBundle?.qualification as JsonObject | undefined)?.qualifies === true ? "QUALIFYING" : "NOT_VERIFIED")} intent={(evaluatorBundle?.qualification as JsonObject | undefined)?.qualifies === true ? "success" : "neutral"} />}>
         <p className="panel-intro">Export a privacy-preserving proof that an external team completed the full workflow with its own promoted data on a pinned OIDC release. Evaluator aliases are hashed before export.</p>
         <div className="form-grid evaluator-evidence-grid">
           <label><span>External team ID</span><input value={evaluatorEvidence.teamId} placeholder="reliability-team-west" onChange={(event) => setEvaluatorEvidence((value) => ({ ...value, teamId: event.target.value }))} /></label>
@@ -711,7 +712,7 @@ function CommandCenter() {
           <a className="button-link" href="https://github.com/jeehoonyu/Ontology_Platform/blob/master/docs/EXTERNAL_EVALUATOR_GUIDE.md" target="_blank" rel="noreferrer">Open evaluator guide</a>
         </div>
         {evaluatorBundle ? <div className="evaluation-qualification" role="status">
-          <StatusBadge value={(evaluatorBundle.qualification as JsonObject | undefined)?.qualifies === true ? "QUALIFYING" : "INCOMPLETE"} />
+          <StatusBadge value={(evaluatorBundle.qualification as JsonObject | undefined)?.qualifies === true ? "QUALIFYING" : "INCOMPLETE"} intent={(evaluatorBundle.qualification as JsonObject | undefined)?.qualifies === true ? "success" : "warning"} />
           <span>Bundle {asString(evaluatorBundle.bundle_hash, "not sealed")}</span>
           {((evaluatorBundle.qualification as JsonObject | undefined)?.reasons as unknown[] | undefined)?.length
             ? <ul>{((evaluatorBundle.qualification as JsonObject).reasons as unknown[]).map((reason) => <li key={String(reason)}>{String(reason).replaceAll("_", " ")}</li>)}</ul>
@@ -728,7 +729,7 @@ function CommandCenter() {
           }}>
             <span>{index + 1}</span>
             {step.label}
-            <StatusBadge value={step.status} />
+            <StatusBadge value={step.status} intent={intentOf(STEP_STATUS, step.status)} />
           </button>
         ))}
       </section>
@@ -738,15 +739,15 @@ function CommandCenter() {
         <Metric label="Failing checks" value={kpis.data_contract_status ?? "NOT_RUN"} />
         <Metric label="Open approvals" value={kpis.open_approvals ?? 0} />
       </div>
-      <Panel title="Governed Approval and Action" action={<StatusBadge value={actionMatchesApproval ? "EXECUTED" : approval?.status || "NOT_STAGED"} />}>
+      <Panel title="Governed Approval and Action" action={<StatusBadge value={actionMatchesApproval ? "EXECUTED" : approval?.status || "NOT_STAGED"} intent={intentOf(APPROVAL, actionMatchesApproval ? "EXECUTED" : approval?.status || "NOT_STAGED")} />}>
         {approval ? (
           <div className="governed-action-panel">
             {approval.id === summary.approvals?.[0]?.id && openApprovals > 1 ? <p className="table-truncated" role="note">Showing the newest of {openApprovals.toLocaleString()} open approvals</p> : null}
             <div className="governed-action-summary">
               <div><span>Action</span><strong>{approval.action_type_id}</strong></div>
               <div><span>Requested by</span><strong>{approval.requester}</strong></div>
-              <div><span>Approval</span><StatusBadge value={approval.status} /></div>
-              <div><span>Execution</span><StatusBadge value={actionMatchesApproval ? latestAction?.status || "EXECUTED" : "NOT_EXECUTED"} /></div>
+              <div><span>Approval</span><StatusBadge value={approval.status} intent={intentOf(APPROVAL, approval.status)} /></div>
+              <div><span>Execution</span><StatusBadge value={actionMatchesApproval ? latestAction?.status || "EXECUTED" : "NOT_EXECUTED"} intent={intentOf(JOB_STATUS, actionMatchesApproval ? latestAction?.status || "EXECUTED" : "NOT_EXECUTED")} /></div>
             </div>
             <KeyValueGrid data={approval.parameters} />
             {approval.status === "PENDING" ? (
@@ -1049,7 +1050,7 @@ function DataOnboarding() {
             {connectorForm.credentialType !== "none" && (connectorForm.credentialType === "sftp_private_key" ? <label className="connector-wide-field"><span>Private key (write only)</span><textarea value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" /></label> : <label className="connector-wide-field"><span>{connectorForm.credentialType === "basic" || connectorForm.credentialType === "sftp_password" || connectorForm.credentialType === "kafka_sasl_plain" ? "Password" : connectorForm.credentialType === "aws" ? "Secret access key (write only)" : "Secret (write only)"}</span><input type="password" autoComplete="new-password" value={connectorForm.secret} onChange={(event) => setConnectorForm((current) => ({ ...current, secret: event.target.value }))} placeholder={credentials.some((item) => item.status === "ACTIVE") ? "Leave blank to keep active credential" : connectorForm.adapter === "s3" || connectorForm.adapter === "sftp" || connectorForm.credentialType === "kafka_sasl_plain" ? "Required for source access" : "Optional for public sources"} /></label>)}
             {connectorForm.credentialType === "aws" && <label className="connector-wide-field"><span>Session token (optional, write only)</span><input type="password" autoComplete="new-password" value={connectorForm.sessionToken} onChange={(event) => setConnectorForm((current) => ({ ...current, sessionToken: event.target.value }))} /></label>}
           </div>
-          <div className="connector-runtime-summary"><StatusBadge value={activeSource?.status || "NOT_CONNECTED"} /><span>{activeSource ? `${activeSource.display_name} uses ${activeSource.source_type}` : "Configure a live source to test access and inspect records."}</span></div>
+          <div className="connector-runtime-summary"><StatusBadge value={activeSource?.status || "NOT_CONNECTED"} intent={intentOf(READINESS, activeSource?.status || "NOT_CONNECTED")} /><span>{activeSource ? `${activeSource.display_name} uses ${activeSource.source_type}` : "Configure a live source to test access and inspect records."}</span></div>
           {sourcePreview.length >= LIVE_PREVIEW_LIMIT ? <p className="table-truncated" role="note">Showing the first {LIVE_PREVIEW_LIMIT} records. The preview stops at {LIVE_PREVIEW_LIMIT}, and this source does not say how many it holds.</p> : null}
           <DataTable rows={sourcePreview} empty="No live records previewed." />
         </Panel>

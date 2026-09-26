@@ -2454,27 +2454,46 @@ pre {
   font-size: 12px;
 }
 
+/* The original's status tag (GOAL_LOOK U8): 20px, radius 4, 2px 6px, 12px. Its
+   colour is the intent its caller gives (data-intent), never the word: the hover
+   step's text on the rest colour at 10%, and neutral on the minimal tint. Each
+   intent is set at (0,2,0), so a card's span colour cannot grey its text. */
 .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 22px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #edf7ef;
-  color: #1d6b34;
-  font-size: 12px;
-  font-weight: 700;
+  min-height: var(--tag-height);
+  padding: var(--tag-padding);
+  border-radius: var(--tag-radius);
+  background: var(--tag-bg-minimal);
+  color: var(--text-muted-2);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-default);
 }
 
-.badge.warn {
-  background: #fff4db;
-  color: #8a5b00;
+.badge[data-intent="neutral"] {
+  background: var(--tag-bg-minimal);
+  color: var(--text-muted-2);
 }
 
-.badge.bad {
-  background: #ffe8e3;
-  color: #9f2c16;
+.badge[data-intent="primary"] {
+  background: var(--tag-primary-bg);
+  color: var(--text-primary-hover);
+}
+
+.badge[data-intent="success"] {
+  background: var(--tag-success-bg);
+  color: var(--text-success-hover);
+}
+
+.badge[data-intent="warning"] {
+  background: var(--tag-warning-bg);
+  color: var(--text-warning-hover);
+}
+
+.badge[data-intent="danger"] {
+  background: var(--tag-danger-bg);
+  color: var(--text-danger-hover);
 }
 
 .empty,
@@ -6062,10 +6081,6 @@ pre {
 .explorer-results-header span {
   color: #647680;
   font-size: 12px;
-}
-
-.explorer-results-header > .badge {
-  color: #1d5d31;
 }
 
 .explorer-table {

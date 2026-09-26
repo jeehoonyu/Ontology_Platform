@@ -410,6 +410,12 @@
   --tag-padding: 2px 6px;
   --tag-radius: 4px;                         /* round tags: --radius-round (Workshop count tag radius 50px, padding 2px 7px; org-badge padding not read) */
   --tag-bg-minimal: rgba(143, 153, 168, 0.15);
+  /* Intent tags: the hover step's text on the rest colour at 10% (UI_CONFIG's rule).
+     Every pair is 4.9:1 or better on white and on --surface-app. */
+  --tag-primary-bg: rgba(45, 114, 210, 0.1);
+  --tag-success-bg: rgba(35, 133, 81, 0.1);
+  --tag-warning-bg: rgba(200, 118, 25, 0.1);
+  --tag-danger-bg: rgba(205, 66, 70, 0.1);
   --tag-new-bg: rgba(122, 225, 216, 0.3);    /* "New": turquoise-5 at 30%, text #004d46 10px 600 */
 
   /* ============================================================ overlays */

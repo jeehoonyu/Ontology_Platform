@@ -13,6 +13,7 @@ import {
   type PlatformArtifact
 } from "../../api/artifactApi";
 import { ErrorBanner, StatusBadge } from "../data/DataDisplay";
+import { APPROVAL, intentOf } from "../data/intents";
 
 /**
  * What a person has typed here and not sent. Held by the caller, keyed by artifact,
@@ -113,7 +114,7 @@ export function ArtifactReviewPanel({ artifact, selectedNodeId, pendingCommands,
           <div className="review-list">
             {(comments.data?.comments || []).map((comment) => (
               <article className={comment.status === "RESOLVED" ? "resolved" : ""} key={comment.id}>
-                <div><strong>{comment.author}</strong><StatusBadge value={comment.status} /></div>
+                <div><strong>{comment.author}</strong><StatusBadge value={comment.status} intent={intentOf(APPROVAL, comment.status)} /></div>
                 <p>{comment.body}</p>
                 <small>{comment.target} · revision {comment.revision}</small>
                 <button onClick={() => commentStatusMutation.mutate({ id: comment.id, status: comment.status === "OPEN" ? "RESOLVED" : "OPEN" })}>
@@ -134,7 +135,7 @@ export function ArtifactReviewPanel({ artifact, selectedNodeId, pendingCommands,
           <div className="review-list proposal-list">
             {(proposals.data?.proposals || []).map((proposal) => (
               <article key={proposal.id}>
-                <div><strong>{proposal.title}</strong><StatusBadge value={proposal.status} /></div>
+                <div><strong>{proposal.title}</strong><StatusBadge value={proposal.status} intent={intentOf(APPROVAL, proposal.status)} /></div>
                 <p>{proposal.targets.length} affected target{proposal.targets.length === 1 ? "" : "s"} · base revision {proposal.base_revision}</p>
                 {proposal.status === "CONFLICT" ? <small>Rebase this proposal against the latest revision before another review.</small> : null}
                 <div className="proposal-actions">

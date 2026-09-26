@@ -27,6 +27,7 @@ import {
   Panel,
   StatusBadge
 } from "../components/data/DataDisplay";
+import { AUTOMATION_RUN, intentOf } from "../components/data/intents";
 import { Page } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
@@ -188,8 +189,8 @@ export function Automate() {
                       >
                         <td title={id}>{asString(row.display_name, id)}</td>
                         <td>{asString(row.scope_mode)}</td>
-                        <td><StatusBadge value={row.enabled ? "enabled" : "paused"} /></td>
-                        <td><StatusBadge value={row.muted ? "muted" : "unmuted"} /></td>
+                        <td><StatusBadge value={row.enabled ? "enabled" : "paused"} intent={row.enabled ? "success" : "neutral"} /></td>
+                        <td><StatusBadge value={row.muted ? "muted" : "unmuted"} intent={row.muted ? "warning" : "neutral"} /></td>
                       </tr>
                     );
                   })}
@@ -255,9 +256,9 @@ export function Automate() {
               {automation ? (
                 <>
                   <div className="button-row" style={{ marginBottom: 10 }}>
-                    <StatusBadge value={automation.enabled ? "enabled" : "paused"} />
-                    <StatusBadge value={automation.muted ? "muted" : "unmuted"} />
-                    <StatusBadge value={automation.scope_mode} />
+                    <StatusBadge value={automation.enabled ? "enabled" : "paused"} intent={automation.enabled ? "success" : "neutral"} />
+                    <StatusBadge value={automation.muted ? "muted" : "unmuted"} intent={automation.muted ? "warning" : "neutral"} />
+                    <StatusBadge value={automation.scope_mode} intent="neutral" />
                   </div>
                   <KeyValueGrid
                     data={{
@@ -274,7 +275,7 @@ export function Automate() {
                   {lastRun ? (
                     <div className="button-row" style={{ marginTop: 10 }}>
                       <span>Last run</span>
-                      <StatusBadge value={lastRun.status} />
+                      <StatusBadge value={lastRun.status} intent={intentOf(AUTOMATION_RUN, lastRun.status)} />
                       <span>{formatValue(lastRun.triggered_object_ids)} triggered</span>
                     </div>
                   ) : null}
@@ -310,7 +311,7 @@ export function Automate() {
                       {runs.map((run) => (
                         <tr key={run.id}>
                           <td title={run.id}>{run.id.slice(0, 8)}</td>
-                          <td><StatusBadge value={run.status} /></td>
+                          <td><StatusBadge value={run.status} intent={intentOf(AUTOMATION_RUN, run.status)} /></td>
                           <td>{run.condition_result ? "triggered" : "skipped"}</td>
                           <td>{run.manual ? "manual" : "auto"}</td>
                           <td>{formatTimestamp(run.created_at)}</td>

@@ -15,6 +15,7 @@ import {
   type RegistryCompatibility
 } from "../api/ontologyRegistryApi";
 import { EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { COMPATIBILITY, LIFECYCLE, intentOf } from "../components/data/intents";
 import { DataGrid } from "../components/data/DataGrid";
 
 export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
@@ -143,7 +144,7 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
     <section className="ontology-registry" aria-label="Ontology schema registry">
       <header className="ontology-release-header">
         <div><span className="eyebrow">Developer contract</span><h1>Schema Registry</h1><p>Publish approved ontology revisions as immutable schemas and typed clients.</p></div>
-        <div className="button-row"><StatusBadge value={state?.summary.status || "LOADING"} /><button onClick={onBack}>Back to object type</button></div>
+        <div className="button-row"><StatusBadge value={state?.summary.status || "LOADING"} intent={intentOf(LIFECYCLE, state?.summary.status || "LOADING")} /><button onClick={onBack}>Back to object type</button></div>
       </header>
       <div className="registry-status" role="status">{message}</div>
       <div className="registry-summary-grid">
@@ -163,11 +164,11 @@ export function OntologyRegistryPanel({ onBack }: { onBack: () => void }) {
       <div className="registry-main-grid">
         <Panel title="Published Versions">
           <div className="ontology-contract-list">
-            {(state?.sections.entries || []).map((entry) => <button key={entry.id} className="ontology-contract-row" onClick={() => { setSelected(entry); setCompatibility(null); }}><span><strong>{entry.version}</strong><small>{entry.channel} · revision {entry.revision_number}</small></span><StatusBadge value={entry.compatibility.classification} /></button>)}
+            {(state?.sections.entries || []).map((entry) => <button key={entry.id} className="ontology-contract-row" onClick={() => { setSelected(entry); setCompatibility(null); }}><span><strong>{entry.version}</strong><small>{entry.channel} · revision {entry.revision_number}</small></span><StatusBadge value={entry.compatibility.classification} intent={intentOf(COMPATIBILITY, entry.compatibility.classification)} /></button>)}
             {!state?.sections.entries.length ? <EmptyState inline>No registry versions have been published.</EmptyState> : null}
           </div>
         </Panel>
-        <Panel title="Contract Evidence" action={selected ? <StatusBadge value={selected.compatibility.classification} /> : undefined}>
+        <Panel title="Contract Evidence" action={selected ? <StatusBadge value={selected.compatibility.classification} intent={intentOf(COMPATIBILITY, selected.compatibility.classification)} /> : undefined}>
           {selected ? <>
             <KeyValueGrid data={{ version: selected.version, revision: selected.revision_number, publisher: selected.published_by, checksum: selected.checksum, prior_registry: selected.compatibility.against_registry_id || "Initial contract" }} />
             <div className="button-row registry-downloads"><button onClick={downloadSchema} disabled={Boolean(busy)}>Download schema</button><button onClick={() => downloadSdk("typescript")} disabled={Boolean(busy)}>TypeScript source</button><button onClick={() => downloadSdk("python")} disabled={Boolean(busy)}>Python source</button></div>

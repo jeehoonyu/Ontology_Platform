@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "a9bf5831081615ac97c40256efdb52e33595e742998c8f56be9f5428c3c64a00",
+    "bundle_source_hash": "d88ff39815a0bbb5ce1aee56929111c5139774b8e69147a0f834e1774fc04f86",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T01:29:55Z",
+    "recorded_at": "2026-09-26T02:16:04Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,39 +14,39 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 0,
-      "ran": 236,
+      "flaky": 1,
+      "ran": 237,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 215
+      "skipped": 217
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 214
+      "skipped": 216
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 215
+      "skipped": 217
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 215
+      "skipped": 217
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 215
+      "skipped": 217
     }
   },
   "tests": {
@@ -58,6 +58,7 @@
     "desktop-1280 :: A panel's edge is a ring shadow, not a border": "ran",
     "desktop-1280 :: A table header is 30px, 12px, muted and uppercase": "ran",
     "desktop-1280 :: A text input is 30px with an inset ring and a blue focus ring": "ran",
+    "desktop-1280 :: A warning badge reads at AA contrast": "ran",
     "desktop-1280 :: AIP agent runtime exposes durable policy and citation evidence": "ran",
     "desktop-1280 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "ran",
     "desktop-1280 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "ran",
@@ -78,6 +79,7 @@
     "desktop-1280 :: Latest incidents lists the most recently updated and says how many are open": "ran",
     "desktop-1280 :: Latest incidents says nothing more when it lists every open incident": "ran",
     "desktop-1280 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "ran",
+    "desktop-1280 :: OFFLINE is not shown as success": "ran",
     "desktop-1280 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "ran",
     "desktop-1280 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "ran",
     "desktop-1280 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "ran",
@@ -299,6 +301,7 @@
     "laptop-1366 :: A panel's edge is a ring shadow, not a border": "skipped",
     "laptop-1366 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "laptop-1366 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
+    "laptop-1366 :: A warning badge reads at AA contrast": "skipped",
     "laptop-1366 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "laptop-1366 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "laptop-1366 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -319,6 +322,7 @@
     "laptop-1366 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "laptop-1366 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "laptop-1366 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "laptop-1366 :: OFFLINE is not shown as success": "skipped",
     "laptop-1366 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "laptop-1366 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "laptop-1366 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
@@ -540,6 +544,7 @@
     "mobile-375 :: A panel's edge is a ring shadow, not a border": "skipped",
     "mobile-375 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "mobile-375 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
+    "mobile-375 :: A warning badge reads at AA contrast": "skipped",
     "mobile-375 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "mobile-375 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "mobile-375 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -560,6 +565,7 @@
     "mobile-375 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "mobile-375 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "mobile-375 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "mobile-375 :: OFFLINE is not shown as success": "skipped",
     "mobile-375 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "mobile-375 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "mobile-375 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
@@ -781,6 +787,7 @@
     "tablet-1024 :: A panel's edge is a ring shadow, not a border": "skipped",
     "tablet-1024 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "tablet-1024 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
+    "tablet-1024 :: A warning badge reads at AA contrast": "skipped",
     "tablet-1024 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "tablet-1024 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-1024 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -801,6 +808,7 @@
     "tablet-1024 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "tablet-1024 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "tablet-1024 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "tablet-1024 :: OFFLINE is not shown as success": "skipped",
     "tablet-1024 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "tablet-1024 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "tablet-1024 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
@@ -1022,6 +1030,7 @@
     "tablet-768 :: A panel's edge is a ring shadow, not a border": "skipped",
     "tablet-768 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "tablet-768 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
+    "tablet-768 :: A warning badge reads at AA contrast": "skipped",
     "tablet-768 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "tablet-768 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-768 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -1042,6 +1051,7 @@
     "tablet-768 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "tablet-768 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "tablet-768 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "tablet-768 :: OFFLINE is not shown as success": "skipped",
     "tablet-768 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "tablet-768 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "tablet-768 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
@@ -1263,6 +1273,7 @@
     "wide-1600 :: A panel's edge is a ring shadow, not a border": "skipped",
     "wide-1600 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "wide-1600 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
+    "wide-1600 :: A warning badge reads at AA contrast": "skipped",
     "wide-1600 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "wide-1600 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "wide-1600 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
@@ -1283,6 +1294,7 @@
     "wide-1600 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "wide-1600 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "wide-1600 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "wide-1600 :: OFFLINE is not shown as success": "skipped",
     "wide-1600 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "wide-1600 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "wide-1600 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",

@@ -33,6 +33,7 @@ import {
   updateOntologyMetadata
 } from "../api/workspaceState";
 import { DataTable, EmptyState, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "../components/data/DataDisplay";
+import { CHECK_RESULT, LIFECYCLE, intentOf } from "../components/data/intents";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
 import { navigate } from "../utils/navigation";
@@ -407,9 +408,9 @@ function ManagerSurface({
           <h2>{manager.object_type.display_name}</h2>
           <p>{manager.object_type.description || "No description"}</p>
           <div className="manager-chip-row">
-            <StatusBadge value={manager.object_type.status} />
-            <StatusBadge value={manager.object_type.visibility} />
-            <StatusBadge value={manager.object_type.index_status} />
+            <StatusBadge value={manager.object_type.status} intent={intentOf(LIFECYCLE, manager.object_type.status)} />
+            <StatusBadge value={manager.object_type.visibility} intent="neutral" />
+            <StatusBadge value={manager.object_type.index_status} intent={intentOf(LIFECYCLE, manager.object_type.index_status)} />
           </div>
         </div>
         <div className="button-row">
@@ -471,7 +472,7 @@ function ManagerSurface({
         />
         <ActionTypeEditor objectTypeId={manager.object_type.id} rows={manager.cards.action_types.rows} onMutation={onResourceMutation} />
         <LinkTypeEditor rows={manager.cards.link_types.rows} fallback={manager.object_type.display_name} onMutation={onResourceMutation} />
-        <Panel title={`Downstream Contracts ${manager.cards.contract_health.count}`} action={<StatusBadge value={manager.cards.contract_health.status} />}>
+        <Panel title={`Downstream Contracts ${manager.cards.contract_health.count}`} action={<StatusBadge value={manager.cards.contract_health.status} intent={intentOf(CHECK_RESULT, manager.cards.contract_health.status)} />}>
           <div className="manager-contract-counts">
             {Object.entries(manager.cards.contract_health.counts).map(([status, count]) => (
               <span key={status}><strong>{count}</strong>{status.replace(/_/g, " ")}</span>
@@ -643,7 +644,7 @@ function DatasetMappingPanel({ objectTypeId, assets, onSaved }: { objectTypeId: 
   }
 
   return (
-    <Panel title="Dataset to Ontology Mapping" className="ontology-mapping-panel" action={<StatusBadge value={preview?.status || "NOT_CONFIGURED"} />}>
+    <Panel title="Dataset to Ontology Mapping" className="ontology-mapping-panel" action={<StatusBadge value={preview?.status || "NOT_CONFIGURED"} intent={intentOf(CHECK_RESULT, preview?.status || "NOT_CONFIGURED")} />}>
       <div className="mapping-toolbar">
         <label>Source dataset<select value={assetId} onChange={(event) => { setAssetId(event.target.value); setPreview(null); setMappings([]); }}><option value="">Choose dataset</option>{assets.map((asset) => <option value={asset.id} key={asset.id}>{asset.display_name || asset.id}</option>)}</select></label>
         <button onClick={() => loadSuggestions()} disabled={!assetId || busy}>Suggest mappings</button>

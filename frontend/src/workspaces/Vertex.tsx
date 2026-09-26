@@ -479,8 +479,8 @@ export function Vertex() {
             }}
           />
           <div className="manager-chip-row">
-            <StatusBadge value={`${nodes.filter((node) => node.faded).length} faded`} />
-            <StatusBadge value={`${edges.filter((edge) => edge.merged).length} merged`} />
+            <StatusBadge value={`${nodes.filter((node) => node.faded).length} faded`} intent="neutral" />
+            <StatusBadge value={`${edges.filter((edge) => edge.merged).length} merged`} intent="neutral" />
           </div>
         </DeveloperEvidence>
       ) : null}

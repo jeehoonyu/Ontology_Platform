@@ -197,7 +197,7 @@ export function PlatformGraphWorkspace() {
         <Panel title="Selected Resource">
           {selected ? (
             <div className="graph-detail-drawer">
-              <div><StatusBadge value={asString(selected.data.kind)} /><strong>{asString(selected.data.label)}</strong></div>
+              <div><StatusBadge value={asString(selected.data.kind)} intent="neutral" /><strong>{asString(selected.data.label)}</strong></div>
               <KeyValueGrid data={selected.data} />
               <h3>Connections</h3>
               {(edges.filter((edge) => edge.source === selected.id || edge.target === selected.id)).map((edge) => (

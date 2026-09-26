@@ -233,6 +233,56 @@ test.describe("GOAL_LOOK", () => {
     }
   });
 
+  // U8, the plan's A1. The badge's colour comes from the intent its caller gives,
+  // not from its word: the backend bar's OFFLINE used to render green, because the
+  // old rule defaulted to success. The readiness call is refused to make it offline.
+  test("OFFLINE is not shown as success", async ({ page }) => {
+    await page.route((url) => url.pathname === "/project/readiness", (route) => route.abort());
+    await page.goto("/workspace/decision");
+    const badge = page.locator(".backend-connection .badge");
+    await expect(badge).toHaveText("OFFLINE");
+    expect.soft(await badge.evaluate((node) => ({
+      intent: node.getAttribute("data-intent"), color: getComputedStyle(node).color,
+    })), "the offline badge").toEqual({ intent: "danger", color: "rgb(172, 47, 51)" });
+  });
+
+  // U8. A warning tag's text is the warning hover step (#935610) on its 10% tint,
+  // read against the ground it actually sits on. #c87619, the rest step, is 3:1.
+  test("A warning badge reads at AA contrast", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    await page.goto("/workspace/command-center");
+    const badge = page.locator(".warning-list article").filter({ hasText: "Data contract status is" })
+      .locator(".badge").first();
+    await expect(badge).toHaveText("warn");
+    const reading = await badge.evaluate((node) => {
+      const parse = (value: string) => {
+        const [r, g, b, a = 1] = (value.match(/[\d.]+/g) || []).map(Number);
+        return { r, g, b, a };
+      };
+      // Composite each translucent background, from the first opaque ancestor up.
+      const layers: ReturnType<typeof parse>[] = [];
+      for (let el: Element | null = node; el; el = el.parentElement) {
+        const background = parse(getComputedStyle(el).backgroundColor);
+        if (background.a > 0) layers.unshift(background);
+        if (background.a >= 1) break;
+      }
+      let ground = { r: 255, g: 255, b: 255 };
+      for (const layer of layers) {
+        ground = { r: layer.r * layer.a + ground.r * (1 - layer.a), g: layer.g * layer.a + ground.g * (1 - layer.a),
+                   b: layer.b * layer.a + ground.b * (1 - layer.a) };
+      }
+      const luminance = ({ r, g, b }: { r: number; g: number; b: number }) => {
+        const channel = (c: number) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      };
+      const text = parse(getComputedStyle(node).color);
+      const [light, dark] = [luminance(ground), luminance(text)].sort((x, y) => y - x);
+      return { intent: node.getAttribute("data-intent"), ratio: Math.round(((light + 0.05) / (dark + 0.05)) * 100) / 100 };
+    });
+    expect.soft(reading.intent, "the warning badge's intent").toBe("warning");
+    expect.soft(reading.ratio, "the warning badge's contrast").toBeGreaterThanOrEqual(4.5);
+  });
+
   // U6. The original's text field: 30px, 0 8px, radius 4, white, the ring (drawn as
   // the border) and an inset shade; on focus the ring turns #4c90f0 and a 3px halo
   // replaces the shade. A select takes the same height.

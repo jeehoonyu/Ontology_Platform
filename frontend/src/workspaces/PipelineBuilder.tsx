@@ -35,6 +35,7 @@ import {
 } from "../api/workspaceState";
 import { BottomDrawer, LASSO_ID, PipelineCanvas, ZOOM_FIT, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
 import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { ACTION_RESULT, CHECK_RESULT, JOB_STATUS, NODE_STATUS, intentOf } from "../components/data/intents";
 import { Toolbar } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asRows, asString, classNames, formatValue } from "../utils/format";
@@ -820,7 +821,7 @@ export function PipelineBuilder() {
           />
           <Toolbar groups={canvas?.toolbar_groups || state.value?.selected_canvas?.toolbar_groups || []} />
           <div className="workbench-status-strip">
-            <StatusBadge value={stripStatus} />
+            <StatusBadge value={stripStatus} intent={canvas ? intentOf(CHECK_RESULT, stripStatus) : stripStatus === "Pipelines failed to load" || stripStatus === "Canvas failed to load" ? "danger" : "neutral"} />
             {unsavedNodes.length ? (
               <button type="button" className="unsaved-changes" aria-expanded={unsavedOpen}
                       onClick={() => setUnsavedOpen((open) => !open)}>
@@ -1011,7 +1012,7 @@ export function PipelineBuilder() {
           </Panel>
           <Panel title="Execution">
             {executionJob ? <div className="pipeline-execution-state" aria-live="polite">
-              <div className="pipeline-execution-heading"><StatusBadge value={executionJob.status} /><strong>{executionJob.job_type}</strong></div>
+              <div className="pipeline-execution-heading"><StatusBadge value={executionJob.status} intent={intentOf(JOB_STATUS, executionJob.status)} /><strong>{executionJob.job_type}</strong></div>
               <progress max={100} value={executionJob.progress} aria-label={`Execution progress ${executionJob.progress}%`} />
               <KeyValueGrid data={{
                 job_id: executionJob.id,
@@ -1081,14 +1082,14 @@ export function PipelineBuilder() {
               ) : null}
             </> : <EmptyState inline>Select a node to inspect lineage, config, and preview details.</EmptyState>}
           </Panel>
-          <Panel title="Ontology Contracts" action={<StatusBadge value={contracts?.summary.status || "NOT_RUN"} />}>
+          <Panel title="Ontology Contracts" action={<StatusBadge value={contracts?.summary.status || "NOT_RUN"} intent={intentOf(CHECK_RESULT, contracts?.summary.status || "NOT_RUN")} />}>
             {contracts?.sections.latest.length ? (
               <div className="ontology-contract-list">
                 {contracts.sections.latest.map((contract) => (
                   <button key={contract.id || contract.node_id} className="ontology-contract-row" onClick={() => setSelectedNodeId(contract.node_id)}>
                     {/* The names may be cut behind an ellipsis in a narrow pane; the counts below may not. */}
                     <span><strong title={contract.object_type_id}>{contract.object_type_id}</strong><small title={contract.node_id}>{contract.node_id}</small></span>
-                    <span><StatusBadge value={contract.status} /></span>
+                    <span><StatusBadge value={contract.status} intent={intentOf(ACTION_RESULT, contract.status)} /></span>
                     <small className="contract-row-counts">{contract.accepted_rows.toLocaleString()} accepted / {contract.rejected_rows.toLocaleString()} rejected</small>
                   </button>
                 ))}
@@ -1104,7 +1105,7 @@ export function PipelineBuilder() {
               {outputRows.map((node) => (
                 <article key={asString(node.id)} className="resource-card">
                   <strong>{formatValue(node.label || node.id)}</strong>
-                  <StatusBadge value={node.status as string} />
+                  <StatusBadge value={node.status as string} intent={intentOf(NODE_STATUS, node.status)} />
                 </article>
               ))}
               {buildRows.map((build) => (
@@ -1163,7 +1164,7 @@ function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyC
       <div className="pipeline-config-heading">
         <strong>Ontology contract</strong>
         <span className="contract-mode">{mode}</span>
-        <StatusBadge value={contract.status} />
+        <StatusBadge value={contract.status} intent={intentOf(ACTION_RESULT, contract.status)} />
       </div>
       <KeyValueGrid data={{
         object_type: contract.object_type_id,
@@ -1311,7 +1312,7 @@ function PipelineNodeConfig({ details, draft, onDraft, onSave }: {
 
   return (
     <form className="pipeline-node-config" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <div className="pipeline-config-heading"><strong>Transform configuration</strong><StatusBadge value={asString((details.metadata.configuration_validation as JsonObject | undefined)?.status || "READY")} /></div>
+      <div className="pipeline-config-heading"><strong>Transform configuration</strong><StatusBadge value={asString((details.metadata.configuration_validation as JsonObject | undefined)?.status || "READY")} intent={intentOf(CHECK_RESULT, asString((details.metadata.configuration_validation as JsonObject | undefined)?.status || "READY"))} /></div>
       <label>Node label<input value={label} onChange={(event) => changeLabel(event.target.value)} required /></label>
       {fields.map((field) => (
         <label key={field.name}>

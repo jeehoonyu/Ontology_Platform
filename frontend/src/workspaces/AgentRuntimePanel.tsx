@@ -11,6 +11,7 @@ import {
 } from "../api/agentApi";
 import { getJob } from "../api/jobApi";
 import { DataTable, ErrorBanner, StatusBadge } from "../components/data/DataDisplay";
+import { intentOf, JOB_STATUS, POLICY } from "../components/data/intents";
 import type { AgentRunResult, PlatformJob } from "../types";
 
 export interface ParameterRow {
@@ -231,7 +232,7 @@ export function AgentRuntimePanel({ draft: held, onDraft, run: heldRun }: {
           </div>
           {job ? (
             <div className="agent-job-state">
-              <span><StatusBadge value={job.status} /><small>{job.job_type} · attempt {job.attempt}</small></span>
+              <span><StatusBadge value={job.status} intent={intentOf(JOB_STATUS, job.status)} /><small>{job.job_type} · attempt {job.attempt}</small></span>
               <div className="agent-progress"><i style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} /></div>
               <strong>{job.progress}%</strong>
               {["BLOCKED", "QUEUED", "RUNNING"].includes(job.status) ? <button onClick={() => void cancel()}><Ban size={14} /> Cancel</button> : null}
@@ -257,12 +258,12 @@ export function AgentRuntimePanel({ draft: held, onDraft, run: heldRun }: {
           ) : null}
           {result ? (
             <div className="agent-run-evidence">
-              <div className="agent-answer"><StatusBadge value={policy} /><p>{result.answer}</p><small>{result.retrieval.retrieved_object_count || 0} objects retrieved · {result.tool_calls.length} tools · {result.policy_summary.direct_mutations || 0} direct mutations</small></div>
+              <div className="agent-answer"><StatusBadge value={policy} intent={intentOf(POLICY, policy)} /><p>{result.answer}</p><small>{result.retrieval.retrieved_object_count || 0} objects retrieved · {result.tool_calls.length} tools · {result.policy_summary.direct_mutations || 0} direct mutations</small></div>
               <div className="agent-tool-trace">
                 {result.tool_calls.map((call, index) => (
                   <article key={`${call.tool}-${index}`}>
                     <span><strong>{call.tool}</strong><small>{call.type} · {call.duration_ms} ms</small></span>
-                    <StatusBadge value={call.policy_decision} />
+                    <StatusBadge value={call.policy_decision} intent={intentOf(POLICY, call.policy_decision)} />
                     <small>{call.citations.length} citation{call.citations.length === 1 ? "" : "s"}</small>
                   </article>
                 ))}
@@ -270,7 +271,7 @@ export function AgentRuntimePanel({ draft: held, onDraft, run: heldRun }: {
               {result.proposed_actions.map((action, index) => (
                 <div className="agent-proposal" key={`${action.action_type_id}-${index}`}>
                   <span><strong>{action.action_type_id}</strong><small>{action.approval_request_id ? `Approval ${action.approval_request_id}` : "Staged for review"}</small></span>
-                  <StatusBadge value={action.policy_decision} />
+                  <StatusBadge value={action.policy_decision} intent={intentOf(POLICY, action.policy_decision)} />
                 </div>
               ))}
             </div>

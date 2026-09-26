@@ -16,6 +16,7 @@ import {
   type OntologyRevisionSummary
 } from "../api/ontologyLifecycleApi";
 import { EmptyState, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { APPROVAL, CHECK_RESULT, COMPATIBILITY, intentOf } from "../components/data/intents";
 
 const PROPERTY_TYPES = ["string", "integer", "double", "boolean", "date", "timestamp", "json", "array", "geometry"];
 
@@ -128,7 +129,7 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
           <h2 id="ontology-release-title">Ontology Releases</h2>
           <p>Review semantic diffs, migration impact, approvals, publication, and rollback.</p>
           <div className="manager-chip-row">
-            <StatusBadge value={production ? "PRODUCTION" : "NOT_PUBLISHED"} />
+            <StatusBadge value={production ? "PRODUCTION" : "NOT_PUBLISHED"} intent={production ? "success" : "neutral"} />
             <span className="release-current">{production?.current_revision_id ? `Revision ${revisions.find((item) => item.id === production.current_revision_id)?.revision || "-"}` : "No production revision"}</span>
           </div>
         </div>
@@ -166,7 +167,7 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
           {changeSets.length ? changeSets.map((changeSet) => (
             <button key={changeSet.id} className={selectedChangeSetId === changeSet.id ? "release-list-row selected" : "release-list-row"} onClick={() => setSelectedChangeSetId(changeSet.id)}>
               <span><strong>{changeSet.title}</strong><small>{changeSet.diff.classification || "NOT_VALIDATED"} · {changeSet.diff.summary?.changes || 0} changes</small></span>
-              <StatusBadge value={changeSet.status} />
+              <StatusBadge value={changeSet.status} intent={intentOf(APPROVAL, changeSet.status)} />
             </button>
           )) : <EmptyState inline>Capture the current ontology and propose the first reviewed change.</EmptyState>}
         </Panel>
@@ -200,7 +201,7 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
           {revisions.map((revision) => (
             <div className="release-table-row" role="row" key={revision.id}>
               <strong role="cell">Revision {revision.revision}</strong>
-              <StatusBadge value={revision.status} />
+              <StatusBadge value={revision.status} intent={intentOf(APPROVAL, revision.status)} />
               <span role="cell">{revision.validation.status || "NOT_VALIDATED"}</span>
               <span role="cell">{new Date(revision.created_at * 1000).toLocaleString()}</span>
               <button disabled={busy || !["PUBLISHED", "SUPERSEDED"].includes(revision.status) || production?.current_revision_id === revision.id} onClick={async () => {
@@ -218,7 +219,7 @@ export function OntologyReleasePanel({ objectTypeId, projectId = "default", onBa
 function ContractHealthPanel({ health }: { health: OntologyContractHealth | null }) {
   const statuses = ["CURRENT", "COMPATIBLE_STALE", "BROKEN", "UNVERSIONED", "NO_ACTIVE_REVISION"] as const;
   return (
-    <Panel title="Downstream Contract Health" ariaLabel="Downstream Contract Health" className="ontology-contract-health" action={<StatusBadge value={health?.status || "NOT_AVAILABLE"} />}>
+    <Panel title="Downstream Contract Health" ariaLabel="Downstream Contract Health" className="ontology-contract-health" action={<StatusBadge value={health?.status || "NOT_AVAILABLE"} intent={intentOf(CHECK_RESULT, health?.status || "NOT_AVAILABLE")} />}>
       <div className="contract-health-summary" aria-label="Downstream ontology contract status counts">
         {statuses.map((status) => <div key={status}><span>{status.replace(/_/g, " ")}</span><strong>{health?.counts[status] || 0}</strong></div>)}
       </div>
@@ -226,7 +227,7 @@ function ContractHealthPanel({ health }: { health: OntologyContractHealth | null
         <div className="contract-consumer-list">
           {health.bindings.map((binding) => (
             <article key={binding.id}>
-              <StatusBadge value={binding.health.status} />
+              <StatusBadge value={binding.health.status} intent={intentOf(COMPATIBILITY, binding.health.status)} />
               <div>
                 <strong>{binding.definition.consumer_kind} · {binding.definition.consumer_id}</strong>
                 <span>Version {binding.definition.consumer_version} · {binding.definition.target_id}</span>
@@ -251,7 +252,7 @@ function ChangeSetReview({ changeSet, busy, breakingAcknowledged, onBreakingAckn
   onPublish: () => void;
 }) {
   return (
-    <Panel title="Review and Migration Evidence" className="ontology-change-review" action={<StatusBadge value={changeSet.diff.classification || changeSet.status} />}>
+    <Panel title="Review and Migration Evidence" className="ontology-change-review" action={<StatusBadge value={changeSet.diff.classification || changeSet.status} intent={changeSet.diff.classification ? intentOf(COMPATIBILITY, changeSet.diff.classification) : intentOf(APPROVAL, changeSet.status)} />}>
       <div className="release-summary-cards">
         <div><span>Changes</span><strong>{changeSet.diff.summary?.changes || 0}</strong></div>
         <div><span>Breaking</span><strong>{changeSet.diff.summary?.breaking || 0}</strong></div>
@@ -261,7 +262,7 @@ function ChangeSetReview({ changeSet, busy, breakingAcknowledged, onBreakingAckn
       <div className="release-evidence-grid">
         <div>
           <h3>Semantic diff</h3>
-          <ul>{(changeSet.diff.entries || []).map((entry, index) => <li key={`${entry.resource_id}-${entry.property_name || index}`}><StatusBadge value={entry.breaking ? "BREAKING" : "SAFE"} /><span>{entry.kind.replace(/_/g, " ")} · {entry.resource_id}{entry.property_name ? `.${entry.property_name}` : ""}</span></li>)}</ul>
+          <ul>{(changeSet.diff.entries || []).map((entry, index) => <li key={`${entry.resource_id}-${entry.property_name || index}`}><StatusBadge value={entry.breaking ? "BREAKING" : "SAFE"} intent={entry.breaking ? "danger" : "success"} /><span>{entry.kind.replace(/_/g, " ")} · {entry.resource_id}{entry.property_name ? `.${entry.property_name}` : ""}</span></li>)}</ul>
         </div>
         <div>
           <h3>Migration plan</h3>
@@ -269,7 +270,7 @@ function ChangeSetReview({ changeSet, busy, breakingAcknowledged, onBreakingAckn
         </div>
         <div>
           <h3>Affected consumers</h3>
-          {(changeSet.impact.affected_consumers || []).length ? <ul>{(changeSet.impact.affected_consumers || []).map((consumer) => <li key={consumer.binding_id}><StatusBadge value={consumer.breaking ? "BREAKING" : "REVIEW"} /><span>{consumer.consumer_kind} · {consumer.consumer_id} · v{consumer.consumer_version}</span></li>)}</ul> : <p className="release-no-consumers">No version-bound consumer references this change.</p>}
+          {(changeSet.impact.affected_consumers || []).length ? <ul>{(changeSet.impact.affected_consumers || []).map((consumer) => <li key={consumer.binding_id}><StatusBadge value={consumer.breaking ? "BREAKING" : "REVIEW"} intent={consumer.breaking ? "danger" : "warning"} /><span>{consumer.consumer_kind} · {consumer.consumer_id} · v{consumer.consumer_version}</span></li>)}</ul> : <p className="release-no-consumers">No version-bound consumer references this change.</p>}
         </div>
       </div>
       {changeSet.diff.classification === "BREAKING" ? (

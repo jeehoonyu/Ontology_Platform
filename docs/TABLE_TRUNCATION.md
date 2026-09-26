@@ -20,10 +20,10 @@ are given: the rows past the cut are named and cannot be reached.
 
 | File | Line | In | Cuts | How | Into a paging table | True count rendered |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/data/DataDisplay.tsx` | 156 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
+| `components/data/DataDisplay.tsx` | 155 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 287 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 278 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
-| `workspaces/ObjectExplorer.tsx` | 203 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
+| `workspaces/ObjectExplorer.tsx` | 204 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
 
 ## Lists, canvases and chips
 
@@ -36,12 +36,12 @@ way to the rest names items nobody can reach.
 | --- | --- | --- | --- | --- | --- | --- |
 | `components/canvas/PipelineCanvas.tsx` | 495 | `MiniGraph` | `nodes` (slice) | mapped | **no** | **no** |
 | `components/canvas/PipelineCanvas.tsx` | 502 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
-| `workspaces/DecisionWorkspace.tsx` | 127 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
-| `workspaces/MapWorkspace.tsx` | 223 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
-| `workspaces/ObjectExplorer.tsx` | 72 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
-| `workspaces/OntologyManager.tsx` | 291 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
-| `workspaces/VisualBuilder.tsx` | 719 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
-| `workspaces/VisualBuilder.tsx` | 823 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
+| `workspaces/DecisionWorkspace.tsx` | 128 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
+| `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
+| `workspaces/ObjectExplorer.tsx` | 73 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
+| `workspaces/OntologyManager.tsx` | 292 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
+| `workspaces/VisualBuilder.tsx` | 720 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 824 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
 
 ## Found and not placed
 
@@ -124,22 +124,22 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `lib/builderKernel.ts` | 22 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `workspaces/Analytics.tsx` | 62 | `truncate` | `text` | text |
-| `workspaces/Automate.tsx` | 312 | `Automate` | `run.id` | text |
-| `workspaces/OntologyManager.tsx` | 506 | `ActionTypeEditor` | ``${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")` | text |
-| `workspaces/OntologyManager.tsx` | 754 | `OntologyRelationshipDesigner` | ``${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_")` | text |
-| `workspaces/OntologyPackagePanel.tsx` | 155 | `PackageVersionRow` | `version.checksum` | text |
-| `workspaces/OntologyRegistryPanel.tsx` | 151 | `OntologyRegistryPanel` | `selected.checksum?` | text |
-| `workspaces/OntologyRegistryPanel.tsx` | 176 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
-| `workspaces/OpsWorkspace.tsx` | 75 | `IncidentsTab` | `alerts` | request payload |
-| `workspaces/PipelineBuilder.tsx` | 578 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 734 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 734 | `PipelineBuilder` | `over` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 739 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 846 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/VisualBuilder.tsx` | 514 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 615 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 620 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 725 | `VisualBuilder` | `participant.display_name` | text |
+| `workspaces/Automate.tsx` | 313 | `Automate` | `run.id` | text |
+| `workspaces/OntologyManager.tsx` | 507 | `ActionTypeEditor` | ``${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")` | text |
+| `workspaces/OntologyManager.tsx` | 755 | `OntologyRelationshipDesigner` | ``${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_")` | text |
+| `workspaces/OntologyPackagePanel.tsx` | 156 | `PackageVersionRow` | `version.checksum` | text |
+| `workspaces/OntologyRegistryPanel.tsx` | 152 | `OntologyRegistryPanel` | `selected.checksum?` | text |
+| `workspaces/OntologyRegistryPanel.tsx` | 177 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
+| `workspaces/OpsWorkspace.tsx` | 76 | `IncidentsTab` | `alerts` | request payload |
+| `workspaces/PipelineBuilder.tsx` | 579 | `PipelineBuilder` | `current` | last dropped |
+| `workspaces/PipelineBuilder.tsx` | 735 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 735 | `PipelineBuilder` | `over` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 740 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 847 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/VisualBuilder.tsx` | 515 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 616 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 621 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 726 | `VisualBuilder` | `participant.display_name` | text |
 
 ## What this does not see
 
