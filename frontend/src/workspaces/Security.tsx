@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Tabs } from "../components/layout/Tabs";
 import {
   DataTable,
   DeveloperEvidence,
@@ -105,17 +106,7 @@ export function Security() {
           <span>SG</span>
           <strong>Security &amp; Governance</strong>
         </div>
-        <nav>
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              className={classNames(tab === item.id && "active")}
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        <Tabs label="Security & Governance views" items={TABS} value={tab} onChange={setTab} />
         <div className="button-row">
           <button onClick={bump}>Refresh</button>
         </div>

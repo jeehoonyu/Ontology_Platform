@@ -2597,6 +2597,12 @@ pre {
   min-width: 0;
 }
 
+/* Tabs in the 42px workspace header: the header's border is their rule, so the bar
+   draws none of its own (GOAL_FOUNDATIONS A8). */
+.workspace-header .tabs {
+  box-shadow: none;
+}
+
 .workspace-header > div:first-child {
   display: flex;
   align-items: center;
@@ -2611,14 +2617,12 @@ pre {
   font-size: 11px;
 }
 
-.workspace-header nav,
 .manager-nav,
 .bottom-drawer nav {
   display: flex;
   gap: 4px;
 }
 
-.workspace-header nav button,
 .manager-nav button,
 .bottom-drawer nav button {
   box-shadow: none;
@@ -2628,7 +2632,6 @@ pre {
   padding: 8px 10px;
 }
 
-.workspace-header nav button.active,
 .bottom-drawer nav button.active {
   color: #156ea3;
   border-bottom-color: #156ea3;

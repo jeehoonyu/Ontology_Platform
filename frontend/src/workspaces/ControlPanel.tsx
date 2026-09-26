@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Tabs } from "../components/layout/Tabs";
 import {
   DataTable,
   EmptyState,
@@ -64,13 +65,7 @@ export function ControlPanel() {
           <strong>Administration</strong>
           <span>Admin</span>
         </div>
-        <nav>
-          {SECTIONS.map((item) => (
-            <button key={item.id} className={classNames(section === item.id && "active")} onClick={() => setSection(item.id)}>
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        <Tabs label="Administration sections" items={SECTIONS} value={section} onChange={setSection} />
         <div className="button-row">
           <StatusBadge value={active.label} intent="neutral" />
         </div>

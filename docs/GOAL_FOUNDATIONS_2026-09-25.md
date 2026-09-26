@@ -404,6 +404,21 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Negative run: the hand-written buttons put back read no primitive and no current tab.
     Restored byte for byte; the hash matched (`ef0734a926df5e88`).
   - Measured: the full six-project run passed 391 of 391, with the known Platform Graph retry.
+
+  **4. Security and Control Panel.** Their workspace-header tab bars are `Tabs`, in one commit,
+  because they shared the `.workspace-header nav` rules and those could go only once both had
+  moved.
+  - Each nav gains the name it lacked: "Security & Governance views" and "Administration
+    sections".
+  - Inside the 42px header, the bar draws no rule of its own, because the header's border is
+    the rule. The header itself stays, since the resource header is the plan's Q5.
+  - Raw colours hold at 587: the shared rules' colours remain for the drawer, which moves next.
+  - Proven by the security and control-panel cases of `look.spec.ts::The … tabs are the Tabs
+    primitive`. A screenshot of both headers shows the underline tabs sitting on the header's
+    bottom edge.
+  - Negative runs: each screen's hand-written nav put back read no primitive and no current
+    tab. Both were restored byte for byte, and the hash matched (`a48b54730ab38665`).
+  - Measured: the full six-project run passed 393 of 393, with the known Platform Graph retry.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by
