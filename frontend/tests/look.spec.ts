@@ -439,4 +439,31 @@ test.describe("GOAL_LOOK", () => {
     expect.soft(scan.violations.map((violation) => violation.id), "the inspector's scroll region").toEqual([]);
     await expect.soft(inspector, "the inspector's name").toHaveAccessibleName("Object inspector");
   });
+
+  // U10, AppHeader. UI_CONFIG's app header: a 50px white bar ruled below, the screen's
+  // name in 16px/19px 600, and one h1 on the page. Ours runs to the workspace's edges
+  // under the flow strip and the backend bar, so it is ruled above as well.
+  test("The page title is a 16px name in the original's 50px header bar", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    const header = page.locator(".page-header");
+    await expect(header.getByRole("heading", { level: 1, name: "Decision Intelligence" })).toBeVisible();
+    expect.soft(await page.locator("h1").count(), "level-1 headings on the page").toBe(1);
+    expect.soft(await header.evaluate((node) => {
+      const workspace = node.closest(".workspace")!;
+      const bounds = workspace.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const title = getComputedStyle(node.querySelector("h1")!);
+      return {
+        height: Math.round(rect.height), background: style.backgroundColor, rules: style.boxShadow,
+        flush: [Math.round(rect.left - bounds.left - workspace.clientLeft),
+                Math.round(bounds.left + workspace.clientLeft + workspace.clientWidth - rect.right)],
+        title: `${title.fontSize}/${title.lineHeight} ${title.fontWeight}`,
+      };
+    }), "the page header").toEqual({
+      height: 50, background: "rgb(255, 255, 255)",
+      rules: "rgba(17, 20, 24, 0.15) 0px 1px 0px 0px, rgba(17, 20, 24, 0.15) 0px -1px 0px 0px",
+      flush: [0, 0], title: "16px/19px 600",
+    });
+  });
 });

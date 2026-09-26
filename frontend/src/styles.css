@@ -750,8 +750,11 @@ button:disabled {
   text-decoration: none;
 }
 
+/* --workspace-gutter is the workspace's padding; the page header (GOAL_LOOK U10)
+   reaches the workspace's edges through it. */
 .workspace {
-  padding: 22px;
+  --workspace-gutter: 22px;
+  padding: var(--workspace-gutter);
   overflow: auto;
   min-width: 0;
 }
@@ -2205,14 +2208,27 @@ button:disabled {
   color: #64717a;
 }
 
+/* The original's app header (GOAL_LOOK U10): a 50px white bar ruled below, running
+   to the workspace's edges, with the screen's name in 16px 600. The subtitle stays
+   under the name, because it says what the screen is for; the bar grows when it
+   wraps. The original's sits at the top of the window; ours sits under the flow
+   strip and the backend bar, so it is ruled above as well. */
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  min-height: var(--shell-header-height);
+  margin: 0 calc(-1 * var(--workspace-gutter)) 16px;
+  padding: 6px var(--workspace-gutter);
+  background: var(--surface-card);
+  box-shadow: var(--shell-header-rule), 0 -1px 0 0 var(--divider);
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.page-header h1 {
+  font: var(--font-title-app);
 }
 
 .page-header > div {
@@ -2238,8 +2254,8 @@ h2 {
 }
 
 .page-header p {
-  margin-top: 5px;
-  color: #52616b;
+  margin-top: 1px;
+  color: var(--text-muted);
 }
 
 .resource-row.selected > span,
@@ -5458,7 +5474,7 @@ pre {
   }
 
   .workspace {
-    padding: 16px;
+    --workspace-gutter: 16px;
   }
 
   .platform-flow {

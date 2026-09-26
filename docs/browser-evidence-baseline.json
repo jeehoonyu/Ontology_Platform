@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "aab0b7c09c0e11fc51365d34b38b2f37ac6661ef2cb4ea727c513e3361afcc1e",
+    "bundle_source_hash": "18132785e18441ebf2f0bb2d0107fc201e0b1fb3304ba6595578f371740325d5",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T03:52:52Z",
+    "recorded_at": "2026-09-26T04:09:27Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,7 +14,7 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 0,
+      "flaky": 1,
       "ran": 243,
       "skipped": 5
     },
@@ -22,31 +22,31 @@
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 222
+      "skipped": 223
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 221
+      "skipped": 222
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 222
+      "skipped": 223
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 222
+      "skipped": 223
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 222
+      "skipped": 223
     }
   },
   "tests": {
@@ -99,6 +99,7 @@
     "desktop-1280 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "ran",
     "desktop-1280 :: The body text is 14px on an 18px line": "ran",
     "desktop-1280 :: The page text renders in the bundled face, not a system font": "ran",
+    "desktop-1280 :: The page title is a 16px name in the original's 50px header bar": "ran",
     "desktop-1280 :: The sidebar is the original's dark gray": "ran",
     "desktop-1280 :: Up Arrow during a keyboard drag moves the node, not the zoom": "ran",
     "desktop-1280 :: Vertex's seed list says how many objects the type holds and reaches every one": "ran",
@@ -347,6 +348,7 @@
     "laptop-1366 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "laptop-1366 :: The body text is 14px on an 18px line": "skipped",
     "laptop-1366 :: The page text renders in the bundled face, not a system font": "skipped",
+    "laptop-1366 :: The page title is a 16px name in the original's 50px header bar": "skipped",
     "laptop-1366 :: The sidebar is the original's dark gray": "skipped",
     "laptop-1366 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "laptop-1366 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -595,6 +597,7 @@
     "mobile-375 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "mobile-375 :: The body text is 14px on an 18px line": "skipped",
     "mobile-375 :: The page text renders in the bundled face, not a system font": "skipped",
+    "mobile-375 :: The page title is a 16px name in the original's 50px header bar": "skipped",
     "mobile-375 :: The sidebar is the original's dark gray": "skipped",
     "mobile-375 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "mobile-375 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -843,6 +846,7 @@
     "tablet-1024 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "tablet-1024 :: The body text is 14px on an 18px line": "skipped",
     "tablet-1024 :: The page text renders in the bundled face, not a system font": "skipped",
+    "tablet-1024 :: The page title is a 16px name in the original's 50px header bar": "skipped",
     "tablet-1024 :: The sidebar is the original's dark gray": "skipped",
     "tablet-1024 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "tablet-1024 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -1091,6 +1095,7 @@
     "tablet-768 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "tablet-768 :: The body text is 14px on an 18px line": "skipped",
     "tablet-768 :: The page text renders in the bundled face, not a system font": "skipped",
+    "tablet-768 :: The page title is a 16px name in the original's 50px header bar": "skipped",
     "tablet-768 :: The sidebar is the original's dark gray": "skipped",
     "tablet-768 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "tablet-768 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
@@ -1339,6 +1344,7 @@
     "wide-1600 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "wide-1600 :: The body text is 14px on an 18px line": "skipped",
     "wide-1600 :: The page text renders in the bundled face, not a system font": "skipped",
+    "wide-1600 :: The page title is a 16px name in the original's 50px header bar": "skipped",
     "wide-1600 :: The sidebar is the original's dark gray": "skipped",
     "wide-1600 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
     "wide-1600 :: Vertex's seed list says how many objects the type holds and reaches every one": "skipped",
