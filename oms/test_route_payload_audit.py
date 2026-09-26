@@ -267,13 +267,21 @@ check(recorded["provenance"]["stale_after"] == "recomputed each run", recorded)
 check(len(recorded["routes"]) >= 15, len(recorded["routes"]))
 
 # The point of the split: the graph library rides with the graph screens, not
-# with everyone. If the shared closure ever exceeds the heaviest non-graph route
-# again, something has been hoisted back into the entry.
+# with everyone. It is about 173 KB, so each graph screen carries at least
+# 150 KB of its own beyond the shared closure. Hoisted back into the entry, it
+# would move into the shared closure, and the platform graph and the visual
+# builder would be left with a few dozen KB of their own.
+#
+# This used to read `shared < 500 KB`, which tested a size, not the split: the
+# fonts of GOAL_LOOK U4 took the shared closure to 499.6 KB, and U8's
+# re-baseline to 507 KB failed it with no graph code moved. The shared
+# closure's size is the gate's own ceiling, recorded in the baseline.
 shared = recorded["shared_closure_bytes"]
-check(shared < 500 * 1024, f"shared closure is {shared / 1024:.0f} KB")
-graph_screens = [recorded["routes"].get(n, 0)
-                 for n in ("OntologyManager", "VisualBuilder", "PlatformGraph")]
-check(all(size > shared for size in graph_screens), graph_screens)
+graph_own = {n: recorded["routes"].get(n, 0) - shared
+             for n in ("OntologyManager", "VisualBuilder", "PlatformGraph")}
+check(all(own >= 150 * 1024 for own in graph_own.values()),
+      f"a graph screen carries under 150 KB of its own, so the graph library "
+      f"is in the shared closure: { {n: f'{own / 1024:.0f} KB' for n, own in graph_own.items()} }")
 
 print(f"Route payload gate verified: {checks} assertions passed "
       f"({len(recorded['routes'])} routes, shared closure {shared / 1024:.0f} KB).")
