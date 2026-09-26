@@ -256,7 +256,7 @@ export function MapWorkspace() {
         <aside className="map-layer-rail">
           <Panel title="Layers" action={<Layers size={15} />}>
             <div className="map-layer-list">{layers.map((item) => <button key={item.id} className={item.id === activeLayerId ? "selected" : ""} onClick={() => void loadLayer(item.id)}><span className="layer-swatch" style={{ background: riskColor(item.style) }} /><span><strong>{item.display_name}</strong><small>{item.object_type_id} · {item.geometry_field}</small></span><StatusBadge value={item.visible ? "visible" : "hidden"} intent="neutral" /></button>)}</div>
-            {!layers.length ? <div className="empty">Render an object type, then save it as a reusable operational layer.</div> : null}
+            {!layers.length ? <EmptyState inline>Render an object type, then save it as a reusable operational layer.</EmptyState> : null}
             {features.length ? <><h3 className="map-subheading">Features</h3>
               {held > features.length ? <p className="table-truncated" role="note">Loaded {features.length.toLocaleString()} of {held.toLocaleString()} features. The map and this list show only these.</p> : null}
               {features.length > FEATURE_PREVIEW && !allFeatures ? <p className="table-truncated" role="note">Listing {FEATURE_PREVIEW} of {features.length.toLocaleString()} loaded features</p> : null}

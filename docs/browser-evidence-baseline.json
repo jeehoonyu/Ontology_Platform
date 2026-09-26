@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "339af6bd2012911b848337c8522cac345fbfdfbbb600a5f6735996d77e2fe1cd",
+    "bundle_source_hash": "ccafdb042987687ed9361c09bb3a04fe317656bbdc32ef05778f12130e9e040d",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T03:11:46Z",
+    "recorded_at": "2026-09-26T03:24:46Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,39 +14,39 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 1,
-      "ran": 239,
+      "flaky": 0,
+      "ran": 241,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 219
+      "skipped": 220
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 218
+      "skipped": 219
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 219
+      "skipped": 220
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 219
+      "skipped": 220
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 219
+      "skipped": 220
     }
   },
   "tests": {
@@ -61,6 +61,7 @@
     "desktop-1280 :: A text input is 30px with an inset ring and a blue focus ring": "ran",
     "desktop-1280 :: A warning badge reads at AA contrast": "ran",
     "desktop-1280 :: AIP agent runtime exposes durable policy and citation evidence": "ran",
+    "desktop-1280 :: An empty state is centred, with a 48px icon over an 18px muted title": "ran",
     "desktop-1280 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "ran",
     "desktop-1280 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "ran",
     "desktop-1280 :: Data Onboarding counts every import job and says the recent list is a window": "ran",
@@ -306,6 +307,7 @@
     "laptop-1366 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "laptop-1366 :: A warning badge reads at AA contrast": "skipped",
     "laptop-1366 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "laptop-1366 :: An empty state is centred, with a 48px icon over an 18px muted title": "skipped",
     "laptop-1366 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "laptop-1366 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "laptop-1366 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
@@ -551,6 +553,7 @@
     "mobile-375 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "mobile-375 :: A warning badge reads at AA contrast": "skipped",
     "mobile-375 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "mobile-375 :: An empty state is centred, with a 48px icon over an 18px muted title": "skipped",
     "mobile-375 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "mobile-375 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "mobile-375 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
@@ -796,6 +799,7 @@
     "tablet-1024 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "tablet-1024 :: A warning badge reads at AA contrast": "skipped",
     "tablet-1024 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "tablet-1024 :: An empty state is centred, with a 48px icon over an 18px muted title": "skipped",
     "tablet-1024 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-1024 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "tablet-1024 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
@@ -1041,6 +1045,7 @@
     "tablet-768 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "tablet-768 :: A warning badge reads at AA contrast": "skipped",
     "tablet-768 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "tablet-768 :: An empty state is centred, with a 48px icon over an 18px muted title": "skipped",
     "tablet-768 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "tablet-768 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "tablet-768 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",
@@ -1286,6 +1291,7 @@
     "wide-1600 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "wide-1600 :: A warning badge reads at AA contrast": "skipped",
     "wide-1600 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
+    "wide-1600 :: An empty state is centred, with a 48px icon over an 18px muted title": "skipped",
     "wide-1600 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
     "wide-1600 :: Ctrl+A, Ctrl+E and Ctrl+D do what their buttons do": "skipped",
     "wide-1600 :: Data Onboarding counts every import job and says the recent list is a window": "skipped",

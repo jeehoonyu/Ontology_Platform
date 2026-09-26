@@ -20,7 +20,7 @@ are given: the rows past the cut are named and cannot be reached.
 
 | File | Line | In | Cuts | How | Into a paging table | True count rendered |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/data/DataDisplay.tsx` | 155 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
+| `components/data/DataDisplay.tsx` | 160 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 287 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 278 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
 | `workspaces/ObjectExplorer.tsx` | 204 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |

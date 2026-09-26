@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Inbox } from "lucide-react";
 import { asString, classNames, formatValue } from "../../utils/format";
 import { renderPropertyValue, type PropertySpec } from "../../utils/semanticRender";
 import type { EvidenceLink, JsonObject, TableRow, UiSection, UiWarning } from "../../types";
@@ -36,6 +37,9 @@ export function LoadingState({ label = "Loading workspace data..." }: { label?: 
  *   <div className="empty">…</div>   ->   <EmptyState inline>…</EmptyState>
  *
  * `audit_ui_states.py` counts the raw form that remains and ratchets it down.
+ *
+ * The card is the original's NonIdealState (GOAL_LOOK U10): centred in the
+ * space it replaces, with a 48px muted icon over the title and one line.
  */
 export function EmptyState({ title, description, action, inline, compact, children }: {
   title?: string;
@@ -50,6 +54,7 @@ export function EmptyState({ title, description, action, inline, compact, childr
   }
   return (
     <div className="state-block empty-state-card">
+      <Inbox size={48} strokeWidth={1.5} aria-hidden="true" />
       <strong>{title}</strong>
       {description ? <span>{description}</span> : null}
       {action ? <div className="button-row">{action}</div> : null}
@@ -148,7 +153,7 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
   // first page every few seconds.
   const [page, setPage] = useState(0);
   const [setArea, areaWidth] = useScrollAreaWidth();
-  if (!safeRows.length) return <div className="empty">{empty}</div>;
+  if (!safeRows.length) return <EmptyState inline>{empty}</EmptyState>;
   const pages = Math.ceil(safeRows.length / TABLE_ROW_LIMIT);
   const current = Math.min(page, pages - 1);
   const first = current * TABLE_ROW_LIMIT;
@@ -203,7 +208,7 @@ export function DataTable({ rows, empty = "No records" }: { rows?: TableRow[]; e
  */
 export function KeyValueGrid({ data, specs }: { data: JsonObject; specs?: Record<string, PropertySpec> }) {
   const entries = Object.entries(data || {});
-  if (!entries.length) return <div className="empty">No details available.</div>;
+  if (!entries.length) return <EmptyState inline>No details available.</EmptyState>;
   return (
     <dl className="kv-grid">
       {entries.map(([key, value]) => (
@@ -250,7 +255,7 @@ export function SectionCards({ sections, onNavigate }: { sections?: UiSection[];
 
 export function EvidenceList({ links }: { links?: EvidenceLink[] }) {
   const safeLinks = (links || []).filter((link) => link.id);
-  if (!safeLinks.length) return <div className="empty">No evidence links yet.</div>;
+  if (!safeLinks.length) return <EmptyState inline>No evidence links yet.</EmptyState>;
   return (
     <ol className="proof-trail evidence-list">
       {safeLinks.map((link) => (

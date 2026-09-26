@@ -226,11 +226,11 @@ export function ObjectExplorer() {
         <aside className="explorer-left-rail">
           <Panel title="Saved Explorations">
             <div className="explorer-saved-list">{explorations.map((saved) => <button key={saved.id} onClick={() => openExploration(saved)}><span><strong>{saved.display_name}</strong><small>{saved.object_type_id}</small></span><ChevronRight size={14} /></button>)}</div>
-            {!explorations.length ? <div className="empty">Save a query to return to it later.</div> : null}
+            {!explorations.length ? <EmptyState inline>Save a query to return to it later.</EmptyState> : null}
           </Panel>
           <Panel title="Filters" action={<Filter size={15} />}>
             <div className="filter-chip-list">{Object.entries(filters).map(([field, value]) => <button key={field} onClick={() => { const next = { ...filters }; delete next[field]; setFilters(next); void runQuery(objectTypeId, next, search); }} title="Remove filter"><span>{field}: {filterLabel(value)}</span><X size={12} /></button>)}</div>
-            {!Object.keys(filters).length ? <div className="empty compact">Select a facet value to filter results.</div> : null}
+            {!Object.keys(filters).length ? <EmptyState inline compact>Select a facet value to filter results.</EmptyState> : null}
           </Panel>
           <div className="facet-stack">{query?.facets.map((facet) => <FacetCard key={`${query.object_type_id}:${facet.field}`} facet={facet} onApply={(value) => applyFacet(facet, value)} />)}</div>
         </aside>
@@ -244,10 +244,10 @@ export function ObjectExplorer() {
 
         <aside className="explorer-inspector">
           <Panel title="Object Preview" action={<Network size={15} />}>
-            {!profile ? <div className="empty">Select a result to inspect its properties and links.</div> : <><header className="object-profile-heading"><div><strong>{formatValue(profile.object.properties.name || profile.object.properties.title || profile.object.id)}</strong><small>{profile.object.id}</small></div><StatusBadge value={risk[profile.object.id]?.band || "unscored"} intent={intentOf(RISK_BAND, risk[profile.object.id]?.band || "unscored")} /></header><KeyValueGrid data={profile.object.properties} specs={specs} /><div className="object-profile-metrics"><span>{profile.inbound_links.length} inbound</span><span>{profile.outbound_links.length} outbound</span><span>{profile.linked_objects.length} linked</span></div>{risk[profile.object.id]?.explanation ? <p className="risk-explanation"><ShieldCheck size={15} />{risk[profile.object.id].explanation}</p> : null}</>}
+            {!profile ? <EmptyState inline>Select a result to inspect its properties and links.</EmptyState> : <><header className="object-profile-heading"><div><strong>{formatValue(profile.object.properties.name || profile.object.properties.title || profile.object.id)}</strong><small>{profile.object.id}</small></div><StatusBadge value={risk[profile.object.id]?.band || "unscored"} intent={intentOf(RISK_BAND, risk[profile.object.id]?.band || "unscored")} /></header><KeyValueGrid data={profile.object.properties} specs={specs} /><div className="object-profile-metrics"><span>{profile.inbound_links.length} inbound</span><span>{profile.outbound_links.length} outbound</span><span>{profile.linked_objects.length} linked</span></div>{risk[profile.object.id]?.explanation ? <p className="risk-explanation"><ShieldCheck size={15} />{risk[profile.object.id].explanation}</p> : null}</>}
           </Panel>
           <Panel title="Governed Actions">
-            {!query?.available_actions.length ? <div className="empty">No actions are bound to this object type.</div> : <div className="explorer-action-list">{query.available_actions.map((action) => <button key={action.id} disabled={!selectedIds.length} onClick={() => { setActiveAction(action); setActionParams({}); }}><span><strong>{action.display_name}</strong><small>{action.description || `${action.id} action`}</small></span><ChevronRight size={14} /></button>)}</div>}
+            {!query?.available_actions.length ? <EmptyState inline>No actions are bound to this object type.</EmptyState> : <div className="explorer-action-list">{query.available_actions.map((action) => <button key={action.id} disabled={!selectedIds.length} onClick={() => { setActiveAction(action); setActionParams({}); }}><span><strong>{action.display_name}</strong><small>{action.description || `${action.id} action`}</small></span><ChevronRight size={14} /></button>)}</div>}
             {actionResult ? <div className="action-result"><StatusBadge value={actionResult.status} intent={intentOf(ACTION_RESULT, actionResult.status)} /><span>{actionResult.approval_request_id ? `Approval ${actionResult.approval_request_id}` : actionResult.message}</span></div> : null}
           </Panel>
         </aside>

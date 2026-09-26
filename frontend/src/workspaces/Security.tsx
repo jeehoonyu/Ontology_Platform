@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   DataTable,
   DeveloperEvidence,
+  EmptyState,
   ErrorBanner,
   KeyValueGrid,
   LoadingState,
@@ -761,7 +762,7 @@ function ProjectsSection({ refreshKey, onChange }: SectionProps) {
               </div>
             </>
           ) : (
-            <div className="empty">Choose a project to view and manage its role grants.</div>
+            <EmptyState inline>Choose a project to view and manage its role grants.</EmptyState>
           )}
         </Panel>
         <Panel title="Access Check (project permission)">

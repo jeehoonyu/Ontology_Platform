@@ -203,7 +203,7 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
                   file_ref: lastUpload.file_ref
                 }} />
               ) : (
-                <div className="empty">Choose a file to ingest records into the selected dataset.</div>
+                <EmptyState inline>Choose a file to ingest records into the selected dataset.</EmptyState>
               )}
             </div>
           ) : (
@@ -227,7 +227,7 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
               <DataTable rows={schemaRows} empty="No schema columns." />
             </>
           ) : (
-            <div className="empty">Schema is inferred once a file is uploaded, or declared via the datasets schema endpoint.</div>
+            <EmptyState inline>Schema is inferred once a file is uploaded, or declared via the datasets schema endpoint.</EmptyState>
           )}
         </Panel>
       </div>
@@ -356,7 +356,7 @@ function MediaSection({ refreshKey, reload }: { refreshKey: number; reload: () =
                   has_text: lastUpload.has_text
                 }} />
               ) : (
-                <div className="empty">Choose a file to store a media item in this set.</div>
+                <EmptyState inline>Choose a file to store a media item in this set.</EmptyState>
               )}
             </div>
           ) : (
@@ -393,7 +393,7 @@ function MediaSection({ refreshKey, reload }: { refreshKey: number; reload: () =
             </table>
           </div>
         ) : (
-          <div className="empty">No media items yet. Upload a file into the selected media set.</div>
+          <EmptyState inline>No media items yet. Upload a file into the selected media set.</EmptyState>
         )}
       </Panel>
     </>

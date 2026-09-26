@@ -332,7 +332,7 @@ function MarketplaceSection({
               </label>
             </div>
             {selectedEntry && !selectedEntry.latest_release ? (
-              <div className="empty">This product has no release yet. Publish a release in the Products tab before installing.</div>
+              <EmptyState inline>This product has no release yet. Publish a release in the Products tab before installing.</EmptyState>
             ) : null}
           </>
         ) : (

@@ -12,7 +12,7 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | --- | --- | --- |
 | `StatusBadge` | `components/data/DataDisplay.tsx` | **23** — App, AgentRuntimePanel, Analytics, Automate, and 19 more |
 | `Panel` | `components/data/DataDisplay.tsx` | **21** — App, Analytics, Automate, ControlPanel, and 17 more |
-| `EmptyState` | `components/data/DataDisplay.tsx` | **19** — App, Analytics, Automate, ControlPanel, and 15 more |
+| `EmptyState` | `components/data/DataDisplay.tsx` | **20** — App, Analytics, Automate, ControlPanel, and 16 more |
 | `ErrorBanner` | `components/data/DataDisplay.tsx` | **17** — App, AgentRuntimePanel, Analytics, Automate, and 13 more |
 | `KeyValueGrid` | `components/data/DataDisplay.tsx` | **17** — App, Analytics, Automate, ControlPanel, and 13 more |
 | `LoadingState` | `components/data/DataDisplay.tsx` | **16** — App, Analytics, Automate, ControlPanel, and 12 more |

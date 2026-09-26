@@ -517,7 +517,7 @@ function LookupPanel({ datasets }: { datasets: DataAssetSummary[] }) {
 
 function ValueTable({ values, empty }: { values: Record<string, FusionValue>; empty: string }) {
   const entries = Object.entries(values);
-  if (!entries.length) return <div className="empty">{empty}</div>;
+  if (!entries.length) return <EmptyState inline>{empty}</EmptyState>;
   return (
     <div className="table-wrap">
       <table style={{ minWidth: 0 }}>

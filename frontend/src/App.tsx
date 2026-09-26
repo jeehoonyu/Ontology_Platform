@@ -1060,7 +1060,7 @@ function DataOnboarding() {
             stream_id: streamReplay.stream_id,
             target_asset_id: streamReplay.target_asset_id,
             record_count: streamReplay.record_count,
-          }} /> : <div className="empty">Replay stream data into a local dataset.</div>}
+          }} /> : <EmptyState inline>Replay stream data into a local dataset.</EmptyState>}
         </Panel>
       </div>
       <div className="two-col">
@@ -1129,7 +1129,7 @@ function ValidationWorkspace() {
 }
 
 function ImportJobSummary({ job }: { job: ImportJob | null }) {
-  if (!job) return <div className="empty">Create an import job to review schema, transform data, and generate ontology.</div>;
+  if (!job) return <EmptyState inline>Create an import job to review schema, transform data, and generate ontology.</EmptyState>;
   return (
     <div className="summary-list">
       <KeyValueGrid data={{

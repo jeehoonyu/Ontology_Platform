@@ -368,4 +368,34 @@ test.describe("GOAL_LOOK", () => {
     await expect(count).toHaveText(/^\d+$/);
     expect.soft(await read(count), "a review-tab count").toEqual({ ...tag, background: "rgba(143, 153, 168, 0.15)" });
   });
+
+  // U10, NonIdealState. UI_CONFIG's empty state: centred in the space it replaces, with
+  // no box of its own; a 48px muted icon, then the title at 18px/20px 600 and one 14px
+  // line, both in #5f6b7c. Decision's Risk Board is empty until an evaluation runs.
+  test("An empty state is centred, with a 48px icon over an 18px muted title", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    const empty = page.locator(".empty-state-card").filter({ hasText: "No evaluated objects" });
+    await expect(empty).toBeVisible();
+    expect.soft(await empty.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const offCentre = (element: Element | null) => {
+        if (!element) return "missing";
+        const rect = element.getBoundingClientRect();
+        return Math.abs(rect.left + rect.width / 2 - (box.left + box.width / 2)) <= 1 ? "centred" : "off centre";
+      };
+      const [icon, title, line] = [node.querySelector(":scope > svg"), node.querySelector("strong"), node.querySelector(":scope > span")];
+      const style = (element: Element | null) => (element ? getComputedStyle(element) : null);
+      return {
+        box: `${style(node)!.borderTopStyle} ${style(node)!.backgroundColor}`,
+        icon: icon ? `${Math.round(icon.getBoundingClientRect().width)}px ${style(icon)!.color}` : "missing",
+        title: title ? `${style(title)!.fontSize}/${style(title)!.lineHeight} ${style(title)!.fontWeight} ${style(title)!.color}` : "missing",
+        line: line ? `${style(line)!.fontSize} ${style(line)!.color}` : "missing",
+        placement: [offCentre(icon), offCentre(title), offCentre(line)],
+      };
+    }), "the Risk Board's empty state").toEqual({
+      box: "none rgba(0, 0, 0, 0)", icon: "48px rgb(143, 153, 168)",
+      title: "18px/20px 600 rgb(95, 107, 124)", line: "14px rgb(95, 107, 124)",
+      placement: ["centred", "centred", "centred"],
+    });
+  });
 });

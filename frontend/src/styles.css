@@ -4662,15 +4662,31 @@ pre {
   background: #fff2ef;
 }
 
+/* The original's NonIdealState (GOAL_LOOK U10): centred in the card or table body it
+   replaces, with no box of its own. A 48px muted icon, then the title at 18px/20px
+   600 and one 14px line, both in --text-muted. */
 .empty-state-card {
   display: grid;
-  gap: 8px;
-  color: #53626c;
-  background: #f8fbfc;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-state-card > svg {
+  margin-bottom: 6px;
+  color: var(--text-disabled);
 }
 
 .empty-state-card strong {
-  color: #17344a;
+  font: var(--font-title-empty);
+}
+
+.empty-state-card > span {
+  max-width: 400px;
 }
 
 .warning-list {
@@ -4712,8 +4728,7 @@ pre {
 
 .hero-summary p,
 .decision-card span,
-.section-card span,
-.empty-state-card span {
+.section-card span {
   color: #64717a;
 }
 
