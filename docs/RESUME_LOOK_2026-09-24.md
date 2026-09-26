@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-25, after U11: GOAL_LOOK is Met. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-26, after GOAL_FOUNDATIONS A4. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -37,10 +37,18 @@ it before trusting it.
 | `38b096a` | **U10, 4 (AppHeader)**: `Page`'s name is a 16px 600 `h1` in a 50px white bar running to the workspace's edges (`--workspace-gutter`) |
 | `46bc6e3` | **U10, 5**: the 39 legacy alias uses moved to real tokens and the alias block deleted; U10 Met |
 | `935f5d8` | **U11**: [`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md) states the plan's A goal; GOAL_LOOK Met |
+| `2b87964` | This note, updated |
+| `03a3237` | **A2**: `lib/storage.ts` guards storage; `ScreenBoundary` keeps the shell standing; `frontend/tests/trust.spec.ts` begins |
+| `d5c8164` | **A3a**: Platform Graph no longer promises to expand neighbourhoods |
+| `db24fe8`, `356ec94` | **A3b**: Automate says "disabled", not "paused" (the second commit regenerates a stale reference the first let through) |
+| `d999cc3` | **A3c**: the release endpoint refuses a gate-blocked submission; the button reads the Gates tab (`oms/test_model_release_gate.py`) |
+| `dfb3056` | **A3d**: Ops' test-event form has its own severity and source |
+| `9cd9395` | **A3e**: Vertex draws the server's layouts and the filter's fade; A3 Met |
+| `83fd189` | **A4**: both grant forms say they do not govern data access (`oms/test_grants_do_not_govern_reads.py`); A4 Met |
 
 GOAL_LOOK: **Met, U1–U11.** Nothing has been pushed. Never push tags. The work continues in
-[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1 is Met (through U8), and
-A2–A9 are Open.
+[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A4 are Met, and A5–A9 are
+Open.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
 - J (a): `tokens.css` imported whole.
@@ -66,32 +74,28 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
    | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 599, held by GOAL_FOUNDATIONS A8 |
    | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
-   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 18 passed (needs a current build) |
+   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 18 passed (needs a current build); `trust.spec.ts` 12 passed |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS, starting with A2
+## Next: GOAL_FOUNDATIONS A5 (waits on the owner), then A9, A6, A7 and A8
 
-GOAL_LOOK is finished. Its successor for the look is the plan's H goal (home and shell), which
-is not stated yet. What comes next is
-[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md), the plan's A goal: wave 0's
-trust fixes (A2–A5), then wave 1's foundations (A6–A9). Its "What is true today" table was
-re-read against the code at `38b096a`, with file and line for each claim.
+Wave 0 is done except A5. Each done item has a test in `frontend/tests/trust.spec.ts` or an
+`oms/test_*.py`, shown to fail with its fix removed.
 
-1. **A2**: blocked or corrupt storage blanks the app. Five unguarded storage calls, and no error
-   boundary. The test goes in a new `frontend/tests/trust.spec.ts`.
-2. **A3, a to e**: one commit per screen. A3c (ModelOps) is the serious one: the release
-   endpoint marks a gate-blocked submission released before the release is refused, so the fix
-   is in `oms/app/modeling.py` as well as on the button.
-3. **A4**: the grant forms say they do not govern data access, until decision O.
-4. **A5**: search incidents and media sets scoped. It needs a migration, and the owner's choice
-   of project for existing media sets (the goal assumes none). A separate task was already filed
-   for this. Check whether it landed before starting.
-5. **A6–A9**: routes, overlays, Tabs (which own `raw_colour_ceiling`), and the app registry.
+1. **A5 waits on the owner.** Scoping search incidents is small. Media sets need a migration
+   that adds `project_id`, and a choice of project for existing rows (the goal assumes none).
+   A separate task was already filed for the same scoping; find out whether it landed before
+   starting.
+2. **A9, the app registry.** One client list (`CORE_VIEWS`, `NAV_ITEMS` and the palette all
+   derive from it). The production image ships only `frontend/dist`, so the server cannot read
+   `frontend/src`. The plan: the server's view list becomes a named constant, the registry's
+   ids plus a declared legacy-only set (home, files, applications, search, which the legacy UI
+   and backend tests use), held equal by an `oms` test.
+3. **A6** (routes, L), **A7** (overlays, M), **A8** (Tabs, M; it owns `raw_colour_ceiling`).
 
-Also filed as its own task, found while measuring U10: Control Panel's workspace scrolls
-sideways by 125px at 375. It is older than U10.
+Also still filed as its own task: Control Panel's sideways scroll at 375.
 
 ## How each step is measured
 
@@ -143,6 +147,10 @@ sideways by 125px at 375. It is older than U10.
   payload re-baseline broke `test_route_payload_audit`. After re-baselining anything, run that
   baseline's own test, and run the default tier (about 25 minutes) before believing a step.
   Don't rebuild `dist` while it runs.
+- **Gate commits on the fast tier's exit code**, not on `| tail`. Piping swallowed a failure
+  once (`db24fe8`). Use `python oms/verify.py --fast > log; rc=$?`.
+- **The route-cost measurement clears `frontend/test-results`.** Copy a run's failure
+  artifacts (traces, error context) before measuring route cost.
 - **Scratch specs** in `frontend/tests/` get picked up by full runs. Delete them, and their
   `.git/info/exclude` line, before measuring.
 - **Git Bash** rewrites `/route` arguments (`MSYS_NO_PATHCONV=1`). Heredocs can mangle
@@ -157,7 +165,7 @@ sideways by 125px at 375. It is older than U10.
 | --- | --- |
 | Route payload | shared closure 518,923 B at its ceiling, re-baselined at U8; measured 508 KB after U10 (inside the 8 KB tolerance) |
 | Route cost | 266 requests on open across 16 routes. One reading taken straight after a full run once gave Automate 8, and it read 13 when measured again |
-| Six-project run | 375 passed, 1,119 skipped, 0 failed, 0 flaky; baseline re-recorded at U10's last commit (1,494 entries). Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
+| Six-project run | 386 passed, 1,174 skipped, 0 failed; baseline re-recorded at A4 (1,560 entries). Earlier: 375 at U10's last commit. Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
 | Style tokens | 0 undefined names and references; 0 legacy alias uses (the block is gone) |
 | Raw colours outside `tokens.css` | 599 (661 at U1's census); held by GOAL_FOUNDATIONS A8 |
 | Raw empty states | 7 (`audit_ui_states`), from 32 |
