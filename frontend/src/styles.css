@@ -2400,12 +2400,16 @@ table {
   font-size: 13px;
 }
 
+/* The original's tables (GOAL_LOOK U7): a 30px header in 12px 400 uppercase
+   muted text on the app ground, 40px rows, 0 11px cells, and an ink rule under
+   each row. Heights on cells are minimums. The header keeps its ground, so the
+   sticky headers (Object Explorer's, the pinned grid cells') stay opaque. */
 th,
 td {
-  padding: 8px;
-  border-bottom: 1px solid #e3e8ea;
+  padding: var(--table-cell-padding);
+  border-bottom: 1px solid var(--divider);
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
   min-width: 0;
   max-width: 260px;
   overflow: hidden;
@@ -2414,9 +2418,16 @@ td {
 }
 
 th {
-  color: #64717a;
-  font-weight: 700;
-  background: #f8fafb;
+  height: var(--table-header-height);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-default);
+  text-transform: uppercase;
+  color: var(--text-label);
+  background: var(--surface-app);
+}
+
+td {
+  height: var(--table-row-height);
 }
 
 textarea {
@@ -2976,6 +2987,7 @@ pre {
 
 .hotkeys-reference th,
 .hotkeys-reference td {
+  height: auto;
   text-align: left;
   padding: 2px 6px;
   border-top: 1px solid #edf1f4;
@@ -6080,6 +6092,8 @@ pre {
 
 .selection-cell {
   width: 38px;
+  /* The table's 0 11px would leave a checkbox 16px and draw an ellipsis beside it. */
+  padding: 0 8px;
 }
 
 .object-link {
@@ -6875,12 +6889,12 @@ pre {
 .grid-table [data-pinned] {
   position: sticky;
   z-index: 1;
-  background: #ffffff;
+  background: var(--surface-card);
 }
 
 .grid-table th[data-pinned] {
   z-index: 2;
-  background: #f8fafb;
+  background: var(--surface-app);
 }
 
 .grid-table [data-pinned-edge] {

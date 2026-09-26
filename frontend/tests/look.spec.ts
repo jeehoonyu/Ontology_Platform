@@ -190,6 +190,37 @@ test.describe("GOAL_LOOK", () => {
     });
   });
 
+  // U7. The original's tables: a 30px header in 12px 400 uppercase muted text on
+  // the app ground, 40px rows, 0 11px cells, and an ink rule under each row. The
+  // Object Explorer's table is read with objects in it.
+  test("A table header is 30px, 12px, muted and uppercase", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    await page.goto("/workspace/object-explorer?type=asset");
+    const table = page.locator(".explorer-table");
+    await expect(table).toContainText("asset_pump_4");
+    const read = (locator: ReturnType<Page["locator"]>) => locator.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        height: `${Math.round((node.closest("tr") ?? node).getBoundingClientRect().height)}px`,
+        font: `${style.fontSize} ${style.fontWeight} ${style.textTransform}`,
+        color: style.color, background: style.backgroundColor, padding: style.padding,
+        rule: `${style.borderBottomWidth} ${style.borderBottomStyle} ${style.borderBottomColor}`,
+      };
+    });
+    expect.soft(await read(table.locator("thead th:not(.selection-cell)").first()), "a header cell").toEqual({
+      height: "30px", font: "12px 400 uppercase", color: "rgb(95, 107, 124)",
+      background: "rgb(246, 247, 249)", padding: "0px 11px", rule: `1px solid ${ruleColour}`,
+    });
+    const cell = await read(table.locator("tbody td:not(.selection-cell)").first());
+    expect.soft({ height: cell.height, padding: cell.padding, rule: cell.rule }, "a body row").toEqual({
+      height: "40px", padding: "0px 11px", rule: `1px solid ${ruleColour}` });
+    // The narrow checkbox column keeps room for its checkbox: no ellipsis beside it.
+    for (const selection of [table.locator("thead .selection-cell"), table.locator("tbody .selection-cell").first()]) {
+      expect.soft(await selection.evaluate((node) => node.scrollWidth - node.clientWidth),
+                  "the checkbox column overflows").toBe(0);
+    }
+  });
+
   // U6. The original's text field: 30px, 0 8px, radius 4, white, the ring (drawn as
   // the border) and an inset shade; on focus the ring turns #4c90f0 and a 3px halo
   // replaces the shade. A select takes the same height.
