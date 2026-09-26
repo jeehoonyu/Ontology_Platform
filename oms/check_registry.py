@@ -117,7 +117,8 @@ BROWSER_SPECS = REPO_ROOT / "frontend" / "tests"
 BROWSER_GATES: Dict[str, Dict[str, str]] = {
     "shell-widths.spec.ts": {
         "gates": "every screen with panes starts its workspace in the first viewport, keeps its "
-                 "canvas the widest pane, and clips no pane title, at every width in SHELL_WIDTHS",
+                 "canvas the widest pane, and clips no pane title, and the pipeline header keeps a "
+                 "150-character name whole and off its buttons, at every width in SHELL_WIDTHS",
         "cadence": "manual: needs node and a Chrome channel",
         # S1 of GOAL_SHELL_2026-09-23: the width list is the gate, so it must parse.
         "widths": "SHELL_WIDTHS",

@@ -230,6 +230,28 @@ test.describe("Data & Media at every width in the list", () => {
   });
 });
 
+const badge = (page: Page) => page.locator(".workbench-status-strip .badge");
+const isPageState = (url: URL) => url.pathname === "/ui-state/pipeline";
+
+/** A pipeline of its own, opened from the Outputs pane with nothing preselected. */
+async function openFixture(page: Page, name = `Strip fixture ${Date.now()}`) {
+  const suffix = `${Date.now()}`;
+  const created = await page.request.post("/pipeline-builder/graphs", { data: {
+    id: `strip_fixture_${suffix}`, display_name: name,
+    nodes: [{ id: "input", type: "input_dataset", config: {} }], edges: [],
+  } });
+  expect(created.ok(), `the fixture pipeline was not created: ${created.status()}`).toBeTruthy();
+  await page.route(isPageState, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), selected_canvas: null } });
+  });
+  await page.goto("/workspace/pipeline");
+  await expect(badge(page)).toHaveText("No pipeline selected");
+  const row = page.locator(".output-rail .resource-row").filter({ hasText: name });
+  await expect(row).toBeVisible();
+  return { row };
+}
+
 /**
  * A badge says what is true. S5 of `GOAL_SHELL_2026-09-23.md`.
  *
@@ -239,8 +261,6 @@ test.describe("Data & Media at every width in the list", () => {
  * because which pipeline a fresh database selects depends on what earlier tests made.
  */
 test.describe("the pipeline status strip says what is true", () => {
-  const badge = (page: Page) => page.locator(".workbench-status-strip .badge");
-  const isPageState = (url: URL) => url.pathname === "/ui-state/pipeline";
   const isCanvas = (url: URL) => /^\/ui-state\/pipeline\/[^/]+\/canvas$/.test(url.pathname);
 
   test.beforeEach(async ({}, testInfo) => {
@@ -274,26 +294,6 @@ test.describe("the pipeline status strip says what is true", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
-  /** A pipeline of its own, opened from the Outputs pane with nothing preselected. */
-  async function openFixture(page: Page) {
-    const suffix = `${Date.now()}`;
-    const name = `Strip fixture ${suffix}`;
-    const created = await page.request.post("/pipeline-builder/graphs", { data: {
-      id: `strip_fixture_${suffix}`, display_name: name,
-      nodes: [{ id: "input", type: "input_dataset", config: {} }], edges: [],
-    } });
-    expect(created.ok(), `the fixture pipeline was not created: ${created.status()}`).toBeTruthy();
-    await page.route(isPageState, async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({ response, json: { ...(await response.json()), selected_canvas: null } });
-    });
-    await page.goto("/workspace/pipeline");
-    await expect(badge(page)).toHaveText("No pipeline selected");
-    const row = page.locator(".output-rail .resource-row").filter({ hasText: name });
-    await expect(row).toBeVisible();
-    return { row };
-  }
-
   test("while a canvas loads the strip says loading, and then what the canvas says", async ({ page }) => {
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -323,6 +323,65 @@ test.describe("the pipeline status strip says what is true", () => {
     const { row } = await openFixture(page);
     await row.click();
     await expect(badge(page), "a failed canvas still reads as loading").toHaveText("Canvas failed to load");
+  });
+});
+
+/**
+ * The pipeline's name is read whole and stays off the buttons beside it, however long.
+ *
+ * The header's title is whatever someone named the pipeline. A 150-character name with
+ * no spaces kept its full width: from 641 to 1100 and from 1500 it printed over the
+ * action buttons, and at the other widths it ran out of the header and was cut, with no
+ * ellipsis or anything else to say part of it was gone -- a silent truncation, which
+ * `docs/TABLE_TRUNCATION.md` counts as a defect wherever a screen shows part of what it
+ * was given. At every width in the list, this reads each line of the name, and the
+ * Batch badge after it, against every control in the header's button row and against
+ * the header's own box.
+ */
+test.describe("the pipeline header keeps a long name whole and off its buttons", () => {
+  test("a 150-character name without spaces, at every width in the list", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; this test sets every viewport itself.");
+    test.setTimeout(120_000);
+    const name = `Unbroken${Date.now()}`.padEnd(150, "x");
+    const { row } = await openFixture(page, name);
+    await row.click();
+    const header = page.locator(".pipeline-workbench-page .workspace-header");
+    await expect(header.locator("strong")).toHaveText(name);
+
+    for (const width of SHELL_WIDTHS) {
+      await test.step(`${width}px`, async () => {
+        // A resize, not a reload: the page state is held with nothing selected, so a
+        // reload would put the fixture away. The header answers to CSS alone.
+        await page.setViewportSize({ width, height: heightAt(width) });
+        const at = await header.evaluate((element) => {
+          const title = element.querySelector(":scope > div:first-child strong") as HTMLElement;
+          const tag = element.querySelector(":scope > div:first-child span") as HTMLElement;
+          const range = document.createRange();
+          range.selectNodeContents(title);
+          const lines = Array.from(range.getClientRects());
+          const parts = [...lines.map((line, index) => ({ what: `line ${index + 1} of the name`, box: line })),
+                         { what: `the ${tag.textContent} badge`, box: tag.getBoundingClientRect() }];
+          const controls = Array.from(element.querySelectorAll(":scope > .button-row :is(button, a)"))
+            .map((control) => ({ what: control.textContent?.trim() || "", box: control.getBoundingClientRect() }));
+          const meets = (a: DOMRect, b: DOMRect) =>
+            a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+          const own = element.getBoundingClientRect();
+          const inside = (box: DOMRect) => box.left >= own.left - 0.5 && box.right <= own.right + 0.5
+            && box.top >= own.top - 0.5 && box.bottom <= own.bottom + 0.5;
+          const edges = (box: DOMRect) => [box.left, box.top, box.right, box.bottom].map(Math.round).join(",");
+          return {
+            lines: lines.length,
+            covered: parts.flatMap((part) => controls.filter((control) => meets(part.box, control.box))
+              .map((control) => `${part.what} over ${control.what}`)),
+            cut: parts.filter((part) => !inside(part.box))
+              .map((part) => `${part.what} at ${edges(part.box)} in a header at ${edges(own)}`),
+          };
+        });
+        expect.soft(at.lines, `${width}px: the name drew no text`).toBeGreaterThan(0);
+        expect.soft(at.covered, `${width}px: the name prints over the header's buttons`).toEqual([]);
+        expect.soft(at.cut, `${width}px: the name runs out of the header, where it is cut`).toEqual([]);
+      });
+    }
   });
 });
 

@@ -3550,6 +3550,16 @@ pre {
   border-right: 0;
 }
 
+/* The pipeline's name is whatever someone typed. A name with spaces already wrapped
+   in its column; one 150 characters long with none kept its full width, so from 641
+   to 1100 and from 1500 it printed over the action buttons, and at the other widths
+   it ran out of the header and was cut with nothing to say so. It breaks where it
+   must now, and the whole name is read. */
+.pipeline-workbench-page .workspace-header > div:first-child strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .pipeline-workbench-page .toolbar-strip {
   border-left: 0;
   border-right: 0;
