@@ -30,10 +30,13 @@ def check(condition, label, payload=None):
 def tree(collections: str, scope_assignments: str = "") -> str:
     """A source file shaped enough for the audit to read."""
     return (
-        "def _snapshot(db, project_id=None, organization_id=None):\n"
-        "    snapshot = {\n"
+        "def _snapshot_collections(db, project_id=None):\n"
+        "    return {\n"
         f"{collections}"
         "    }\n"
+        "\n\n"
+        "def _snapshot(db, project_id=None, organization_id=None):\n"
+        "    snapshot = {name: load() for name, load in _snapshot_collections(db, project_id).items()}\n"
         "    if project_id:\n"
         "        snapshot = _scope_snapshot(db, snapshot, project_id, organization_id)\n"
         "    return snapshot\n"
@@ -48,11 +51,11 @@ def tree(collections: str, scope_assignments: str = "") -> str:
     )
 
 
-SAFE = ('        "widgets": [\n'
+SAFE = ('        "widgets": lambda: [\n'
         '            _row_dict(row, ["id", "project_id", "name"])\n'
         '            for row in db.query(models.Widget).all()\n'
         '        ],\n')
-UNSAFE = ('        "gadgets": [\n'
+UNSAFE = ('        "gadgets": lambda: [\n'
           '            _row_dict(row, ["id", "name"])\n'
           '            for row in db.query(models.Gadget).all()\n'
           '        ],\n')
@@ -102,13 +105,15 @@ check(len(unsafe) == 1 and "gadgets" in unsafe[0],
 
 def narrowing_tree(query: str) -> str:
     return (
-        "def _snapshot(db, project_id=None, organization_id=None):\n"
-        "    snapshot = {\n"
-        '        "data_assets": [\n'
+        "def _snapshot_collections(db, project_id=None):\n"
+        "    return {\n"
+        '        "data_assets": lambda: [\n'
         '            _row_dict(row, ["id", "project_id"])\n'
         f"            for row in {query}.all()\n"
         "        ],\n"
-        "    }\n"
+        "    }\n\n\n"
+        "def _snapshot(db, project_id=None, organization_id=None):\n"
+        "    snapshot = {name: load() for name, load in _snapshot_collections(db, project_id).items()}\n"
         "    snapshot = _scope_snapshot(db, snapshot, project_id, organization_id)\n"
         "    return snapshot\n\n\n"
         "def _scope_snapshot(db, snapshot, project_id, organization_id):\n"
@@ -139,11 +144,17 @@ check(narrowed == {"data_assets"},
 
 # --- the real tree ------------------------------------------------------------
 
-from app.system_hardening import _SNAPSHOT_CHILD_RELATIONS  # noqa: E402
+from app.system_hardening import _SNAPSHOT_CHILD_RELATIONS, _snapshot_collections  # noqa: E402
 
 source = audit.SOURCE.read_text(encoding="utf-8")
 real, real_unsafe = audit.survey(source, set(_SNAPSHOT_CHILD_RELATIONS))
 check(len(real) > 100, "the audit reads the whole snapshot builder", len(real))
+# Names only: no loader runs, so no database is needed. When the collections
+# moved out of `_snapshot`, the audit read zero of them and passed; a count
+# floor caught that, and this catches reading only some of them.
+declared = set(_snapshot_collections(None))
+check(set(real) == declared, "it reads exactly the collections the builder declares",
+      sorted(set(real) ^ declared))
 check(real_unsafe == [], "no collection currently vanishes from a scoped snapshot", real_unsafe)
 check(all(entry["safe"] for entry in real.values()), "every collection is safe by some route", None)
 

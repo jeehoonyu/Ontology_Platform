@@ -93,11 +93,12 @@ I, M and N are still undecided, and the goal assumes their option (a).
    (571). The first adopters are the command palette and Object Explorer's action modal
    (Dialog). The goal's A7 text lists the rest and the test.
 3. **A6, routes** (L): one route table, `navigate(view, params)`, and six query readers.
-4. **A known retry:** the Platform Graph test at 1366 fails its first attempt every full run
-   and passes on retry, because `/project/readiness` goes unanswered late in the run. It is
-   filed as its own task with the evidence. Without the trust tests it takes 20 s; readiness
-   is 0.04 s in-process. It is not the WebSocket (fixed, `f09a564`), and SQLite's 30 s lock
-   wait and the 40-thread limit are the leads.
+4. **The known retry is fixed.** The Platform Graph test at 1366 timed out because
+   `/project/readiness` built the whole project snapshot on every page load. That was 1.0 s of
+   Python per call late in a run, and calls queued two dozen deep. Readiness now reads only the
+   snapshot's collection names, and the test takes 0.6 s with no retry. The details are in
+   `GOAL_FOUNDATIONS_2026-09-25.md` under A8's run. It was not the WebSocket (`f09a564`), the
+   SQLite lock wait or the thread limit.
 
 ## How each step is measured
 
