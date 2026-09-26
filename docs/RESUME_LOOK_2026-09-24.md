@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-26, after GOAL_FOUNDATIONS A4. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-26, after GOAL_FOUNDATIONS A8. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -45,10 +45,15 @@ it before trusting it.
 | `dfb3056` | **A3d**: Ops' test-event form has its own severity and source |
 | `9cd9395` | **A3e**: Vertex draws the server's layouts and the filter's fade; A3 Met |
 | `83fd189` | **A4**: both grant forms say they do not govern data access (`oms/test_grants_do_not_govern_reads.py`); A4 Met |
+| `d9fe84a` | This note, updated |
+| `7cb56ad` | **A9**: `frontend/src/apps.json` is the one app registry; the server's `WORKSPACE_VIEWS` is held to it (`oms/test_workspace_registry.py`); A9 Met |
+| `15e664c` | **A8, 1**: `components/layout/Tabs.tsx` (`Tabs`, `SegmentedControl`); Decision and Ontology Health adopt; `Tabs` rides in `dragdrop-vendor` |
+| `fcc6104`, `4d8697a`, `088f3e0`, `4e01505`, `59ec98e`, `129dea3` | **A8, 2–7**: Ops, ModelOps, Security and Control Panel, the drawer (tint), the artifact review (tablist), Delivery and the breakpoint; A8 Met |
+| `f09a564` | The collaboration WebSocket and both event streams read their logs off the event loop (`oms/test_collaboration_socket_off_loop.py`) |
 
 GOAL_LOOK: **Met, U1–U11.** Nothing has been pushed. Never push tags. The work continues in
-[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A4 are Met, and A5–A9 are
-Open.
+[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A4, A8 and A9 are Met; A5, A6
+and A7 are Open.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
 - J (a): `tokens.css` imported whole.
@@ -68,34 +73,31 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | Command | Expected |
    | --- | --- |
    | `python oms/verify.py --fast` | 25 of 25 |
-   | `python oms/test_style_tokens_audit.py` | 51 assertions (0 undefined names, 0 references, 599 raw colours, no alias used or defined) |
+   | `python oms/test_style_tokens_audit.py` | 51 assertions (0 undefined names, 0 references, 571 raw colours, no alias used or defined) |
    | `python oms/test_route_payload_audit.py` | 41 assertions, shared closure 507 KB |
    | `python oms/audit_route_payload.py` | 17 routes, shared 518,923 B, three font lines, all shared |
    | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
-   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 599, held by GOAL_FOUNDATIONS A8 |
+   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 571, held by GOAL_FOUNDATIONS A7 |
    | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
-   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 18 passed (needs a current build); `trust.spec.ts` 12 passed |
+   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 29 passed (needs a current build); `trust.spec.ts` 12 passed |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS A5 (waits on the owner), then A9, A6, A7 and A8
+## Next: GOAL_FOUNDATIONS A7, then A6; A5 waits on the owner
 
-Wave 0 is done except A5. Each done item has a test in `frontend/tests/trust.spec.ts` or an
-`oms/test_*.py`, shown to fail with its fix removed.
-
-1. **A5 waits on the owner.** Scoping search incidents is small. Media sets need a migration
-   that adds `project_id`, and a choice of project for existing rows (the goal assumes none).
-   A separate task was already filed for the same scoping; find out whether it landed before
-   starting.
-2. **A9, the app registry.** One client list (`CORE_VIEWS`, `NAV_ITEMS` and the palette all
-   derive from it). The production image ships only `frontend/dist`, so the server cannot read
-   `frontend/src`. The plan: the server's view list becomes a named constant, the registry's
-   ids plus a declared legacy-only set (home, files, applications, search, which the legacy UI
-   and backend tests use), held equal by an `oms` test.
-3. **A6** (routes, L), **A7** (overlays, M), **A8** (Tabs, M; it owns `raw_colour_ceiling`).
-
-Also still filed as its own task: Control Panel's sideways scroll at 375.
+1. **A5 waits on the owner.** Search incidents are a small change. Media sets need a migration
+   (`project_id`) and a choice of project for existing rows; the goal assumes none. A separate
+   task was already filed for the same scoping.
+2. **A7, overlays** (M): Dialog, Menu with Popover, Tooltip. It now owns `raw_colour_ceiling`
+   (571). The first adopters are the command palette and Object Explorer's action modal
+   (Dialog). The goal's A7 text lists the rest and the test.
+3. **A6, routes** (L): one route table, `navigate(view, params)`, and six query readers.
+4. **A known retry:** the Platform Graph test at 1366 fails its first attempt every full run
+   and passes on retry, because `/project/readiness` goes unanswered late in the run. It is
+   filed as its own task with the evidence. Without the trust tests it takes 20 s; readiness
+   is 0.04 s in-process. It is not the WebSocket (fixed, `f09a564`), and SQLite's 30 s lock
+   wait and the 40-thread limit are the leads.
 
 ## How each step is measured
 
@@ -165,11 +167,11 @@ Also still filed as its own task: Control Panel's sideways scroll at 375.
 | --- | --- |
 | Route payload | shared closure 518,923 B at its ceiling, re-baselined at U8; measured 508 KB after U10 (inside the 8 KB tolerance) |
 | Route cost | 266 requests on open across 16 routes. One reading taken straight after a full run once gave Automate 8, and it read 13 when measured again |
-| Six-project run | 386 passed, 1,174 skipped, 0 failed; baseline re-recorded at A4 (1,560 entries). Earlier: 375 at U10's last commit. Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
+| Six-project run | 397 passed, 1,229 skipped, 0 failed, 1 known retry (the Platform Graph test at 1366); baseline re-recorded at A8 (1,626 entries). Earlier: 386 at A4. Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
 | Style tokens | 0 undefined names and references; 0 legacy alias uses (the block is gone) |
-| Raw colours outside `tokens.css` | 599 (661 at U1's census); held by GOAL_FOUNDATIONS A8 |
+| Raw colours outside `tokens.css` | 571 (661 at U1's census); held by GOAL_FOUNDATIONS A7 |
 | Raw empty states | 7 (`audit_ui_states`), from 32 |
-| Look tests | 18 in `look.spec.ts`, each shown to fail with what it defends removed |
+| Look tests | 29 in `look.spec.ts` and 12 in `trust.spec.ts`, each shown to fail with what it defends removed |
 
 ## Other open threads
 
