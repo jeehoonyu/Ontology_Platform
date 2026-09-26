@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-25, after U7. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-25, after U9. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -26,8 +26,12 @@ it before trusting it.
 | `a6246f6` | **U7, 2**: panes and pane headers ruled with the divider |
 | `ce87e4d` | **U7, 3**: tables — 30px uppercase muted header, 40px rows, `0 11px` cells, ink rules |
 | `48937ed` | **U7, 4**: pane titles 14px 600; U7 Met |
+| `1b05324` | This note, updated |
+| `2b90ee3` | **U8**: `StatusBadge` takes its intent from the caller (`components/data/intents.ts`); 20px tags; OFFLINE no longer reads as success; warning text `#935610` |
+| `17f4ec9` | **U9**: the sidebar in the original's dark gray, 400 labels, 600 on the active item; still 286px |
+| `8bd4a56` | `test_route_payload_audit` proves the graph split by the graph screens' own bytes, not `shared < 500 KB`, which U8's re-baseline had broken |
 
-GOAL_LOOK: **U1–U7 are Met; U8–U11 are Open.** Nothing has been pushed. Never push
+GOAL_LOOK: **U1–U9 are Met; U10 and U11 are Open.** Nothing has been pushed. Never push
 tags.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
@@ -48,37 +52,49 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | Command | Expected |
    | --- | --- |
    | `python oms/verify.py --fast` | 25 of 25 |
-   | `python oms/test_style_tokens_audit.py` | 50 assertions (0 undefined names, 0 references, 636 raw colours) |
-   | `python oms/test_route_payload_audit.py` | 42 assertions, shared closure 500 KB |
-   | `python oms/audit_route_payload.py` | 17 routes, shared 511,615 B, three font lines, all shared |
+   | `python oms/test_style_tokens_audit.py` | 50 assertions (0 undefined names, 0 references, 606 raw colours) |
+   | `python oms/test_route_payload_audit.py` | 41 assertions, shared closure 507 KB |
+   | `python oms/audit_route_payload.py` | 17 routes, shared 518,923 B, three font lines, all shared |
    | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
-   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 636, held by U10 |
+   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 606, held by U10 |
    | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
-   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 10 passed (needs a current build) |
+   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 13 passed (needs a current build) |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: U8, status tags
+## Next: U10, the primitives take the look
 
-U8 is the first look condition that changes components, not only CSS. It carries the plan's A1:
-OFFLINE must not show as success.
-- `StatusBadge` (`components/data/DataDisplay.tsx`) takes an explicit intent from its caller,
-  instead of guessing green, amber or red from a substring with green as the default. Words it
-  does not know render neutral.
-- The tag is 20px, radius 4, padding 2px 6px, 12px, with the intent text in the hover step on a
-  10% tint.
-- It is rendered by 25 files at 109 call sites (the 23 `UI_PRIMITIVES.md` counts, plus
-  `PipelineCanvas.tsx` and `ArtifactReviewPanel.tsx`).
-- **Tests:** `look.spec.ts::OFFLINE is not shown as success` and `…A warning badge reads at AA
-  contrast`, shown to fail with the substring rule and `#c87619` restored. The warning text is
-  `#935610`, not `#c87619`, which is only 3.46:1 on white.
-- **Method:** map first (every call site and the value it passes; tests reading `.badge`/status
-  text), then change the component and every caller in one or two commits. Census the badges on
-  the evaluator routes before and after, and run `audit_ui_primitives` and `audit_inert_controls`.
+U10 is five commits: one per primitive, then one for the aliases. Each commit gets a
+`look.spec.ts` test with UI_CONFIG's values, shown to fail with the primitive's CSS removed. It
+deletes the per-screen CSS it replaces and lowers `raw_colour_ceiling` in the same change (K8).
+What the survey after U9 found:
 
-After U8: U9 (sidebar colours), U10 (primitives; the alias block retires), and U11 (write the
-plan's A goal document).
+1. **Tag.** U8 already gave `.badge` the tag's CSS. What is left:
+   - Two hand-rolled tags move onto `StatusBadge` (neutral), and their CSS goes: the agent
+     runtime's event strip (`.agent-event-strip span`, `AgentRuntimePanel.tsx:279`) and the
+     review tabs' counts (`.artifact-review-tabs button span`, `ArtifactReviewPanel.tsx:100,103`).
+   - Three selectors name `.status-badge`, a class nothing renders; they meant `StatusBadge`:
+     `.preview-row-list`, `.evaluation-qualification` and `.package-summary-row`.
+   - Leave `.workspace-header > div:first-child span` alone. It is also Security's "SG" tile,
+     and the resource header is the plan's Q5.
+   - The test: a tag is 20px, radius 4, padding 2px 6px, 12px at 400.
+2. **NonIdealState.** `EmptyState`'s card (`.state-block.empty-state-card`, 51 call sites; the
+   16 `inline` ones stay `.empty`) becomes centred: title `--font-title-empty` (18px/20px 600)
+   in `--text-muted`, one 14px muted line, and optionally a 48px muted icon. The CSS is
+   `styles.css` ~4662–4736, plus `.empty-state-card span` in the `.hero-summary p` group.
+3. **SectionCard** (`Panel`, `DataDisplay.tsx:7`). The header becomes 50px with padding
+   `0 20px` and a rule (`--section-header-*`). Keep `section.panel > header.panel-header > h2`.
+   Expect layout tests (pane-layout, shell widths) to notice the taller header.
+4. **AppHeader** (`Page`, `Workbench.tsx:5`, 11 files). One `h1` at 16px 600
+   (`--font-title-app`) in a 50px bar; the subtitle stays visible, since the evaluator reads it.
+   `look.spec.ts` U4 already reads `.page-header h1` and `.page-header p`.
+5. **Aliases.** The 39 `var(--border|--surface|--surface-strong|--accent|--muted|--text|--line)`
+   sites in Decision, Ops and `.runtime-slo-row` move to the names the alias block maps them to
+   (`tokens.css` ~522–540), and the block is deleted. `audit_style_tokens` must read 0 alias
+   uses.
+
+After U10: U11, writing the plan's A goal document.
 
 ## How each step is measured
 
@@ -126,6 +142,10 @@ plan's A goal document).
   redone.
 - **Throwaway worktrees for measuring builds:** link `node_modules` with `cmd //c mklink //J`,
   and remove the link with `cmd //c rmdir` *before* `git worktree remove --force`.
+- **The fast tier runs no `oms/test_*.py`.** A baseline change can break one unseen, as U8's
+  payload re-baseline broke `test_route_payload_audit`. After re-baselining anything, run that
+  baseline's own test, and run the default tier (about 25 minutes) before believing a step.
+  Don't rebuild `dist` while it runs.
 - **Scratch specs** in `frontend/tests/` get picked up by full runs. Delete them, and their
   `.git/info/exclude` line, before measuring.
 - **Git Bash** rewrites `/route` arguments (`MSYS_NO_PATHCONV=1`). Heredocs can mangle
@@ -136,13 +156,14 @@ plan's A goal document).
 
 ## Numbers to hold on to
 
-| Measure | Value after U7 |
+| Measure | Value after U9 |
 | --- | --- |
-| Route payload | shared closure 511,615 B at its ceiling (U3 +13,218 B, U4 +47,636 B); U5–U6 moved it by less than the 8 KB tolerance (measured 502 KB) |
-| Route cost | 266 requests on open across 16 routes (U4 added the two preloaded faces to each) |
-| Six-project run | 367 passed, 1,079 skipped, 0 failed, 0 flaky; baseline re-recorded at U7 (1,446 entries). Occasional single retries under full-run load (movement-contract, the evaluator's Ctrl+K), each clean in isolation |
+| Route payload | shared closure 518,923 B at its ceiling, re-baselined at U8 (U4's fonts +47,636 B; U5–U8's CSS and the intent vocabulary +7,308 B) |
+| Route cost | 266 requests on open across 16 routes |
+| Six-project run | 370 passed, 1,094 skipped, 0 failed, 0 flaky; baseline re-recorded at U9 (1,464 entries). Occasional single retries under full-run load (movement-contract, the evaluator's Ctrl+K, the map's feature count), each clean when repeated |
 | Style tokens | 0 undefined names and references; 39 legacy alias uses (U10 retires them) |
-| Raw colours outside `tokens.css` | 636 (U6 and U7 took 25 away; U10 lowers it) |
+| Raw colours outside `tokens.css` | 606 (U8 took 7 and U9 23; U10 lowers it) |
+| Status badges on the evaluator routes | 46: 20 success, 16 neutral, 7 warning, 3 danger |
 
 ## Other open threads
 
