@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
@@ -397,5 +398,45 @@ test.describe("GOAL_LOOK", () => {
       title: "18px/20px 600 rgb(95, 107, 124)", line: "14px rgb(95, 107, 124)",
       placement: ["centred", "centred", "centred"],
     });
+  });
+
+  // U10, SectionCard. UI_CONFIG's section card: a 50px header ruled from the body by
+  // the divider, running to the card's edges, its title inset 20px; the body is padded
+  // 20px, so the first thing in it sits 20px under the rule.
+  test("A panel's header is the original's 50px section header", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    const panel = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Risk Board", exact: true }) });
+    await expect(panel).toBeVisible();
+    expect.soft(await panel.evaluate((node) => {
+      const card = node.getBoundingClientRect();
+      const header = node.querySelector(":scope > header.panel-header")!;
+      const rect = header.getBoundingClientRect();
+      const style = getComputedStyle(header);
+      const title = header.querySelector("h2")!.getBoundingClientRect();
+      const body = header.nextElementSibling!.getBoundingClientRect();
+      return {
+        height: Math.round(rect.height), rule: `${style.borderBottomWidth} ${style.borderBottomStyle} ${style.borderBottomColor}`,
+        flush: [Math.round(rect.left - card.left), Math.round(card.right - rect.right), Math.round(rect.top - card.top)],
+        titleInset: Math.round(title.left - card.left), bodyGap: Math.round(body.top - rect.bottom),
+      };
+    }), "the Risk Board's header").toEqual({
+      height: 50, rule: "1px solid rgba(17, 20, 24, 0.15)", flush: [0, 0, 0], titleInset: 20, bodyGap: 20,
+    });
+  });
+
+  // U10, SectionCard. The taller cards make Object Explorer's inspector, a sticky column
+  // capped at the viewport, scroll where it did not; with nothing selected it holds no
+  // control, so a keyboard could not scroll it (axe: scrollable-region-focusable, seen
+  // once at 1366 in the full run). A short window makes it scroll every time.
+  test("A scrolling object inspector can be reached by keyboard", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 480 });
+    await page.goto("/workspace/object-explorer");
+    await expect(page.getByRole("heading", { name: "Object Explorer" })).toBeVisible();
+    const inspector = page.locator(".explorer-inspector");
+    await expect(inspector).toContainText("Select a result to inspect");
+    expect(await inspector.evaluate((node) => node.scrollHeight > node.clientHeight), "the inspector scrolls").toBe(true);
+    const scan = await new AxeBuilder({ page }).include(".explorer-inspector").withRules(["scrollable-region-focusable"]).analyze();
+    expect.soft(scan.violations.map((violation) => violation.id), "the inspector's scroll region").toEqual([]);
+    await expect.soft(inspector, "the inspector's name").toHaveAccessibleName("Object inspector");
   });
 });

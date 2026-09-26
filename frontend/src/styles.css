@@ -2254,15 +2254,29 @@ h2 {
 
 /* A card (GOAL_LOOK U7): its edge is --shadow-0's ring, not a border, at the
    original's radius. The ring draws outside the box, so a scrolling ancestor
-   needs a pixel of room around a panel (the explorer rails give it one). */
+   needs a pixel of room around a panel (the explorer rails give it one).
+   It is a section card (U10): --panel-padding is its body's padding, and the
+   header below reaches the card's edges through it, so a denser rail sets the
+   one property and keeps its header flush. */
 .panel {
+  --panel-padding: var(--card-padding);
   background: var(--surface-card);
   border: 0;
   border-radius: var(--radius);
-  padding: 14px;
+  padding: var(--panel-padding);
   margin-bottom: 14px;
   box-shadow: var(--shadow-0);
   min-width: 0;
+}
+
+/* The original's section header: 50px, ruled from the body, the title inset by the
+   body's padding (0 20px by default). The 5px above and below matter only when a
+   crowded header wraps, which the original's never does. */
+.panel > .panel-header {
+  min-height: var(--section-header-height);
+  margin: calc(-1 * var(--panel-padding)) calc(-1 * var(--panel-padding)) var(--panel-padding);
+  padding: 5px var(--panel-padding);
+  border-bottom: 1px solid var(--divider);
 }
 
 .panel-header,
@@ -4041,7 +4055,7 @@ pre {
 }
 
 .manager-resource-nav .panel {
-  padding: 10px;
+  --panel-padding: 10px;
 }
 
 .manager-surface {
@@ -6241,7 +6255,7 @@ pre {
 
 .map-layer-rail .panel,
 .map-inspector .panel {
-  padding: 10px;
+  --panel-padding: 10px;
 }
 
 .map-layer-list > button {
