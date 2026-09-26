@@ -30,8 +30,14 @@ export default defineConfig({
           // and the other fifteen routes pay 619 bytes each for it. Grouping it
           // with the store shim both graph screens load instead split that shim
           // and gave five other routes a request each.
+          //
+          // `Tabs` (GOAL_FOUNDATIONS A8) rides here for the same reason: Decision
+          // and Ontology Manager import it, Rollup gave it a chunk of its own, and
+          // `audit_route_cost` measured each at one more request on open. Every
+          // route already loads this chunk, so each pays about a kilobyte instead.
           "dragdrop-vendor": ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities",
-                              "./src/components/dnd/DragKit.tsx", "./src/lib/graphLayout.ts"],
+                              "./src/components/dnd/DragKit.tsx", "./src/lib/graphLayout.ts",
+                              "./src/components/layout/Tabs.tsx"],
           "query-vendor": ["@tanstack/react-query"],
           "icons-vendor": ["lucide-react"]
         }

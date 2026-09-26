@@ -322,6 +322,56 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   ModelOps tabs gain `aria-current`, and the artifact review keeps `role="tab"`. To be proven by a
   `look.spec.ts` test per variant, reading its spec from UI_CONFIG, each shown to fail with the
   variant's CSS removed; the seven tab locators and the class locators still pass.
+
+  **1. The primitives, with a first adopter each.** `components/layout/Tabs.tsx`:
+  - `Tabs`, the underline kind: a 40px bar ruled by the divider, 14px labels at 400 set 20px
+    apart, and the selected one in `--text-selected` over a 3px indicator. Tabs stay buttons
+    in a named `nav`, marked with `aria-current`, and keep the `active` class.
+  - `SegmentedControl`: 30px, the selected option white with the button ring and drop, the
+    others transparent in `--text-muted`, each with `aria-pressed`. The ground was not read in
+    the original; it uses `--surface-app`.
+  - Decision's tabs adopt `Tabs`, and keep `.decision-tabs` for U3's test and the class
+    locators. Their bordered-box CSS goes.
+  - Ontology Health's severity filter adopts `SegmentedControl`. Its navy active state goes.
+  - The tint, pill and vertical kinds come with the first screen that needs each.
+  - Raw colours fell from 599 to 594. `docs/UI_PRIMITIVES.md` lists 26 primitives.
+
+  Proven by two tests in `look.spec.ts`:
+  - `Tabs are the original's underline tabs`, on Decision: the bar at 40px with a 20px gap and
+    the rule; the selected tab at 14px 400 in `#215db0` with the 3px indicator and
+    `aria-current`; another tab in `#1c2127` with neither.
+  - `A segmented control is 30px with the selected option raised`, on Ontology Health: 30px,
+    the selected option white with the ring and `aria-pressed="true"`, another transparent in
+    `#5f6b7c`.
+  - U3's Decision tab check still passes.
+
+  **Negative runs,** against a rebuilt dist:
+  - The bar and tab rules removed: no gap or rule, and the selected tab in the text colour with
+    no indicator.
+  - The selected option's rule removed: it read transparent in `#5f6b7c`.
+  - Restored byte for byte; the hash matched (`24897d2f35d1bba1`).
+
+  **Found by the full run.** Route cost measured Decision and Ontology Manager at one more
+  request on open each (16 and 23 against 15 and 22).
+  - Rollup had given `Tabs.tsx` a chunk of its own, because two lazy routes import it. That is
+    the trap `DragKit` and `graphLayout` fell into before.
+  - It now rides in `dragdrop-vendor`, a chunk every route already loads, with the same comment
+    in `vite.config.ts`. The routes are back at 266 requests, and the shared closure is 510 KB,
+    inside the tolerance.
+  - The rerun on the folded build passed 388 of 388. Route cost holds at 266, and the payload at
+    510 KB.
+
+  **A growing retry, not A8's.** Both runs retried "the Platform Graph does not move when
+  readiness and job counts land" at 1366. It timed out waiting for the responses it holds back.
+  - The trace shows `/jobs/summary` answering in 0.7 s after release, while `/project/readiness`
+    never answers.
+  - Its duration at 1366 across today's runs: 17 s at U10's last commit, about 38 s from A2
+    onward (A2 added the stateful trust tests), 43 s at A4, then past the 45 s timeout.
+  - In-process, readiness takes 0.04 s even after ten scenario loads or 40 artifacts with
+    collaboration joins. So the endpoint is cheap, and something starves the one server the
+    full run shares.
+  - It passed 4 of 4 alone. It is filed as its own task, to be found with server-side evidence
+    rather than by raising the timeout.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by

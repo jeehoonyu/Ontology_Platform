@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "13d37ae4cd909f5175424cfcf6c146579a9637e62863bfe47b57a0580a02cdf9",
+    "bundle_source_hash": "59ce78e8b8b38c16568117d93033af128df7d77c31c6cdabced1144cfb8f1a68",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T07:07:25Z",
+    "recorded_at": "2026-09-26T07:38:15Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 255,
+      "ran": 257,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
-      "flaky": 0,
-      "ran": 26,
-      "skipped": 234
+      "flaky": 1,
+      "ran": 25,
+      "skipped": 236
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 233
+      "skipped": 235
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 234
+      "skipped": 236
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 234
+      "skipped": 236
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 234
+      "skipped": 236
     }
   },
   "tests": {
@@ -63,6 +63,7 @@
     "desktop-1280 :: A panel's header is the original's 50px section header": "ran",
     "desktop-1280 :: A screen that throws leaves the shell standing and names itself": "ran",
     "desktop-1280 :: A scrolling object inspector can be reached by keyboard": "ran",
+    "desktop-1280 :: A segmented control is 30px with the selected option raised": "ran",
     "desktop-1280 :: A table header is 30px, 12px, muted and uppercase": "ran",
     "desktop-1280 :: A tag is 20px with radius 4, and the review counts are tags": "ran",
     "desktop-1280 :: A text input is 30px with an inset ring and a blue focus ring": "ran",
@@ -106,6 +107,7 @@
     "desktop-1280 :: Resolve is offered for every open incident and no resolved or closed one": "ran",
     "desktop-1280 :: Select all, parents and children write the one selection and send nothing": "ran",
     "desktop-1280 :: Shift held when a lasso begins adds to the selection": "ran",
+    "desktop-1280 :: Tabs are the original's underline tabs": "ran",
     "desktop-1280 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "ran",
     "desktop-1280 :: The body text is 14px on an 18px line": "ran",
     "desktop-1280 :: The page text renders in the bundled face, not a system font": "ran",
@@ -323,6 +325,7 @@
     "laptop-1366 :: A panel's header is the original's 50px section header": "skipped",
     "laptop-1366 :: A screen that throws leaves the shell standing and names itself": "skipped",
     "laptop-1366 :: A scrolling object inspector can be reached by keyboard": "skipped",
+    "laptop-1366 :: A segmented control is 30px with the selected option raised": "skipped",
     "laptop-1366 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "laptop-1366 :: A tag is 20px with radius 4, and the review counts are tags": "skipped",
     "laptop-1366 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
@@ -366,6 +369,7 @@
     "laptop-1366 :: Resolve is offered for every open incident and no resolved or closed one": "ran",
     "laptop-1366 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "laptop-1366 :: Shift held when a lasso begins adds to the selection": "skipped",
+    "laptop-1366 :: Tabs are the original's underline tabs": "skipped",
     "laptop-1366 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "laptop-1366 :: The body text is 14px on an 18px line": "skipped",
     "laptop-1366 :: The page text renders in the bundled face, not a system font": "skipped",
@@ -583,6 +587,7 @@
     "mobile-375 :: A panel's header is the original's 50px section header": "skipped",
     "mobile-375 :: A screen that throws leaves the shell standing and names itself": "skipped",
     "mobile-375 :: A scrolling object inspector can be reached by keyboard": "skipped",
+    "mobile-375 :: A segmented control is 30px with the selected option raised": "skipped",
     "mobile-375 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "mobile-375 :: A tag is 20px with radius 4, and the review counts are tags": "skipped",
     "mobile-375 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
@@ -626,6 +631,7 @@
     "mobile-375 :: Resolve is offered for every open incident and no resolved or closed one": "ran",
     "mobile-375 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "mobile-375 :: Shift held when a lasso begins adds to the selection": "skipped",
+    "mobile-375 :: Tabs are the original's underline tabs": "skipped",
     "mobile-375 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "mobile-375 :: The body text is 14px on an 18px line": "skipped",
     "mobile-375 :: The page text renders in the bundled face, not a system font": "skipped",
@@ -843,6 +849,7 @@
     "tablet-1024 :: A panel's header is the original's 50px section header": "skipped",
     "tablet-1024 :: A screen that throws leaves the shell standing and names itself": "skipped",
     "tablet-1024 :: A scrolling object inspector can be reached by keyboard": "skipped",
+    "tablet-1024 :: A segmented control is 30px with the selected option raised": "skipped",
     "tablet-1024 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "tablet-1024 :: A tag is 20px with radius 4, and the review counts are tags": "skipped",
     "tablet-1024 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
@@ -886,6 +893,7 @@
     "tablet-1024 :: Resolve is offered for every open incident and no resolved or closed one": "ran",
     "tablet-1024 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "tablet-1024 :: Shift held when a lasso begins adds to the selection": "skipped",
+    "tablet-1024 :: Tabs are the original's underline tabs": "skipped",
     "tablet-1024 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "tablet-1024 :: The body text is 14px on an 18px line": "skipped",
     "tablet-1024 :: The page text renders in the bundled face, not a system font": "skipped",
@@ -1103,6 +1111,7 @@
     "tablet-768 :: A panel's header is the original's 50px section header": "skipped",
     "tablet-768 :: A screen that throws leaves the shell standing and names itself": "skipped",
     "tablet-768 :: A scrolling object inspector can be reached by keyboard": "skipped",
+    "tablet-768 :: A segmented control is 30px with the selected option raised": "skipped",
     "tablet-768 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "tablet-768 :: A tag is 20px with radius 4, and the review counts are tags": "skipped",
     "tablet-768 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
@@ -1146,6 +1155,7 @@
     "tablet-768 :: Resolve is offered for every open incident and no resolved or closed one": "ran",
     "tablet-768 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "tablet-768 :: Shift held when a lasso begins adds to the selection": "skipped",
+    "tablet-768 :: Tabs are the original's underline tabs": "skipped",
     "tablet-768 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "tablet-768 :: The body text is 14px on an 18px line": "skipped",
     "tablet-768 :: The page text renders in the bundled face, not a system font": "skipped",
@@ -1363,6 +1373,7 @@
     "wide-1600 :: A panel's header is the original's 50px section header": "skipped",
     "wide-1600 :: A screen that throws leaves the shell standing and names itself": "skipped",
     "wide-1600 :: A scrolling object inspector can be reached by keyboard": "skipped",
+    "wide-1600 :: A segmented control is 30px with the selected option raised": "skipped",
     "wide-1600 :: A table header is 30px, 12px, muted and uppercase": "skipped",
     "wide-1600 :: A tag is 20px with radius 4, and the review counts are tags": "skipped",
     "wide-1600 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
@@ -1406,6 +1417,7 @@
     "wide-1600 :: Resolve is offered for every open incident and no resolved or closed one": "ran",
     "wide-1600 :: Select all, parents and children write the one selection and send nothing": "skipped",
     "wide-1600 :: Shift held when a lasso begins adds to the selection": "skipped",
+    "wide-1600 :: Tabs are the original's underline tabs": "skipped",
     "wide-1600 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "wide-1600 :: The body text is 14px on an 18px line": "skipped",
     "wide-1600 :: The page text renders in the bundled face, not a system font": "skipped",

@@ -466,4 +466,47 @@ test.describe("GOAL_LOOK", () => {
       flush: [0, 0], title: "16px/19px 600",
     });
   });
+
+  // GOAL_FOUNDATIONS A8, Tabs. UI_CONFIG's underline tabs: a 40px bar ruled by the
+  // divider, 14px labels at 400 set 20px apart, the selected one in #215db0 over a 3px
+  // indicator and marked aria-current. Only the colour changes.
+  test("Tabs are the original's underline tabs", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    const bar = page.getByRole("navigation", { name: "Decision intelligence views" });
+    await expect(bar).toBeVisible();
+    expect.soft(await bar.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { height: Math.round(node.getBoundingClientRect().height), gap: style.columnGap, rule: style.boxShadow };
+    }), "the bar").toEqual({ height: 40, gap: "20px", rule: "rgba(17, 20, 24, 0.15) 0px -1px 0px 0px inset" });
+    const read = (tab: ReturnType<Page["locator"]>) => tab.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { font: `${style.fontSize} ${style.fontWeight}`, color: style.color, indicator: style.boxShadow,
+               current: node.getAttribute("aria-current") };
+    });
+    expect.soft(await read(bar.getByRole("button", { name: "Risk Board" })), "the selected tab").toEqual({
+      font: "14px 400", color: "rgb(33, 93, 176)", indicator: "rgb(33, 93, 176) 0px -3px 0px 0px inset", current: "true" });
+    expect.soft(await read(bar.getByRole("button", { name: "Timeline" })), "another tab").toEqual({
+      font: "14px 400", color: "rgb(28, 33, 39)", indicator: "none", current: null });
+  });
+
+  // GOAL_FOUNDATIONS A8, SegmentedControl. UI_CONFIG's light segmented control: 30px,
+  // the selected option white with the default button's ring, the others transparent
+  // in #5f6b7c; each option says whether it is pressed.
+  test("A segmented control is 30px with the selected option raised", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    await page.goto("/workspace/ontology");
+    await page.getByRole("button", { name: "health center" }).click();
+    const control = page.getByRole("group", { name: "Finding severity" });
+    await expect(control).toBeVisible();
+    expect.soft(Math.round((await control.boundingBox())!.height), "the control").toBe(30);
+    const read = (option: ReturnType<Page["locator"]>) => option.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, ring: style.borderTopColor, color: style.color,
+               pressed: node.getAttribute("aria-pressed") };
+    });
+    expect.soft(await read(control.getByRole("button", { name: "ALL" })), "the selected option").toEqual({
+      background: "rgb(255, 255, 255)", ring: "rgba(69, 78, 91, 0.325)", color: "rgb(28, 33, 39)", pressed: "true" });
+    expect.soft(await read(control.getByRole("button", { name: "ERROR" })), "another option").toEqual({
+      background: "rgba(0, 0, 0, 0)", ring: "rgba(0, 0, 0, 0)", color: "rgb(95, 107, 124)", pressed: "false" });
+  });
 });

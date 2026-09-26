@@ -36,7 +36,7 @@ way to the rest names items nobody can reach.
 | --- | --- | --- | --- | --- | --- | --- |
 | `components/canvas/PipelineCanvas.tsx` | 509 | `MiniGraph` | `nodes` (slice) | held as shown | **no** | **no** |
 | `components/canvas/PipelineCanvas.tsx` | 518 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
-| `workspaces/DecisionWorkspace.tsx` | 128 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
+| `workspaces/DecisionWorkspace.tsx` | 129 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 73 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
 | `workspaces/OntologyManager.tsx` | 292 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |

@@ -31,6 +31,8 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `PlatformFlow` | `components/workbench/Workbench.tsx` | **1** — App |
 | `RelationshipStrip` | `components/data/DataDisplay.tsx` | **1** — OntologyManager |
 | `SectionCards` | `components/data/DataDisplay.tsx` | **1** — App |
+| `SegmentedControl` | `components/layout/Tabs.tsx` | **1** — OntologyHealthPanel |
+| `Tabs` | `components/layout/Tabs.tsx` | **1** — DecisionWorkspace |
 | `Toolbar` | `components/workbench/Workbench.tsx` | **1** — PipelineBuilder |
 | `WarningList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `DebugJson` | `components/data/DataDisplay.tsx` | **0** — — |

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Check, GitCompareArrows, Play, RefreshCw, Search, ShieldAlert, Sparkles, X } from "lucide-react";
 import { DataTable, EmptyState, ErrorBanner, KeyValueGrid, LoadingState, Metric, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { APPROVAL, intentOf, RISK_BAND, SEVERITY, type Intent } from "../components/data/intents";
+import { Tabs } from "../components/layout/Tabs";
 import { Page } from "../components/workbench/Workbench";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 import { listObjectTypes, type ObjectTypeSummary } from "../api/objectExplorerApi";
@@ -113,7 +114,7 @@ export function DecisionWorkspace() {
     {/* Only when the server's ceiling cut the scope: a condition that is the cut itself. */}
     {evaluation && evaluation.object_count < evaluation.objects_in_scope ? <p className="table-truncated" role="note">Scored the first {evaluation.object_count.toLocaleString()} of {evaluation.objects_in_scope.toLocaleString()} active objects, by id. Every figure and the board below cover only those {evaluation.object_count.toLocaleString()}.</p> : null}
     <div className="decision-metrics"><Metric label="Objects evaluated" value={evaluation?.object_count || 0} /><Metric label="High-risk findings" value={highCount} /><Metric label="Average risk" value={averageRisk} /><Metric label="Active rules" value={rules.length} /><Metric label="Scorecards" value={scorecards.length} /></div>
-    <nav className="decision-tabs" aria-label="Decision intelligence views">{TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
+    <Tabs className="decision-tabs" label="Decision intelligence views" items={TABS} value={tab} onChange={setTab} />
     {tab === "risk" ? <RiskBoard evaluation={evaluation} rules={rules} scorecards={scorecards} onSelect={(id) => { setObjectId(id); setTab("explain"); }} /> : null}
     {tab === "explain" ? <ExplainPanel objectId={objectId} explanation={explanation} busy={busy} onExplain={() => void act("Explanation loaded", async () => setExplanation(await explainDecisionObject(objectTypeId, objectId)))} /> : null}
     {tab === "timeline" ? <TimelinePanel objectId={objectId} timeline={timeline} busy={busy} specs={specs} onLoad={() => void act("Timeline loaded", async () => setTimeline((await getObjectTimeline(objectTypeId, objectId)).timeline))} /> : null}

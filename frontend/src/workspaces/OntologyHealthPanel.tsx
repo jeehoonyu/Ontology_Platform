@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SegmentedControl } from "../components/layout/Tabs";
 import {
   generateStandardObjectView,
   getOntologyHealthUiState,
@@ -104,7 +105,7 @@ export function OntologyHealthPanel({ objectTypeId, onBack }: { objectTypeId: st
       </div>
 
       <div className="ontology-health-main-grid">
-        <Panel title="Findings" className="ontology-health-findings" action={<div className="segmented-control" aria-label="Finding severity">{SEVERITIES.map((item) => <button key={item} className={severity === item ? "active" : ""} onClick={() => setSeverity(item)}>{item}</button>)}</div>}>
+        <Panel title="Findings" className="ontology-health-findings" action={<SegmentedControl label="Finding severity" options={SEVERITIES.map((item) => ({ id: item, label: item }))} value={severity} onChange={setSeverity} />}>
           {findings.length ? findings.map((finding) => <FindingRow key={finding.id} finding={finding} onGenerateView={finding.code === "MISSING_OBJECT_VIEW" ? generateView : undefined} busy={busy} />) : <div className="health-empty"><strong>{summary?.status === "PASS" ? "No active findings" : "Run a health check"}</strong><span>{summary?.status === "PASS" ? "Identity, schema, values, lineage, and governance checks passed." : "Evaluate this object type to produce actionable evidence."}</span></div>}
         </Panel>
 
