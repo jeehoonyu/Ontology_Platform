@@ -419,6 +419,23 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Negative runs: each screen's hand-written nav put back read no primitive and no current
     tab. Both were restored byte for byte, and the hash matched (`a48b54730ab38665`).
   - Measured: the full six-project run passed 393 of 393, with the known Platform Graph retry.
+
+  **5. The pipeline drawer, the tint kind.**
+  - `Tabs` gains `variant="tint"`: a 35px bar, the selected tab on `--surface-selected` in
+    `--text-selected`, with no indicator.
+  - The pipeline's bottom drawer uses it, named "Drawer views". Its hand-drawn blue underline
+    and its bar rule go, and raw colours fall from 587 to 584.
+  - The truncation test that clicks the drawer's "preview" tab and reads its note passes, as do
+    the pane-layout tests.
+  - Proven by `look.spec.ts::The pipeline drawer's tabs are the original's tint tabs`. It reads
+    a 35px `.tabs` bar and the selected tab on the tint in `#215db0` with no indicator.
+
+  **Negative runs,** against a rebuilt dist:
+  - The tint's selected rule removed: the selected tab went clear, with the underline indicator
+    instead.
+  - The hand-written nav put back: the bar read no primitive, at 30px.
+  - Restored byte for byte; the hash matched (`fb15add54380b81c`).
+  - Measured: the full six-project run passed 394 of 394, with the known Platform Graph retry.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by

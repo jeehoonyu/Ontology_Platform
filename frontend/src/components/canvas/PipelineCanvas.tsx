@@ -1,4 +1,5 @@
 import { useRef, useState, type MutableRefObject } from "react";
+import { Tabs } from "../layout/Tabs";
 import { useDndMonitor, useDraggable, useDroppable } from "@dnd-kit/core";
 import { DataTable, KeyValueGrid, StatusBadge } from "../data/DataDisplay";
 import { asString, classNames, formatValue } from "../../utils/format";
@@ -426,6 +427,8 @@ function PipelineNodeCard({ node, zoom, selected, follow, onSelect }: {
   );
 }
 
+const DRAWER_VIEWS = ["selection_preview", "preview", "transformations", "suggestions", "pipeline_warnings"];
+
 export function BottomDrawer({
   preview,
   selectedNode,
@@ -449,11 +452,8 @@ export function BottomDrawer({
     : selectedNode?.row_count ?? null;
   return (
     <section className="bottom-drawer">
-      <nav>
-        {["selection_preview", "preview", "transformations", "suggestions", "pipeline_warnings"].map((item) => (
-          <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item.replace(/_/g, " ")}</button>
-        ))}
-      </nav>
+      <Tabs variant="tint" label="Drawer views" value={tab} onChange={setTab}
+            items={DRAWER_VIEWS.map((item) => ({ id: item, label: item.replace(/_/g, " ") }))} />
       {tab === "selection_preview" && selectedNode ? (
         <div className="drawer-split">
           <KeyValueGrid data={{

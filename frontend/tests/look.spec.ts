@@ -506,6 +506,23 @@ test.describe("GOAL_LOOK", () => {
     });
   }
 
+  // GOAL_FOUNDATIONS A8, tint tabs. UI_CONFIG's bottom-panel tabs: a 35px bar, the
+  // selected tab on the rgba(45,114,210,.1) tint in #215db0, with no indicator.
+  test("The pipeline drawer's tabs are the original's tint tabs", async ({ page }) => {
+    await page.goto("/workspace/pipeline");
+    const bar = page.getByRole("navigation", { name: "Drawer views" });
+    await expect(bar).toBeVisible();
+    expect.soft(await bar.evaluate((node) => ({
+      primitive: node.classList.contains("tabs"), height: Math.round(node.getBoundingClientRect().height),
+    })), "the drawer's bar").toEqual({ primitive: true, height: 35 });
+    const selected = await bar.locator("button[aria-current='true']").evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, color: style.color, indicator: style.boxShadow };
+    });
+    expect.soft(selected, "the selected drawer tab").toEqual({
+      background: "rgba(45, 114, 210, 0.1)", color: "rgb(33, 93, 176)", indicator: "none" });
+  });
+
   // GOAL_FOUNDATIONS A8, SegmentedControl. UI_CONFIG's light segmented control: 30px,
   // the selected option white with the default button's ring, the others transparent
   // in #5f6b7c; each option says whether it is pressed.

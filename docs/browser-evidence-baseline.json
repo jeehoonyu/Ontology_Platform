@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "a48b54730ab38665bdb38e5350fcee592cf003070ceef44484a311dcad796d08",
+    "bundle_source_hash": "fb15add54380b81c5cd9b551d1acde44c033c12a6d773ede641e03d7d93b66f2",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T08:43:38Z",
+    "recorded_at": "2026-09-26T08:58:33Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 262,
+      "ran": 263,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 1,
       "ran": 25,
-      "skipped": 241
+      "skipped": 242
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 240
+      "skipped": 241
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 241
+      "skipped": 242
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 241
+      "skipped": 242
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 241
+      "skipped": 242
     }
   },
   "tests": {
@@ -116,6 +116,7 @@
     "desktop-1280 :: The ops tabs are the Tabs primitive": "ran",
     "desktop-1280 :: The page text renders in the bundled face, not a system font": "ran",
     "desktop-1280 :: The page title is a 16px name in the original's 50px header bar": "ran",
+    "desktop-1280 :: The pipeline drawer's tabs are the original's tint tabs": "ran",
     "desktop-1280 :: The security tabs are the Tabs primitive": "ran",
     "desktop-1280 :: The sidebar is the original's dark gray": "ran",
     "desktop-1280 :: Up Arrow during a keyboard drag moves the node, not the zoom": "ran",
@@ -383,6 +384,7 @@
     "laptop-1366 :: The ops tabs are the Tabs primitive": "skipped",
     "laptop-1366 :: The page text renders in the bundled face, not a system font": "skipped",
     "laptop-1366 :: The page title is a 16px name in the original's 50px header bar": "skipped",
+    "laptop-1366 :: The pipeline drawer's tabs are the original's tint tabs": "skipped",
     "laptop-1366 :: The security tabs are the Tabs primitive": "skipped",
     "laptop-1366 :: The sidebar is the original's dark gray": "skipped",
     "laptop-1366 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
@@ -650,6 +652,7 @@
     "mobile-375 :: The ops tabs are the Tabs primitive": "skipped",
     "mobile-375 :: The page text renders in the bundled face, not a system font": "skipped",
     "mobile-375 :: The page title is a 16px name in the original's 50px header bar": "skipped",
+    "mobile-375 :: The pipeline drawer's tabs are the original's tint tabs": "skipped",
     "mobile-375 :: The security tabs are the Tabs primitive": "skipped",
     "mobile-375 :: The sidebar is the original's dark gray": "skipped",
     "mobile-375 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
@@ -917,6 +920,7 @@
     "tablet-1024 :: The ops tabs are the Tabs primitive": "skipped",
     "tablet-1024 :: The page text renders in the bundled face, not a system font": "skipped",
     "tablet-1024 :: The page title is a 16px name in the original's 50px header bar": "skipped",
+    "tablet-1024 :: The pipeline drawer's tabs are the original's tint tabs": "skipped",
     "tablet-1024 :: The security tabs are the Tabs primitive": "skipped",
     "tablet-1024 :: The sidebar is the original's dark gray": "skipped",
     "tablet-1024 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
@@ -1184,6 +1188,7 @@
     "tablet-768 :: The ops tabs are the Tabs primitive": "skipped",
     "tablet-768 :: The page text renders in the bundled face, not a system font": "skipped",
     "tablet-768 :: The page title is a 16px name in the original's 50px header bar": "skipped",
+    "tablet-768 :: The pipeline drawer's tabs are the original's tint tabs": "skipped",
     "tablet-768 :: The security tabs are the Tabs primitive": "skipped",
     "tablet-768 :: The sidebar is the original's dark gray": "skipped",
     "tablet-768 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",
@@ -1451,6 +1456,7 @@
     "wide-1600 :: The ops tabs are the Tabs primitive": "skipped",
     "wide-1600 :: The page text renders in the bundled face, not a system font": "skipped",
     "wide-1600 :: The page title is a 16px name in the original's 50px header bar": "skipped",
+    "wide-1600 :: The pipeline drawer's tabs are the original's tint tabs": "skipped",
     "wide-1600 :: The security tabs are the Tabs primitive": "skipped",
     "wide-1600 :: The sidebar is the original's dark gray": "skipped",
     "wide-1600 :: Up Arrow during a keyboard drag moves the node, not the zoom": "skipped",

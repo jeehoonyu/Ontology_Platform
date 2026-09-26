@@ -220,6 +220,25 @@ button:hover,
   box-shadow: inset 0 calc(-1 * var(--tab-indicator)) 0 var(--text-selected);
 }
 
+/* The tint kind (bottom panels): a 35px bar, the selected tab tinted, no indicator. */
+.tabs.tabs-tint {
+  gap: 2px;
+  min-height: var(--tab-bottom-panel-height);
+  padding: 0 8px;
+  align-items: center;
+}
+
+.tabs.tabs-tint .tab {
+  min-height: 27px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+}
+
+.tabs.tabs-tint .tab.active {
+  background: var(--surface-selected);
+  box-shadow: none;
+}
+
 .decision-risk-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(250px, 330px);
@@ -2617,14 +2636,12 @@ pre {
   font-size: 11px;
 }
 
-.manager-nav,
-.bottom-drawer nav {
+.manager-nav {
   display: flex;
   gap: 4px;
 }
 
-.manager-nav button,
-.bottom-drawer nav button {
+.manager-nav button {
   box-shadow: none;
   border-color: transparent;
   background: transparent;
@@ -2632,10 +2649,6 @@ pre {
   padding: 8px 10px;
 }
 
-.bottom-drawer nav button.active {
-  color: #156ea3;
-  border-bottom-color: #156ea3;
-}
 
 .toolbar-strip {
   display: flex;
@@ -3268,10 +3281,6 @@ pre {
   border-top: 0;
 }
 
-.bottom-drawer nav {
-  border-bottom: 1px solid #d7dedf;
-  padding: 0 8px;
-}
 
 .bottom-drawer .table-wrap,
 .bottom-drawer .kv-grid,

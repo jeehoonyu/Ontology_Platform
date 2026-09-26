@@ -11,18 +11,22 @@ export interface TabOption<T extends string> {
  * divider, 14px labels at 400 set 20px apart, and the selected one in --text-selected
  * over a 3px indicator; only the colour changes. They stay buttons in a named nav,
  * the selected one marked with aria-current (decision N, option (a)), and keep the
- * `active` class screens and tests read. UI_CONFIG's tint, pill and vertical kinds
- * come with the first screen that needs each.
+ * `active` class screens and tests read.
+ *
+ * `variant="tint"` is the bottom-panel kind: a 35px bar, the selected tab on the
+ * --surface-selected tint in --text-selected, no indicator. UI_CONFIG's pill and
+ * vertical kinds come with the first screen that needs each.
  */
-export function Tabs<T extends string>({ items, value, onChange, label, className }: {
+export function Tabs<T extends string>({ items, value, onChange, label, className, variant = "underline" }: {
   items: ReadonlyArray<TabOption<T>>;
   value: T;
   onChange: (id: T) => void;
   label: string;
   className?: string;
+  variant?: "underline" | "tint";
 }) {
   return (
-    <nav className={classNames("tabs", className)} aria-label={label}>
+    <nav className={classNames("tabs", variant === "tint" && "tabs-tint", className)} aria-label={label}>
       {items.map((item) => (
         <button key={item.id} type="button" className={classNames("tab", item.id === value && "active")}
                 aria-current={item.id === value ? "true" : undefined} onClick={() => onChange(item.id)}>

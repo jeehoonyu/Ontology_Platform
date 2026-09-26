@@ -100,7 +100,7 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 
 | File | Line | In | Leaves out | Says how many | Show all |
 | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 161 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
+| `components/canvas/PipelineCanvas.tsx` | 162 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
 
 ## Declared not a list
 
@@ -115,9 +115,9 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | File | Line | In | Slice of | Read as |
 | --- | --- | --- | --- | --- |
 | `api.ts` | 15 | `request` | `text` | text |
-| `components/canvas/PipelineCanvas.tsx` | 110 | `PipelineCanvas` | `started` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 131 | `PipelineCanvas` | `id` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 303 | `PipelineCanvas` | `action.label` | text |
+| `components/canvas/PipelineCanvas.tsx` | 111 | `PipelineCanvas` | `started` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 132 | `PipelineCanvas` | `id` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 304 | `PipelineCanvas` | `action.label` | text |
 | `components/canvas/PipelineCanvas.tsx` | 527 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
 | `components/layout/Pane.tsx` | 385 | `usePaneLayout` | `active` | prefix dropped |
 | `components/layout/Pane.tsx` | 386 | `usePaneLayout` | `over` | prefix dropped |
