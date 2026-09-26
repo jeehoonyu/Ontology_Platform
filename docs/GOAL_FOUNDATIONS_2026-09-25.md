@@ -66,11 +66,12 @@ six-project run for anything a browser renders.
 The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
 - **O** (the project model): A4 labels the grant forms until O is made. Retiring the grants, or
   making them govern reads, waits on it.
-- **N** (Tabs and Menu semantics): A7 and A8 assume option (a), buttons with `aria-current` or
-  `aria-pressed`.
-- **A5's migration:** `media_sets` gains a `project_id`. Which project existing rows take (a
-  default project, or none until reviewed) is the owner's choice; A5 assumes none, which hides
-  them from project principals until assigned.
+- **N** (Tabs and Menu semantics): **decided 2026-09-26, option (a)**. Tabs and menus stay
+  buttons, with `aria-current` or `aria-pressed`, and a menu is a disclosure popover with
+  `aria-expanded`. The artifact review keeps its existing tablist.
+- **A5's migration:** **decided 2026-09-26**. `media_sets` gains a `project_id`, and existing
+  sets get none until someone assigns one. Project principals do not see them; administrators
+  do.
 
 ## Gates this must clear
 

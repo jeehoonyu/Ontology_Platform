@@ -312,8 +312,16 @@ each offered with the options in its row and its recommendation marked:
   offered: 14px / 18px; keep 16px).
 - **Decided 2026-09-25: H (a)**, the sidebar takes the original's colours now and keeps 286px
   (options offered: colour only; colour and 230px; leave it).
+- **Decided 2026-09-26: N (a)**, tabs and menus stay buttons: tabs with `aria-current`, a
+  segmented control with `aria-pressed`, a menu as a disclosure popover with `aria-expanded`,
+  and node menu items as buttons. The artifact review keeps its existing ARIA tablist (options
+  offered: buttons; an ARIA tablist and menu, moving about 8 locators).
+- **Decided 2026-09-26, for GOAL_FOUNDATIONS A5:** when `media_sets` gains a `project_id`,
+  existing sets get none until someone assigns one; project principals do not see them, and
+  administrators do (options offered: none until assigned; the default project; leave A5 to the
+  separately filed scoping task).
 
-I, M and N are not yet decided; GOAL_LOOK assumes their option (a). O–T wait for their waves.
+I and M are not yet decided; GOAL_LOOK assumed their option (a). O–T wait for their waves.
 
 | Decision | Question | Options | Recommendation |
 | --- | --- | --- | --- |
