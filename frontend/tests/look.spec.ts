@@ -283,6 +283,27 @@ test.describe("GOAL_LOOK", () => {
     expect.soft(reading.ratio, "the warning badge's contrast").toBeGreaterThanOrEqual(4.5);
   });
 
+  // U9, decision H (a). The original's sidebar colours at our 286px width: the dark
+  // gray, the active item in #1c2127 with a 600 label, the hover in #383e47.
+  test("The sidebar is the original's dark gray", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    await expect(page.getByRole("heading", { name: "Decision Intelligence" })).toBeVisible();
+    const sidebar = page.locator(".sidebar");
+    expect.soft(await sidebar.evaluate((node) => ({
+      background: getComputedStyle(node).backgroundColor, width: Math.round(node.getBoundingClientRect().width),
+    })), "the sidebar").toEqual({ background: "rgb(37, 42, 49)", width: 286 });
+    const item = (locator: ReturnType<Page["locator"]>) => locator.evaluate((node) => ({
+      background: getComputedStyle(node).backgroundColor,
+      label: getComputedStyle(node.querySelector("strong")!).fontWeight,
+    }));
+    expect.soft(await item(sidebar.locator(".nav-item.active")), "the active item")
+      .toEqual({ background: "rgb(28, 33, 39)", label: "600" });
+    const other = sidebar.locator(".nav-item:not(.active)").first();
+    expect.soft((await item(other)).label, "an inactive item's label").toBe("400");
+    await other.hover();
+    expect.soft((await item(other)).background, "a hovered item").toBe("rgb(56, 62, 71)");
+  });
+
   // U6. The original's text field: 30px, 0 8px, radius 4, white, the ring (drawn as
   // the border) and an inset shade; on focus the ring turns #4c90f0 and a 3px halo
   // replaces the shade. A select takes the same height.
