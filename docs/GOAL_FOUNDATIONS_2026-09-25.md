@@ -172,6 +172,17 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     byte; the hash matched (`6784b5b56289efef`).
   - Measured: the full six-project run passed 381 of 381, with none retried; route cost and the
     payload hold.
+
+  **b. Automate.** An automation has one switch, `enabled`. Pause turns it off, and so does
+  creating one with "Enabled on create" unchecked. The screen now names the off state for what
+  it is: the metric reads "Disabled", and the row and detail badges read "disabled", where all
+  three said "paused". The Pause and Resume actions keep their names.
+  - Proven by `trust.spec.ts::Automate does not call a never-enabled automation paused`. It
+    creates an automation with "Enabled on create" unchecked, and reads "disabled" in its row
+    and its detail, with no Paused metric.
+  - Negative run: the old wording put back failed "its row". Restored byte for byte; the hash
+    matched (`39481a619ee66bf2`).
+  - Measured: the full six-project run passed 382 of 382, with none retried.
 - **A4 — The grant forms say they do not govern data access.** **Open** — until decision O,
   Security's project grants and Control Panel's role grants each carry "does not govern data
   access" beside the form, and the backend docstrings stop claiming otherwise. To be proven by

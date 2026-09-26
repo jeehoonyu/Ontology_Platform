@@ -116,4 +116,24 @@ test.describe("GOAL_FOUNDATIONS A3", () => {
     expect(requested, "turning on Neighbors fetches nothing").toEqual([]);
     await expect(page.locator(".page-header"), "the header's promise").not.toContainText(/expand/i);
   });
+
+  // b. An automation created with "Enabled on create" unchecked was never paused,
+  // yet it read "paused" in the metric, its row and its detail. The backend has one
+  // switch, so the screen names the off state for what it is.
+  test("Automate does not call a never-enabled automation paused", async ({ page }) => {
+    await page.goto("/workspace/automate");
+    await expect(page.getByRole("heading", { name: "Automate", exact: true })).toBeVisible();
+    const name = `Created off ${Date.now()}`;
+    await page.getByLabel("Display name").fill(name);
+    const enabled = page.getByRole("checkbox", { name: "Enabled on create" });
+    if (await enabled.isChecked()) await enabled.uncheck();
+    await page.getByRole("button", { name: "Create automation" }).click();
+    const row = page.locator("tr").filter({ hasText: name });
+    await expect(row).toBeVisible();
+    await expect(row.locator(".badge").first(), "its row").toHaveText("disabled");
+    await expect(page.locator(".metric-card").filter({ hasText: /paused/i }), "a Paused metric").toHaveCount(0);
+    await row.click();
+    await expect(page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Automation Detail" }) })
+      .locator(".badge").first(), "its detail").toHaveText("disabled");
+  });
 });

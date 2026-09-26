@@ -127,6 +127,9 @@ export function Automate() {
   }
 
   const automation = detail.value?.automation || null;
+  // An automation has one switch, `enabled`: Pause turns it off, and so does
+  // creating one with "Enabled on create" unchecked. The screen calls the off
+  // state what it is, disabled, not "paused" (GOAL_FOUNDATIONS A3b).
   const enabledCount = rows.filter((row) => row.enabled).length;
   const mutedCount = rows.filter((row) => row.muted).length;
 
@@ -157,7 +160,7 @@ export function Automate() {
       <div className="grid metrics">
         <Metric label="Automations" value={rows.length} />
         <Metric label="Enabled" value={enabledCount} />
-        <Metric label="Paused" value={rows.length - enabledCount} />
+        <Metric label="Disabled" value={rows.length - enabledCount} />
         <Metric label="Muted" value={mutedCount} />
       </div>
 
@@ -189,7 +192,7 @@ export function Automate() {
                       >
                         <td title={id}>{asString(row.display_name, id)}</td>
                         <td>{asString(row.scope_mode)}</td>
-                        <td><StatusBadge value={row.enabled ? "enabled" : "paused"} intent={row.enabled ? "success" : "neutral"} /></td>
+                        <td><StatusBadge value={row.enabled ? "enabled" : "disabled"} intent={row.enabled ? "success" : "neutral"} /></td>
                         <td><StatusBadge value={row.muted ? "muted" : "unmuted"} intent={row.muted ? "warning" : "neutral"} /></td>
                       </tr>
                     );
@@ -256,7 +259,7 @@ export function Automate() {
               {automation ? (
                 <>
                   <div className="button-row" style={{ marginBottom: 10 }}>
-                    <StatusBadge value={automation.enabled ? "enabled" : "paused"} intent={automation.enabled ? "success" : "neutral"} />
+                    <StatusBadge value={automation.enabled ? "enabled" : "disabled"} intent={automation.enabled ? "success" : "neutral"} />
                     <StatusBadge value={automation.muted ? "muted" : "unmuted"} intent={automation.muted ? "warning" : "neutral"} />
                     <StatusBadge value={automation.scope_mode} intent="neutral" />
                   </div>
