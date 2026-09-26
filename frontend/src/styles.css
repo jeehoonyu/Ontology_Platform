@@ -5599,24 +5599,39 @@ pre {
   color: var(--dark-text-muted);
 }
 
-.command-palette-backdrop {
+/* Dialog (GOAL_FOUNDATIONS A7): UI_CONFIG's light dialog, centred over the backdrop.
+   The command palette sits higher, as a quick-search does. */
+.dialog-backdrop {
   position: fixed;
-  z-index: 1000;
+  z-index: 1100;
   inset: 0;
   display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--overlay-backdrop);
+}
+
+.dialog {
+  max-height: 85vh;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.command-palette-backdrop {
   place-items: start center;
   padding-top: min(14vh, 130px);
-  background: rgb(7 18 25 / 56%);
 }
 
 .command-palette {
   width: min(680px, calc(100vw - 28px));
   max-height: min(650px, 75vh);
   overflow: hidden;
-  border: 1px solid #aab9c2;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 24px 70px rgb(4 17 24 / 35%);
 }
 
 .command-palette > label {
@@ -6189,24 +6204,9 @@ pre {
   background: #f1f7f4;
 }
 
-.modal-backdrop {
-  position: fixed;
-  z-index: 1100;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgb(9 21 29 / 55%);
-}
-
 .action-modal {
   width: min(520px, 100%);
-  max-height: 85vh;
-  overflow: auto;
   padding: 16px;
-  border: 1px solid #91a5af;
-  background: #fff;
-  box-shadow: 0 20px 55px rgb(7 22 31 / 30%);
 }
 
 .action-modal > label {

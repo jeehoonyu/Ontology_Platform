@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "d668a6281fb564434ab22550164e17ab15578265a9a5774fd73675c1c85b93fb",
+    "bundle_source_hash": "e8c09699f1630fd78b7767e12745462ef19e1f04c704367bde9f60ee1a95dcfd",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T09:24:36Z",
+    "recorded_at": "2026-09-26T10:03:52Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 266,
+      "ran": 268,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 1,
       "ran": 25,
-      "skipped": 245
+      "skipped": 247
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 244
+      "skipped": 246
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 245
+      "skipped": 247
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 245
+      "skipped": 247
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 245
+      "skipped": 247
     }
   },
   "tests": {
@@ -95,6 +95,7 @@
     "desktop-1280 :: OFFLINE is not shown as success": "ran",
     "desktop-1280 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "ran",
     "desktop-1280 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "ran",
+    "desktop-1280 :: Object Explorer's action dialog closes on Escape and gives focus back": "ran",
     "desktop-1280 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "ran",
     "desktop-1280 :: Operational Map renders ontology features and supports selection and MGRS": "ran",
     "desktop-1280 :: Ops' rule form and test-event form keep their own fields": "ran",
@@ -112,6 +113,7 @@
     "desktop-1280 :: The Workshop breakpoint switch is the SegmentedControl": "ran",
     "desktop-1280 :: The artifact review tabs are a Tabs tablist": "ran",
     "desktop-1280 :: The body text is 14px on an 18px line": "ran",
+    "desktop-1280 :: The command palette holds focus, closes on Escape, and gives focus back": "ran",
     "desktop-1280 :: The control-panel tabs are the Tabs primitive": "ran",
     "desktop-1280 :: The decision tabs are the Tabs primitive": "ran",
     "desktop-1280 :: The delivery tabs are the Tabs primitive": "ran",
@@ -366,6 +368,7 @@
     "laptop-1366 :: OFFLINE is not shown as success": "skipped",
     "laptop-1366 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "laptop-1366 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
+    "laptop-1366 :: Object Explorer's action dialog closes on Escape and gives focus back": "skipped",
     "laptop-1366 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "laptop-1366 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "laptop-1366 :: Ops' rule form and test-event form keep their own fields": "skipped",
@@ -383,6 +386,7 @@
     "laptop-1366 :: The Workshop breakpoint switch is the SegmentedControl": "skipped",
     "laptop-1366 :: The artifact review tabs are a Tabs tablist": "skipped",
     "laptop-1366 :: The body text is 14px on an 18px line": "skipped",
+    "laptop-1366 :: The command palette holds focus, closes on Escape, and gives focus back": "skipped",
     "laptop-1366 :: The control-panel tabs are the Tabs primitive": "skipped",
     "laptop-1366 :: The decision tabs are the Tabs primitive": "skipped",
     "laptop-1366 :: The delivery tabs are the Tabs primitive": "skipped",
@@ -637,6 +641,7 @@
     "mobile-375 :: OFFLINE is not shown as success": "skipped",
     "mobile-375 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "mobile-375 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
+    "mobile-375 :: Object Explorer's action dialog closes on Escape and gives focus back": "skipped",
     "mobile-375 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "mobile-375 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "mobile-375 :: Ops' rule form and test-event form keep their own fields": "skipped",
@@ -654,6 +659,7 @@
     "mobile-375 :: The Workshop breakpoint switch is the SegmentedControl": "skipped",
     "mobile-375 :: The artifact review tabs are a Tabs tablist": "skipped",
     "mobile-375 :: The body text is 14px on an 18px line": "skipped",
+    "mobile-375 :: The command palette holds focus, closes on Escape, and gives focus back": "skipped",
     "mobile-375 :: The control-panel tabs are the Tabs primitive": "skipped",
     "mobile-375 :: The decision tabs are the Tabs primitive": "skipped",
     "mobile-375 :: The delivery tabs are the Tabs primitive": "skipped",
@@ -908,6 +914,7 @@
     "tablet-1024 :: OFFLINE is not shown as success": "skipped",
     "tablet-1024 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "tablet-1024 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
+    "tablet-1024 :: Object Explorer's action dialog closes on Escape and gives focus back": "skipped",
     "tablet-1024 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-1024 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "tablet-1024 :: Ops' rule form and test-event form keep their own fields": "skipped",
@@ -925,6 +932,7 @@
     "tablet-1024 :: The Workshop breakpoint switch is the SegmentedControl": "skipped",
     "tablet-1024 :: The artifact review tabs are a Tabs tablist": "skipped",
     "tablet-1024 :: The body text is 14px on an 18px line": "skipped",
+    "tablet-1024 :: The command palette holds focus, closes on Escape, and gives focus back": "skipped",
     "tablet-1024 :: The control-panel tabs are the Tabs primitive": "skipped",
     "tablet-1024 :: The decision tabs are the Tabs primitive": "skipped",
     "tablet-1024 :: The delivery tabs are the Tabs primitive": "skipped",
@@ -1179,6 +1187,7 @@
     "tablet-768 :: OFFLINE is not shown as success": "skipped",
     "tablet-768 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "tablet-768 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
+    "tablet-768 :: Object Explorer's action dialog closes on Escape and gives focus back": "skipped",
     "tablet-768 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-768 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "tablet-768 :: Ops' rule form and test-event form keep their own fields": "skipped",
@@ -1196,6 +1205,7 @@
     "tablet-768 :: The Workshop breakpoint switch is the SegmentedControl": "skipped",
     "tablet-768 :: The artifact review tabs are a Tabs tablist": "skipped",
     "tablet-768 :: The body text is 14px on an 18px line": "skipped",
+    "tablet-768 :: The command palette holds focus, closes on Escape, and gives focus back": "skipped",
     "tablet-768 :: The control-panel tabs are the Tabs primitive": "skipped",
     "tablet-768 :: The decision tabs are the Tabs primitive": "skipped",
     "tablet-768 :: The delivery tabs are the Tabs primitive": "skipped",
@@ -1450,6 +1460,7 @@
     "wide-1600 :: OFFLINE is not shown as success": "skipped",
     "wide-1600 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "wide-1600 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
+    "wide-1600 :: Object Explorer's action dialog closes on Escape and gives focus back": "skipped",
     "wide-1600 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "wide-1600 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
     "wide-1600 :: Ops' rule form and test-event form keep their own fields": "skipped",
@@ -1467,6 +1478,7 @@
     "wide-1600 :: The Workshop breakpoint switch is the SegmentedControl": "skipped",
     "wide-1600 :: The artifact review tabs are a Tabs tablist": "skipped",
     "wide-1600 :: The body text is 14px on an 18px line": "skipped",
+    "wide-1600 :: The command palette holds focus, closes on Escape, and gives focus back": "skipped",
     "wide-1600 :: The control-panel tabs are the Tabs primitive": "skipped",
     "wide-1600 :: The decision tabs are the Tabs primitive": "skipped",
     "wide-1600 :: The delivery tabs are the Tabs primitive": "skipped",

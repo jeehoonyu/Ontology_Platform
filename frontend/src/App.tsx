@@ -24,6 +24,7 @@ import {
   WarningList
 } from "./components/data/DataDisplay";
 import { APPROVAL, intentOf, JOB_STATUS, READINESS, RISK_BAND, STEP_STATUS } from "./components/data/intents";
+import { Dialog } from "./components/layout/Dialog";
 import { ScreenBoundary } from "./components/layout/ScreenBoundary";
 import { Page, PlatformFlow } from "./components/workbench/Workbench";
 import { useAsyncState } from "./hooks/useAsyncState";
@@ -307,19 +308,12 @@ function AuthIdentity({ session, loading, error }: { session: AuthSession | null
 function CommandPalette({ onClose, onOpen }: { onClose: () => void; onOpen: (view: string) => void }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => NAV_ITEMS.filter((item) => `${item.label} ${item.hint}`.toLowerCase().includes(query.toLowerCase())), [query]);
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
   return (
-    <div className="command-palette-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Search workspaces" onMouseDown={(event) => event.stopPropagation()}>
+    <Dialog className="command-palette" backdropClassName="command-palette-backdrop" label="Search workspaces" onClose={onClose}>
         <label><Search size={18} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a workspace or capability" /></label>
         <div>{filtered.map((item) => <button key={item.id} onClick={() => onOpen(item.id)}><strong>{item.label}</strong><small>{item.hint}</small></button>)}</div>
         {!filtered.length ? <p>No matching workspaces.</p> : null}
-      </section>
-    </div>
+    </Dialog>
   );
 }
 

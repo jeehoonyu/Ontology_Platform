@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Dialog } from "../components/layout/Dialog";
 import { BookmarkPlus, ChevronRight, Filter, Network, Play, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { EmptyState, ErrorBanner, KeyValueGrid, LoadingState, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { ACTION_RESULT, intentOf, RISK_BAND } from "../components/data/intents";
@@ -252,7 +253,7 @@ export function ObjectExplorer() {
           </Panel>
         </aside>
       </div>
-      {activeAction ? <div className="modal-backdrop" role="presentation" onMouseDown={() => setActiveAction(null)}><section className="action-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-action-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="bulk-action-title">{activeAction.display_name}</h2><p>{selectedIds.length} selected object{selectedIds.length === 1 ? "" : "s"}</p></div><button aria-label="Close action" onClick={() => setActiveAction(null)}><X size={16} /></button></header>{parameterNames(activeAction).filter((name) => name !== "object_id").map((name) => <label key={name}><span>{name.replace(/_/g, " ")}</span><input value={actionParams[name] || ""} onChange={(event) => setActionParams((values) => ({ ...values, [name]: event.target.value }))} /></label>)}<div className="button-row"><button onClick={() => setActiveAction(null)}>Cancel</button><button className="primary" onClick={() => void runAction()}><ShieldCheck size={15} />Evaluate and run</button></div></section></div> : null}
+      {activeAction ? <Dialog className="action-modal" labelledBy="bulk-action-title" onClose={() => setActiveAction(null)}><header><div><h2 id="bulk-action-title">{activeAction.display_name}</h2><p>{selectedIds.length} selected object{selectedIds.length === 1 ? "" : "s"}</p></div><button aria-label="Close action" onClick={() => setActiveAction(null)}><X size={16} /></button></header>{parameterNames(activeAction).filter((name) => name !== "object_id").map((name) => <label key={name}><span>{name.replace(/_/g, " ")}</span><input value={actionParams[name] || ""} onChange={(event) => setActionParams((values) => ({ ...values, [name]: event.target.value }))} /></label>)}<div className="button-row"><button onClick={() => setActiveAction(null)}>Cancel</button><button className="primary" onClick={() => void runAction()}><ShieldCheck size={15} />Evaluate and run</button></div></Dialog> : null}
     </Page>
   );
 }

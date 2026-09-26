@@ -317,6 +317,38 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   (Tooltip). To be proven by `frontend/tests/overlays.spec.ts`: focus stays inside while open,
   Escape closes and returns focus, axe is clean with each open, and Escape never also cancels a
   live drag. Each is shown to fail with the primitive's behaviour removed.
+
+  **1. Dialog, with its two first adopters.** `components/layout/Dialog.tsx`:
+  - Focus moves inside on open, and Tab and Shift+Tab stay inside.
+  - Escape closes it. Escape is taken in the capture phase and goes no further, so it never
+    also cancels a drag or a selection behind it.
+  - The backdrop closes it, and focus goes back to whatever opened it. The opener is read
+    during the first render, before a child's `autoFocus` moves focus.
+  - The look is UI_CONFIG's light dialog: white, radius 4, `--shadow-overlay`, over
+    `--overlay-backdrop`.
+  - The command palette ("Search workspaces") and Object Explorer's action dialog adopt it.
+    Their hand-set backdrops, borders and shadows go. The palette keeps its width and its place
+    near the top, as a quick-search sits.
+  - Raw colours fall from 571 to 563. `docs/UI_PRIMITIVES.md` lists 27 primitives.
+
+  Before this:
+  - The palette closed on Escape but left focus nowhere, and Tab walked out behind it.
+  - The action dialog did not close on Escape, set no initial focus and held no focus.
+
+  Proven by `frontend/tests/overlays.spec.ts`. Each dialog's test opens it, checks focus
+  inside, tabs through and back without leaving it, runs axe on the open dialog, presses
+  Escape, and checks that focus is back on the control that opened it. The evaluator's palette
+  and Object Explorer tests pass.
+
+  **Negative runs,** each failing both tests against a rebuilt dist:
+  - Focus not given back: "focus went back to … that opened it".
+  - The Tab trap removed: "focus left the dialog after 3 Tab(s)" in the palette, and after 5
+    in the action dialog.
+  - Escape ignored: neither dialog closed.
+  - Restored byte for byte; the hash matched (`e8c09699f1630fd7`).
+  - Measured: the full six-project run passed 399 of 399, with the known Platform Graph retry.
+    `Dialog` rides in the entry chunk, which App already loads; route cost holds at 266, and the
+    shared closure is 510 KB.
 - **A8 — Tabs and SegmentedControl replace the ad-hoc tabs.** **Met** — `raw_colour_ceiling`
   (599) falls as the eight per-screen tab styles go, re-recorded in each commit (K8). Underline,
   tint, pill and vertical variants; SegmentedControl with `aria-pressed`. The Decision, Ops and

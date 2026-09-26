@@ -23,7 +23,7 @@ are given: the rows past the cut are named and cannot be reached.
 | `components/data/DataDisplay.tsx` | 160 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 287 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 278 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
-| `workspaces/ObjectExplorer.tsx` | 204 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
+| `workspaces/ObjectExplorer.tsx` | 205 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
 
 ## Lists, canvases and chips
 
@@ -38,7 +38,7 @@ way to the rest names items nobody can reach.
 | `components/canvas/PipelineCanvas.tsx` | 518 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
 | `workspaces/DecisionWorkspace.tsx` | 129 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
-| `workspaces/ObjectExplorer.tsx` | 73 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
+| `workspaces/ObjectExplorer.tsx` | 74 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
 | `workspaces/OntologyManager.tsx` | 292 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
 | `workspaces/VisualBuilder.tsx` | 733 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
 | `workspaces/VisualBuilder.tsx` | 837 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
