@@ -160,6 +160,18 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     sets the event's severity and reads the rule's unchanged, and checks the event's POST.
   - **e.** Vertex's layout buttons move the nodes, or go, and the filter fades nodes, or goes.
     The test clicks two layouts and compares node positions.
+
+  **a. Platform Graph.** The smaller change: the subtitle no longer promises to "expand
+  neighborhoods". It reads "narrow to a node's loaded neighbors", which is what Neighbors does.
+  Nothing fetches more nodes, and the control's own label ("Show all loaded nodes") and the
+  truncation note were already honest.
+  - Proven by `trust.spec.ts::Platform Graph promises only the neighbours it has loaded`. With
+    the asset scenario loaded, it selects a node and turns on Neighbors. It records that no
+    `/graph/` request was made, and requires that the page header not say "expand".
+  - Negative run: the old subtitle put back failed "the header's promise". Restored byte for
+    byte; the hash matched (`6784b5b56289efef`).
+  - Measured: the full six-project run passed 381 of 381, with none retried; route cost and the
+    payload hold.
 - **A4 — The grant forms say they do not govern data access.** **Open** — until decision O,
   Security's project grants and Control Panel's role grants each carry "does not govern data
   access" beside the form, and the backend docstrings stop claiming otherwise. To be proven by

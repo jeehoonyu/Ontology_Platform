@@ -155,7 +155,7 @@ export function PlatformGraphWorkspace() {
   }
 
   return (
-    <Page title="Platform Graph" subtitle="Explore operational resources, move nodes, expand neighborhoods, and inspect evidence relationships.">
+    <Page title="Platform Graph" subtitle="Explore operational resources, move nodes, narrow to a node's loaded neighbors, and inspect evidence relationships.">
       <ErrorBanner message={graph.error} />
       {graph.loading ? <LoadingState label="Loading platform graph..." /> : null}
       <div className="platform-graph-toolbar" role="toolbar" aria-label="Platform graph controls">

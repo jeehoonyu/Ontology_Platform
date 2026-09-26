@@ -88,3 +88,32 @@ test.describe("GOAL_FOUNDATIONS A2", () => {
     await shellStands(page, "Asset Reliability Command Center");
   });
 });
+
+/**
+ * A3: each screen claims only what it does. One test per screen; each checks the
+ * screen's words against what its control actually does.
+ */
+test.describe("GOAL_FOUNDATIONS A3", () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Claims are checked once, on desktop.");
+  });
+
+  // a. Neighbors narrows the graph to a node's neighbours among the nodes already
+  // loaded; it fetches nothing. So nothing on the page may promise to expand one.
+  test("Platform Graph promises only the neighbours it has loaded", async ({ page }) => {
+    expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+    await page.goto("/workspace/graph");
+    const node = page.locator(".react-flow__node").first();
+    await expect(node).toBeVisible();
+    await node.click();
+    const requested: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/graph/")) requested.push(path);
+    });
+    await page.getByRole("button", { name: "Neighbors" }).click();
+    await expect(page.getByRole("button", { name: "Show all loaded nodes" })).toBeVisible();
+    expect(requested, "turning on Neighbors fetches nothing").toEqual([]);
+    await expect(page.locator(".page-header"), "the header's promise").not.toContainText(/expand/i);
+  });
+});

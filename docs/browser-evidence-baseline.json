@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "c4897bcff57c496495c7fcf163e970d91018df6745ce16a81fc0442a2c81ce78",
+    "bundle_source_hash": "6784b5b56289efef7916b895463cf083fbfe8d9bca827c9a08d01260ea61851d",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T05:10:12Z",
+    "recorded_at": "2026-09-26T05:22:21Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 249,
+      "ran": 250,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 228
+      "skipped": 229
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 227
+      "skipped": 228
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 228
+      "skipped": 229
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 228
+      "skipped": 229
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 228
+      "skipped": 229
     }
   },
   "tests": {
@@ -93,6 +93,7 @@
     "desktop-1280 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "ran",
     "desktop-1280 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "ran",
     "desktop-1280 :: Operational Map renders ontology features and supports selection and MGRS": "ran",
+    "desktop-1280 :: Platform Graph promises only the neighbours it has loaded": "ran",
     "desktop-1280 :: Refresh keeps the feed's filter and sort, and what was typed into a form": "ran",
     "desktop-1280 :: Reset columns leaves filters alone and says so, and a sort orders only the matches": "ran",
     "desktop-1280 :: Reset columns puts back width, place, pin and visibility, and leaves the sort alone": "ran",
@@ -347,6 +348,7 @@
     "laptop-1366 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "laptop-1366 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "laptop-1366 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "laptop-1366 :: Platform Graph promises only the neighbours it has loaded": "skipped",
     "laptop-1366 :: Refresh keeps the feed's filter and sort, and what was typed into a form": "skipped",
     "laptop-1366 :: Reset columns leaves filters alone and says so, and a sort orders only the matches": "skipped",
     "laptop-1366 :: Reset columns puts back width, place, pin and visibility, and leaves the sort alone": "skipped",
@@ -601,6 +603,7 @@
     "mobile-375 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "mobile-375 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "mobile-375 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "mobile-375 :: Platform Graph promises only the neighbours it has loaded": "skipped",
     "mobile-375 :: Refresh keeps the feed's filter and sort, and what was typed into a form": "skipped",
     "mobile-375 :: Reset columns leaves filters alone and says so, and a sort orders only the matches": "skipped",
     "mobile-375 :: Reset columns puts back width, place, pin and visibility, and leaves the sort alone": "skipped",
@@ -855,6 +858,7 @@
     "tablet-1024 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "tablet-1024 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-1024 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "tablet-1024 :: Platform Graph promises only the neighbours it has loaded": "skipped",
     "tablet-1024 :: Refresh keeps the feed's filter and sort, and what was typed into a form": "skipped",
     "tablet-1024 :: Reset columns leaves filters alone and says so, and a sort orders only the matches": "skipped",
     "tablet-1024 :: Reset columns puts back width, place, pin and visibility, and leaves the sort alone": "skipped",
@@ -1109,6 +1113,7 @@
     "tablet-768 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "tablet-768 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "tablet-768 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "tablet-768 :: Platform Graph promises only the neighbours it has loaded": "skipped",
     "tablet-768 :: Refresh keeps the feed's filter and sort, and what was typed into a form": "skipped",
     "tablet-768 :: Reset columns leaves filters alone and says so, and a sort orders only the matches": "skipped",
     "tablet-768 :: Reset columns puts back width, place, pin and visibility, and leaves the sort alone": "skipped",
@@ -1363,6 +1368,7 @@
     "wide-1600 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
     "wide-1600 :: Operational Control promotes events through alerts, incidents, runbooks, and inbox": "skipped",
     "wide-1600 :: Operational Map renders ontology features and supports selection and MGRS": "skipped",
+    "wide-1600 :: Platform Graph promises only the neighbours it has loaded": "skipped",
     "wide-1600 :: Refresh keeps the feed's filter and sort, and what was typed into a form": "skipped",
     "wide-1600 :: Reset columns leaves filters alone and says so, and a sort orders only the matches": "skipped",
     "wide-1600 :: Reset columns puts back width, place, pin and visibility, and leaves the sort alone": "skipped",
