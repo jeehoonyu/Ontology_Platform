@@ -37,5 +37,6 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `SectionCards` | `components/data/DataDisplay.tsx` | **1** — App |
 | `Toolbar` | `components/workbench/Workbench.tsx` | **1** — PipelineBuilder |
 | `Tooltip` | `components/layout/Tooltip.tsx` | **1** — VisualBuilder |
+| `UnknownResource` | `components/data/DataDisplay.tsx` | **1** — OpsWorkspace |
 | `WarningList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `DebugJson` | `components/data/DataDisplay.tsx` | **0** — — |

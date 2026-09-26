@@ -20,7 +20,7 @@ are given: the rows past the cut are named and cannot be reached.
 
 | File | Line | In | Cuts | How | Into a paging table | True count rendered |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/data/DataDisplay.tsx` | 160 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
+| `components/data/DataDisplay.tsx` | 169 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 287 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 278 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
 | `workspaces/ObjectExplorer.tsx` | 205 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
@@ -130,7 +130,7 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `workspaces/OntologyPackagePanel.tsx` | 156 | `PackageVersionRow` | `version.checksum` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 152 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 177 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
-| `workspaces/OpsWorkspace.tsx` | 81 | `IncidentsTab` | `alerts` | request payload |
+| `workspaces/OpsWorkspace.tsx` | 87 | `IncidentsTab` | `alerts` | request payload |
 | `workspaces/PipelineBuilder.tsx` | 580 | `PipelineBuilder` | `current` | last dropped |
 | `workspaces/PipelineBuilder.tsx` | 736 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 736 | `PipelineBuilder` | `over` | prefix dropped |

@@ -105,6 +105,8 @@ triage = check(client.post("/api/v1/industrial/workflows/asset-reliability/triag
 assert triage["status"] == "APPROVAL_REQUIRED" and triage["object"]["id"] == "plant_alpha:pump-4", triage
 assert triage["risk"]["band"] in {"high", "critical"} and triage["agent_session"]["proposed_actions"][0]["requires_approval"], triage
 assert triage["incident"]["project_id"] == "plant-alpha" and triage["investigation"]["project_id"] == "plant-alpha", triage
+# The incident evidence opens Ops on its Incidents tab (GOAL_FOUNDATIONS A6), built from the route table.
+assert {"kind": "incident", "id": triage["incident"]["id"], "href": "/workspace/ops?tab=incidents"} in triage["evidence_links"], triage["evidence_links"]
 passed += 3
 
 workflow = check(client.get("/api/v1/industrial/workflows/asset-reliability/workflow-state?project_id=plant-alpha"), "workflow awaits approval")

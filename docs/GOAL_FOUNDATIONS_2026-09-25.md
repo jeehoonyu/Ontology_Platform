@@ -390,6 +390,38 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   condition's own text: a tab is a selection, so Ops tabs are pushed and Back restores the last
   one; Object Explorer's search is the first filter and is replaced, never pushed; and each test
   is run against a build of `38b096a` to show it fails there.
+
+  **1. The route table, `navigate`, and Ops' `?tab=`.** `frontend/src/routes.json` is the one
+  table: each view's params in the order a URL writes them, with defaults left out, and each
+  kind's view and param (rows land with their readers). `utils/navigation.ts` reads it:
+  - `useRouteParams(view)` re-reads the query on every `navigate`, Back and Forward, since the
+    screen stays mounted while only the query changes (ScreenBoundary is keyed by view).
+  - `navigate(view, params)` pushes, builds the URL from `params` alone so a view change
+    carries none of the last view's query, and adds nothing when the place is already open,
+    however its URL spells it (`?tab=command`, or a param no screen reads). Only event handlers
+    call it, so a default never writes the URL.
+  - `navigateHref` opens a server-written link in the page; `?legacy=1` and other paths load.
+  - The `alongside`/`flushSync` parameter the spec proposed is gone: its premise, that a URL
+    write after an await renders a pass early, is false under React 19.2.7.
+  - `oms/app/workspace_routes.py` is the server's copy (`workspace_href`, `app_url`), and
+    `oms/test_workspace_routes.py` holds the two equal, requires a routes.spec case for every
+    kind and view, and counts hand-built workspace links by file (the count may only fall).
+    The incident evidence link is the first built from it: `/workspace/ops?tab=incidents`.
+  - Ops reads `?tab=`; choosing a tab pushes, so Back restores the tab before; an unknown tab is
+    named by `UnknownResource` and no tab is current. Sign-in's `next=` keeps the query.
+  - ScreenBoundary clears a caught error when a history step changes the query, so Back from a
+    tab that threw lands on the tab that did not.
+
+  Proven by `frontend/tests/routes.spec.ts` (four cases so far) and the Python tests. Negative
+  runs, each failing: the open place pushing again ("opening the view already open added a
+  history entry"); the open place compared by spelling only ("the open tab, spelled
+  ?tab=command, added a history entry"); Ops' tab as its own state ("the URL's tab, not Command
+  Center"); the tab read once at mount (Incidents never shows); an unknown tab not named; a
+  history step not clearing a caught error ("the failure of the tab left behind stayed over the
+  one Back returned to"); sign-in keeping only the path ("sign-in drops the query …"); the
+  incident link unbuilt; a hand-built count off by one, the server's default edited, and a view
+  with no case (each `test_workspace_routes` message). An adversarial review confirmed five
+  findings, all fixed above; eight were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

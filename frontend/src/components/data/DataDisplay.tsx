@@ -62,6 +62,15 @@ export function EmptyState({ title, description, action, inline, compact, childr
   );
 }
 
+/**
+ * An id a URL named that this person cannot open (GOAL_FOUNDATIONS A6): named, never swapped for
+ * the first item. A 403 reads as a 404, so the wording tells nobody what another project holds.
+ */
+export function UnknownResource({ noun, id, scope, action }: { noun: string; id: string; scope?: string; action?: ReactNode }) {
+  return <EmptyState title={scope ? `${scope} has no ${noun} named "${id}"` : `No ${noun} named "${id}"`}
+    description={scope ? "Choose one of those listed here." : "It does not exist, or it is in a project you cannot open."} action={action} />;
+}
+
 export function ErrorBanner({ message }: { message?: string }) {
   if (!message) return null;
   return <div className="state-block error-state">{message}</div>;

@@ -29,7 +29,7 @@ import { ScreenBoundary } from "./components/layout/ScreenBoundary";
 import { Page, PlatformFlow } from "./components/workbench/Workbench";
 import { useAsyncState } from "./hooks/useAsyncState";
 import { asRows, asString, classNames } from "./utils/format";
-import { currentWorkspaceView, navigate } from "./utils/navigation";
+import { currentWorkspaceView, navigate, navigateHref } from "./utils/navigation";
 import { readStoredJson, writeStored } from "./lib/storage";
 import registry from "./apps.json";
 import { getAuthSession, logout, type AuthSession } from "./api/authApi";
@@ -260,7 +260,7 @@ export function App() {
       <main className="workspace">
         <PlatformFlow currentView={view} />
         <BackendConnection readiness={backendReadiness.value} loading={backendReadiness.loading} error={backendReadiness.error} jobs={jobSummary.value} jobsError={jobSummary.error} />
-        <ScreenBoundary key={view} screen={NAV_ITEMS.find((item) => item.id === view)?.label || view}>
+        <ScreenBoundary key={view} resetKey={window.location.search} screen={NAV_ITEMS.find((item) => item.id === view)?.label || view}>
         <Suspense fallback={<LoadingState label="Loading visual workspace..." />}>
           {view === "command-center" && <CommandCenter />}
           {view === "imports" && <DataOnboarding />}
@@ -295,7 +295,7 @@ export function App() {
 
 function AuthIdentity({ session, loading, error }: { session: AuthSession | null; loading: boolean; error: string }) {
   if (loading) return <div className="auth-identity"><User size={16} /><span>Checking session...</span></div>;
-  if (error || !session?.authenticated) return <a className="auth-identity" href={`/auth/login?next=${encodeURIComponent(window.location.pathname)}`}><LogIn size={16} /><span>Sign in</span></a>;
+  if (error || !session?.authenticated) return <a className="auth-identity" href={`/auth/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`}><LogIn size={16} /><span>Sign in</span></a>;
   return (
     <div className="auth-identity">
       <User size={16} />
@@ -706,7 +706,7 @@ function CommandCenter() {
             if (step.id === "bootstrap") void bootstrap();
             else if (step.id === "triage") void triage();
             else if (step.id === "report") void exportReport();
-            else if (step.href?.startsWith("/workspace/")) navigate(step.href.replace("/workspace/", ""));
+            else if (step.href?.startsWith("/workspace/")) navigateHref(step.href);
           }}>
             <span>{index + 1}</span>
             {step.label}
@@ -779,10 +779,7 @@ function CommandCenter() {
           <EvidenceList links={ui.value?.evidence_links} />
         </Panel>
       </div>
-      <SectionCards sections={ui.value?.sections} onNavigate={(href) => {
-        if (href.startsWith("/workspace/")) navigate(href.replace("/workspace/", ""));
-        else window.location.href = href;
-      }} />
+      <SectionCards sections={ui.value?.sections} onNavigate={navigateHref} />
       {lastRun ? (
         <DeveloperEvidence title="Developer evidence: latest action result">
           <KeyValueGrid data={lastRun} />
@@ -980,7 +977,7 @@ function DataOnboarding() {
         <Metric label="Latest job" value={importsUi.value?.summary.latest_job_id || "-"} />
       </div>
       <SectionCards sections={importsUi.value?.sections} onNavigate={(href) => {
-        if (href.startsWith("/workspace/")) navigate(href.replace("/workspace/", ""));
+        if (href.startsWith("/workspace/")) navigateHref(href);
       }} />
       <div className="two-col">
         <Panel title="CSV Import and Transform" action={<button onClick={createCsvJob}>Create Job</button>}>

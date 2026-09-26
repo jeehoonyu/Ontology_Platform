@@ -8,9 +8,12 @@ import { ErrorBanner } from "../data/DataDisplay";
  * rendering or in an effect, so one screen's bad value took the sidebar and every
  * other screen down with it. This catches the error at the screen, says which
  * screen failed and why, and offers to try again. App keys it by view, so
- * navigating away starts the next screen clean.
+ * navigating away starts the next screen clean. A history step inside the view
+ * (A6: a tab or a resource in the query) changes `resetKey`, and clears a caught
+ * error without remounting a screen that is working: Back from the tab that threw
+ * lands on the tab that did not.
  */
-export class ScreenBoundary extends Component<{ screen: string; children: ReactNode }, { error: Error | null }> {
+export class ScreenBoundary extends Component<{ screen: string; resetKey?: string; children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
 
   static getDerivedStateFromError(error: unknown) {
@@ -19,6 +22,10 @@ export class ScreenBoundary extends Component<{ screen: string; children: ReactN
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
     console.error(`${this.props.screen} failed`, error, info.componentStack);
+  }
+
+  componentDidUpdate(previous: { resetKey?: string }) {
+    if (this.state.error && previous.resetKey !== this.props.resetKey) this.setState({ error: null });
   }
 
   render() {
