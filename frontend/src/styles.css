@@ -3439,9 +3439,19 @@ pre {
   margin-top: 10px;
 }
 
+/* One column, never wider than the list. An `auto` column grew to its widest
+   item's min-content, and Data & Media's upload routes, which have nowhere to
+   break, scrolled the workspace sideways at 320-375 and 1101 and ran out of their
+   panel at 1200. The routes wrap anywhere rather than being clipped: the route is
+   what the paragraph says. */
 .summary-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+.summary-list code {
+  overflow-wrap: anywhere;
 }
 
 .proof-trail {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
@@ -151,6 +152,82 @@ test.describe("every screen with panes, at every width in the list", () => {
       }
     });
   }
+});
+
+/**
+ * Data & Media does not scroll sideways, and says each upload route whole.
+ *
+ * Each upload panel names the route it posts to in a `<code>` inside a
+ * `.summary-list`, a grid whose one column was `auto`. An auto track grows to its
+ * widest item's min-content, and a route has nowhere to break, so with a dataset
+ * selected the column was the route plus its paragraph's padding and
+ * `main.workspace` scrolled sideways: 31px at 320, 1px at 350, measured 2026-09-26.
+ * A media set's id is a 32-character uuid unless it is given one, so its route
+ * was wider still: it scrolled the workspace at 1101 too, where the two panels
+ * sit side by side, and at 1200 ran out of its panel without scrolling anything.
+ * Clipping the route would pass a scroll check and hide the one thing the
+ * paragraph is there to say, so the route is read back whole and every line of
+ * its text must sit inside the list that holds it.
+ */
+test.describe("Data & Media at every width in the list", () => {
+  test("does not scroll sideways, and shows each upload route whole", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "Runs once; this test sets every viewport itself.");
+    test.setTimeout(240_000);
+    const stamp = Date.now();
+    const dataset = { id: `sideways_dataset_${stamp}`, name: `Sideways dataset ${stamp}` };
+    const mediaSet = { id: randomUUID().replace(/-/g, ""), name: `Sideways media ${stamp}` };
+    const created = await page.request.post("/data-assets", { data: {
+      id: dataset.id, project_id: "default", display_name: dataset.name, kind: "dataset",
+      asset_schema: { name: "string" }, records: [{ name: "one" }],
+    } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const createdSet = await page.request.post("/media-sets", { data: {
+      id: mediaSet.id, display_name: mediaSet.name, media_type: "document",
+    } });
+    expect(createdSet.ok(), await createdSet.text()).toBeTruthy();
+    const routes = [`/data-assets/${dataset.id}/upload`, `/media-sets/${mediaSet.id}/items/upload`];
+
+    for (const width of SHELL_WIDTHS) {
+      await test.step(`${width}px`, async () => {
+        await page.setViewportSize({ width, height: heightAt(width) });
+        await page.goto("/workspace/data-media");
+        // Each section selects its first entry by itself; these are selected by name,
+        // and the class is waited for so a click mid-render cannot land on another row.
+        for (const name of [dataset.name, mediaSet.name]) {
+          const row = page.getByRole("button", { name });
+          await row.click();
+          await expect(row).toHaveClass(/selected/);
+        }
+        for (const route of routes) await expect(page.locator("code", { hasText: route })).toBeVisible();
+
+        const at = await page.evaluate((expected) => {
+          const workspace = document.querySelector("main.workspace") as HTMLElement;
+          const codes = Array.from(workspace.querySelectorAll("code"));
+          return {
+            overflow: workspace.scrollWidth - workspace.clientWidth,
+            routes: expected.map((route) => {
+              const code = codes.find((candidate) => candidate.textContent === route);
+              if (!code) return { route, whole: false, outside: 0 };
+              // The text's own lines, not the element's box: a code clipped to its
+              // box would keep its box inside the list and its text past it.
+              const text = document.createRange();
+              text.selectNodeContents(code);
+              const edge = (code.closest(".summary-list") as HTMLElement).getBoundingClientRect().right;
+              const rights = Array.from(text.getClientRects()).map((line) => line.right);
+              return { route, whole: true, outside: Math.round(Math.max(0, ...rights.map((right) => right - edge))) };
+            }),
+          };
+        }, routes);
+
+        expect.soft(at.overflow, `${width}px: the workspace scrolls ${at.overflow}px sideways`).toBeLessThanOrEqual(0);
+        for (const route of at.routes) {
+          expect.soft(route.whole, `${width}px: ${route.route} is not on the page whole`).toBe(true);
+          expect.soft(route.outside, `${width}px: ${route.route} runs ${route.outside}px past its list`)
+            .toBeLessThanOrEqual(0);
+        }
+      });
+    }
+  });
 });
 
 /**
