@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, text
 from sqlalchemy.exc import IntegrityError
@@ -2461,22 +2462,12 @@ async def stream_artifact_collaboration_events(
         cursor = resume_cursor
         idle_cycles = 0
         while True:
-            event_db = SessionLocal()
-            try:
-                events = event_db.query(ArtifactCollaborationEvent).filter(
-                    ArtifactCollaborationEvent.artifact_id == artifact_id,
-                    ArtifactCollaborationEvent.id > cursor,
-                ).order_by(ArtifactCollaborationEvent.id).limit(100).all()
-                serialized_events = [
-                    (
-                        event.id,
-                        event.event_type,
-                        json.dumps(_event_dict(event), separators=(",", ":")),
-                    )
-                    for event in events
-                ]
-            finally:
-                event_db.close()
+            # Off the event loop, as the socket's read is (GOAL_FOUNDATIONS, measured during A8).
+            events = await run_in_threadpool(_collaboration_events_after, artifact_id, cursor)
+            serialized_events = [
+                (event["id"], event["event_type"], json.dumps(event, separators=(",", ":")))
+                for event in events
+            ]
             for event_id, event_type, event_data in serialized_events:
                 cursor = event_id
                 yield f"id: {event_id}\nevent: {event_type}\ndata: {event_data}\n\n"
@@ -2511,6 +2502,18 @@ def _websocket_origin_allowed(websocket: WebSocket) -> bool:
         parsed = urlsplit(redirect_uri)
         configured.add(f"{parsed.scheme}://{parsed.netloc}")
     return origin.rstrip("/") in configured
+
+
+def _collaboration_events_after(artifact_id: str, cursor: int) -> List[Dict[str, Any]]:
+    event_db = SessionLocal()
+    try:
+        events = event_db.query(ArtifactCollaborationEvent).filter(
+            ArtifactCollaborationEvent.artifact_id == artifact_id,
+            ArtifactCollaborationEvent.id > cursor,
+        ).order_by(ArtifactCollaborationEvent.id).limit(100).all()
+        return [_event_dict(event) for event in events]
+    finally:
+        event_db.close()
 
 
 @router.websocket("/artifacts/{artifact_id}/collaboration/ws")
@@ -2557,15 +2560,11 @@ async def websocket_artifact_collaboration_events(websocket: WebSocket, artifact
             "lock_version": initial_lock_version,
         })
         while True:
-            event_db = SessionLocal()
-            try:
-                events = event_db.query(ArtifactCollaborationEvent).filter(
-                    ArtifactCollaborationEvent.artifact_id == artifact_id,
-                    ArtifactCollaborationEvent.id > cursor,
-                ).order_by(ArtifactCollaborationEvent.id).limit(100).all()
-                serialized = [_event_dict(event) for event in events]
-            finally:
-                event_db.close()
+            # The read is synchronous SQLAlchemy, so it runs in the threadpool: on the
+            # event loop's thread it held the whole server every half second for each
+            # open socket, and for up to the lock timeout behind a write
+            # (GOAL_FOUNDATIONS, measured during A8).
+            serialized = await run_in_threadpool(_collaboration_events_after, artifact_id, cursor)
             for event in serialized:
                 cursor = int(event["id"])
                 await websocket.send_json({"type": "event", "cursor": cursor, "event": event})
@@ -3158,6 +3157,29 @@ def retry_job(job_id: str, principal: Principal = Depends(require_permission("ex
     return _job_dict(row, db)
 
 
+def _job_events_after(principal: Principal, cursor: int, job_id: Optional[str],
+                      allowed_projects: Optional[List[str]]) -> List[Any]:
+    db = SessionLocal()
+    try:
+        query = db.query(PlatformJobEvent).filter(PlatformJobEvent.id > cursor)
+        if job_id:
+            job = _authorized_job(db, principal, job_id, "view")
+            query = query.filter(PlatformJobEvent.job_id == job.id)
+        elif allowed_projects is not None:
+            query = query.join(PlatformJob, PlatformJob.id == PlatformJobEvent.job_id).filter(PlatformJob.project_id.in_(allowed_projects))
+        events = query.order_by(PlatformJobEvent.id).limit(100).all()
+        return [
+            (
+                event.id,
+                event.event_type,
+                json_dumps({"id": event.id, "job_id": event.job_id, "event_type": event.event_type, "status": event.status, "payload": event.payload, "created_at": event.created_at}),
+            )
+            for event in events
+        ]
+    finally:
+        db.close()
+
+
 @router.get("/events/stream")
 @router.get("/api/v1/events/stream")
 async def event_stream(request: Request, after: int = 0, job_id: Optional[str] = None, once: bool = False, principal: Principal = Depends(require_detached_permission("view"))):
@@ -3170,25 +3192,8 @@ async def event_stream(request: Request, after: int = 0, job_id: Optional[str] =
         cursor = after
         idle_cycles = 0
         while True:
-            db = SessionLocal()
-            try:
-                query = db.query(PlatformJobEvent).filter(PlatformJobEvent.id > cursor)
-                if job_id:
-                    job = _authorized_job(db, principal, job_id, "view")
-                    query = query.filter(PlatformJobEvent.job_id == job.id)
-                elif allowed_projects is not None:
-                    query = query.join(PlatformJob, PlatformJob.id == PlatformJobEvent.job_id).filter(PlatformJob.project_id.in_(allowed_projects))
-                events = query.order_by(PlatformJobEvent.id).limit(100).all()
-                serialized_events = [
-                    (
-                        event.id,
-                        event.event_type,
-                        json_dumps({"id": event.id, "job_id": event.job_id, "event_type": event.event_type, "status": event.status, "payload": event.payload, "created_at": event.created_at}),
-                    )
-                    for event in events
-                ]
-            finally:
-                db.close()
+            # Off the event loop, as the collaboration reads are (GOAL_FOUNDATIONS, measured during A8).
+            serialized_events = await run_in_threadpool(_job_events_after, principal, cursor, job_id, allowed_projects)
             for event_id, event_type, event_data in serialized_events:
                 cursor = event_id
                 yield f"id: {event_id}\nevent: {event_type}\ndata: {event_data}\n\n"

@@ -370,8 +370,20 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - In-process, readiness takes 0.04 s even after ten scenario loads or 40 artifacts with
     collaboration joins. So the endpoint is cheap, and something starves the one server the
     full run shares.
-  - It passed 4 of 4 alone. It is filed as its own task, to be found with server-side evidence
-    rather than by raising the timeout.
+  - It passed 4 of 4 alone.
+  - Without the trust tests (`--grep-invert "GOAL_FOUNDATIONS A"`), the full run took it back
+    to 20.5 s with no retry. The stateful tests this goal adds are part of the load.
+  - Looking for the cause turned up a real server bug. The collaboration WebSocket and both
+    server-sent-event streams (collaboration and job events) ran a synchronous SQLAlchemy poll
+    on the event loop's own thread, holding the whole server for each open page. Those reads
+    now run in the threadpool.
+  - `oms/test_collaboration_socket_off_loop.py` slows the database, holds a socket open and
+    times a plain request. Before the fix it waited 0.43 s and 0.50 s; after it, under 0.3 s.
+    The collaboration, pipeline-execution and runtime stream tests pass.
+  - The retry did not go away. The traces show `/project/readiness` itself unanswered, while
+    `/jobs/summary` answers. SQLite's 30 s lock wait and the 40-thread limit on sync endpoints
+    are the leading suspects. It stays filed as its own task, with these findings, to be found
+    with server-side evidence rather than by raising the timeout.
 
   **2. Ops.** Ops' tab bar is `Tabs`, and keeps `.ops-tabs` and its name. Its three rules go.
   They used tokens only, so raw colours hold at 594.
