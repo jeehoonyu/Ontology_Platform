@@ -1,8 +1,8 @@
 {
   "provenance": {
     "stale_after": "recomputed each run",
-    "recorded_at": "2026-09-25T22:56:59Z"
+    "recorded_at": "2026-09-25T23:25:00Z"
   },
   "note": "Raw colour literals outside tokens.css, in stylesheet values and TS strings. A ceiling, not a floor: it may fall and must never rise. U10 of GOAL_LOOK_2026-09-24 lowers it as primitives replace per-screen CSS.",
-  "raw_colour_ceiling": 655
+  "raw_colour_ceiling": 653
 }

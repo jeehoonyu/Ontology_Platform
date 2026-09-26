@@ -386,6 +386,11 @@
   --button-bg-dark: #404854;
   --input-bg: #ffffff;
   --input-padding: 0 8px;                    /* Blueprint's default, not read live; 0 8px 0 30px with a leading icon (Files search) */
+  /* SHIP CHOICE: --shadow-input's two parts, drawn as the field's border and an
+     inset shade, for the reason --button-ring gives: many rules in styles.css
+     give a field its own border, and an inset ring would sit inside it. */
+  --input-ring: rgba(17, 20, 24, 0.2);
+  --shadow-input-shade: inset 0 1px 1px rgba(17, 20, 24, 0.3);
   --input-icon-inset: 30px;
   --search-home-height: 40px;                /* 1200 wide, radius --radius-pill, 16px text, padding 0 15px */
   --search-files-height: 36px;

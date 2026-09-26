@@ -100,6 +100,42 @@ textarea {
   box-shadow: none;
 }
 
+/* The original's text field (GOAL_LOOK U6): 30px, 0 8px, radius 4, white, the
+   ring drawn as the border for the reason the button's is, and an inset shade.
+   Checkboxes, radios, files, ranges and button-like inputs keep their own look.
+   On focus the ring turns blue and a 3px halo replaces the shade; a field whose
+   own rule sets its border keeps that border and still takes the halo. */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"],
+    [type="color"], [type="button"], [type="submit"], [type="reset"], [type="image"],
+    [type="hidden"]), select, textarea) {
+  min-height: var(--control-height);
+  border: 1px solid var(--input-ring);
+  border-radius: var(--radius);
+  padding: var(--input-padding);
+  background: var(--input-bg);
+  box-shadow: var(--shadow-input-shade);
+  color: var(--text-rest);
+}
+
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"],
+    [type="color"], [type="button"], [type="submit"], [type="reset"], [type="image"],
+    [type="hidden"]), select, textarea):focus {
+  border-color: var(--focus-input-border);
+  box-shadow: var(--shadow-input-focus);
+  outline: none;
+}
+
+/* A disabled field reads as one: the light ground, the disabled text, no shade.
+   (The browser's own disabled look went when the base rule painted fields white.) */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"],
+    [type="color"], [type="button"], [type="submit"], [type="reset"], [type="image"],
+    [type="hidden"]), select, textarea):disabled {
+  background: var(--surface-hover);
+  color: var(--text-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
 button:hover,
 .legacy-button:hover {
   border-color: #1e6a96;
@@ -928,6 +964,8 @@ button:disabled {
 }
 
 .search-field input {
+  min-height: 0;
+  box-shadow: none;
   width: 100%;
   border: 0;
   outline: 0;
@@ -2379,8 +2417,6 @@ textarea {
   width: 100%;
   min-height: 150px;
   resize: vertical;
-  border: 1px solid #cfd8dc;
-  border-radius: 7px;
   padding: 10px;
   margin-bottom: 10px;
 }
@@ -2388,9 +2424,6 @@ textarea {
 select {
   min-width: 0;
   max-width: 100%;
-  border: 1px solid #cfd8dc;
-  border-radius: 7px;
-  padding: 9px 10px;
 }
 
 pre {
@@ -4885,6 +4918,8 @@ pre {
 }
 
 .graph-search input {
+  min-height: 0;
+  box-shadow: none;
   min-width: 0;
   flex: 1;
   border: 0;
@@ -5535,6 +5570,8 @@ pre {
 }
 
 .command-palette input {
+  min-height: 0;
+  box-shadow: none;
   width: 100%;
   border: 0;
   outline: 0;

@@ -346,6 +346,7 @@ function SheetGrid({ sheetId }: { sheetId: string }) {
                           width: "100%",
                           boxSizing: "border-box",
                           border: "none",
+                          boxShadow: "none",
                           background: "transparent",
                           padding: "6px 8px",
                           font: "inherit",
