@@ -65,6 +65,7 @@ import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../component
 import { CHECK_RESULT, JOB_STATUS, LIFECYCLE, NODE_STATUS, intentOf } from "../components/data/intents";
 import { ArtifactReviewPanel, NEW_REVIEW_DRAFT, type ReviewDraft } from "../components/workbench/ArtifactReviewPanel";
 import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
+import { readStored, writeStored } from "../lib/storage";
 import { AgentRuntimePanel, NEW_AGENT_DRAFT, useAgentRun, type AgentDraft } from "./AgentRuntimePanel";
 
 /**
@@ -155,13 +156,19 @@ function stateEdges(artifact: PlatformArtifact | undefined): Edge[] {
   return (artifact?.state?.edges || []) as Edge[];
 }
 
+let pageClientId = "";
+
+// One id per browser, kept across reloads; with storage blocked, one per page.
+// `crypto.randomUUID` exists only in secure contexts.
 function collaborationClientId(): string {
   const key = "ontology-platform-collaboration-client";
-  const existing = window.localStorage.getItem(key);
+  const existing = readStored(key);
   if (existing) return existing;
-  const created = crypto.randomUUID();
-  window.localStorage.setItem(key, created);
-  return created;
+  pageClientId ||= typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  writeStored(key, pageClientId);
+  return pageClientId;
 }
 
 export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderProps) {

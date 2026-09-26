@@ -24,10 +24,12 @@ import {
   WarningList
 } from "./components/data/DataDisplay";
 import { APPROVAL, intentOf, JOB_STATUS, READINESS, RISK_BAND, STEP_STATUS } from "./components/data/intents";
+import { ScreenBoundary } from "./components/layout/ScreenBoundary";
 import { Page, PlatformFlow } from "./components/workbench/Workbench";
 import { useAsyncState } from "./hooks/useAsyncState";
 import { asRows, asString, classNames } from "./utils/format";
 import { currentWorkspaceView, navigate } from "./utils/navigation";
+import { readStoredJson, writeStored } from "./lib/storage";
 import { getAuthSession, logout, type AuthSession } from "./api/authApi";
 import { getJob, getJobSummary } from "./api/jobApi";
 import {
@@ -105,6 +107,11 @@ const NAV_ITEMS = [
 ];
 
 const LEGACY_ITEMS: string[] = [];
+
+// A recents list from storage is kept only if it is a list of view names: an
+// older build, or a hand edit, can leave anything there (GOAL_FOUNDATIONS A2).
+const isViewList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
 
 const ENDPOINT_INVENTORY: TableRow[] = [
   {
@@ -208,7 +215,7 @@ export function App() {
   const authSession = useAsyncState<AuthSession>(getAuthSession, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [recentViews, setRecentViews] = useState<string[]>(() => JSON.parse(localStorage.getItem("ontology.recentViews") || "[]"));
+  const [recentViews, setRecentViews] = useState<string[]>(() => readStoredJson("ontology.recentViews", isViewList, []));
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -229,7 +236,7 @@ export function App() {
     setNavigationOpen(false);
     const nextRecent = [nextView, ...recentViews.filter((item) => item !== nextView)].slice(0, 5);
     setRecentViews(nextRecent);
-    localStorage.setItem("ontology.recentViews", JSON.stringify(nextRecent));
+    writeStored("ontology.recentViews", JSON.stringify(nextRecent));
   }
 
   return (
@@ -274,6 +281,7 @@ export function App() {
       <main className="workspace">
         <PlatformFlow currentView={view} />
         <BackendConnection readiness={backendReadiness.value} loading={backendReadiness.loading} error={backendReadiness.error} jobs={jobSummary.value} jobsError={jobSummary.error} />
+        <ScreenBoundary key={view} screen={NAV_ITEMS.find((item) => item.id === view)?.label || view}>
         <Suspense fallback={<LoadingState label="Loading visual workspace..." />}>
           {view === "command-center" && <CommandCenter />}
           {view === "imports" && <DataOnboarding />}
@@ -299,6 +307,7 @@ export function App() {
           {view === "analytics" && <Analytics />}
           {view === "delivery" && <Delivery />}
         </Suspense>
+        </ScreenBoundary>
       </main>
       {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} onOpen={(item) => { openView(item); setPaletteOpen(false); }} /> : null}
     </div>

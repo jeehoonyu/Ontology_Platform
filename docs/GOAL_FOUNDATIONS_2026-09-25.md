@@ -94,7 +94,7 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   renders danger, not success. Proven by `look.spec.ts::OFFLINE is not shown as success`, shown
   to fail with the substring rule restored (`rgb(28, 110, 66)`), and by `…::A warning badge reads
   at AA contrast`. Refusing unknown severity words stays GOAL_HONEST_UI's open item.
-- **A2 — Blocked or corrupt storage never blanks the app.** **Open** — every read and write of
+- **A2 — Blocked or corrupt storage never blanks the app.** **Met** — every read and write of
   browser storage is guarded; `recentViews` is parsed and shape-checked; an error boundary keeps
   the shell standing when a screen throws, and says which screen failed. To be proven by
   `frontend/tests/trust.spec.ts::A blocked store leaves every screen standing`, with an init script
@@ -102,6 +102,49 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   Command Center, the four builder routes (each with an artifact) and Platform Graph. And by
   `…::A corrupt recents list is ignored`, seeding `{bad`, `null` and `"x"`. Each is shown to fail
   at `38b096a`, and with the guard removed.
+
+  **What changed.**
+  - `frontend/src/lib/storage.ts` has three functions: `readStored`, `writeStored` and
+    `readStoredJson`. The last keeps a parsed value only if a shape check passes. A read that
+    fails gives the fallback, and a write that fails is dropped.
+  - The five unguarded calls use it:
+    - App's recents are read with a list-of-strings check (`isViewList`) and written guarded.
+    - The builders' collaboration client id falls back to one id per page when storage is
+      blocked. It also no longer needs `crypto.randomUUID`, which exists only in secure
+      contexts.
+    - Platform Graph's saved layout is read guarded.
+  - The nine calls that were already guarded (pane layouts, the pipeline's hidden nodes, the
+    ontology layout, the graph's save) keep their own guards.
+  - `components/layout/ScreenBoundary.tsx` wraps the workspace switch, keyed by view:
+    - A screen that throws while rendering, or in an effect, shows "*Screen* failed." with the
+      error, in `ErrorBanner`, and a Try again button.
+    - The sidebar, the flow strip and the backend bar stay, and navigating away starts the next
+      screen clean.
+    - It reuses `ErrorBanner` rather than `.state-block`, which `audit_style_scope` would
+      otherwise count as a new coupling.
+
+  Proven by the five tests in `frontend/tests/trust.spec.ts`:
+  - `A blocked store leaves every screen standing`. Each builder waits for its collaboration
+    join request, the sign that its effect ran. Platform Graph, with the asset scenario loaded,
+    waits for a placed node, since it places nodes only after reading its layout.
+  - `A corrupt recents list is ignored`, run for `{bad`, `null` and `"x"`. No recents render.
+  - `A screen that throws leaves the shell standing and names itself`. An overview whose nodes
+    are not a list makes Platform Graph throw in its layout effect. The alert reads "Platform
+    Graph failed.", and the sidebar still navigates to Command Center.
+
+  **Negative runs,** each restoring the code at `38b096a` at one site, against a rebuilt dist:
+  - The recents read unguarded again: with storage blocked, and with each corrupt value, no
+    sidebar was found, because the page was blank.
+  - The builders' client id unguarded again: the join request never came (the test timed out).
+  - Platform Graph's layout read unguarded again: no node was placed.
+  - The boundary removed: no alert, because the whole root unmounted.
+  - Every file was restored byte for byte, and the hash matched (`c4897bcff57c4964`).
+
+  **Measured.** The full six-project run: 380 passed, 0 failed, none retried; the five new tests
+  run once, on desktop. Route cost holds at 266 requests. The shared closure measured 509 KB,
+  inside the 8 KB tolerance. `docs/INERT_CONTROLS.md` (350 → 351 controls, the Try again button)
+  and `docs/TABLE_TRUNCATION.md` (moved lines) were regenerated, and the browser-evidence
+  baseline was re-recorded.
 - **A3 — Each screen claims only what it does.** **Open** — five commits, one per screen, each
   with a test that fails on the old behaviour:
   - **a.** Platform Graph's subtitle drops "expand neighborhoods", unless a fetch that adds

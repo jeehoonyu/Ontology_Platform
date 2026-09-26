@@ -18,6 +18,7 @@ import { useAsyncState } from "../hooks/useAsyncState";
 import { asString } from "../utils/format";
 import type { JsonObject, TableRow } from "../types";
 import { columnLayout } from "../lib/graphLayout";
+import { readStored } from "../lib/storage";
 
 interface GraphOverview {
   node_count: number;
@@ -77,7 +78,7 @@ export function PlatformGraphWorkspace() {
   useEffect(() => {
     if (!graph.value) return;
     const nextNodes = layoutNodes(graph.value.nodes || []);
-    const saved = localStorage.getItem("ontology.platformGraph.layout");
+    const saved = readStored("ontology.platformGraph.layout");
     if (saved) {
       try {
         const positions = JSON.parse(saved) as Record<string, { x: number; y: number }>;

@@ -40,8 +40,8 @@ way to the rest names items nobody can reach.
 | `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 73 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
 | `workspaces/OntologyManager.tsx` | 292 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
-| `workspaces/VisualBuilder.tsx` | 720 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
-| `workspaces/VisualBuilder.tsx` | 824 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 727 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 831 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
 
 ## Found and not placed
 
@@ -110,7 +110,7 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 
 ## Read as text, a prefix, a last item or a request payload
 
-38 `.slice(` calls found: 11 placed as collection cuts, 16 text, 8 a prefix dropped, 1 a last item dropped, 1 a request payload, and 1 not placed.
+39 `.slice(` calls found: 11 placed as collection cuts, 17 text, 8 a prefix dropped, 1 a last item dropped, 1 a request payload, and 1 not placed.
 
 | File | Line | In | Slice of | Read as |
 | --- | --- | --- | --- | --- |
@@ -136,10 +136,11 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `workspaces/PipelineBuilder.tsx` | 735 | `PipelineBuilder` | `over` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 740 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 847 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/VisualBuilder.tsx` | 515 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 616 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 621 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 726 | `VisualBuilder` | `participant.display_name` | text |
+| `workspaces/VisualBuilder.tsx` | 169 | `collaborationClientId` | `Math.random().toString(36)` | text |
+| `workspaces/VisualBuilder.tsx` | 522 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 623 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 628 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 733 | `VisualBuilder` | `participant.display_name` | text |
 
 ## What this does not see
 
