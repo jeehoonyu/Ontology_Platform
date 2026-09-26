@@ -34,14 +34,14 @@ way to the rest names items nobody can reach.
 
 | File | Line | In | Cuts | How | Note from the true total | Rest reachable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 509 | `MiniGraph` | `nodes` (slice) | held as shown | **no** | **no** |
-| `components/canvas/PipelineCanvas.tsx` | 518 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 513 | `MiniGraph` | `nodes` (slice) | held as shown | **no** | **no** |
+| `components/canvas/PipelineCanvas.tsx` | 522 | `MiniGraph` | `edges` (slice) | mapped | **no** | **no** |
 | `workspaces/DecisionWorkspace.tsx` | 129 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 74 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
 | `workspaces/OntologyManager.tsx` | 292 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
-| `workspaces/VisualBuilder.tsx` | 733 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
-| `workspaces/VisualBuilder.tsx` | 837 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 734 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
+| `workspaces/VisualBuilder.tsx` | 838 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
 
 ## Found and not placed
 
@@ -100,7 +100,7 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 
 | File | Line | In | Leaves out | Says how many | Show all |
 | --- | --- | --- | --- | --- | --- |
-| `components/canvas/PipelineCanvas.tsx` | 162 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
+| `components/canvas/PipelineCanvas.tsx` | 163 | `PipelineCanvas` | `hiddenNodes` | yes | yes |
 
 ## Declared not a list
 
@@ -115,10 +115,10 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | File | Line | In | Slice of | Read as |
 | --- | --- | --- | --- | --- |
 | `api.ts` | 15 | `request` | `text` | text |
-| `components/canvas/PipelineCanvas.tsx` | 111 | `PipelineCanvas` | `started` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 132 | `PipelineCanvas` | `id` | prefix dropped |
-| `components/canvas/PipelineCanvas.tsx` | 304 | `PipelineCanvas` | `action.label` | text |
-| `components/canvas/PipelineCanvas.tsx` | 527 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
+| `components/canvas/PipelineCanvas.tsx` | 112 | `PipelineCanvas` | `started` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 133 | `PipelineCanvas` | `id` | prefix dropped |
+| `components/canvas/PipelineCanvas.tsx` | 308 | `PipelineCanvas` | `action.label` | text |
+| `components/canvas/PipelineCanvas.tsx` | 531 | `MiniGraph` | `asString(node.kind || node.type || "?")` | text |
 | `components/layout/Pane.tsx` | 385 | `usePaneLayout` | `active` | prefix dropped |
 | `components/layout/Pane.tsx` | 386 | `usePaneLayout` | `over` | prefix dropped |
 | `lib/builderKernel.ts` | 17 | `duplicateSelection` | `crypto.randomUUID()` | text |
@@ -136,11 +136,11 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `workspaces/PipelineBuilder.tsx` | 736 | `PipelineBuilder` | `over` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 741 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/PipelineBuilder.tsx` | 848 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/VisualBuilder.tsx` | 170 | `collaborationClientId` | `Math.random().toString(36)` | text |
-| `workspaces/VisualBuilder.tsx` | 528 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 629 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 634 | `VisualBuilder` | `crypto.randomUUID()` | text |
-| `workspaces/VisualBuilder.tsx` | 739 | `VisualBuilder` | `participant.display_name` | text |
+| `workspaces/VisualBuilder.tsx` | 171 | `collaborationClientId` | `Math.random().toString(36)` | text |
+| `workspaces/VisualBuilder.tsx` | 529 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 630 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 635 | `VisualBuilder` | `crypto.randomUUID()` | text |
+| `workspaces/VisualBuilder.tsx` | 740 | `VisualBuilder` | `participant.display_name` | text |
 
 ## What this does not see
 

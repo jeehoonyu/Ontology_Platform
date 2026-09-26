@@ -1,5 +1,6 @@
 import { useRef, useState, type MutableRefObject } from "react";
 import { Tabs } from "../layout/Tabs";
+import { Tooltip } from "../layout/Tooltip";
 import { useDndMonitor, useDraggable, useDroppable } from "@dnd-kit/core";
 import { DataTable, KeyValueGrid, StatusBadge } from "../data/DataDisplay";
 import { asString, classNames, formatValue } from "../../utils/format";
@@ -201,9 +202,11 @@ export function PipelineCanvas({
           so the obvious place to zoom was the dead one. Zoom is a viewport
           control; it belongs on the viewport. */}
       <div className="canvas-controls">
-        <button title="Zoom in" aria-label="Zoom in" onClick={() => onZoom(zoom + ZOOM_STEP)}>+</button>
-        <button title="Zoom out" aria-label="Zoom out" onClick={() => onZoom(zoom - ZOOM_STEP)}>-</button>
-        <button title="Fit to view" aria-label="Fit to view" onClick={() => onZoom(ZOOM_FIT)}>Fit</button>
+        {/* Right of a vertical stack at the canvas's left edge, where above or below would
+            cover the next button. */}
+        <Tooltip content="Zoom in" placement="right"><button aria-label="Zoom in" onClick={() => onZoom(zoom + ZOOM_STEP)}>+</button></Tooltip>
+        <Tooltip content="Zoom out" placement="right"><button aria-label="Zoom out" onClick={() => onZoom(zoom - ZOOM_STEP)}>-</button></Tooltip>
+        <Tooltip content="Fit to view" placement="right"><button aria-label="Fit to view" onClick={() => onZoom(ZOOM_FIT)}>Fit</button></Tooltip>
       </div>
       <div className="canvas-legend">
         {(canvas?.legend || []).map((item) => (
@@ -250,15 +253,16 @@ export function PipelineCanvas({
           const target = byId.get(edge.target);
           if (!source || !target) return null;
           return (
-            <button
-              key={`insert-${edge.source}-${edge.target}`}
-              className="edge-insert"
-              style={{ left: (source.position.x + target.position.x) / 2 + 78, top: (source.position.y + target.position.y) / 2 + 22 }}
-              onClick={onInsertEdge}
-              title="Insert selected node type"
-            >
-              +
-            </button>
+            <Tooltip key={`insert-${edge.source}-${edge.target}`} content="Insert selected node type">
+              <button
+                className="edge-insert"
+                style={{ left: (source.position.x + target.position.x) / 2 + 78, top: (source.position.y + target.position.y) / 2 + 22 }}
+                onClick={onInsertEdge}
+                aria-label="Insert selected node type"
+              >
+                +
+              </button>
+            </Tooltip>
           );
         })}
         {Array.from(hiddenNeighbours, ([id, count]) => {

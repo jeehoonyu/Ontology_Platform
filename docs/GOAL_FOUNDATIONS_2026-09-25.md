@@ -395,6 +395,13 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   Escape closes and returns focus, axe is clean with each open, and Escape never also cancels a
   live drag. Each is shown to fail with the primitive's behaviour removed.
 
+  **Where it stands.** Dialog, Menu and Tooltip are in and adopted (1–3 below), and each proof
+  named above holds. The popover is `placement.ts` with the `.menu-panel` surface: a Popover
+  export only the Menu imported would fail `audit_ui_primitives`, and the arrow comes with the
+  Notifications layout (H8). A7 stays Open while it owns `raw_colour_ceiling` (563): the node
+  context menu's look, seven raw colours, is the next hand-styled overlay to go, and whether
+  that is A7's or Y15's is the owner's call.
+
   **1. Dialog, with its two first adopters.** `components/layout/Dialog.tsx`:
   - Focus moves inside on open, and Tab and Shift+Tab stay inside.
   - Escape closes it. Escape is taken in the capture phase and goes no further, so it never
@@ -520,6 +527,128 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     tolerance. One earlier run failed a strip test that never renders the menu: its route
     handler's canvas fetch hung past teardown, the late-run backend stall under separate
     investigation; it passed alone three times and in the next full run.
+
+  **3. Tooltip, with its first adopters.** `components/layout/Tooltip.tsx`:
+  - UI_CONFIG's dark tooltip: `--tooltip-bg` with `--tooltip-text` at 14px/18px, 8px 12px in,
+    radius 4, the overlay shadow, no arrow, over everything on `--z-tooltip` (1200). It sits
+    8px from its child, turned to the other side when it does not fit, and is portalled to
+    the body on `position: fixed`, so the canvas's scaled stage neither scales nor clips it.
+  - It opens once a mouse comes to rest on its child (each move restarts a 100ms wait, a SHIP
+    CHOICE), and at once when the keyboard focuses it (`:focus-visible`); a finger never opens
+    it, and neither does the page moving under a resting pointer. It never opens while a
+    button is held, and a press, Enter or Space shuts it until the pointer comes back or the
+    keyboard focuses the child again, so a drag never shows one.
+  - WCAG 1.4.13: the pointer can rest in the 8px gap (a `::before` bridge on the side it took)
+    or cross onto it, and it stays; it does not time out; Escape hides it without moving focus
+    or the pointer.
+  - Escape with focus on its child is the tooltip's alone: taken on window in the capture
+    phase, so a tooltip the keyboard opened during a drag hides and the drag goes on. With
+    focus anywhere else, it hides and the Escape goes on, so a tooltip under a resting mouse
+    never costs the pipeline search, a dialog, or the canvas clearing its selection its Escape.
+  - It never supplies a name. When its text says more than the child's name ("Auto-layout
+    nodes" on Layout), the child is described by it at all times through a hidden copy, as the
+    title described it, since a screen reader's cursor moves no focus and opens no bubble.
+    When it says the same ("Zoom in"), it describes nothing.
+  - It follows its child however the child moves: its box is read each frame while it shows,
+    since the canvas's zoom moves an edge insert with no scroll and no resize. It hides when
+    the child is out of sight: off the screen, clipped by a scroll box, or covered, judged by
+    what is at the child's middle looking through the bubble itself (the Menu's check now looks
+    through its panel the same way). The window losing focus hides it.
+  - Adopters: the canvas's Zoom in, Zoom out and Fit to view (to their right, since they are a
+    stack) and its edge inserts, which gain the name "Insert selected node type" in place of
+    "+"; Workshop's Layout, and Duplicate node and Delete node, whose title was their only name
+    and which now have their own. Their titles go.
+  - Titles that stay native: table cells and spans that cannot take focus, the aria-hidden
+    ports, the hidden-link count, truncation sites, Delivery's disabled-reason (which should
+    become visible text), and Workshop's Undo and Redo, which are disabled when there is
+    nothing to take back and so cannot take focus. They come with the second wave.
+  - `Tooltip` and `placement` ride in the dragdrop-vendor chunk, which every route loads:
+    Pipeline and Vertex share the canvas that imports the Tooltip, and Workshop imports it
+    too, so either would otherwise be a chunk of its own and a request on those routes.
+  - Raw colours hold at 563. `docs/UI_PRIMITIVES.md` lists 29 primitives.
+
+  Proven by twelve tests in `frontend/tests/overlays.spec.ts`:
+  - Hover on Zoom in: a sweep across it in 1px steps opens nothing until the pointer rests;
+    then the dark tooltip 8px to its right and level with it, on the body, no title, no
+    description; the look, `position: fixed` and z-index 1200 included; resting in the gap
+    keeps it and the gap is the bubble's; on the bubble it stays, and 1.5s later still; Escape
+    hides it and focus is the same element; back on the button it shows; a press shuts it, a
+    move on the pressed button leaves it shut, and leaving and coming back shows it.
+  - Keyboard focus: Shift+Tab onto Zoom in shows it; axe is clean while it shows; Tab moves it
+    to Zoom out and Fit to view; Enter shuts it, and so does Space; blur hides it.
+  - Workshop: Layout is described as "Auto-layout nodes" before, during and after its bubble;
+    Duplicate and Delete node have names of their own, no title and no description.
+  - The edge insert at the largest zoom (1.35): the bubble 8px above, centred, on the body and
+    unscaled; resting in the gap above keeps it; from the keyboard, Up Arrow fits the canvas
+    and the bubble follows the insert.
+  - A clipped insert: scrolled just under the pane host's edge and then 30px more, its middle
+    lands where the bubble stood, above the edge; the bubble goes.
+  - A button held down from bare page onto Zoom in (the pointer checked to be on the button)
+    shows no tooltip; a lasso ending on an edge insert shows none, and Escape still cancels it.
+  - During a live lasso, a tooltip opened from the keyboard takes the first Escape and the
+    lasso the second.
+  - With focus in the pipeline search and the mouse resting on Zoom in, one Escape hides the
+    tooltip and closes the search; the keyboard then opens it without the mouse moving.
+  - With nothing focused, Enter shuts a hover tooltip while the pointer stays on the button
+    (checked); the keyboard focusing the button then opens it.
+  - With nothing focused, one Escape hides a hover tooltip and clears the lasso's selection.
+  - A synthetic touch opens nothing; the pane host scrolling Zoom in under a resting pointer
+    opens nothing until the pointer moves; a keyboard tooltip follows a 30px scroll; the window
+    losing focus hides it; scrolled up past the pane host's top, clipped but inside the window,
+    it goes.
+  - On a touch screen (`hasTouch`), a tap on Zoom in opens nothing.
+
+  **Negative runs,** each against a rebuilt dist, each failing:
+  - Focus not opening it: "keyboard focus did not show the tooltip", in two tests.
+  - The keyboard arriving not clearing a dismissal: "a key pressed while hovering kept the
+    keyboard's tooltip shut". (The search test alone did not catch it: closing the search moves
+    the button off the resting pointer, which clears the dismissal by itself.)
+  - Escape not hiding it: the hover test, at Escape.
+  - Escape on its child not kept: "the Escape that hid the tooltip also cancelled the drag".
+  - Escape kept with focus on nothing: "the tooltip took the Escape that clears the selection".
+  - Escape kept whatever has focus: "the tooltip took the Escape that belonged to the search".
+  - Opening under a held button: "a tooltip opened under a held button". (The lasso alone did
+    not prove it: its rectangle lies over what it crosses.)
+  - A finger opening it: "a touch opened a tooltip". The tap test passes either way, since a tap
+    makes no pointer move; it guards the tap flow as a whole.
+  - The bubble rendered inline: "the bubble is not on the body", in two tests.
+  - `pointer-events: none` on the bubble, and each bridge removed: "the tooltip closed with the
+    pointer resting in the gap" beside Zoom in, and above the insert.
+  - Describing always: "a tooltip that repeats the name describes nothing", in two tests.
+  - Describing never, and describing only while it shows: "Layout's explanation is heard only
+    while its bubble shows".
+  - A press not shutting it: the hover test, after the click. A move on the pressed button
+    reopening it: "a move on the button just pressed brought the tooltip back".
+  - Coming back not reopening it: "after Escape, coming back to the button did not show it
+    again".
+  - Enter, and Space, not shutting it: "Enter left the tooltip showing", "Space left the tooltip
+    showing".
+  - Not following its child: "the tooltip stayed where the insert was before the zoom" and "the
+    tooltip stayed where its button was".
+  - No hit-test: "the bubble took itself for the insert and floated on" and "the tooltip floated
+    on after its button was scrolled out of sight". The bubble counted as its child: the first.
+  - Opening 100ms after the first move, resting or not: "the tooltip opened while the pointer
+    was still moving".
+  - Opening on the pointer coming in rather than on its moves: "the page moving under a resting
+    pointer opened a tooltip".
+  - The Menu's hit-test, now looking through its panel, removed: "the panel floated on over a
+    bar that covers its button".
+  - Restored byte for byte; the hashes matched.
+
+  An adversarial review (four readers, each finding checked by a second reader trying to refute
+  it) confirmed fourteen findings, all fixed above: the bubble left behind by a zoom or any move
+  without a scroll (found three times); the hit-test taking the bubble's old place for the child
+  (and the same hole in the Menu's, through its panel); a dismissal from a key pressed elsewhere
+  keeping the keyboard's tooltip shut (twice); Layout's explanation heard only while its bubble
+  showed, where its title had always been heard; a hover tooltip taking the canvas's
+  clear-selection Escape with nothing focused; opening 100ms after the first move rather than on
+  rest; and tests that could not fail (a press, the bridge, the body branch, the lasso's guard,
+  claims with no test). The line that dropped a child's title went, since no adopter has one.
+  Four others were refuted.
+  - Measured: the full six-project run passed 432 of 432, none flaky. Route cost holds. Route
+    payload holds without re-recording: the shared closure is 4,600 B above the ceiling the
+    Menu recorded (the Tooltip, `placement` and their CSS now in a chunk every route loads),
+    3,592 B inside the tolerance; PipelineBuilder's own share fell as `placement` left it.
 - **A8 — Tabs and SegmentedControl replace the ad-hoc tabs.** **Met** — `raw_colour_ceiling`
   (599) falls as the eight per-screen tab styles go, re-recorded in each commit (K8). Underline,
   tint, pill and vertical variants; SegmentedControl with `aria-pressed`. The Decision, Ops and

@@ -36,5 +36,6 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `RelationshipStrip` | `components/data/DataDisplay.tsx` | **1** — OntologyManager |
 | `SectionCards` | `components/data/DataDisplay.tsx` | **1** — App |
 | `Toolbar` | `components/workbench/Workbench.tsx` | **1** — PipelineBuilder |
+| `Tooltip` | `components/layout/Tooltip.tsx` | **1** — VisualBuilder |
 | `WarningList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `DebugJson` | `components/data/DataDisplay.tsx` | **0** — — |

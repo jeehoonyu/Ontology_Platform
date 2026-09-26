@@ -79,10 +79,11 @@ export function Menu({ trigger, triggerLabel, className, label, align = "start",
       node.style.maxHeight = "";
       const spot = placeOverlay(rect, node, "bottom", align);
       // Out of sight is off the screen, clipped by a scroll box, or under something drawn
-      // over it, such as the sticky bar of the narrow layout: what is at the button's middle
-      // is not the button.
-      const seen = spot && inside(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
-      if (!spot || !seen) {
+      // over it, such as the sticky bar of the narrow layout: what is at the button's middle,
+      // looking through the panel where it last stood, is not the button.
+      const hit = spot && document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        .find((each) => !node.contains(each));
+      if (!spot || !hit || !anchor.contains(hit)) {
         close();
         return false;
       }

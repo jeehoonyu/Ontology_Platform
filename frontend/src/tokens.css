@@ -312,6 +312,7 @@
   --z-3: 30;
   --z-4: 40;
   --z-overlay: 1100;   /* dialogs, menus, popovers: above the app's 0–40 scale and Leaflet's 1000 (UI_CONFIG "overlays above") */
+  --z-tooltip: 1200;   /* over an open dialog and Leaflet's controls */
   --overlay-backdrop: rgba(17, 20, 24, 0.7);   /* behind light and dark dialogs alike */
 
   --focus-color: #2d72d2;

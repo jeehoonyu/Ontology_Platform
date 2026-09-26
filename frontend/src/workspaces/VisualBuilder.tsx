@@ -1,5 +1,6 @@
 import "@xyflow/react/dist/style.css";
 import { SegmentedControl } from "../components/layout/Tabs";
+import { Tooltip } from "../components/layout/Tooltip";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -743,7 +744,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           <StatusBadge value={dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status} intent={intentOf(LIFECYCLE, dirty ? "UNSAVED" : saveMutation.isPending ? "SAVING" : artifact.status)} />
           <button title="Undo" aria-label="Undo" onClick={undo} disabled={!undoStack.current.length}><Undo2 size={16} /></button>
           <button title="Redo" aria-label="Redo" onClick={redo} disabled={!redoStack.current.length}><Redo2 size={16} /></button>
-          <button title="Auto-layout nodes" onClick={layoutNodes}><AlignHorizontalSpaceAround size={16} /> Layout</button>
+          <Tooltip content="Auto-layout nodes" placement="bottom"><button onClick={layoutNodes}><AlignHorizontalSpaceAround size={16} /> Layout</button></Tooltip>
           {artifactType === "workshop" ? <SegmentedControl className="builder-breakpoint-control" label="Workshop breakpoint" value={breakpoint} onChange={setBreakpoint} options={BREAKPOINTS} /> : null}
           <button onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending}><Eye size={16} /> {previewMutation.isPending ? "Running" : "Preview"}</button>
           <button onClick={() => saveMutation.mutate({ reason: "Manual save" })} disabled={!dirty || saveMutation.isPending}><Save size={16} /> Save</button>
@@ -916,7 +917,7 @@ function NodeInspector({ node, onChange, onDuplicate, onDelete }: { node: Node<A
   }
   return (
     <div className="node-inspector-form">
-      <div className="inspector-heading"><div><span className="eyebrow">{node.data.nodeType}</span><h2>Node settings</h2></div><div><button title="Duplicate node" onClick={onDuplicate}><Copy size={15} /></button><button title="Delete node" onClick={onDelete}><Trash2 size={15} /></button></div></div>
+      <div className="inspector-heading"><div><span className="eyebrow">{node.data.nodeType}</span><h2>Node settings</h2></div><div><Tooltip content="Duplicate node" placement="bottom"><button aria-label="Duplicate node" onClick={onDuplicate}><Copy size={15} /></button></Tooltip><Tooltip content="Delete node" placement="bottom"><button aria-label="Delete node" onClick={onDelete}><Trash2 size={15} /></button></Tooltip></div></div>
       <label>Name<input value={node.data.label} onChange={(event) => onChange({ ...node.data, label: event.target.value })} /></label>
       <label>Description<textarea rows={3} value={node.data.description || ""} onChange={(event) => onChange({ ...node.data, description: event.target.value })} /></label>
       <div className="field-list-heading"><strong>Configuration fields</strong><button onClick={() => onChange({ ...node.data, fields: [...fields, { id: crypto.randomUUID(), name: "field", label: "Custom field", value: "", type: "string" }] })}><Plus size={14} /> Add</button></div>
