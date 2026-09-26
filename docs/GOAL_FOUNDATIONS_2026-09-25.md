@@ -396,6 +396,14 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     written once, in `Tabs`.
   - Measured: the full six-project run passed 390 of 390, with the same single retry of the
     Platform Graph test, a third run in a row.
+
+  **3. ModelOps.** ModelOps' tab bar is `Tabs`, keeping `.modelops-tabs` for its 12px margin
+  and its name. Its navy bordered box goes, and raw colours fall from 594 to 587.
+  - Proven by `look.spec.ts::The models tabs are the Tabs primitive`. The evaluator's ModelOps
+    flow and the release-gate test pass.
+  - Negative run: the hand-written buttons put back read no primitive and no current tab.
+    Restored byte for byte; the hash matched (`ef0734a926df5e88`).
+  - Measured: the full six-project run passed 391 of 391, with the known Platform Graph retry.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by

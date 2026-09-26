@@ -492,7 +492,8 @@ test.describe("GOAL_LOOK", () => {
   // GOAL_FOUNDATIONS A8. Each screen's underline tab set is the Tabs primitive: a
   // .tabs nav whose selected tab says so with aria-current. A screen still drawing its
   // own buttons has neither. The list grows as screens move.
-  for (const [route, name] of [["decision", "Decision intelligence views"], ["ops", "Operational control views"]]) {
+  for (const [route, name] of [["decision", "Decision intelligence views"], ["ops", "Operational control views"],
+                               ["models", "ModelOps lifecycle"]]) {
     test(`The ${route} tabs are the Tabs primitive`, async ({ page }) => {
       await page.goto(`/workspace/${route}`);
       const bar = page.getByRole("navigation", { name });

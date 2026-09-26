@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "fc8872e4a3d32e0c5054a10724e03a233e55e0488d4ea71982c7f77bcc113d1b",
+    "bundle_source_hash": "ef0734a926df5e8824a7f68b4fc356b7363da8feaeb5444d9cda451151e4cc0e",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T07:51:04Z",
+    "recorded_at": "2026-09-26T08:29:47Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 259,
+      "ran": 260,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 1,
       "ran": 25,
-      "skipped": 238
+      "skipped": 239
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 237
+      "skipped": 238
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 238
+      "skipped": 239
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 238
+      "skipped": 239
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 238
+      "skipped": 239
     }
   },
   "tests": {
@@ -111,6 +111,7 @@
     "desktop-1280 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "ran",
     "desktop-1280 :: The body text is 14px on an 18px line": "ran",
     "desktop-1280 :: The decision tabs are the Tabs primitive": "ran",
+    "desktop-1280 :: The models tabs are the Tabs primitive": "ran",
     "desktop-1280 :: The ops tabs are the Tabs primitive": "ran",
     "desktop-1280 :: The page text renders in the bundled face, not a system font": "ran",
     "desktop-1280 :: The page title is a 16px name in the original's 50px header bar": "ran",
@@ -375,6 +376,7 @@
     "laptop-1366 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "laptop-1366 :: The body text is 14px on an 18px line": "skipped",
     "laptop-1366 :: The decision tabs are the Tabs primitive": "skipped",
+    "laptop-1366 :: The models tabs are the Tabs primitive": "skipped",
     "laptop-1366 :: The ops tabs are the Tabs primitive": "skipped",
     "laptop-1366 :: The page text renders in the bundled face, not a system font": "skipped",
     "laptop-1366 :: The page title is a 16px name in the original's 50px header bar": "skipped",
@@ -639,6 +641,7 @@
     "mobile-375 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "mobile-375 :: The body text is 14px on an 18px line": "skipped",
     "mobile-375 :: The decision tabs are the Tabs primitive": "skipped",
+    "mobile-375 :: The models tabs are the Tabs primitive": "skipped",
     "mobile-375 :: The ops tabs are the Tabs primitive": "skipped",
     "mobile-375 :: The page text renders in the bundled face, not a system font": "skipped",
     "mobile-375 :: The page title is a 16px name in the original's 50px header bar": "skipped",
@@ -903,6 +906,7 @@
     "tablet-1024 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "tablet-1024 :: The body text is 14px on an 18px line": "skipped",
     "tablet-1024 :: The decision tabs are the Tabs primitive": "skipped",
+    "tablet-1024 :: The models tabs are the Tabs primitive": "skipped",
     "tablet-1024 :: The ops tabs are the Tabs primitive": "skipped",
     "tablet-1024 :: The page text renders in the bundled face, not a system font": "skipped",
     "tablet-1024 :: The page title is a 16px name in the original's 50px header bar": "skipped",
@@ -1167,6 +1171,7 @@
     "tablet-768 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "tablet-768 :: The body text is 14px on an 18px line": "skipped",
     "tablet-768 :: The decision tabs are the Tabs primitive": "skipped",
+    "tablet-768 :: The models tabs are the Tabs primitive": "skipped",
     "tablet-768 :: The ops tabs are the Tabs primitive": "skipped",
     "tablet-768 :: The page text renders in the bundled face, not a system font": "skipped",
     "tablet-768 :: The page title is a 16px name in the original's 50px header bar": "skipped",
@@ -1431,6 +1436,7 @@
     "wide-1600 :: The Decision and Ops screens draw the borders and colours their stylesheet names": "skipped",
     "wide-1600 :: The body text is 14px on an 18px line": "skipped",
     "wide-1600 :: The decision tabs are the Tabs primitive": "skipped",
+    "wide-1600 :: The models tabs are the Tabs primitive": "skipped",
     "wide-1600 :: The ops tabs are the Tabs primitive": "skipped",
     "wide-1600 :: The page text renders in the bundled face, not a system font": "skipped",
     "wide-1600 :: The page title is a 16px name in the original's 50px header bar": "skipped",

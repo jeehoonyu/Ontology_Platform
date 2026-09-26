@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Beaker, Check, ChevronRight, Gauge, Play, Plus, RefreshCw, Rocket, ShieldCheck, Trash2, X } from "lucide-react";
 import { DataTable, EmptyState, ErrorBanner, KeyValueGrid, LoadingState, Metric, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { APPROVAL, CHECK_RESULT, intentOf, LIFECYCLE } from "../components/data/intents";
+import { Tabs } from "../components/layout/Tabs";
 import { Page } from "../components/workbench/Workbench";
 import type { JsonObject, JsonValue, TableRow } from "../types";
 import {
@@ -201,7 +202,7 @@ export function ModelOps() {
         <Metric label="Monitors" value={summary?.monitors || 0} />
         <Metric label="Prediction logs" value={summary?.prediction_logs || 0} />
       </div>
-      <nav className="modelops-tabs" aria-label="ModelOps lifecycle">{TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
+      <Tabs className="modelops-tabs" label="ModelOps lifecycle" items={TABS} value={tab} onChange={setTab} />
       {loading ? <LoadingState label="Loading model lifecycle evidence..." /> : null}
       {!loading && tab === "objectives" ? <ObjectivesTab assets={assets} objectives={objectives} selectedId={objectiveId} busy={busy} onSelect={(id) => void changeObjective(id)} onCreate={(body) => void act("Objective created", async () => { const created = await createObjective(body); await refresh({ objective: created.id }); })} /> : null}
       {!loading && tab === "training" ? <TrainingTab assets={assets} objective={selectedObjective} submissions={submissions} selectedId={submissionId} busy={busy} onSelect={(id) => void changeSubmission(id)} onTrain={(body) => void act("Training completed", async () => { if (!objectiveId) return; const created = await trainObjective(objectiveId, body); await refresh({ objective: objectiveId, submission: created.id }); })} /> : null}

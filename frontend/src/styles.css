@@ -6531,28 +6531,7 @@ pre {
 }
 
 .modelops-tabs {
-  display: flex;
-  min-width: 0;
   margin-bottom: 12px;
-  overflow-x: auto;
-  border: 1px solid #cbd6da;
-  background: #fff;
-}
-
-.modelops-tabs button {
-  box-shadow: none;
-  flex: 0 0 auto;
-  min-height: 40px;
-  border: 0;
-  border-right: 1px solid #d9e1e4;
-  border-radius: 0;
-  background: #fff;
-}
-
-.modelops-tabs button.active {
-  box-shadow: inset 0 -3px #176b8f;
-  background: #eaf4f8;
-  color: #123e54;
 }
 
 .modelops-layout {
