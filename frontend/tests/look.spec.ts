@@ -133,6 +133,42 @@ test.describe("GOAL_LOOK", () => {
                 "a canvas tool is the small button").toBe("24px");
   });
 
+  // U7. A Panel's title is the original's card title, 14px on a 16px line at 600,
+  // and it is still the h2 inside section.panel > header.panel-header.
+  test("A panel title is 14px bold, and it is still a heading", async ({ page }) => {
+    await page.goto("/workspace/decision");
+    const title = page.getByRole("heading", { name: "Risk Board", level: 2 });
+    await expect(title).toBeVisible();
+    expect.soft(await title.evaluate((node) => ({
+      inPanel: node.parentElement!.matches("header.panel-header")
+        && node.parentElement!.parentElement!.matches("section.panel"),
+      font: `${getComputedStyle(node).fontSize}/${getComputedStyle(node).lineHeight} ${getComputedStyle(node).fontWeight}`,
+    })), "a panel title").toEqual({ inPanel: true, font: "14px/16px 600" });
+  });
+
+  // U7. A card's edge is --shadow-0's ring, with no border, at radius 4, on the
+  // #f6f7f9 ground. Panels in the rails that used to flatten themselves keep it.
+  test("A panel's edge is a ring shadow, not a border", async ({ page }) => {
+    const ring = "rgba(0, 0, 0, 0.15) 0px 0px 0px 1px, rgba(0, 0, 0, 0.02) 0px 0px 5px 0px";
+    const edge = (locator: ReturnType<Page["locator"]>) => locator.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { shadow: style.boxShadow, border: style.borderTopStyle, radius: style.borderTopLeftRadius,
+               background: style.backgroundColor };
+    });
+    await page.goto("/workspace/decision");
+    const panel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Risk Board" }) });
+    await expect(panel).toBeVisible();
+    expect.soft(await edge(panel), "a panel").toEqual({
+      shadow: ring, border: "none", radius: "4px", background: "rgb(255, 255, 255)" });
+    expect.soft(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor), "the app ground")
+      .toBe("rgb(246, 247, 249)");
+
+    await page.goto("/workspace/ontology");
+    const railPanel = page.locator(".manager-resource-nav .panel").first();
+    await expect(railPanel).toBeVisible();
+    expect.soft((await edge(railPanel)).shadow, "a panel in the resources rail").toBe(ring);
+  });
+
   // U6. The original's text field: 30px, 0 8px, radius 4, white, the ring (drawn as
   // the border) and an inset shade; on focus the ring turns #4c90f0 and a 3px halo
   // replaces the shade. A select takes the same height.

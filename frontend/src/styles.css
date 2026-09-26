@@ -4,7 +4,7 @@
   font-size: var(--font-size-medium);
   line-height: var(--line-height-default);
   color: #17212b;
-  background: #eef2f1;
+  background: var(--surface-app);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -767,7 +767,7 @@ button:disabled {
   grid-template-rows: auto auto minmax(620px, calc(100vh - 195px));
   min-height: calc(100vh - 44px);
   margin: -22px;
-  background: #edf1f4;
+  background: var(--surface-app);
   overflow: hidden;
 }
 
@@ -787,6 +787,7 @@ button:disabled {
 .node-inspector-form h2 {
   margin: 2px 0 3px;
   font-size: 20px;
+  line-height: 1.2;
   letter-spacing: 0;
 }
 
@@ -2231,8 +2232,10 @@ h1 {
   line-height: 1.2;
 }
 
+/* The card title (GOAL_LOOK U7): 14px on a 16px line at 600. It stays an h2;
+   Panel keeps section.panel > header.panel-header > h2. */
 h2 {
-  font-size: 15px;
+  font: var(--font-title-card);
 }
 
 .page-header p {
@@ -2250,13 +2253,16 @@ h2 {
   outline-offset: 2px;
 }
 
+/* A card (GOAL_LOOK U7): its edge is --shadow-0's ring, not a border, at the
+   original's radius. The ring draws outside the box, so a scrolling ancestor
+   needs a pixel of room around a panel (the explorer rails give it one). */
 .panel {
-  background: #ffffff;
-  border: 1px solid #d7dedf;
-  border-radius: 8px;
+  background: var(--surface-card);
+  border: 0;
+  border-radius: var(--radius);
   padding: 14px;
   margin-bottom: 14px;
-  box-shadow: 0 1px 2px rgba(24, 34, 42, 0.06);
+  box-shadow: var(--shadow-0);
   min-width: 0;
 }
 
@@ -3481,7 +3487,7 @@ pre {
 .workbench-page {
   margin: -22px;
   min-height: calc(100vh - 1px);
-  background: #edf1f4;
+  background: var(--surface-app);
 }
 
 .pipeline-workbench-page .builder-shell {
@@ -3681,8 +3687,6 @@ pre {
 }
 
 .pipeline-workbench-page .output-rail .panel {
-  box-shadow: none;
-  border-radius: 5px;
   margin-bottom: 10px;
 }
 
@@ -4003,8 +4007,6 @@ pre {
 
 .manager-resource-nav .panel {
   padding: 10px;
-  border-radius: 5px;
-  box-shadow: none;
 }
 
 .manager-surface {
@@ -4029,7 +4031,6 @@ pre {
 }
 
 .ontology-workbench-page .manager-header-card,
-.ontology-workbench-page .manager-grid .panel,
 .ontology-workbench-page .manager-nav {
   border-radius: 5px;
   box-shadow: none;
@@ -4670,6 +4671,7 @@ pre {
 
 .hero-summary h2 {
   font-size: 22px;
+  line-height: 1.2;
   margin: 4px 0 8px;
 }
 
@@ -5867,7 +5869,8 @@ pre {
 
 .explorer-left-rail .panel,
 .explorer-inspector .panel {
-  margin: 0;
+  /* A pixel of room for the card's ring inside the scrolling rail. */
+  margin: 1px;
 }
 
 .explorer-saved-list,
@@ -6191,8 +6194,6 @@ pre {
 .map-layer-rail .panel,
 .map-inspector .panel {
   padding: 10px;
-  border-radius: 4px;
-  box-shadow: none;
 }
 
 .map-layer-list > button {

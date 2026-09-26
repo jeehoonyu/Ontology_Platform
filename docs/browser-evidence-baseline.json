@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "bb7851c970a8fbae166fce11686b7b277dd2335387f6199686d54173cbddbcab",
+    "bundle_source_hash": "68140ea656fdbc07aaebb1131ba1a11bf1fdb7f6f7cd5d5437725672273cb6c3",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T00:01:50Z",
+    "recorded_at": "2026-09-26T00:40:21Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,44 +14,46 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 1,
-      "ran": 230,
+      "flaky": 0,
+      "ran": 233,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 210
+      "skipped": 212
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 209
+      "skipped": 211
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 210
+      "skipped": 212
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 210
+      "skipped": 212
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 210
+      "skipped": 212
     }
   },
   "tests": {
     "desktop-1280 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "desktop-1280 :: A default button is 30px tall with the original's ring shadow": "ran",
+    "desktop-1280 :: A panel title is 14px bold, and it is still a heading": "ran",
+    "desktop-1280 :: A panel's edge is a ring shadow, not a border": "ran",
     "desktop-1280 :: A text input is 30px with an inset ring and a blue focus ring": "ran",
     "desktop-1280 :: AIP agent runtime exposes durable policy and citation evidence": "ran",
     "desktop-1280 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "ran",
@@ -288,6 +290,8 @@
     "desktop-1280 :: zoom reaches its bounds and stops there": "ran",
     "laptop-1366 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "laptop-1366 :: A default button is 30px tall with the original's ring shadow": "skipped",
+    "laptop-1366 :: A panel title is 14px bold, and it is still a heading": "skipped",
+    "laptop-1366 :: A panel's edge is a ring shadow, not a border": "skipped",
     "laptop-1366 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "laptop-1366 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "laptop-1366 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
@@ -524,6 +528,8 @@
     "laptop-1366 :: zoom reaches its bounds and stops there": "skipped",
     "mobile-375 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "mobile-375 :: A default button is 30px tall with the original's ring shadow": "skipped",
+    "mobile-375 :: A panel title is 14px bold, and it is still a heading": "skipped",
+    "mobile-375 :: A panel's edge is a ring shadow, not a border": "skipped",
     "mobile-375 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "mobile-375 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "mobile-375 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
@@ -760,6 +766,8 @@
     "mobile-375 :: zoom reaches its bounds and stops there": "skipped",
     "tablet-1024 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "tablet-1024 :: A default button is 30px tall with the original's ring shadow": "skipped",
+    "tablet-1024 :: A panel title is 14px bold, and it is still a heading": "skipped",
+    "tablet-1024 :: A panel's edge is a ring shadow, not a border": "skipped",
     "tablet-1024 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "tablet-1024 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "tablet-1024 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
@@ -996,6 +1004,8 @@
     "tablet-1024 :: zoom reaches its bounds and stops there": "skipped",
     "tablet-768 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "tablet-768 :: A default button is 30px tall with the original's ring shadow": "skipped",
+    "tablet-768 :: A panel title is 14px bold, and it is still a heading": "skipped",
+    "tablet-768 :: A panel's edge is a ring shadow, not a border": "skipped",
     "tablet-768 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "tablet-768 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "tablet-768 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
@@ -1232,6 +1242,8 @@
     "tablet-768 :: zoom reaches its bounds and stops there": "skipped",
     "wide-1600 :: 200 distinct OIDC identities authenticate across both replicas": "skipped",
     "wide-1600 :: A default button is 30px tall with the original's ring shadow": "skipped",
+    "wide-1600 :: A panel title is 14px bold, and it is still a heading": "skipped",
+    "wide-1600 :: A panel's edge is a ring shadow, not a border": "skipped",
     "wide-1600 :: A text input is 30px with an inset ring and a blue focus ring": "skipped",
     "wide-1600 :: AIP agent runtime exposes durable policy and citation evidence": "skipped",
     "wide-1600 :: Cipher operations run as the signed-in caller, with a licence granted on the screen": "skipped",
