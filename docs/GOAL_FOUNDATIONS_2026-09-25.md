@@ -213,6 +213,18 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     enabled. Restored byte for byte; the hash matched (`73cf4a48f449eecf`).
   - Measured: the full six-project run passed 383 of 383, with none retried. That includes the
     evaluator's ModelOps flow, which releases a submission after its automatic gate approves it.
+
+  **d. Ops.** The test-event form has its own severity and a source field ("Operational event
+  source"), where it used to share the rule form's. The defaults still match (source
+  `decision`, severity `high`), so a new rule still catches the default test event, as the
+  evaluator's Ops flow relies on.
+  - Proven by `trust.spec.ts::Ops' rule form and test-event form keep their own fields`. It sets
+    the event's severity to critical and reads the rule's minimum still at high. It then types a
+    rule-only source and checks that the event's POST carries severity `critical` and source
+    `decision`.
+  - Negative run: the event form wired back to the rule's fields failed "the rule's minimum
+    severity". Restored byte for byte; the hash matched (`2ab6019b38ef4737`).
+  - Measured: the full six-project run passed 384 of 384, with none retried.
 - **A4 — The grant forms say they do not govern data access.** **Open** — until decision O,
   Security's project grants and Control Panel's role grants each carry "does not govern data
   access" beside the form, and the backend docstrings stop claiming otherwise. To be proven by

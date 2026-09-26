@@ -169,4 +169,22 @@ test.describe("GOAL_FOUNDATIONS A3", () => {
     await expect(page.getByRole("button", { name: "Start deployment" }), "Start deployment").toBeDisabled();
     expect(released, "no release request was sent").toEqual([]);
   });
+
+  // d. The alert-rule form and the test-event form shared one severity and one source:
+  // choosing the event's severity changed the rule's, and the event, which had no source
+  // field, posted whatever the rule's source input held.
+  test("Ops' rule form and test-event form keep their own fields", async ({ page }) => {
+    await page.goto("/workspace/ops");
+    await page.getByRole("button", { name: "Alerts", exact: true }).click();
+    await page.getByLabel("Operational event severity").selectOption("critical");
+    await expect(page.getByLabel("Alert minimum severity"), "the rule's minimum severity").toHaveValue("high");
+    await page.getByLabel("Alert rule source").fill("rule-only-source");
+    const ingested = page.waitForRequest((request) => request.method() === "POST"
+      && new URL(request.url()).pathname === "/ops/events/ingest");
+    await page.getByLabel("Operational event title").fill(`Own fields ${Date.now()}`);
+    await page.getByRole("button", { name: "Ingest event" }).click();
+    const body = (await ingested).postDataJSON();
+    expect.soft(body.severity, "the event's severity").toBe("critical");
+    expect.soft(body.source, "the event's source").toBe("decision");
+  });
 });
