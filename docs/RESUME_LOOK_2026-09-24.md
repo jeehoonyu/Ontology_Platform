@@ -97,16 +97,14 @@ I, M and N are still undecided, and the goal assumes their option (a).
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS A6, and three owner questions
+## Next: GOAL_FOUNDATIONS A6
 
-1. **Owner questions, asked before A6's first commit** (`look-census/specs/a6_critique.json` names
-   them; ask with AskUserQuestion and record the answers in the plan and the goal):
-   - A6's acceptance says each reader is "shown to fail at `38b096a`". Run `routes.spec.ts`
-     against a `38b096a` build (a throwaway worktree, as the gotchas say), or accept per-reader
-     negative runs instead?
-   - Should the filters write the URL with `replaceState` (A6's text), or is that narrowed?
-   - `raw_colour_ceiling` (563) needs an open owner. The node context menu's look (seven raw
-     colours, 563 → 556) is the next overlay: inside A7, or left to Y15? A7 stays Open until then.
+1. **Decisions U–X are assumed, not decided** (the plan's owner-decisions table, 2026-09-26):
+   `page` names an ontology-level panel (U a); old spellings are not read (V a); the server
+   keeps a copy of the route table (W a); the node context menu's look waits for Y15, so A7
+   stays Open as `raw_colour_ceiling`'s owner (X b). Ask the owner when they are back. A6's own
+   text settles the rest: Ops tabs are pushed, Object Explorer's search is replaced, and each
+   test is run against a `38b096a` build.
 2. **A6, routes** (L): one route table (`routes.json` beside `apps.json`), `navigate(view,
    params)`, and six query readers, one commit per reader. The spec and its critique are in
    `look-census/specs/` (local, excluded: `a6_spec.md`, `a6_critique.json`); the critique's two major points

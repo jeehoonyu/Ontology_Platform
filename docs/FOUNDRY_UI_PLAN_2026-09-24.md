@@ -322,6 +322,8 @@ each offered with the options in its row and its recommendation marked:
   separately filed scoping task).
 
 I and M are not yet decided; GOAL_LOOK assumed their option (a). O–T wait for their waves.
+U–X came up while specifying GOAL_FOUNDATIONS A6 and A7 (2026-09-26). They are not yet decided;
+the work assumes the option marked, and each is written so the owner can overturn it cheaply.
 
 | Decision | Question | Options | Recommendation |
 | --- | --- | --- | --- |
@@ -339,6 +341,10 @@ I and M are not yet decided; GOAL_LOOK assumed their option (a). O–T wait for 
 | **R** | Saved exploration defaults | (a) a private default per user and a project default; (b) private only | (a) |
 | **S** | Reopen "organise" for legend colour groups | (a) yes, citing capture 12; (b) keep it declined | (a), groups only (no folders or text nodes) |
 | **T** | Where favorites and recents live | (a) a principal-scoped table; (b) one browser module, labelled "in this browser" | (b) for recents; (a) for favorites |
+| **U** | What `&page=` means in an Ontology URL | (a) `section` is one of the type's navigation ids (default overview) and `page` one of the three ontology-level panels that replace the whole surface (health center, releases, schema registry), as line 277's "an ontology-level page"; (b) no `page` this wave, the three stay `section` values | (a), assumed |
+| **V** | Old query spellings (`object_type_id`, `object_type`, `objectType`) | (a) not read: the server's links change to `?type=` with each reader, and an old bookmark opens the view's default; (b) read as aliases, about four lines | (a), assumed |
+| **W** | The server's copy of the route table | (a) in A6: `oms/app/workspace_routes.py` with `app_url`, held equal to `routes.json`, and a check that refuses hand-built workspace links; (b) deferred to H2, A6 only renaming the server's links | (a), assumed |
+| **X** | The node context menu's look (seven raw colours) | (a) inside A7 now, 563 → 556; (b) with Y15, the builder parity row, leaving A7 Open as `raw_colour_ceiling`'s owner | (b), assumed: a live canvas look changes with the owner's say |
 
 ## Gates every item touches
 

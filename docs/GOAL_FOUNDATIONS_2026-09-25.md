@@ -383,6 +383,13 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   restores the previous one, and an unknown id shows a NonIdealState naming it, never the first
   item. Each is shown to fail at `38b096a`. The server's view list and `CORE_VIEWS` come from one
   source (with A9).
+
+  **Assumed, not yet decided** (the plan's U, V and W, 2026-09-26): `page` names an ontology-level
+  panel and `section` a type's navigation id; old spellings such as `objectType` are not read;
+  the server holds a copy of the route table and builds its links from it. Settled by this
+  condition's own text: a tab is a selection, so Ops tabs are pushed and Back restores the last
+  one; Object Explorer's search is the first filter and is replaced, never pushed; and each test
+  is run against a build of `38b096a` to show it fails there.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`
