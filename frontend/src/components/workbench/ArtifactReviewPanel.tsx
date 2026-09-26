@@ -97,10 +97,10 @@ export function ArtifactReviewPanel({ artifact, selectedNodeId, pendingCommands,
     <section className="artifact-review-panel" aria-label="Artifact review">
       <div className="artifact-review-tabs" role="tablist">
         <button className={tab === "comments" ? "active" : ""} onClick={() => setTab("comments")} role="tab" aria-selected={tab === "comments"}>
-          <MessageSquare size={14} /> Comments <span>{comments.data?.comments.filter((item) => item.status === "OPEN").length || 0}</span>
+          <MessageSquare size={14} /> Comments <StatusBadge value={comments.data?.comments.filter((item) => item.status === "OPEN").length || 0} intent="neutral" />
         </button>
         <button className={tab === "proposals" ? "active" : ""} onClick={() => setTab("proposals")} role="tab" aria-selected={tab === "proposals"}>
-          <ShieldCheck size={14} /> Proposals <span>{proposals.data?.proposals.filter((item) => ["OPEN", "APPROVED", "CONFLICT"].includes(item.status)).length || 0}</span>
+          <ShieldCheck size={14} /> Proposals <StatusBadge value={proposals.data?.proposals.filter((item) => ["OPEN", "APPROVED", "CONFLICT"].includes(item.status)).length || 0} intent="neutral" />
         </button>
       </div>
       {error ? <ErrorBanner message={error instanceof Error ? error.message : String(error)} /> : null}

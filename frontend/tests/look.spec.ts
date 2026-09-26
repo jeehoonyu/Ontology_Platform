@@ -342,4 +342,30 @@ test.describe("GOAL_LOOK", () => {
       return { background: style.backgroundColor, color: style.color, shadow: style.boxShadow };
     }), "a disabled field").toEqual({ background: "rgb(246, 247, 249)", color: "rgb(143, 153, 168)", shadow: "none" });
   });
+
+  // U10, Tag. UI_CONFIG's tag: 20px, radius 4, 2px 6px, 12px at 400, on its intent's
+  // 10% tint; neutral is the minimal tint. The review tabs' counts were a 10px pill
+  // of their own, and are the same tag now.
+  test("A tag is 20px with radius 4, and the review counts are tags", async ({ page }) => {
+    const read = (locator: ReturnType<Page["locator"]>) => locator.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        height: `${Math.round(node.getBoundingClientRect().height)}px`, radius: style.borderTopLeftRadius,
+        padding: style.padding, font: `${style.fontSize} ${style.fontWeight}`, background: style.backgroundColor,
+      };
+    });
+    const tag = { height: "20px", radius: "4px", padding: "2px 6px", font: "12px 400" };
+    await page.goto("/workspace/decision");
+    const ready = page.locator(".backend-connection .badge");
+    await expect(ready).toHaveText("READY");
+    expect.soft(await read(ready), "a success tag").toEqual({ ...tag, background: "rgba(35, 133, 81, 0.1)" });
+
+    await page.goto("/workspace/workshop");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const count = page.locator(".artifact-review-panel").getByRole("tab", { name: /Comments/ }).locator(".badge");
+    await expect(count).toHaveText(/^\d+$/);
+    expect.soft(await read(count), "a review-tab count").toEqual({ ...tag, background: "rgba(143, 153, 168, 0.15)" });
+  });
 });

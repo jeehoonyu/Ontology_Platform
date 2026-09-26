@@ -276,7 +276,7 @@ export function AgentRuntimePanel({ draft: held, onDraft, run: heldRun }: {
               ))}
             </div>
           ) : null}
-          {events.length ? <div className="agent-event-strip">{events.map((event) => <span key={event.id}>{event.event_type.replace("job.", "")}</span>)}</div> : null}
+          {events.length ? <div className="agent-event-strip">{events.map((event) => <StatusBadge key={event.id} value={event.event_type.replace("job.", "")} intent="neutral" />)}</div> : null}
         </>
       )}
     </section>
