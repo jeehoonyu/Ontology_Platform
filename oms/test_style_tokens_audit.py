@@ -11,6 +11,7 @@ tree would read zero undefined names on a tree where all 39 declarations are sti
 dropped. Definitions count only from sheets something imports.
 """
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -186,11 +187,13 @@ check("src/styles.css" in live["live"], "styles.css is imported by main.tsx")
 check(not live["missing"], f"every stylesheet import resolves: {live['missing']}")
 check(colours > 0, "raw colours remain; a zero here means the scan broke")
 check(not live["token_problems"], f"tokens.css holds only custom properties: {live['token_problems']}")
+# U10 retired the legacy aliases: no stylesheet uses one, and tokens.css no longer
+# defines them, so a new use is an undefined name and the first gate refuses it.
+check(not any(live["alias_uses"].values()), f"no legacy alias is used: {live['alias_uses']}")
 if audit.TOKENS.exists():
     token_text = audit.TOKENS.read_text(encoding="utf-8")
-    missing_aliases = [n for n in audit.LEGACY_ALIASES if f"{n}:" not in token_text]
-    check(not missing_aliases,
-          f"tokens.css must define every legacy alias U3 resolves: {missing_aliases}")
+    kept = [n for n in audit.LEGACY_ALIASES if re.search(r"(?<![\w-])" + re.escape(n) + r"\s*:", token_text)]
+    check(not kept, f"tokens.css still defines a retired alias: {kept}")
 
 # --- baselines are rewritten only when a number moves -------------------------
 # U3 takes the undefined counts to zero and leaves every colour where it was. A

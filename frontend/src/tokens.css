@@ -8,7 +8,9 @@
  * exploration, an Object View, a menu, a Workshop module at runtime, the
  * Pipeline Builder, the Ontology Manager, an app landing page and a dialog),
  * unless a line says SHIP CHOICE. A SHIP CHOICE is ours to make: a font we can
- * bundle, a fallback, an alias for a name our stylesheet already uses.
+ * bundle, a fallback. (An alias block for seven names styles.css used before
+ * anything defined them resolved them from U3 until U10 moved their 39 uses to
+ * the names below and deleted it.)
  *
  * The original is Blueprint 6. Its :root carries 206 custom properties, 205 of
  * them --bp-* in five families (emphasis, intent, palette, surface, typography);
@@ -519,22 +521,4 @@
   --banner-announcement-bg: rgba(253, 204, 0, 0.1);    /* border rgba(253,204,0,.4), text rgb(185,150,0) 600 */
   --banner-info-bg: #f6f7f9;                           /* inset rule --border-header */
   --count-pill-bg: rgba(76, 144, 240, 0.1);            /* border rgba(76,144,240,.4), text #4c90f0 */
-
-  /* ================================================ SHIP CHOICE: legacy names
-     styles.css refers to seven custom properties that nothing defines, 39
-     times (the Decision and Ops screens and .runtime-slo-row). Each such
-     declaration is invalid at computed-value time, so the property computes as
-     unset (inherited or initial), and those screens drew no borders, grounds or
-     active-tab marks until U3 imported this file. These aliases restore what each
-     rule always meant.
-     They are debt: in GOAL_LOOK U10's last commit the 39 call sites move to real
-     token names and this block is deleted, without waiting for the plan's Tabs
-     primitive. `audit_style_tokens` reports every use until then. */
-  --border: var(--divider);                 /* 12 references */
-  --surface: var(--surface-card);           /* 5 */
-  --surface-strong: var(--surface-app);     /* 6 */
-  --accent: var(--text-selected);           /* 7; #215db0, not #2d72d2, which is 4.40:1 on #f6f7f9 */
-  --muted: var(--text-muted);               /* 7 */
-  --text: var(--text-rest);                 /* 1 */
-  --line: var(--divider-weak);              /* 1 */
 }

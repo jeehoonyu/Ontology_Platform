@@ -73,9 +73,10 @@ BASELINE = REPO_ROOT / "docs" / "style-tokens-baseline.json"
 COLOUR_BASELINE = REPO_ROOT / "docs" / "raw-colours-baseline.json"
 REFERENCE = REPO_ROOT / "docs" / "STYLE_TOKENS.md"
 
-# The names styles.css used before anything defined them. tokens.css aliases them
-# (a SHIP CHOICE block) so U3 can resolve them in one import; they are debt either
-# way, and their uses are reported until U10 moves the call sites to real names.
+# The names styles.css used before anything defined them. tokens.css aliased them
+# (a SHIP CHOICE block) so U3 could resolve them in one import; U10 moved their 39
+# uses to real names and deleted the block. A use now is an undefined name, which
+# the first gate refuses; the count stays reported so the retirement reads as 0.
 LEGACY_ALIASES = ("--border", "--surface", "--surface-strong", "--accent", "--muted",
                   "--text", "--line")
 
@@ -413,8 +414,9 @@ def render(found: Dict[str, Any]) -> str:
                  f"{found['heights']}.")
     alias = found["alias_uses"]
     lines.append(f"- **Legacy alias names in use:** {sum(alias.values())} ("
-                 + ", ".join(f"`{n}` ×{c}" for n, c in alias.items()) + "). U10 moves these "
-                 "call sites to real token names and deletes the alias block.")
+                 + ", ".join(f"`{n}` ×{c}" for n, c in alias.items()) + "). U10 moved their "
+                 "uses to real token names and deleted the alias block; a use now is an "
+                 "undefined name.")
     if found["tokens_live"]:
         lines.append(f"- **Tokens nothing reads,** directly or through another token: "
                      f"{found['tokens_unreferenced']} of {found['token_count']}.")

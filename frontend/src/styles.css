@@ -156,8 +156,8 @@ button:hover,
   gap: 10px;
   align-items: end;
   padding: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--divider);
+  background: var(--surface-card);
 }
 
 .decision-topbar label,
@@ -169,7 +169,7 @@ button:hover,
 
 .decision-topbar label > span,
 .decision-evidence-layout label > span {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -192,8 +192,8 @@ button:hover,
 .decision-tabs {
   display: flex;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--divider);
+  background: var(--surface-card);
 }
 
 .decision-tabs button {
@@ -201,15 +201,15 @@ button:hover,
   min-height: 40px;
   flex: 0 0 auto;
   border: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--divider);
   border-radius: 0;
   background: transparent;
 }
 
 .decision-tabs button.active {
-  color: var(--accent);
-  box-shadow: inset 0 -3px 0 var(--accent);
-  background: var(--surface-strong);
+  color: var(--text-selected);
+  box-shadow: inset 0 -3px 0 var(--text-selected);
+  background: var(--surface-app);
 }
 
 .decision-risk-layout {
@@ -237,14 +237,14 @@ button:hover,
   min-width: 0;
   padding: 12px;
   text-align: left;
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
+  background: var(--surface-app);
+  border: 1px solid var(--divider);
 }
 
 .decision-risk-grid > button:hover,
 .decision-risk-grid > button:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--text-selected);
+  box-shadow: 0 0 0 1px var(--text-selected);
 }
 
 .decision-risk-grid header,
@@ -269,14 +269,14 @@ button:hover,
 .decision-definition-list small,
 .decision-candidate-list small,
 .decision-explain-heading > div > span {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 .decision-risk-grid p,
 .decision-narrative {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   line-height: 1.45;
 }
 
@@ -288,8 +288,8 @@ button:hover,
 
 .decision-risk-grid footer span {
   padding: 3px 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--surface-card);
+  border: 1px solid var(--divider);
   font-size: 11px;
 }
 
@@ -301,11 +301,11 @@ button:hover,
 
 .decision-score b {
   font-size: 24px;
-  color: var(--text);
+  color: var(--text-rest);
 }
 
 .decision-score span {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -318,8 +318,8 @@ button:hover,
 .decision-definition-list article,
 .decision-candidate-list article {
   padding: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface-strong);
+  border: 1px solid var(--divider);
+  background: var(--surface-app);
 }
 
 .decision-definition-list article > span,
@@ -360,8 +360,8 @@ button:hover,
   gap: 7px;
   align-items: center;
   padding: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-strong);
+  border: 1px solid var(--divider);
+  background: var(--surface-app);
   text-transform: capitalize;
 }
 
@@ -375,7 +375,7 @@ button:hover,
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--divider);
 }
 
 .decision-timeline-marker {
@@ -385,13 +385,13 @@ button:hover,
   height: 30px;
   border-radius: 50%;
   color: white;
-  background: var(--accent);
+  background: var(--text-selected);
   font-weight: 800;
 }
 
 .decision-timeline time,
 .decision-timeline p {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -414,8 +414,8 @@ button:hover,
   justify-content: flex-end;
   gap: 8px;
   padding: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--divider);
+  background: var(--surface-card);
 }
 
 .ops-metrics,
@@ -429,8 +429,8 @@ button:hover,
 .ops-tabs {
   display: flex;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--divider);
+  background: var(--surface-card);
 }
 
 .ops-tabs button {
@@ -438,15 +438,15 @@ button:hover,
   flex: 0 0 auto;
   min-height: 40px;
   border: 0;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--divider);
   border-radius: 0;
   background: transparent;
 }
 
 .ops-tabs button.active {
-  color: var(--accent);
-  box-shadow: inset 0 -3px 0 var(--accent);
-  background: var(--surface-strong);
+  color: var(--text-selected);
+  box-shadow: inset 0 -3px 0 var(--text-selected);
+  background: var(--surface-app);
 }
 
 .ops-command-layout,
@@ -474,7 +474,7 @@ button:hover,
 }
 
 .ops-grid label > span {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -504,8 +504,8 @@ button:hover,
   gap: 10px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface-strong);
+  border: 1px solid var(--divider);
+  background: var(--surface-app);
 }
 
 .ops-alert-list article,
@@ -538,7 +538,7 @@ button:hover,
 .ops-alert-list small,
 .ops-incident-list small,
 .ops-inbox-list small {
-  color: var(--muted);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -1154,7 +1154,7 @@ button:disabled {
 
 .runtime-slo-row {
   align-items: center;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--divider-weak);
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto auto;
