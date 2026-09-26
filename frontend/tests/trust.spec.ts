@@ -219,3 +219,26 @@ test.describe("GOAL_FOUNDATIONS A3", () => {
     await expect(page.locator(".mini-graph g.faded"), "the node the filter faded").toHaveCount(1);
   });
 });
+
+/**
+ * A4: Security's project grants and Control Panel's role grants return 201 and are
+ * recorded, but no data read consults them; tenancy memberships scope reads
+ * (`oms/test_grants_do_not_govern_reads.py` pins that). Until decision O, each form says so.
+ */
+test.describe("GOAL_FOUNDATIONS A4", () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-1280", "The notes are checked once, on desktop.");
+  });
+
+  test("Grant forms say what they govern", async ({ page }) => {
+    await page.goto("/workspace/security");
+    await page.getByRole("button", { name: "Projects & Roles", exact: true }).click();
+    const security = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Project Role Grants" }) });
+    await expect(security.getByRole("note"), "Security's project grants").toContainText("do not govern data access");
+
+    await page.goto("/workspace/control-panel");
+    await page.getByRole("button", { name: "Roles", exact: true }).click();
+    const control = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Grant Role" }) });
+    await expect(control.getByRole("note"), "Control Panel's role grants").toContainText("do not govern data access");
+  });
+});

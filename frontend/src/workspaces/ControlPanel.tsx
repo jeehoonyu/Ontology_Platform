@@ -544,6 +544,12 @@ function RolesSection() {
           title="Grant Role"
           action={<button onClick={submitGrant} disabled={!grantForm.scope_id.trim() || !grantForm.principal_id.trim()}>Grant</button>}
         >
+          {/* GOAL_FOUNDATIONS A4: a role grant answers the access check and decides who may
+              manage an admin group's members; no data read consults it (decision O). */}
+          <p className="panel-description" role="note">
+            Role grants do not govern data access. Reads are scoped by project memberships; a grant
+            here decides only who may manage an admin group&apos;s members.
+          </p>
           <div className="metadata-edit-grid">
             <SelectField
               label="Scope type"

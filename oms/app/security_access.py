@@ -21,7 +21,12 @@ from . import models, models_action
 # ---------------------------------------------------------------------------
 
 class Project(Base):
-    """A Foundry project that groups resources and governs access."""
+    """A project record that Security's role grants name.
+
+    It governs no data read: reads are scoped by tenancy's projects and memberships
+    (`platform_projects`), a separate table, and nothing consults these grants to
+    authorize one (GOAL_FOUNDATIONS A4, until decision O).
+    """
 
     __tablename__ = "projects"
 

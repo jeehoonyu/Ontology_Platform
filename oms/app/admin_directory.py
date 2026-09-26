@@ -1,7 +1,9 @@
 """
 Management & Enablement — Control Panel directory: enrollments, organizations,
-spaces, users, groups, memberships, and scope-level role grants with real
-access resolution (deep-fidelity pass 12). Based on
+spaces, users, groups, memberships, and scope-level role grants (deep-fidelity
+pass 12). The grants answer the access check and decide who may manage an admin
+group's members; no data read consults them, which tenancy memberships scope
+(GOAL_FOUNDATIONS A4, until decision O). Based on
 /docs/foundry/administration/overview and /platform-security-management/*:
 an enrollment contains organizations; access is controlled at user/group level;
 roles are granted at a scope and map to capabilities; membership can expire.

@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "ad5dcb6d597a0a6bc81a0fb7325f5717b3d2e3368d6562c464563d6f01eedd80",
+    "bundle_source_hash": "85883128fd917826d8cfb3f8b55a55785a1f733412696e475982408806aed0e1",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T06:13:51Z",
+    "recorded_at": "2026-09-26T06:29:29Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -14,7 +14,7 @@
   "viewports": {
     "desktop-1280": {
       "failed": 0,
-      "flaky": 0,
+      "flaky": 1,
       "ran": 254,
       "skipped": 5
     },
@@ -22,31 +22,31 @@
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 233
+      "skipped": 234
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 232
+      "skipped": 233
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 233
+      "skipped": 234
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 233
+      "skipped": 234
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 233
+      "skipped": 234
     }
   },
   "tests": {
@@ -86,6 +86,7 @@
     "desktop-1280 :: Escape during a splitter resize restores the width and writes nothing": "ran",
     "desktop-1280 :: Escape during an artifact canvas drag restores the node and records nothing": "ran",
     "desktop-1280 :: Fetch Evidence says when the source holds more attempts than it loaded": "ran",
+    "desktop-1280 :: Grant forms say what they govern": "ran",
     "desktop-1280 :: Latest incidents lists the most recently updated and says how many are open": "ran",
     "desktop-1280 :: Latest incidents says nothing more when it lists every open incident": "ran",
     "desktop-1280 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "ran",
@@ -345,6 +346,7 @@
     "laptop-1366 :: Escape during a splitter resize restores the width and writes nothing": "skipped",
     "laptop-1366 :: Escape during an artifact canvas drag restores the node and records nothing": "skipped",
     "laptop-1366 :: Fetch Evidence says when the source holds more attempts than it loaded": "skipped",
+    "laptop-1366 :: Grant forms say what they govern": "skipped",
     "laptop-1366 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "laptop-1366 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "laptop-1366 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
@@ -604,6 +606,7 @@
     "mobile-375 :: Escape during a splitter resize restores the width and writes nothing": "skipped",
     "mobile-375 :: Escape during an artifact canvas drag restores the node and records nothing": "skipped",
     "mobile-375 :: Fetch Evidence says when the source holds more attempts than it loaded": "skipped",
+    "mobile-375 :: Grant forms say what they govern": "skipped",
     "mobile-375 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "mobile-375 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "mobile-375 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
@@ -863,6 +866,7 @@
     "tablet-1024 :: Escape during a splitter resize restores the width and writes nothing": "skipped",
     "tablet-1024 :: Escape during an artifact canvas drag restores the node and records nothing": "skipped",
     "tablet-1024 :: Fetch Evidence says when the source holds more attempts than it loaded": "skipped",
+    "tablet-1024 :: Grant forms say what they govern": "skipped",
     "tablet-1024 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "tablet-1024 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "tablet-1024 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
@@ -1122,6 +1126,7 @@
     "tablet-768 :: Escape during a splitter resize restores the width and writes nothing": "skipped",
     "tablet-768 :: Escape during an artifact canvas drag restores the node and records nothing": "skipped",
     "tablet-768 :: Fetch Evidence says when the source holds more attempts than it loaded": "skipped",
+    "tablet-768 :: Grant forms say what they govern": "skipped",
     "tablet-768 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "tablet-768 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "tablet-768 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
@@ -1381,6 +1386,7 @@
     "wide-1600 :: Escape during a splitter resize restores the width and writes nothing": "skipped",
     "wide-1600 :: Escape during an artifact canvas drag restores the node and records nothing": "skipped",
     "wide-1600 :: Fetch Evidence says when the source holds more attempts than it loaded": "skipped",
+    "wide-1600 :: Grant forms say what they govern": "skipped",
     "wide-1600 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "wide-1600 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "wide-1600 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",

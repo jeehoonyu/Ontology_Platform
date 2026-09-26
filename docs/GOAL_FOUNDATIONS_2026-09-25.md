@@ -251,11 +251,45 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   the payload hold.
 
   **A3 is Met:** five screens, five commits, each with a test that fails on the old behaviour.
-- **A4 — The grant forms say they do not govern data access.** **Open** — until decision O,
+- **A4 — The grant forms say they do not govern data access.** **Met** — until decision O,
   Security's project grants and Control Panel's role grants each carry "does not govern data
   access" beside the form, and the backend docstrings stop claiming otherwise. To be proven by
   `trust.spec.ts::Grant forms say what they govern`, shown to fail at `38b096a`. A pytest pins the
   behaviour the copy describes: a grant without a membership still reads nothing.
+
+  **What changed.**
+  - Security's "Project Role Grants" panel says: "These grants do not govern data access.
+    Reads are scoped by project memberships, so a grant here lets no one read a project's data."
+  - Control Panel's "Grant Role" panel says: "Role grants do not govern data access. Reads are
+    scoped by project memberships; a grant here decides only who may manage an admin group's
+    members." The last half is the one thing they do govern (`_can_manage_membership`).
+  - The docstrings no longer claim otherwise. Security's `Project` no longer "governs access",
+    and Control Panel's module no longer promises "real access resolution".
+
+  Proven by `trust.spec.ts::Grant forms say what they govern`, which reads each panel's note.
+  Also by `oms/test_grants_do_not_govern_reads.py`: a principal granted a role on project alpha
+  by both forms (each returns 201), with no membership, lists none of alpha's datasets or
+  object types and is refused alpha's object (403). That test pins the behaviour, so it passes
+  today. It fails the day a grant starts to govern a read, and the notes are then revisited.
+
+  **Negative runs:**
+  - Security's note removed, then Control Panel's: each failed with its panel's note not found.
+    Restored byte for byte; the hash matched (`85883128fd917826`).
+  - The pin, with the granted principal given alpha's project (a grant that governs), failed on
+    the dataset list.
+  - The security and admin backend tests (`test_admin`, `test_security_admin`,
+    `test_security_data`, `test_security_governance`) and `test_docs_conformance` pass with the
+    new docstrings.
+
+  **Measured.** The full six-project run: 386 passed and 0 failed.
+  - One test retried: the evaluator's Workshop sweep, whose page showed no `.app-shell` within
+    10 seconds of loading. That is a blank page at first paint, not a screen error, which the A2
+    boundary would have caught inside the shell.
+  - Its trace was lost, because the route-cost measurement after the run clears
+    `test-results`. Runs now copy `test-results` first.
+  - Repeated 4 times alongside the trust tests that create Workshop drafts, it passed 12 of 12.
+    It is recorded as unexplained.
+  - Route cost and the payload hold, and the browser-evidence baseline was re-recorded.
 - **A5 — Search and media sets are scoped to the caller's projects.** **Open** —
   `unscoped_reads_ceiling` (344) and `tenant_orphan_ceiling` (52) are re-recorded lower in the same
   change (K8). Search filters incidents by `project_id`, and events by their column rather than

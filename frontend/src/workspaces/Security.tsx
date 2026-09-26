@@ -728,6 +728,12 @@ function ProjectsSection({ refreshKey, onChange }: SectionProps) {
             </select>
           }
         >
+          {/* GOAL_FOUNDATIONS A4: these grants are recorded, and answer the access check
+              below, but no data read consults them; tenancy memberships do (decision O). */}
+          <p className="panel-description" role="note">
+            These grants do not govern data access. Reads are scoped by project memberships, so a
+            grant here lets no one read a project's data.
+          </p>
           {selectedProject ? (
             <>
               <DataTable rows={grants.value || []} empty="No grants on this project yet." />
