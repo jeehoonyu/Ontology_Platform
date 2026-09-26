@@ -52,7 +52,7 @@ goal uses (A, H, O, Q, W, Y, Z; U is GOAL_LOOK's):
 
 | Prefix | Goal (to be stated) | Covers |
 | --- | --- | --- |
-| **A** | app-wide honesty and foundations | status truth, crash-safe storage, the route table, overlay primitives, the app registry, approvals |
+| **A** | app-wide honesty and foundations: [`GOAL_FOUNDATIONS`](GOAL_FOUNDATIONS_2026-09-25.md), stated 2026-09-25 (A1–A9; A10 waits for wave 2) | status truth, crash-safe storage, the route table, overlay primitives, the app registry, approvals |
 | **H** | home and shell | Quicksearch, Home, recents, notifications, launcher, sidebar, account |
 | **Q** | projects, files and resource apps | Files, project pages, the dataset app, share and access |
 | **O** | Object Explorer and Object View | catalog, exploration, results, Object View, lists |
