@@ -412,18 +412,17 @@ def _search_resources(db: Session, query: str, kinds: List[str], limit: int, inc
         for row in _safe_all(db, models.AgentDefinition, principal):
             _add_search_result(results, kind="agent", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "Agent", url=f"/agents/{row.id}", query=query, payload={"allowed_object_types": row.allowed_object_types or [], "allowed_actions": row.allowed_actions or []}, include_payload=include_payload)
 
+    # Events and incidents are scoped like every other kind, by the project the row is
+    # filed under. Events were filtered by their payload's project_id, which the column
+    # can disagree with, and incidents not at all (GOAL_FOUNDATIONS A5).
     if allowed("event"):
         ops_control._ensure_tables(db)
-        accessible = tenancy.accessible_project_ids(db, semantic_scope.effective_principal(principal), "view")
-        for row in db.query(ops_control.OpsEvent).all():
-            event_project = (row.payload or {}).get("project_id")
-            if accessible is not None and event_project not in accessible:
-                continue
+        for row in _safe_all(db, ops_control.OpsEvent, principal):
             _add_search_result(results, kind="event", resource_id=row.id, title=row.title, subtitle=f"{row.source} {row.event_type} {row.severity}", url=f"/events/{row.id}", query=query, payload=_event_dict(row), include_payload=include_payload)
 
     if allowed("incident"):
         ops_control._ensure_tables(db)
-        for row in db.query(ops_control.Incident).all():
+        for row in _safe_all(db, ops_control.Incident, principal):
             _add_search_result(results, kind="incident", resource_id=row.id, title=row.display_name, subtitle=f"{row.severity} {row.status}", url=f"/ops/incidents/{row.id}", query=query, payload=ops_control._incident_dict(row), include_payload=include_payload)
 
     try:

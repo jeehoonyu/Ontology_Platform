@@ -206,6 +206,9 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     the note shows, and no release request is sent.
   - The modeling tests that release (`test_modeling_io`, `test_modeling_evaluation_ops`,
     `test_modelops`, `test_foundry_tools`, `test_docs_conformance`) all pass.
+  - Later, the suite-cost measurement at A5 found this route loading the objective twice,
+    because the gate commits and the route read `objective.project_id` again afterwards. It
+    was fixed in A5's commit.
 
   **Negative runs:**
   - The backend's gate check removed: the pytest failed again with the submission released. The
@@ -291,7 +294,7 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Repeated 4 times alongside the trust tests that create Workshop drafts, it passed 12 of 12.
     It is recorded as unexplained.
   - Route cost and the payload hold, and the browser-evidence baseline was re-recorded.
-- **A5 — Search and media sets are scoped to the caller's projects.** **Open** —
+- **A5 — Search and media sets are scoped to the caller's projects.** **Met** —
   `unscoped_reads_ceiling` (344) and `tenant_orphan_ceiling` (52) are re-recorded lower in the same
   change (K8). Search filters incidents by `project_id`, and events by their column rather than
   their payload. `media_sets` gains a project, and its list, get, items and extract are scoped.
@@ -299,6 +302,77 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   `oms/test_search_scope.py` (a project-B principal finds none of project A's incidents) and
   `oms/test_media_set_scope.py` (B neither lists nor reads A's set), each shown to fail at
   `38b096a`. The OIDC tier repeats both, because local mode resolves every caller to `*`.
+
+  **What changed.**
+  - **Search.** Events and incidents go through `_safe_all`, the same project scope as every
+    other kind, by the project column the row is filed under. Events were filtered by their
+    payload's `project_id`, and incidents not at all.
+  - **Media sets.** They gain a nullable, indexed `project_id` (migration `0048`).
+    - Existing sets keep none, as the owner decided on 2026-09-26. Only a principal who holds
+      every project reaches an unassigned set, and `POST /media-sets/{id}/project` assigns one.
+    - New sets are created in a project, which the caller must be able to edit.
+    - Every route is scoped by the set's project: in `media_sets.py` the list, get, items and
+      extract; in `media_ops.py` chunk, entities, process, upload and content. Items reach
+      their project through their set.
+  - **The audit.** `audit_tenancy_scope` no longer reads every `semantic_scope.<name>(` as
+    authorization. It now reads only the accessors that check the caller, so
+    `effective_principal(` stops filing reads as authorized.
+  - **The ratchets.** `tenant_orphan_ceiling` falls from 52 to 50: media sets, and their items
+    through their set, now name a tenant. `unscoped_reads_ceiling` holds at 344, not lower,
+    and here is why:
+    - Search's incident read left the count.
+    - `media_sets` entered the census when it gained a `project_id`, and one of its reads
+      counts: creation's check that the new id is free. That check has to look across
+      projects, because ids are global primary keys.
+  - **Baselines at the new migration head.** Adding `0048` left four baselines stamped with
+    `0047`: query bounds, request cost, suite cost and browser evidence. Each was re-measured.
+
+  **Proven by:**
+  - `oms/test_search_scope.py`: beta finds none of alpha's incident or event, including an
+    event whose payload names beta. Alpha finds both. At `108e8bc` it failed: "beta found
+    alpha's rows: ['event', 'incident']".
+  - `oms/test_media_set_scope.py`, 30 assertions:
+    - Beta cannot list, read, fill, extract, chunk or fetch the content of alpha's set or item.
+    - Alpha cannot create a set in beta.
+    - An unassigned set is hidden from both project principals and cannot be claimed by them.
+      The administrator sees it, assigns it to beta, and beta then reaches it.
+  - `oms/test_media_set_project_migration.py`: an existing set stays NULL through the upgrade,
+    the upgrade applies twice, and the downgrade drops the index and the column.
+  - The media, tenancy and platform tests pass: `test_connectivity_media_notepad`,
+    `test_tenancy_scope`, `test_tenant_orphans`, `test_semantic_plane_tenancy` and
+    `test_unified_platform`.
+
+  **Negative runs:**
+  - The list's project filter removed: beta listed alpha's set.
+  - The set authorizer emptied: beta read alpha's set (200).
+  - Both were restored byte for byte.
+
+  **Found by the suite-cost measurement** (`measure_suite_cost`, which only the full tier
+  runs): two routes repeated a query shape where their baseline allows none. Both were fixed by
+  reading the value before a commit expires the row.
+  - `POST /media-items/{id}/extract` (this change) read `item.media_set_id` after its audit
+    commit, which loaded the item a second time.
+  - `POST /modeling/objectives/{id}/release` (A3c, `d999cc3`): the release gate commits, and
+    the route's later reads of `objective.project_id` loaded the objective again. The fast and
+    default tiers do not measure query shapes, so A3c's own measurements missed it. With that fixed,
+    the next measurement showed the gate itself reading the objective's checks twice:
+    `_evaluate_submission_checks` loaded them, and `_release_eligibility` queried them again.
+    The gate now reads them once and keeps each check's kind before the evaluation commits,
+    which helps every route that asks it.
+
+  **Measured.**
+  - The full six-project run at migration head `0048` passed 399 of 399, with none retried.
+    The Platform Graph test at 1366 passed at 41.0 s, just under its 45 s limit, so its task
+    stands.
+  - Data & Media's flows pass with the scoping on.
+  - Route cost and the payload hold. The suite-cost census passed, with several routes now
+    running fewer statements.
+  - The browser-evidence, query-bounds, request-cost and suite-cost baselines are re-recorded
+    at `0048`.
+
+  **Not done:** the OIDC tier (`frontend/tests/production/oidc-rbac.spec.ts`) needs an identity
+  provider this machine does not have, so it was not run. The pytest principals stand in for
+  it: they are real, project-limited principals, not local mode's `*`.
 - **A6 — Every resource kind has a URL.** **Open** — one module maps each kind to a
   `/workspace/<view>?…` route, and `navigate(view, params)` keeps the query and dispatches
   `popstate`. The readers this wave adds: `?graph=` (Pipeline), `?type=&section=&page=`

@@ -438,14 +438,21 @@ def list_checks(objective_id: str, principal: Principal = Depends(require_permis
     return db.query(MevCheck).filter(MevCheck.objective_id == objective_id, MevCheck.project_id == objective.project_id).all()
 
 
-def _evaluate_submission_checks(db: Session, submission: ModelSubmission) -> List[MevCheckResult]:
+def _objective_checks(db: Session, submission: ModelSubmission) -> List[MevCheck]:
+    return db.query(MevCheck).filter(MevCheck.objective_id == submission.objective_id,
+                                     MevCheck.project_id == submission.project_id).all()
+
+
+def _evaluate_submission_checks(db: Session, submission: ModelSubmission,
+                                checks: Optional[List[MevCheck]] = None) -> List[MevCheckResult]:
     """
     Materialize check results for a submission. Automatic checks evaluate the submission's stored
     metric vs threshold/operator -> approved/rejected automatically. Manual checks start pending.
-    Idempotent per (submission, check): existing results are reused.
+    Idempotent per (submission, check): existing results are reused. A caller that already
+    loaded the objective's checks passes them, so they are not read twice.
     """
-    checks = db.query(MevCheck).filter(MevCheck.objective_id == submission.objective_id,
-                                       MevCheck.project_id == submission.project_id).all()
+    if checks is None:
+        checks = _objective_checks(db, submission)
     results: List[MevCheckResult] = []
     metrics = submission.metrics or {}
     for chk in checks:
@@ -533,17 +540,20 @@ def _release_eligibility(db: Session, submission: ModelSubmission) -> Dict[str, 
     A submission is release-eligible iff no check is rejected AND all manual checks are approved.
     Ensures check results exist (materializes automatic ones) before judging.
     """
-    _evaluate_submission_checks(db, submission)
-    checks = {c.id: c for c in db.query(MevCheck).filter(
-        MevCheck.objective_id == submission.objective_id,
-        MevCheck.project_id == submission.project_id).all()}
+    # The checks are read once. What judging needs from them is taken before the evaluation
+    # commits: after the commit each check would load again (audit_suite_cost counted the
+    # second read of the objective's checks on every route that asks the gate).
+    submission_id, project_id = submission.id, submission.project_id
+    checks = _objective_checks(db, submission)
+    kinds = {check.id: check.check_type for check in checks}
+    _evaluate_submission_checks(db, submission, checks)
     results = db.query(MevCheckResult).filter(
-        MevCheckResult.submission_id == submission.id,
-        MevCheckResult.project_id == submission.project_id).all()
+        MevCheckResult.submission_id == submission_id,
+        MevCheckResult.project_id == project_id).all()
     rejected = [r.check_id for r in results if r.status == "rejected"]
     pending_manual = [
         r.check_id for r in results
-        if r.status == "pending" and checks.get(r.check_id) and checks[r.check_id].check_type == "manual"
+        if r.status == "pending" and kinds.get(r.check_id) == "manual"
     ]
     eligible = (len(rejected) == 0) and (len(pending_manual) == 0)
     return {"eligible": eligible, "rejected_checks": rejected, "pending_manual_checks": pending_manual}
