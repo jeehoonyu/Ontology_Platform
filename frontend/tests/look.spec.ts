@@ -489,6 +489,21 @@ test.describe("GOAL_LOOK", () => {
       font: "14px 400", color: "rgb(28, 33, 39)", indicator: "none", current: null });
   });
 
+  // GOAL_FOUNDATIONS A8. Each screen's underline tab set is the Tabs primitive: a
+  // .tabs nav whose selected tab says so with aria-current. A screen still drawing its
+  // own buttons has neither. The list grows as screens move.
+  for (const [route, name] of [["decision", "Decision intelligence views"], ["ops", "Operational control views"]]) {
+    test(`The ${route} tabs are the Tabs primitive`, async ({ page }) => {
+      await page.goto(`/workspace/${route}`);
+      const bar = page.getByRole("navigation", { name });
+      await expect(bar).toBeVisible();
+      expect.soft(await bar.evaluate((node) => ({
+        primitive: node.classList.contains("tabs"),
+        current: [...node.querySelectorAll("button")].filter((button) => button.getAttribute("aria-current") === "true").length,
+      })), `the ${route} tab bar`).toEqual({ primitive: true, current: 1 });
+    });
+  }
+
   // GOAL_FOUNDATIONS A8, SegmentedControl. UI_CONFIG's light segmented control: 30px,
   // the selected option white with the default button's ring, the others transparent
   // in #5f6b7c; each option says whether it is pressed.

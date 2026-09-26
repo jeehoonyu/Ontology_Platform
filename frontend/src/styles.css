@@ -434,28 +434,6 @@ button:hover,
   margin: 12px 0;
 }
 
-.ops-tabs {
-  display: flex;
-  overflow-x: auto;
-  border: 1px solid var(--divider);
-  background: var(--surface-card);
-}
-
-.ops-tabs button {
-  box-shadow: none;
-  flex: 0 0 auto;
-  min-height: 40px;
-  border: 0;
-  border-right: 1px solid var(--divider);
-  border-radius: 0;
-  background: transparent;
-}
-
-.ops-tabs button.active {
-  color: var(--text-selected);
-  box-shadow: inset 0 -3px 0 var(--text-selected);
-  background: var(--surface-app);
-}
 
 .ops-command-layout,
 .ops-grid {

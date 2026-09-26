@@ -372,6 +372,18 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     full run shares.
   - It passed 4 of 4 alone. It is filed as its own task, to be found with server-side evidence
     rather than by raising the timeout.
+
+  **2. Ops.** Ops' tab bar is `Tabs`, and keeps `.ops-tabs` and its name. Its three rules go.
+  They used tokens only, so raw colours hold at 594.
+  - Proven by `look.spec.ts::The ops tabs are the Tabs primitive`, one case of a test that grows
+    with each screen: the named bar is a `.tabs` nav with exactly one `aria-current` tab. U3's
+    Ops border check and the evaluator's Ops flow pass.
+  - Negative run: the hand-written buttons put back read no primitive and no current tab.
+    Restored byte for byte; the hash matched (`fc8872e4a3d32e0c`).
+  - `docs/INERT_CONTROLS.md` counts 350 controls, one fewer, because the tab buttons are now
+    written once, in `Tabs`.
+  - Measured: the full six-project run passed 390 of 390, with the same single retry of the
+    Platform Graph test, a third run in a row.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by

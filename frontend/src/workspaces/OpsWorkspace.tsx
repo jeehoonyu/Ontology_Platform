@@ -3,6 +3,7 @@ import { Activity, Bell, BookOpenCheck, Check, CircleAlert, Play, Plus, RefreshC
 import { DataTable, EmptyState, ErrorBanner, KeyValueGrid, LoadingState, Metric, Panel, StatusBadge } from "../components/data/DataDisplay";
 import { CHECK_RESULT, INCIDENT, intentOf, SEVERITY } from "../components/data/intents";
 import { DataGrid, type GridColumnSpec } from "../components/data/DataGrid";
+import { Tabs } from "../components/layout/Tabs";
 import { Page } from "../components/workbench/Workbench";
 import type { JsonObject, TableRow } from "../types";
 import { acknowledgeNotification, createAlertRule, createIncident, createRunbook, evaluateAlerts, executeRunbook, getOpsSummary, getReliabilitySummary, incidentIsOpen, ingestOpsEvent, listAlertRules, listAlerts, listInbox, listIncidents, listOpsEvents, listRunbooks, updateIncident, type AlertEvent, type AlertRule, type Incident, type OpsEvent, type OpsNotification, type OpsSummary, type ReliabilitySummary, type Runbook } from "../api/opsApi";
@@ -29,7 +30,7 @@ export function OpsWorkspace() {
     <div className="ops-topbar"><button onClick={() => void refresh()} disabled={!!busy || loading} aria-busy={loading}><RefreshCw size={15} />Refresh</button><button className="primary" onClick={() => void act("Alert rules evaluated", async () => { await evaluateAlerts(); await refresh(); })} disabled={!!busy}><Siren size={15} />Evaluate alerts</button></div>
     <ErrorBanner message={error} />{notice ? <div className="inline-success" role="status">{notice}</div> : null}
     <div className="ops-metrics"><Metric label="Operational events" value={summary?.events || 0} /><Metric label="Open alerts" value={summary?.open_alerts || 0} /><Metric label="Open incidents" value={summary?.open_incidents || 0} /><Metric label="Pending approvals" value={summary?.pending_approvals || 0} /><Metric label="Unread notifications" value={summary?.unread_notifications || 0} /></div>
-    <nav className="ops-tabs" aria-label="Operational control views">{TABS.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>{item.label}</button>)}</nav>
+    <Tabs className="ops-tabs" label="Operational control views" items={TABS} value={tab} onChange={setTab} />
     {tab === "command" ? <CommandTab summary={summary} events={events} /> : null}
     {tab === "alerts" ? <AlertsTab rules={rules} alerts={alerts} busy={busy} onCreate={(body) => void act("Alert rule created", async () => { await createAlertRule(body); await refresh(); })} onEvent={(body) => void act("Operational event ingested", async () => { await ingestOpsEvent(body); await refresh(); })} /> : null}
     {tab === "incidents" ? <IncidentsTab incidents={incidents} alerts={alerts} busy={busy} onCreate={(body) => void act("Incident opened", async () => { await createIncident(body); await refresh(); })} onResolve={(id) => void act("Incident resolved", async () => { await updateIncident(id, { status: "RESOLVED" }); await refresh(); })} /> : null}

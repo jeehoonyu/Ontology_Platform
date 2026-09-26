@@ -37,7 +37,7 @@ None. Every `var()` names a property something defines.
 
 Counts to read, not ceilings to meet: the goal is not a rule that every value come from a token.
 
-- **Radius literals:** 99 across 10 distinct values: `4px` ×19, `5px` ×17, `8px` ×17, `6px` ×15, `50%` ×10, `0` ×8, `7px` ×6, `3px` ×5, `2px` ×1, `8px 8px 0 0` ×1.
-- **Height literals** (`height`, `min-height`, `max-height` in px): 87.
+- **Radius literals:** 98 across 10 distinct values: `4px` ×19, `5px` ×17, `8px` ×17, `6px` ×15, `50%` ×10, `0` ×7, `7px` ×6, `3px` ×5, `2px` ×1, `8px 8px 0 0` ×1.
+- **Height literals** (`height`, `min-height`, `max-height` in px): 86.
 - **Legacy alias names in use:** 0 (`--border` ×0, `--surface` ×0, `--surface-strong` ×0, `--accent` ×0, `--muted` ×0, `--text` ×0, `--line` ×0). U10 moved their uses to real token names and deleted the alias block; a use now is an undefined name.
 - **Tokens nothing reads,** directly or through another token: 316 of 397.

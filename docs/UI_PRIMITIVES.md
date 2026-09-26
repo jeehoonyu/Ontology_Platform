@@ -23,6 +23,7 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `DeveloperEvidence` | `components/data/DataDisplay.tsx` | **5** — App, DataMedia, Delivery, Security, and 1 more |
 | `PaneHost` | `components/layout/Pane.tsx` | **3** — OntologyManager, PipelineBuilder, VisualBuilder |
 | `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
+| `Tabs` | `components/layout/Tabs.tsx` | **2** — DecisionWorkspace, OpsWorkspace |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |
@@ -32,7 +33,6 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `RelationshipStrip` | `components/data/DataDisplay.tsx` | **1** — OntologyManager |
 | `SectionCards` | `components/data/DataDisplay.tsx` | **1** — App |
 | `SegmentedControl` | `components/layout/Tabs.tsx` | **1** — OntologyHealthPanel |
-| `Tabs` | `components/layout/Tabs.tsx` | **1** — DecisionWorkspace |
 | `Toolbar` | `components/workbench/Workbench.tsx` | **1** — PipelineBuilder |
 | `WarningList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `DebugJson` | `components/data/DataDisplay.tsx` | **0** — — |
