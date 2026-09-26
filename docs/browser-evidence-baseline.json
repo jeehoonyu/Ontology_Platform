@@ -1,12 +1,12 @@
 {
   "provenance": {
     "migration_head": "0047_approval_consumption",
-    "bundle_source_hash": "39481a619ee66bf2978b8e64657cfc70b28746db92eeadddadc1a5ab5695fb72",
+    "bundle_source_hash": "73cf4a48f449eecfd611a91bbf003c1e03d930d4bfe92a4ca35301c8e8bc4928",
     "dependencies": {
       "digest": "77e430376fe5dfb1",
       "closure": 46
     },
-    "recorded_at": "2026-09-26T05:34:22Z",
+    "recorded_at": "2026-09-26T05:48:07Z",
     "stale_after": "migration head"
   },
   "known_failing": {},
@@ -15,38 +15,38 @@
     "desktop-1280": {
       "failed": 0,
       "flaky": 0,
-      "ran": 251,
+      "ran": 252,
       "skipped": 5
     },
     "laptop-1366": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 230
+      "skipped": 231
     },
     "mobile-375": {
       "failed": 0,
       "flaky": 0,
       "ran": 27,
-      "skipped": 229
+      "skipped": 230
     },
     "tablet-1024": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 230
+      "skipped": 231
     },
     "tablet-768": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 230
+      "skipped": 231
     },
     "wide-1600": {
       "failed": 0,
       "flaky": 0,
       "ran": 26,
-      "skipped": 230
+      "skipped": 231
     }
   },
   "tests": {
@@ -89,6 +89,7 @@
     "desktop-1280 :: Latest incidents lists the most recently updated and says how many are open": "ran",
     "desktop-1280 :: Latest incidents says nothing more when it lists every open incident": "ran",
     "desktop-1280 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "ran",
+    "desktop-1280 :: ModelOps releases only what its gates allow": "ran",
     "desktop-1280 :: OFFLINE is not shown as success": "ran",
     "desktop-1280 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "ran",
     "desktop-1280 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "ran",
@@ -345,6 +346,7 @@
     "laptop-1366 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "laptop-1366 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "laptop-1366 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "laptop-1366 :: ModelOps releases only what its gates allow": "skipped",
     "laptop-1366 :: OFFLINE is not shown as success": "skipped",
     "laptop-1366 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "laptop-1366 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
@@ -601,6 +603,7 @@
     "mobile-375 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "mobile-375 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "mobile-375 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "mobile-375 :: ModelOps releases only what its gates allow": "skipped",
     "mobile-375 :: OFFLINE is not shown as success": "skipped",
     "mobile-375 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "mobile-375 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
@@ -857,6 +860,7 @@
     "tablet-1024 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "tablet-1024 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "tablet-1024 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "tablet-1024 :: ModelOps releases only what its gates allow": "skipped",
     "tablet-1024 :: OFFLINE is not shown as success": "skipped",
     "tablet-1024 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "tablet-1024 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
@@ -1113,6 +1117,7 @@
     "tablet-768 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "tablet-768 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "tablet-768 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "tablet-768 :: ModelOps releases only what its gates allow": "skipped",
     "tablet-768 :: OFFLINE is not shown as success": "skipped",
     "tablet-768 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "tablet-768 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",
@@ -1369,6 +1374,7 @@
     "wide-1600 :: Latest incidents lists the most recently updated and says how many are open": "skipped",
     "wide-1600 :: Latest incidents says nothing more when it lists every open incident": "skipped",
     "wide-1600 :: ModelOps completes objective-to-monitor lifecycle through structured controls": "skipped",
+    "wide-1600 :: ModelOps releases only what its gates allow": "skipped",
     "wide-1600 :: OFFLINE is not shown as success": "skipped",
     "wide-1600 :: Object Explorer facets draw every bin, and a value list says how many values it holds": "skipped",
     "wide-1600 :: Object Explorer queries bootstrapped ontology objects and opens a typed profile": "skipped",

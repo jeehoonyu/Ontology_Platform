@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.database import Base, engine, SessionLocal  # noqa: E402
 from app import models, models_action  # noqa: E402  (ensure tables registered)
 from app import modeling as M  # noqa: E402
+from app import modeling_evaluation_ops  # noqa: E402,F401  (the release gate's tables: release asks it)
 
 Base.metadata.create_all(bind=engine)
 

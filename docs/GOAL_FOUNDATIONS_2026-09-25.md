@@ -183,6 +183,36 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Negative run: the old wording put back failed "its row". Restored byte for byte; the hash
     matched (`39481a619ee66bf2`).
   - Measured: the full six-project run passed 382 of 382, with none retried.
+  - Committed with the fast tier failing: the comment moved a table's line in
+    `docs/TABLE_TRUNCATION.md`, and the tier's exit code was lost in a pipe. `356ec94`
+    regenerated the reference. No table changed, and the tier's exit code is now read directly.
+
+  **c. ModelOps.** The data came first.
+  - `POST /modeling/objectives/{id}/release` now asks the release gate
+    (`_release_eligibility`) before it marks anything. It refuses an ineligible submission with
+    the same 422 detail as the gated release, and changes nothing. With no gate defined, a
+    submission releases as before.
+  - The Releases tab now receives the eligibility the Gates tab shows. "Create release" needs
+    it as well as a successful training run, and a note says why the button is off.
+  - `test_modeling_io` releases through the modeling router alone, so it now registers the
+    gate's tables.
+  - Proven by `oms/test_model_release_gate.py`. With an automatic gate that rejects it, a
+    submission's release is refused with the rejected check named, and `released` stays false.
+    An eligible one still releases, and so does one with no gate at all. At `db24fe8` it failed:
+    "a gate-blocked submission is refused: 200 … "released":true".
+  - Also proven by `trust.spec.ts::ModelOps releases only what its gates allow`. A trained
+    submission with a manual gate pending: "Create release" and "Start deployment" are disabled,
+    the note shows, and no release request is sent.
+  - The modeling tests that release (`test_modeling_io`, `test_modeling_evaluation_ops`,
+    `test_modelops`, `test_foundry_tools`, `test_docs_conformance`) all pass.
+
+  **Negative runs:**
+  - The backend's gate check removed: the pytest failed again with the submission released. The
+    file was restored byte for byte.
+  - The button keyed on training status again: "Create release, with a gate pending" was
+    enabled. Restored byte for byte; the hash matched (`73cf4a48f449eecf`).
+  - Measured: the full six-project run passed 383 of 383, with none retried. That includes the
+    evaluator's ModelOps flow, which releases a submission after its automatic gate approves it.
 - **A4 — The grant forms say they do not govern data access.** **Open** — until decision O,
   Security's project grants and Control Panel's role grants each carry "does not govern data
   access" beside the form, and the backend docstrings stop claiming otherwise. To be proven by

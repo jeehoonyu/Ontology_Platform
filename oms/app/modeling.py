@@ -457,6 +457,19 @@ def release_model(objective_id: str, body: ReleaseRequest, principal: Principal 
     if target.project_id != objective.project_id:
         raise HTTPException(status_code=409, detail="Model submission belongs to another project")
 
+    # Only through the release gate (GOAL_FOUNDATIONS A3c). This marked a gate-blocked
+    # submission released, and ModelOps called it before the gated release, which then
+    # refused with the flag already set and deployment unlocked. The gate lives in the
+    # evaluation module, which imports this one.
+    from .modeling_evaluation_ops import _release_eligibility
+    eligibility = _release_eligibility(db, target)
+    if not eligibility["eligible"]:
+        raise HTTPException(status_code=422, detail={
+            "error": "submission not release-eligible",
+            "rejected_checks": eligibility["rejected_checks"],
+            "pending_manual_checks": eligibility["pending_manual_checks"],
+        })
+
     # Mark all others as not released, then mark target
     db.query(ModelSubmission).filter(
         ModelSubmission.objective_id == objective_id,

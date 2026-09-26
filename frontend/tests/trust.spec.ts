@@ -136,4 +136,37 @@ test.describe("GOAL_FOUNDATIONS A3", () => {
     await expect(page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Automation Detail" }) })
       .locator(".badge").first(), "its detail").toHaveText("disabled");
   });
+
+  // c. "Create release" keyed on the submission having trained, not on the gate the
+  // Gates tab shows, and its first request marked the submission released before the
+  // gated release was refused. A pending manual gate makes a submission ineligible.
+  test("ModelOps releases only what its gates allow", async ({ page }) => {
+    const suffix = Date.now();
+    const assetId = `release_gate_${suffix}`;
+    expect((await page.request.post("/data-assets", { data: {
+      id: assetId, display_name: "Release gate data", kind: "dataset", asset_schema: {},
+      records: [{ temperature: 10, pressure: 20, risk_score: 15 }, { temperature: 30, pressure: 60, risk_score: 45 }],
+    } })).ok()).toBeTruthy();
+    const objective = await (await page.request.post("/modeling/objectives", { data: {
+      display_name: `Release gate ${suffix}`, problem_type: "regression", target_field: "risk_score",
+      feature_fields: ["temperature", "pressure"], input_asset_id: assetId,
+    } })).json();
+    const submission = await (await page.request.post(`/modeling/objectives/${objective.id}/train`,
+                                                      { data: { training_dataset_id: assetId } })).json();
+    expect((await page.request.post(`/modeling/objectives/${objective.id}/checks`,
+                                    { data: { name: "human_review", check_type: "manual" } })).ok()).toBeTruthy();
+
+    const released: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/release(s)?$/.test(new URL(request.url()).pathname)) released.push(request.url());
+    });
+    await page.goto("/workspace/models");
+    await page.getByLabel("Selected objective").selectOption(objective.id);
+    await page.getByLabel("Selected submission").selectOption(submission.id);
+    await page.getByRole("button", { name: "Releases & Deployments", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Create release" }), "Create release, with a gate pending").toBeDisabled();
+    await expect(page.getByRole("note").filter({ hasText: "has not passed its gates" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Start deployment" }), "Start deployment").toBeDisabled();
+    expect(released, "no release request was sent").toEqual([]);
+  });
 });
