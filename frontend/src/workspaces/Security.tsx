@@ -13,7 +13,6 @@ import {
 } from "../components/data/DataDisplay";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { getAuthSession } from "../api/authApi";
-import { classNames } from "../utils/format";
 import {
   assignResourceMarking,
   checkClassificationAccess,

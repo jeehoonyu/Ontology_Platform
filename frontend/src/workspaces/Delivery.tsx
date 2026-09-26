@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Tabs } from "../components/layout/Tabs";
 import {
   createComputeModule,
   createProduct,
@@ -34,7 +35,6 @@ import {
 } from "../components/data/DataDisplay";
 import { LIFECYCLE, intentOf } from "../components/data/intents";
 import { useAsyncState } from "../hooks/useAsyncState";
-import { classNames } from "../utils/format";
 import type { TableRow } from "../types";
 
 type SectionId = "products" | "marketplace" | "code";
@@ -105,18 +105,8 @@ export function Delivery() {
         </div>
       </header>
 
-      <div className="button-row top-actions">
-        {SECTIONS.map((item) => (
-          <button
-            key={item.id}
-            className={classNames("nav-item", section === item.id && "active")}
-            onClick={() => setSection(item.id)}
-          >
-            <strong>{item.label}</strong>
-            <span>{item.hint}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs className="delivery-tabs" label="Delivery sections" items={SECTIONS} value={section} onChange={setSection} />
+      <p className="delivery-section-hint">{SECTIONS.find((item) => item.id === section)?.hint}</p>
 
       <div className="grid metrics">
         <Metric label="Products" value={products.value?.length ?? 0} />

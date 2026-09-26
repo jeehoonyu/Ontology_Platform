@@ -14,7 +14,6 @@ import { CHECK_RESULT, LIFECYCLE, SEVERITY, WORKER_STATUS, intentOf } from "../c
 import { DataGrid } from "../components/data/DataGrid";
 import { Page } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
-import { classNames } from "../utils/format";
 import * as admin from "../api/controlPanelApi";
 
 const SECTIONS = [

@@ -221,6 +221,13 @@ button:hover,
 }
 
 /* The tint kind (bottom panels): a 35px bar, the selected tab tinted, no indicator. */
+/* Delivery's sections: the active section's one-line description sits under the bar,
+   where each tab used to carry it as a second line (GOAL_FOUNDATIONS A8). */
+.delivery-section-hint {
+  margin: 8px 0 14px;
+  color: var(--text-muted);
+}
+
 .tabs.tabs-tint {
   gap: 2px;
   min-height: var(--tab-bottom-panel-height);
@@ -890,26 +897,6 @@ button:disabled {
 
 .builder-breakpoint-control {
   display: inline-flex;
-  padding: 2px;
-  border: 1px solid #c6d0d7;
-  border-radius: 5px;
-  background: #f4f7f8;
-}
-
-.builder-breakpoint-control button {
-  box-shadow: none;
-  min-height: 28px;
-  padding: 4px 7px;
-  border: 0;
-  background: transparent;
-  color: #5d707c;
-  text-transform: capitalize;
-}
-
-.builder-breakpoint-control button.active {
-  background: #fff;
-  color: #176b8f;
-  box-shadow: 0 1px 3px rgb(24 46 58 / 18%);
 }
 
 .operation-message {

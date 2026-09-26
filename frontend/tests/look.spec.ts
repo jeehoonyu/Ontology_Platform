@@ -494,7 +494,7 @@ test.describe("GOAL_LOOK", () => {
   // own buttons has neither. The list grows as screens move.
   for (const [route, name] of [["decision", "Decision intelligence views"], ["ops", "Operational control views"],
                                ["models", "ModelOps lifecycle"], ["security", "Security & Governance views"],
-                               ["control-panel", "Administration sections"]]) {
+                               ["control-panel", "Administration sections"], ["delivery", "Delivery sections"]]) {
     test(`The ${route} tabs are the Tabs primitive`, async ({ page }) => {
       await page.goto(`/workspace/${route}`);
       const bar = page.getByRole("navigation", { name });
@@ -545,6 +545,25 @@ test.describe("GOAL_LOOK", () => {
     expect.soft(await state(), "after ArrowRight").toEqual({
       primitive: true, tabs: [["Comments", "false", -1], ["Proposals", "true", 0]] });
     await expect.soft(list.getByRole("tab", { name: /Proposals/ }), "focus follows the selection").toBeFocused();
+  });
+
+  // GOAL_FOUNDATIONS A8. The Workshop breakpoint switch is the SegmentedControl, with
+  // each option saying whether it is pressed.
+  test("The Workshop breakpoint switch is the SegmentedControl", async ({ page }) => {
+    await page.goto("/workspace/workshop");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const control = page.getByRole("group", { name: "Workshop breakpoint" });
+    await expect(control).toBeVisible();
+    const pressed = () => control.evaluate((node) => ({
+      primitive: node.classList.contains("segmented-control"),
+      pressed: [...node.querySelectorAll("button")].map((button) => [button.textContent, button.getAttribute("aria-pressed")]),
+    }));
+    expect.soft(await pressed(), "the breakpoint switch").toEqual({ primitive: true,
+      pressed: [["Desktop", "true"], ["Tablet", "false"], ["Mobile", "false"]] });
+    await control.getByRole("button", { name: "Tablet" }).click();
+    expect.soft((await pressed()).pressed, "after choosing Tablet").toEqual([["Desktop", "false"], ["Tablet", "true"], ["Mobile", "false"]]);
   });
 
   // GOAL_FOUNDATIONS A8, SegmentedControl. UI_CONFIG's light segmented control: 30px,

@@ -19,11 +19,12 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `DataTable` | `components/data/DataDisplay.tsx` | **14** — App, AgentRuntimePanel, Analytics, Automate, and 10 more |
 | `Page` | `components/workbench/Workbench.tsx` | **13** — App, Analytics, Automate, ControlPanel, and 9 more |
 | `Metric` | `components/data/DataDisplay.tsx` | **12** — App, Analytics, Automate, ControlPanel, and 8 more |
+| `Tabs` | `components/layout/Tabs.tsx` | **6** — ControlPanel, DecisionWorkspace, Delivery, ModelOps, and 2 more |
 | `DataGrid` | `components/data/DataGrid.tsx` | **5** — ControlPanel, DataMedia, OntologyRegistryPanel, OpsWorkspace, and 1 more |
 | `DeveloperEvidence` | `components/data/DataDisplay.tsx` | **5** — App, DataMedia, Delivery, Security, and 1 more |
-| `Tabs` | `components/layout/Tabs.tsx` | **5** — ControlPanel, DecisionWorkspace, ModelOps, OpsWorkspace, and 1 more |
 | `PaneHost` | `components/layout/Pane.tsx` | **3** — OntologyManager, PipelineBuilder, VisualBuilder |
 | `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
+| `SegmentedControl` | `components/layout/Tabs.tsx` | **2** — OntologyHealthPanel, VisualBuilder |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |
@@ -32,7 +33,6 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `PlatformFlow` | `components/workbench/Workbench.tsx` | **1** — App |
 | `RelationshipStrip` | `components/data/DataDisplay.tsx` | **1** — OntologyManager |
 | `SectionCards` | `components/data/DataDisplay.tsx` | **1** — App |
-| `SegmentedControl` | `components/layout/Tabs.tsx` | **1** — OntologyHealthPanel |
 | `Toolbar` | `components/workbench/Workbench.tsx` | **1** — PipelineBuilder |
 | `WarningList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `DebugJson` | `components/data/DataDisplay.tsx` | **0** — — |

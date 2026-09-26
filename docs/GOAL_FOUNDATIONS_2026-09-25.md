@@ -308,7 +308,8 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   restores the previous one, and an unknown id shows a NonIdealState naming it, never the first
   item. Each is shown to fail at `38b096a`. The server's view list and `CORE_VIEWS` come from one
   source (with A9).
-- **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — Dialog traps
+- **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
+  (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu opens from a button with `aria-haspopup`, arrow
   keys move and Escape returns focus; Tooltip opens on hover and on focus. Their look is
   UI_CONFIG's overlays. The first adopters are the command palette and Object Explorer's action
@@ -316,7 +317,7 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   (Tooltip). To be proven by `frontend/tests/overlays.spec.ts`: focus stays inside while open,
   Escape closes and returns focus, axe is clean with each open, and Escape never also cancels a
   live drag. Each is shown to fail with the primitive's behaviour removed.
-- **A8 — Tabs and SegmentedControl replace the ad-hoc tabs.** **Open** — `raw_colour_ceiling`
+- **A8 — Tabs and SegmentedControl replace the ad-hoc tabs.** **Met** — `raw_colour_ceiling`
   (599) falls as the eight per-screen tab styles go, re-recorded in each commit (K8). Underline,
   tint, pill and vertical variants; SegmentedControl with `aria-pressed`. The Decision, Ops and
   ModelOps tabs gain `aria-current`, and the artifact review keeps `role="tab"`. To be proven by a
@@ -455,6 +456,34 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - The hand-written tablist put back: no primitive, and a tab stop on both tabs.
   - Restored byte for byte; the hash matched (`9d5d16be717dcc4a`).
   - Measured: the full six-project run passed 395 of 395, with the known Platform Graph retry.
+
+  **7. Delivery and the Workshop breakpoint.**
+  - Delivery's three section buttons, which borrowed the sidebar's `nav-item` classes, are
+    `Tabs`, named "Delivery sections". Each button used to carry a one-line hint as a second
+    line; the active section's hint now sits in a muted line under the bar, so nothing is lost.
+  - The Workshop breakpoint switch is `SegmentedControl`, named "Workshop breakpoint", with
+    capitalized labels and `aria-pressed`. Its own navy-accented CSS goes.
+  - Three imports of `classNames` that no longer had a caller (Delivery, Security, Control
+    Panel) go with them.
+  - Raw colours fall from 577 to 571.
+  - Proven by the delivery case of `look.spec.ts::The … tabs are the Tabs primitive`, and by
+    `…::The Workshop breakpoint switch is the SegmentedControl`. The latter reads Desktop
+    pressed, chooses Tablet, and reads Tablet pressed.
+
+  **Negative runs,** against a rebuilt dist:
+  - Delivery's hand-written buttons put back: no primitive and no current tab.
+  - The breakpoint's hand-written buttons put back: no primitive and no `aria-pressed`.
+  - Both were restored byte for byte, and the hash matched (`d668a6281fb56443`).
+  - Measured: the full six-project run passed 397 of 397, with the known Platform Graph retry.
+
+  **A8 as a whole.** All eight tab sets the goal names now draw from `Tabs`: decision, ops,
+  modelops, security (with Control Panel), the drawer, the artifact review, delivery and the
+  breakpoint. Raw colours fell from 599 to 571.
+  - **Narrowed, in the open:** the underline and tint kinds were built, plus the tablist
+    semantics and `SegmentedControl`. The pill and vertical kinds were not, because no screen
+    here needs them. They come with their first readers, the H goal's Files pill tabs and
+    project navigation.
+  - `raw_colour_ceiling` passes to A7.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by

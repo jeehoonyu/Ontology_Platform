@@ -1,4 +1,5 @@
 import "@xyflow/react/dist/style.css";
+import { SegmentedControl } from "../components/layout/Tabs";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -171,6 +172,11 @@ function collaborationClientId(): string {
   return pageClientId;
 }
 
+type Breakpoint = "desktop" | "tablet" | "mobile";
+const BREAKPOINTS: ReadonlyArray<{ id: Breakpoint; label: string }> = [
+  { id: "desktop", label: "Desktop" }, { id: "tablet", label: "Tablet" }, { id: "mobile", label: "Mobile" },
+];
+
 export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderProps) {
   const queryClient = useQueryClient();
   const artifacts = useQuery({ queryKey: ["artifacts", artifactType], queryFn: () => listArtifacts(artifactType) });
@@ -199,7 +205,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const paneState = usePaneLayout(`visual-${artifactType}`, VISUAL_PANES);
   const [instance, setInstance] = useState<ReactFlowInstance<Node<ArtifactNodeData>, Edge> | null>(null);
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
-  const [breakpoint, setBreakpoint] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [breakpoint, setBreakpoint] = useState<Breakpoint>("desktop");
   const undoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   // The node and box the last Inspector edit changed, while edits to it keep coming. Any
   // other entry, an Undo or a Redo ends the run, so the next keystroke starts a new one.
@@ -738,7 +744,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           <button title="Undo" aria-label="Undo" onClick={undo} disabled={!undoStack.current.length}><Undo2 size={16} /></button>
           <button title="Redo" aria-label="Redo" onClick={redo} disabled={!redoStack.current.length}><Redo2 size={16} /></button>
           <button title="Auto-layout nodes" onClick={layoutNodes}><AlignHorizontalSpaceAround size={16} /> Layout</button>
-          {artifactType === "workshop" ? <div className="builder-breakpoint-control" aria-label="Workshop breakpoint">{(["desktop", "tablet", "mobile"] as const).map((item) => <button type="button" className={breakpoint === item ? "active" : ""} onClick={() => setBreakpoint(item)} key={item}>{item}</button>)}</div> : null}
+          {artifactType === "workshop" ? <SegmentedControl className="builder-breakpoint-control" label="Workshop breakpoint" value={breakpoint} onChange={setBreakpoint} options={BREAKPOINTS} /> : null}
           <button onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending}><Eye size={16} /> {previewMutation.isPending ? "Running" : "Preview"}</button>
           <button onClick={() => saveMutation.mutate({ reason: "Manual save" })} disabled={!dirty || saveMutation.isPending}><Save size={16} /> Save</button>
           <button className="primary-action" onClick={async () => {
