@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-26, after GOAL_FOUNDATIONS A8. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-26, after GOAL_FOUNDATIONS A5 and A7's first step. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -50,10 +50,17 @@ it before trusting it.
 | `15e664c` | **A8, 1**: `components/layout/Tabs.tsx` (`Tabs`, `SegmentedControl`); Decision and Ontology Health adopt; `Tabs` rides in `dragdrop-vendor` |
 | `fcc6104`, `4d8697a`, `088f3e0`, `4e01505`, `59ec98e`, `129dea3` | **A8, 2–7**: Ops, ModelOps, Security and Control Panel, the drawer (tint), the artifact review (tablist), Delivery and the breakpoint; A8 Met |
 | `f09a564` | The collaboration WebSocket and both event streams read their logs off the event loop (`oms/test_collaboration_socket_off_loop.py`) |
+| `0a6613d` | This note, updated |
+| `752572e` | **A7, 1**: `components/layout/Dialog.tsx`; the command palette and Object Explorer's action dialog adopt it (`frontend/tests/overlays.spec.ts`) |
+| `108e8bc` | The owner's decisions: N (a), menus stay buttons; A5's existing media sets stay unassigned |
+| `2d3bba0` | **A5**: search scopes incidents; media sets gain `project_id` (migration `0048`); the gate reads its checks once; four baselines re-recorded at `0048`; A5 Met |
 
 GOAL_LOOK: **Met, U1–U11.** Nothing has been pushed. Never push tags. The work continues in
-[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A4, A8 and A9 are Met; A5, A6
-and A7 are Open.
+[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A5, A8 and A9 are Met; A6 and A7
+are Open (A7's Dialog is done).
+
+**Decided 2026-09-26:** N (a), tabs and menus stay buttons; and for A5, existing media sets stay
+unassigned until someone assigns them.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
 - J (a): `tokens.css` imported whole.
@@ -73,31 +80,34 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | Command | Expected |
    | --- | --- |
    | `python oms/verify.py --fast` | 25 of 25 |
-   | `python oms/test_style_tokens_audit.py` | 51 assertions (0 undefined names, 0 references, 571 raw colours, no alias used or defined) |
+   | `python oms/test_style_tokens_audit.py` | 51 assertions (0 undefined names, 0 references, 563 raw colours, no alias used or defined) |
    | `python oms/test_route_payload_audit.py` | 41 assertions, shared closure 507 KB |
    | `python oms/audit_route_payload.py` | 17 routes, shared 518,923 B, three font lines, all shared |
    | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
-   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 571, held by GOAL_FOUNDATIONS A7 |
+   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 563, held by GOAL_FOUNDATIONS A7 |
    | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
    | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 29 passed (needs a current build); `trust.spec.ts` 12 passed |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS A7, then A6; A5 waits on the owner
+## Next: GOAL_FOUNDATIONS A7 (Menu, Tooltip), then A6
 
-1. **A5 waits on the owner.** Search incidents are a small change. Media sets need a migration
-   (`project_id`) and a choice of project for existing rows; the goal assumes none. A separate
-   task was already filed for the same scoping.
-2. **A7, overlays** (M): Dialog, Menu with Popover, Tooltip. It now owns `raw_colour_ceiling`
-   (571). The first adopters are the command palette and Object Explorer's action modal
-   (Dialog). The goal's A7 text lists the rest and the test.
-3. **A6, routes** (L): one route table, `navigate(view, params)`, and six query readers.
-4. **A known retry:** the Platform Graph test at 1366 fails its first attempt every full run
-   and passes on retry, because `/project/readiness` goes unanswered late in the run. It is
-   filed as its own task with the evidence. Without the trust tests it takes 20 s; readiness
-   is 0.04 s in-process. It is not the WebSocket (fixed, `f09a564`), and SQLite's 30 s lock
-   wait and the 40-thread limit are the leads.
+1. **A7, the rest** (M). `Dialog` is done. Two pieces remain:
+   - Menu with Popover, as a disclosure: a button with `aria-expanded` opens a panel of plain
+     buttons, per decision N (a). The goal names the pane actions as its adopter, but they sit
+     in the page flow on purpose (`Pane.tsx`), so check that before moving them.
+   - Tooltip, for the canvas's icon buttons, which use native `title=`.
+   - A7 owns `raw_colour_ceiling` (563).
+2. **A6, routes** (L): one route table, `navigate(view, params)`, and six query readers.
+3. **The Platform Graph retry** at 1366 is still filed as its own task. It passed the last run
+   at 41 s, against a 45 s limit.
+4. **A migration re-records four baselines.** Adding one stamps query-bounds, request-cost,
+   suite-cost and browser-evidence as past their life. Re-record them:
+   `audit_query_bounds.py --set-baseline`, `audit_request_cost.py --write-baseline`,
+   `measure_suite_cost.py` (about 20 minutes) and then `audit_suite_cost.py --write-baseline`,
+   and a full run. The suite-cost census is also the only check that sees repeated query
+   shapes: run it after any backend change.
 
 ## How each step is measured
 
@@ -167,11 +177,12 @@ I, M and N are still undecided, and the goal assumes their option (a).
 | --- | --- |
 | Route payload | shared closure 518,923 B at its ceiling, re-baselined at U8; measured 508 KB after U10 (inside the 8 KB tolerance) |
 | Route cost | 266 requests on open across 16 routes. One reading taken straight after a full run once gave Automate 8, and it read 13 when measured again |
-| Six-project run | 397 passed, 1,229 skipped, 0 failed, 1 known retry (the Platform Graph test at 1366); baseline re-recorded at A8 (1,626 entries). Earlier: 386 at A4. Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
+| Six-project run | 399 passed, 1,239 skipped, 0 failed; baseline re-recorded at A5, migration head `0048` (1,638 entries). The Platform Graph test at 1366 usually retries once | Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
 | Style tokens | 0 undefined names and references; 0 legacy alias uses (the block is gone) |
-| Raw colours outside `tokens.css` | 571 (661 at U1's census); held by GOAL_FOUNDATIONS A7 |
+| Raw colours outside `tokens.css` | 563 (661 at U1's census); held by GOAL_FOUNDATIONS A7 |
 | Raw empty states | 7 (`audit_ui_states`), from 32 |
-| Look tests | 29 in `look.spec.ts` and 12 in `trust.spec.ts`, each shown to fail with what it defends removed |
+| Look tests | 29 in `look.spec.ts`, 12 in `trust.spec.ts`, 2 in `overlays.spec.ts`, each shown to fail with what it defends removed |
+| Tenancy | `unscoped_reads_ceiling` 344, `tenant_orphan_ceiling` 50 (from 52 at A5) |
 
 ## Other open threads
 
