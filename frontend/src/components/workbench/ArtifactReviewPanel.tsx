@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Tabs } from "../layout/Tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, MessageSquare, Send, ShieldCheck, X } from "lucide-react";
 import {
@@ -95,14 +96,10 @@ export function ArtifactReviewPanel({ artifact, selectedNodeId, pendingCommands,
 
   return (
     <section className="artifact-review-panel" aria-label="Artifact review">
-      <div className="artifact-review-tabs" role="tablist">
-        <button className={tab === "comments" ? "active" : ""} onClick={() => setTab("comments")} role="tab" aria-selected={tab === "comments"}>
-          <MessageSquare size={14} /> Comments <StatusBadge value={comments.data?.comments.filter((item) => item.status === "OPEN").length || 0} intent="neutral" />
-        </button>
-        <button className={tab === "proposals" ? "active" : ""} onClick={() => setTab("proposals")} role="tab" aria-selected={tab === "proposals"}>
-          <ShieldCheck size={14} /> Proposals <StatusBadge value={proposals.data?.proposals.filter((item) => ["OPEN", "APPROVED", "CONFLICT"].includes(item.status)).length || 0} intent="neutral" />
-        </button>
-      </div>
+      <Tabs semantics="tablist" className="artifact-review-tabs" label="Review views" value={tab} onChange={setTab} items={[
+        { id: "comments", label: <><MessageSquare size={14} /> Comments <StatusBadge value={comments.data?.comments.filter((item) => item.status === "OPEN").length || 0} intent="neutral" /></> },
+        { id: "proposals", label: <><ShieldCheck size={14} /> Proposals <StatusBadge value={proposals.data?.proposals.filter((item) => ["OPEN", "APPROVED", "CONFLICT"].includes(item.status)).length || 0} intent="neutral" /></> },
+      ]} />
       {error ? <ErrorBanner message={error instanceof Error ? error.message : String(error)} /> : null}
       {tab === "comments" ? (
         <div className="artifact-review-content">

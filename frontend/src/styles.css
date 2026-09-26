@@ -1573,36 +1573,18 @@ button:disabled {
   background: #fff;
 }
 
+/* The review panel's two tabs split the pane's width (GOAL_FOUNDATIONS A8). */
 .artifact-review-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  border-bottom: 1px solid #d8e1e6;
-  background: #f5f8fa;
 }
 
-.artifact-review-tabs button {
-  box-shadow: none;
+.artifact-review-tabs .tab {
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 9px 6px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #566a75;
-  font-size: 11px;
-}
-
-.artifact-review-tabs button + button {
-  border-left: 1px solid #d8e1e6;
-}
-
-.artifact-review-tabs button.active {
-  box-shadow: inset 0 -2px #14799f;
-  background: #fff;
-  color: #123f54;
 }
 
 .artifact-review-content,

@@ -436,6 +436,25 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - The hand-written nav put back: the bar read no primitive, at 30px.
   - Restored byte for byte; the hash matched (`fb15add54380b81c`).
   - Measured: the full six-project run passed 394 of 394, with the known Platform Graph retry.
+
+  **6. The artifact review, as a tablist.**
+  - `Tabs` gains `semantics="tablist"`: a `role="tablist"` of `role="tab"` buttons with
+    `aria-selected`, one tab stop (the selected tab is tabIndex 0, the others -1), and the
+    arrow keys moving the selection and focus. The hand-written tabs had no arrow keys and a
+    tab stop on each tab.
+  - The artifact review uses it, named "Review views", so the seven `getByRole("tab")` locators
+    keep their role (decision N). The underline look replaces its 11px teal-underlined pair.
+    The two tabs still split the pane's width.
+  - Raw colours fall from 584 to 577.
+  - Proven by `look.spec.ts::The artifact review tabs are a Tabs tablist`. It reads Comments
+    selected at tabIndex 0 and Proposals at -1, presses ArrowRight, and reads Proposals selected
+    and focused. The movement-contract review tests and the U10 tag test pass.
+
+  **Negative runs,** against a rebuilt dist:
+  - The arrow keys ignored: the selection stayed on Comments, and focus did not move.
+  - The hand-written tablist put back: no primitive, and a tab stop on both tabs.
+  - Restored byte for byte; the hash matched (`9d5d16be717dcc4a`).
+  - Measured: the full six-project run passed 395 of 395, with the known Platform Graph retry.
 - **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by

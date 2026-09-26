@@ -523,6 +523,30 @@ test.describe("GOAL_LOOK", () => {
       background: "rgba(45, 114, 210, 0.1)", color: "rgb(33, 93, 176)", indicator: "none" });
   });
 
+  // GOAL_FOUNDATIONS A8, the review tablist. The artifact review keeps its ARIA tablist
+  // (decision N): Tabs draws it with aria-selected, one tab stop, and the arrow keys
+  // moving the selection, which the hand-written tabs lacked.
+  test("The artifact review tabs are a Tabs tablist", async ({ page }) => {
+    await page.goto("/workspace/workshop");
+    const create = page.getByRole("button", { name: "Create draft" });
+    await expect(create.or(page.locator(".visual-builder-shell")).first()).toBeVisible();
+    if (await create.isVisible()) await create.click();
+    const list = page.getByRole("tablist", { name: "Review views" });
+    await expect(list).toBeVisible();
+    const state = () => list.evaluate((node) => ({
+      primitive: node.classList.contains("tabs"),
+      tabs: [...node.querySelectorAll("[role='tab']")].map((tab) => [tab.textContent?.replace(/\d+/g, "").trim(),
+        tab.getAttribute("aria-selected"), (tab as HTMLElement).tabIndex]),
+    }));
+    expect.soft(await state(), "the review tablist").toEqual({
+      primitive: true, tabs: [["Comments", "true", 0], ["Proposals", "false", -1]] });
+    await list.getByRole("tab", { name: /Comments/ }).focus();
+    await page.keyboard.press("ArrowRight");
+    expect.soft(await state(), "after ArrowRight").toEqual({
+      primitive: true, tabs: [["Comments", "false", -1], ["Proposals", "true", 0]] });
+    await expect.soft(list.getByRole("tab", { name: /Proposals/ }), "focus follows the selection").toBeFocused();
+  });
+
   // GOAL_FOUNDATIONS A8, SegmentedControl. UI_CONFIG's light segmented control: 30px,
   // the selected option white with the default button's ring, the others transparent
   // in #5f6b7c; each option says whether it is pressed.
