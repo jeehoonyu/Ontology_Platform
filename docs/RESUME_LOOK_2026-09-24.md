@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-25, after U6. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-25, after U7. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -21,8 +21,13 @@ it before trusting it.
 | `fa95d93` | This note, updated |
 | `abd02d3` | **U6, buttons**: `:where(button)` base, the ring as the border, primary and friends, opt-outs, the small canvas toolbar |
 | `9797be1` | **U6, fields**: one base rule for text inputs, selects and textareas, a focus halo, disabled fields; U6 Met |
+| `8735cf9` | This note, updated |
+| `b686e61` | **U7, 1**: card titles 14px/16px 600, panels as ring-shadow cards, the `#f6f7f9` ground |
+| `a6246f6` | **U7, 2**: panes and pane headers ruled with the divider |
+| `ce87e4d` | **U7, 3**: tables — 30px uppercase muted header, 40px rows, `0 11px` cells, ink rules |
+| `48937ed` | **U7, 4**: pane titles 14px 600; U7 Met |
 
-GOAL_LOOK: **U1–U6 are Met; U7–U11 are Open.** Nothing has been pushed. Never push
+GOAL_LOOK: **U1–U7 are Met; U8–U11 are Open.** Nothing has been pushed. Never push
 tags.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
@@ -43,43 +48,37 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | Command | Expected |
    | --- | --- |
    | `python oms/verify.py --fast` | 25 of 25 |
-   | `python oms/test_style_tokens_audit.py` | 50 assertions (0 undefined names, 0 references, 653 raw colours) |
+   | `python oms/test_style_tokens_audit.py` | 50 assertions (0 undefined names, 0 references, 636 raw colours) |
    | `python oms/test_route_payload_audit.py` | 42 assertions, shared closure 500 KB |
    | `python oms/audit_route_payload.py` | 17 routes, shared 511,615 B, three font lines, all shared |
    | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
-   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 653, held by U10 |
+   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 636, held by U10 |
    | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
-   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 5 passed (needs a current build) |
+   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 10 passed (needs a current build) |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: U7, headings, panels, panes and tables
+## Next: U8, status tags
 
-This is three commits, and pane titles at 14px is a sub-commit of its own. The spec is in U7's
-bullet in the goal, and the values are in UI_CONFIG and `tokens.css`.
-- **The changes:** `h2` takes the card title (14px/16px, 600) and stays an `h2`. `.panel`
-  becomes a shadow-0 card at radius 4. `.pane` and `.pane-header` take the divider rule. The app
-  ground becomes `#f6f7f9`. Tables take the 30px header (12px, 400, uppercase), 40px rows,
-  `0 11px` cells and ink row rules, with opaque pinned cells.
-- **Tests:** `look.spec.ts::A panel title is 14px bold, and it is still a heading`, `…A panel's
-  edge is a ring shadow, not a border` and `…A table header is 30px, 12px, muted and uppercase`,
-  each shown to fail with its rule reverted. Re-check shell-widths at all 18 widths.
-- **Watch:**
-  - data-grid (pinned cells opaque, header button names under `text-transform`);
-  - pane-layout, movement-contract and graph-editor (U7's pane titles at 14px bring back the
-    crowding that pane-layout's test now injects);
-  - GOAL_SHELL S4, which moves more panes behind ⋯ at 1280 and 1366.
-- **The method that worked for U6:**
-  - Map the rules first. A four-reader workflow listed every rule, class and dependent test.
-  - Keep the base rules in `:where()`, and draw rings as borders where many rules recolour
-    borders.
-  - Take a census of every affected box before and after, with the spec in
-    `look-census/zz-census-controls.spec.ts`, copied into `frontend/tests/` only while it runs.
-  - Take masked screenshots, and look at the most-changed pages side by side.
+U8 is the first look condition that changes components, not only CSS. It carries the plan's A1:
+OFFLINE must not show as success.
+- `StatusBadge` (`components/data/DataDisplay.tsx`) takes an explicit intent from its caller,
+  instead of guessing green, amber or red from a substring with green as the default. Words it
+  does not know render neutral.
+- The tag is 20px, radius 4, padding 2px 6px, 12px, with the intent text in the hover step on a
+  10% tint.
+- It is rendered by 25 files at 109 call sites (the 23 `UI_PRIMITIVES.md` counts, plus
+  `PipelineCanvas.tsx` and `ArtifactReviewPanel.tsx`).
+- **Tests:** `look.spec.ts::OFFLINE is not shown as success` and `…A warning badge reads at AA
+  contrast`, shown to fail with the substring rule and `#c87619` restored. The warning text is
+  `#935610`, not `#c87619`, which is only 3.46:1 on white.
+- **Method:** map first (every call site and the value it passes; tests reading `.badge`/status
+  text), then change the component and every caller in one or two commits. Census the badges on
+  the evaluator routes before and after, and run `audit_ui_primitives` and `audit_inert_controls`.
 
-After U7: U8 (status tags), U9 (sidebar colours), U10 (primitives; the aliases retire), and U11
-(write the plan's A goal document).
+After U8: U9 (sidebar colours), U10 (primitives; the alias block retires), and U11 (write the
+plan's A goal document).
 
 ## How each step is measured
 
@@ -137,13 +136,13 @@ After U7: U8 (status tags), U9 (sidebar colours), U10 (primitives; the aliases r
 
 ## Numbers to hold on to
 
-| Measure | Value after U6 |
+| Measure | Value after U7 |
 | --- | --- |
 | Route payload | shared closure 511,615 B at its ceiling (U3 +13,218 B, U4 +47,636 B); U5–U6 moved it by less than the 8 KB tolerance (measured 502 KB) |
 | Route cost | 266 requests on open across 16 routes (U4 added the two preloaded faces to each) |
-| Six-project run | 361–362 passed, 1,054 skipped, 0 failed; baseline re-recorded at U6 (1,416 entries). movement-contract has shown occasional single retries under full-run load (a slow page, a DOM count), clean in isolation |
+| Six-project run | 367 passed, 1,079 skipped, 0 failed, 0 flaky; baseline re-recorded at U7 (1,446 entries). Occasional single retries under full-run load (movement-contract, the evaluator's Ctrl+K), each clean in isolation |
 | Style tokens | 0 undefined names and references; 39 legacy alias uses (U10 retires them) |
-| Raw colours outside `tokens.css` | 653 (U6 took 8 away; U10 lowers it) |
+| Raw colours outside `tokens.css` | 636 (U6 and U7 took 25 away; U10 lowers it) |
 
 ## Other open threads
 
