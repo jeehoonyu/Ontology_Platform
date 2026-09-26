@@ -30,6 +30,7 @@ import { useAsyncState } from "./hooks/useAsyncState";
 import { asRows, asString, classNames } from "./utils/format";
 import { currentWorkspaceView, navigate } from "./utils/navigation";
 import { readStoredJson, writeStored } from "./lib/storage";
+import registry from "./apps.json";
 import { getAuthSession, logout, type AuthSession } from "./api/authApi";
 import { getJob, getJobSummary } from "./api/jobApi";
 import {
@@ -61,7 +62,7 @@ import type {
   WorkflowState
 } from "./types";
 
-const CORE_VIEWS = new Set(["command-center", "imports", "ontology", "pipeline", "object-explorer", "map", "models", "decision", "ops", "workshop", "aip", "investigations", "entity-resolution", "graph", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"]);
+const CORE_VIEWS = new Set(registry.apps.map((app) => app.id));
 const OntologyManager = lazy(() => import("./workspaces/OntologyManager").then((module) => ({ default: module.OntologyManager })));
 const PipelineBuilder = lazy(() => import("./workspaces/PipelineBuilder").then((module) => ({ default: module.PipelineBuilder })));
 const ObjectExplorer = lazy(() => import("./workspaces/ObjectExplorer").then((module) => ({ default: module.ObjectExplorer })));
@@ -80,31 +81,8 @@ const Delivery = lazy(() => import("./workspaces/Delivery").then((module) => ({ 
 const PlatformGraphWorkspace = lazy(() => import("./workspaces/PlatformGraph").then((module) => ({ default: module.PlatformGraphWorkspace })));
 const VisualBuilder = lazy(() => import("./workspaces/VisualBuilder").then((module) => ({ default: module.VisualBuilder })));
 
-const NAV_ITEMS = [
-  { id: "command-center", label: "Command Center", hint: "Guided asset reliability workflow" },
-  { id: "imports", label: "Data Onboarding", hint: "Upload, map, transform, connect, replay" },
-  { id: "ontology", label: "Ontology Manager", hint: "Generate and manage object types" },
-  { id: "pipeline", label: "Pipeline Builder", hint: "Canvas, previews, outputs" },
-  { id: "object-explorer", label: "Object Explorer", hint: "Search, filter, inspect, and act" },
-  { id: "map", label: "Operational Map", hint: "Layers, MGRS, geofences, and risk" },
-  { id: "models", label: "ModelOps", hint: "Train, gate, deploy, monitor, and infer" },
-  { id: "decision", label: "Decision Intelligence", hint: "Explain risk, history, duplicates, and scenarios" },
-  { id: "ops", label: "Operational Control", hint: "Alerts, incidents, runbooks, and reliability" },
-  { id: "workshop", label: "Workshop", hint: "Compose operational applications" },
-  { id: "aip", label: "AIP Logic", hint: "Build governed decision logic" },
-  { id: "investigations", label: "Investigations", hint: "Evidence, entities, hypotheses" },
-  { id: "entity-resolution", label: "Entity Resolution", hint: "Review and merge duplicates" },
-  { id: "graph", label: "Platform Graph", hint: "Inspect relationships and evidence" },
-  { id: "validation", label: "Validation", hint: "Trust, conformance, schema health" },
-  { id: "data-media", label: "Data & Media", hint: "Upload files, datasets, media" },
-  { id: "automate", label: "Automate", hint: "Automations, conditions, effects, runs" },
-  { id: "security", label: "Security & Governance", hint: "Markings, CBAC, projects, cipher" },
-  { id: "control-panel", label: "Control Panel", hint: "Orgs, users, groups, roles, tokens" },
-  { id: "vertex", label: "Vertex", hint: "Graph explorer: expand, layout, merge" },
-  { id: "fusion", label: "Fusion", hint: "Spreadsheet: cells, formulas, lookups" },
-  { id: "analytics", label: "Analytics", hint: "Object Explorer charts + Contour boards" },
-  { id: "delivery", label: "Delivery", hint: "Marketplace, DevOps, code & compute" }
-];
+// The sidebar and the command palette read the registry (GOAL_FOUNDATIONS A9).
+const NAV_ITEMS = registry.apps.map((app) => ({ id: app.id, label: app.label, hint: app.description }));
 
 const LEGACY_ITEMS: string[] = [];
 

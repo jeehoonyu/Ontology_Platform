@@ -322,11 +322,44 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   ModelOps tabs gain `aria-current`, and the artifact review keeps `role="tab"`. To be proven by a
   `look.spec.ts` test per variant, reading its spec from UI_CONFIG, each shown to fail with the
   variant's CSS removed; the seven tab locators and the class locators still pass.
-- **A9 — One app registry.** **Open** — one list is the source of `CORE_VIEWS`, the sidebar, the
+- **A9 — One app registry.** **Met** — one list is the source of `CORE_VIEWS`, the sidebar, the
   command palette and the server's view list, each app with a category, icon, one-line
   description and, where one exists, a create path. Counts derive from its length. To be proven by
   a test that asserts the registry is the only source of all four, shown to fail at `38b096a`
   (where the server allows 27 views and the client 23).
+
+  **What changed.** `frontend/src/apps.json` is the registry: the 23 apps in sidebar order,
+  each with an id, a label and a one-line description, taken from the old `NAV_ITEMS`, so
+  nothing a user sees changed.
+  - `CORE_VIEWS`, the sidebar and the command palette derive from it.
+  - Its `legacy_only` list names the four views only the legacy UI draws: home, files,
+    applications and search. Backend tests request `/workspace/search`.
+
+  **Narrowed from the text above, in the open:**
+  - The server cannot read the registry at runtime: the production image ships
+    `frontend/dist`, not `frontend/src` (`oms/Dockerfile`). Its list is now a named constant,
+    `WORKSPACE_VIEWS` in `main.py`, and a test holds it equal to the registry's ids plus
+    `legacy_only`.
+  - Category, icon and create path land with their first reader, the plan's H launcher and
+    sidebar. No screen reads them yet, and a field nothing reads is a field nothing checks.
+  - No app has a create route today.
+
+  Proven by `oms/test_workspace_registry.py`:
+  - the server's list equals the registry's ids plus `legacy_only`;
+  - App.tsx's screen switch covers exactly the registry's ids;
+  - no client file lists ten or more apps by hand;
+  - each app has an id, a label and a description.
+
+  **Negative runs,** each with the file restored byte for byte afterwards:
+  - An extra server view ("reports") failed: "serves ['reports'] it does not list".
+  - Fusion's screen removed from the switch failed: "no screen for ['fusion']".
+  - The old `CORE_VIEWS` literal put back failed: "App.tsx lists 23 apps by hand".
+  - At `38b096a` there is no registry to read.
+  - The backend route tests (`test_asset_reliability_command_center`, `test_unified_platform`,
+    `test_docs_conformance`) pass against the constant.
+
+  **Measured.** The full six-project run passed 386 of 386, with none retried. The registry
+  rides in the entry chunk, and the shared closure holds at 509 KB.
 
 Every test is run once against a build with the thing it defends removed before it is believed.
 

@@ -444,9 +444,21 @@ def serve_workspace(request: Request):
     return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 
 
+# The workspace views the shell serves: the app registry's ids (frontend/src/apps.json)
+# plus its legacy_only views, which only the legacy UI draws. The production image
+# ships frontend/dist, not the registry's source, so this is a constant, and
+# oms/test_workspace_registry.py holds it equal to the registry (GOAL_FOUNDATIONS A9).
+WORKSPACE_VIEWS = frozenset({
+    "command-center", "imports", "ontology", "pipeline", "object-explorer", "map", "models", "decision",
+    "ops", "workshop", "aip", "investigations", "entity-resolution", "graph", "validation", "data-media",
+    "automate", "security", "control-panel", "vertex", "fusion", "analytics", "delivery",
+    "home", "files", "applications", "search",
+})
+
+
 @app.get("/workspace/{view}", include_in_schema=False)
 def serve_workspace_view(view: str, request: Request):
-    if view not in {"home", "files", "ontology", "applications", "map", "aip", "workshop", "object-explorer", "pipeline", "decision", "models", "ops", "investigations", "entity-resolution", "search", "graph", "command-center", "imports", "validation", "control-panel", "security", "automate", "data-media", "vertex", "fusion", "analytics", "delivery"}:
+    if view not in WORKSPACE_VIEWS:
         _not_found("Workspace", view)
     return _workspace_shell(legacy=request.query_params.get("legacy") == "1")
 

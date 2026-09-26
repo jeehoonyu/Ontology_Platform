@@ -1,0 +1,126 @@
+{
+  "about": "The workspace apps, in sidebar order: the one list the sidebar, the command palette and the client's view check read (GOAL_FOUNDATIONS A9). The server's view list is these ids plus legacy_only, the legacy UI's own views; oms/test_workspace_registry.py holds them equal, and holds App.tsx's screen switch to these ids.",
+  "apps": [
+    {
+      "id": "command-center",
+      "label": "Command Center",
+      "description": "Guided asset reliability workflow"
+    },
+    {
+      "id": "imports",
+      "label": "Data Onboarding",
+      "description": "Upload, map, transform, connect, replay"
+    },
+    {
+      "id": "ontology",
+      "label": "Ontology Manager",
+      "description": "Generate and manage object types"
+    },
+    {
+      "id": "pipeline",
+      "label": "Pipeline Builder",
+      "description": "Canvas, previews, outputs"
+    },
+    {
+      "id": "object-explorer",
+      "label": "Object Explorer",
+      "description": "Search, filter, inspect, and act"
+    },
+    {
+      "id": "map",
+      "label": "Operational Map",
+      "description": "Layers, MGRS, geofences, and risk"
+    },
+    {
+      "id": "models",
+      "label": "ModelOps",
+      "description": "Train, gate, deploy, monitor, and infer"
+    },
+    {
+      "id": "decision",
+      "label": "Decision Intelligence",
+      "description": "Explain risk, history, duplicates, and scenarios"
+    },
+    {
+      "id": "ops",
+      "label": "Operational Control",
+      "description": "Alerts, incidents, runbooks, and reliability"
+    },
+    {
+      "id": "workshop",
+      "label": "Workshop",
+      "description": "Compose operational applications"
+    },
+    {
+      "id": "aip",
+      "label": "AIP Logic",
+      "description": "Build governed decision logic"
+    },
+    {
+      "id": "investigations",
+      "label": "Investigations",
+      "description": "Evidence, entities, hypotheses"
+    },
+    {
+      "id": "entity-resolution",
+      "label": "Entity Resolution",
+      "description": "Review and merge duplicates"
+    },
+    {
+      "id": "graph",
+      "label": "Platform Graph",
+      "description": "Inspect relationships and evidence"
+    },
+    {
+      "id": "validation",
+      "label": "Validation",
+      "description": "Trust, conformance, schema health"
+    },
+    {
+      "id": "data-media",
+      "label": "Data & Media",
+      "description": "Upload files, datasets, media"
+    },
+    {
+      "id": "automate",
+      "label": "Automate",
+      "description": "Automations, conditions, effects, runs"
+    },
+    {
+      "id": "security",
+      "label": "Security & Governance",
+      "description": "Markings, CBAC, projects, cipher"
+    },
+    {
+      "id": "control-panel",
+      "label": "Control Panel",
+      "description": "Orgs, users, groups, roles, tokens"
+    },
+    {
+      "id": "vertex",
+      "label": "Vertex",
+      "description": "Graph explorer: expand, layout, merge"
+    },
+    {
+      "id": "fusion",
+      "label": "Fusion",
+      "description": "Spreadsheet: cells, formulas, lookups"
+    },
+    {
+      "id": "analytics",
+      "label": "Analytics",
+      "description": "Object Explorer charts + Contour boards"
+    },
+    {
+      "id": "delivery",
+      "label": "Delivery",
+      "description": "Marketplace, DevOps, code & compute"
+    }
+  ],
+  "legacy_only": [
+    "home",
+    "files",
+    "applications",
+    "search"
+  ]
+}
