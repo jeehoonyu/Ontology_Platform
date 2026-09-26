@@ -131,11 +131,11 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `workspaces/OntologyRegistryPanel.tsx` | 152 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 177 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |
 | `workspaces/OpsWorkspace.tsx` | 81 | `IncidentsTab` | `alerts` | request payload |
-| `workspaces/PipelineBuilder.tsx` | 579 | `PipelineBuilder` | `current` | last dropped |
-| `workspaces/PipelineBuilder.tsx` | 735 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 735 | `PipelineBuilder` | `over` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 740 | `PipelineBuilder` | `id` | prefix dropped |
-| `workspaces/PipelineBuilder.tsx` | 847 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 580 | `PipelineBuilder` | `current` | last dropped |
+| `workspaces/PipelineBuilder.tsx` | 736 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 736 | `PipelineBuilder` | `over` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 741 | `PipelineBuilder` | `id` | prefix dropped |
+| `workspaces/PipelineBuilder.tsx` | 848 | `PipelineBuilder` | `id` | prefix dropped |
 | `workspaces/VisualBuilder.tsx` | 170 | `collaborationClientId` | `Math.random().toString(36)` | text |
 | `workspaces/VisualBuilder.tsx` | 528 | `VisualBuilder` | `crypto.randomUUID()` | text |
 | `workspaces/VisualBuilder.tsx` | 629 | `VisualBuilder` | `crypto.randomUUID()` | text |

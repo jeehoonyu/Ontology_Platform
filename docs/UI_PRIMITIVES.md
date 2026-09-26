@@ -29,6 +29,7 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |
+| `Menu` | `components/layout/Menu.tsx` | **1** — PipelineBuilder |
 | `MiniGraph` | `components/canvas/PipelineCanvas.tsx` | **1** — Vertex |
 | `PipelineCanvas` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `PlatformFlow` | `components/workbench/Workbench.tsx` | **1** — App |

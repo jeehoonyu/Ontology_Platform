@@ -311,6 +311,7 @@
   --z-2: 20;
   --z-3: 30;
   --z-4: 40;
+  --z-overlay: 1100;   /* dialogs, menus, popovers: above the app's 0–40 scale and Leaflet's 1000 (UI_CONFIG "overlays above") */
   --overlay-backdrop: rgba(17, 20, 24, 0.7);   /* behind light and dark dialogs alike */
 
   --focus-color: #2d72d2;
@@ -430,6 +431,9 @@
   --tooltip-text: #f6f7f9;
   --tooltip-padding: 8px 12px;
   --notifications-width: 480px;              /* popover with an arrow; entries padding 16px, 48px gutter */
+  --overlay-offset: 8px;                     /* a menu sits 8px from its button (UI_CONFIG) */
+  --menu-min-width: 180px;                   /* SHIP CHOICE: Blueprint's default, not read */
+  --overlay-max-width: 400px;                /* SHIP CHOICE: menus wrap past it; not read */
   --dialog-top: 23vh;                        /* Quicksearch only (top at y=285 of 1249); light dialogs are centred vertically */
   --dialog-width-resource: 690px;            /* resource details dialog, 135px nav + 555px pane */
 

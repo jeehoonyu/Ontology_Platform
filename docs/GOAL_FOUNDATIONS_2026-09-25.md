@@ -385,11 +385,13 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   source (with A9).
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
-  focus, closes on Escape and returns focus; Menu opens from a button with `aria-haspopup`, arrow
-  keys move and Escape returns focus; Tooltip opens on hover and on focus. Their look is
-  UI_CONFIG's overlays. The first adopters are the command palette and Object Explorer's action
-  modal (Dialog), the pane actions (Menu, if decision N allows it) and the canvas's icon buttons
-  (Tooltip). To be proven by `frontend/tests/overlays.spec.ts`: focus stays inside while open,
+  focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`
+  that names its panel with `aria-controls` while open (decision N (a): no `aria-haspopup` and no
+  ARIA menu roles), whose arrow keys move and whose Escape returns focus; Tooltip opens on hover
+  and on focus. Their look is UI_CONFIG's overlays. The first adopters are the command palette
+  and Object Explorer's action modal (Dialog), the pipeline strip's unsaved-changes list (Menu;
+  the pane actions stay in the page's flow, as GOAL_SHELL S4 put them) and the canvas's icon
+  buttons (Tooltip). To be proven by `frontend/tests/overlays.spec.ts`: focus stays inside while open,
   Escape closes and returns focus, axe is clean with each open, and Escape never also cancels a
   live drag. Each is shown to fail with the primitive's behaviour removed.
 
@@ -424,6 +426,100 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Measured: the full six-project run passed 399 of 399, with the known Platform Graph retry.
     `Dialog` rides in the entry chunk, which App already loads; route cost holds at 266, and the
     shared closure is 510 KB.
+
+  **2. Menu, with its first adopter.** `components/layout/Menu.tsx`, placed by
+  `components/layout/placement.ts`:
+  - A disclosure (decision N (a)): the button carries `aria-expanded` and names its panel with
+    `aria-controls` only while it is open. There is no `aria-haspopup`, which a screen reader
+    reads as a menu, and no menu or menuitem role. The items are plain buttons.
+  - The panel follows its button in the page, so Tab goes from the button into it and a
+    dialog's trap still holds it. It floats on `position: fixed`, 8px under the button and
+    flush with its edge, so a pane's edge or a scroll box does not clip it. It follows the
+    button however the button moves (its box is read each frame while the panel is open, since
+    the page laying out again around it fires no event), and keeps its own scroll when placed
+    again. It closes when the button goes out of sight: off the screen, clipped by a scroll
+    box, or covered, as the narrow layout's sticky bar covers the strip; what is at the
+    button's middle is not the button. A keyboard on a button out of sight opens nothing.
+  - A click or Enter opens it and leaves focus on the button; ArrowDown and ArrowUp open onto
+    the first or last item. Inside, the arrows, Home and End move between items and go round,
+    leaving a field's or a select's arrows to it.
+  - Choosing an item closes it and gives focus back to the button, before anything the item
+    opens renders. Escape closes it and gives focus back. A press outside, or focus moving to
+    anything outside, closes it; focus dropped to the page, as when the window loses it, does
+    not.
+  - Escape is taken on window in the capture phase, and only with focus on the button or in
+    the panel: before a dialog's listener and every drag's, so one Escape closes the menu and
+    nothing else, and an Escape pressed elsewhere belongs to whatever has focus.
+  - The look is UI_CONFIG's menu: white, radius 4, `--shadow-overlay`, 4px in, 14px/22px items
+    at least 30px tall with the minimal hover, and an outline in forced colours. The Dialog
+    backdrop's 1100 became the `--z-overlay` token the panel shares.
+  - The pipeline strip's unsaved-changes count adopts it. Its list pushed the canvas down,
+    stayed open until the count was pressed again, and came back open with the next typed
+    change. The list now floats, closes when a node is chosen, and unmounts with the count, so
+    it never reopens by itself. `.unsaved-list` goes.
+  - The pane actions stay in the page's flow, as GOAL_SHELL S4 put them (a collapsed pane has
+    no body to hold a popover). The node context menu keeps its own look until Y15.
+  - Raw colours hold at 563. `docs/UI_PRIMITIVES.md` lists 28 primitives.
+
+  Proven by seven tests in `frontend/tests/overlays.spec.ts`, on a pipeline each builds with
+  up to four node configurations typed and not saved:
+  - The disclosure, on four items: no `aria-haspopup`; `aria-controls` only while open; a click
+    leaves focus on the button; Tab goes into the panel; ArrowDown, End, ArrowDown (round to
+    the first), ArrowUp (round to the last), ArrowUp, Home and Home land on B, D, A, D, C, A
+    and A, so no key can be taken for another; Escape from an item and from the button closes
+    and gives focus back; ArrowUp and ArrowDown on the button open onto the last and the first.
+  - The float: 8px under the button and flush with it, over the canvas; the look; axe clean
+    with it open; a 12px scroll carries it along, and so does the status before the button
+    growing 120px; a bar drawn over the strip closes it on the next move; the button moved out
+    of sight closes it; ArrowDown on that button opens nothing and keeps focus on it.
+  - Its own scroll: with items taller than the room, ArrowUp scrolls the panel to the last one,
+    and placing it again after a scroll keeps that offset.
+  - Choosing an item closes it, gives focus back and runs the item; Shift+Tab away closes it;
+    a press on the strip closes it; focus dropped to the page leaves it open.
+  - During a live lasso, with focus in the list, the first Escape closes the list and the lasso
+    stays; the second cancels the lasso. With focus outside, the Escape cancels the lasso and
+    the list stays.
+  - Escape keeps the canvas selection a lasso made, and Enter on an item runs it.
+  - The list does not come back open after its count goes and returns.
+
+  **Negative runs,** each against a rebuilt dist, each failing:
+  - Escape not stopped: "the Escape that closed the list also cancelled the drag behind it"
+    and "… also cleared the selection".
+  - Escape taken only from the panel: the disclosure test, at Escape on the button.
+  - Escape taken whenever open: "an Escape pressed outside the list did not cancel the drag".
+  - A click that focuses the first item: "opening moved focus off the button".
+  - No arrow keys in the panel: "ArrowDown did not move focus where it should".
+  - The panel portalled to the body: "Tab from the button did not go into its panel".
+  - No `position: fixed`: "the panel is not 8px under its button".
+  - `aria-controls` always set: the disclosure test.
+  - Focus leaving not closing: "focus left and the list stayed over the page".
+  - A press outside not closing: "a press outside left the list open".
+  - Choosing not closing: "choosing an item left the list open", and the keyboard test.
+  - Arrows on a closed button doing nothing: the lasso and keyboard tests.
+  - The old in-page open state: "the list came back open".
+  - No minimal hover: the hover colour.
+  - No following: "the panel stayed where the button was".
+  - No hit-test: "the panel floated on over a bar that covers its button".
+  - Focus moved into a panel that failed to place: "ArrowDown on a button out of sight dropped
+    focus to the page".
+  - The panel's scroll not kept: "the panel did not scroll to its last item" (the panel's
+    first placing after it opens already threw the scroll away).
+  - ArrowUp stepping down, and Home taken for an arrow: "… did not move focus where it should".
+  - Restored byte for byte; the hashes matched.
+
+  An adversarial review of the change (four readers, each finding checked by a second reader
+  trying to refute it) confirmed five findings, all fixed above: the panel's scroll lost on
+  placing, focus dropped when the button is out of sight (found twice), a covered button, a
+  button moved by layout alone, and an arrow test on two items that could not tell
+  directions apart. Eleven others were refuted.
+  - Measured: the full six-project run passed 420 of 420, with the known Platform Graph
+    readiness retry. `Menu` rides in the PipelineBuilder chunk, its one importer, so route
+    cost holds. Route payload, re-baselined in the open: the shared closure is 4,650 B above
+    its record (A2 through A9, the Dialog and this menu's CSS, each inside the tolerance), and
+    Menu with placement adds 3,740 B to PipelineBuilder, which took it 198 B past the 8 KB
+    tolerance. One earlier run failed a strip test that never renders the menu: its route
+    handler's canvas fetch hung past teardown, the late-run backend stall under separate
+    investigation; it passed alone three times and in the next full run.
 - **A8 — Tabs and SegmentedControl replace the ad-hoc tabs.** **Met** — `raw_colour_ceiling`
   (599) falls as the eight per-screen tab styles go, re-recorded in each commit (K8). Underline,
   tint, pill and vertical variants; SegmentedControl with `aria-pressed`. The Decision, Ops and
