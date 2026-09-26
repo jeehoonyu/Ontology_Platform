@@ -708,7 +708,7 @@ function ProjectsSection({ refreshKey, onChange }: SectionProps) {
         <Panel
           title="Project Role Grants"
           action={
-            <select value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)}>
+            <select aria-label="Project for role grants" value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)}>
               <option value="">Choose project</option>
               {projectOptions.map((project) => (
                 <option key={project.id} value={project.id}>

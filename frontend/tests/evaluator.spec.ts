@@ -47,6 +47,54 @@ for (const route of routes) {
   });
 }
 
+// The sweep above scans each route as it opens, so a form behind a second tab is never
+// scanned: Security's "Projects & Roles" shipped a project picker with no name
+// (select-name, critical) that nothing here reached. These two screens keep most of their
+// forms behind tabs. The tabs are read from the tab bar, so a tab added later is scanned too.
+const tabbedRoutes = [
+  { route: "security", bar: "Security & Governance views" },
+  { route: "control-panel", bar: "Administration sections" }
+];
+
+for (const { route, bar } of tabbedRoutes) {
+  test(`every ${route} tab is accessible`, async ({ page }) => {
+    await page.goto(`/workspace/${route}`);
+    const tabs = page.getByRole("navigation", { name: bar });
+    await expect(tabs).toBeVisible();
+    const labels = await tabs.getByRole("button").allInnerTexts();
+    expect(labels.length, "the tab bar lists no tabs").toBeGreaterThan(1);
+    const blocking: string[] = [];
+    for (const label of labels) {
+      const tab = tabs.getByRole("button", { name: label, exact: true });
+      await tab.click();
+      await expect(tab).toHaveAttribute("aria-current", "true");
+      await expect(page.locator(".loading-state")).toHaveCount(0);
+      const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+      blocking.push(...accessibility.violations
+        .filter((violation) => violation.impact === "critical" || violation.impact === "serious")
+        .map((violation) => `${label}: ${violation.id}: ${violation.help}`));
+    }
+    expect(blocking, blocking.join("\n")).toEqual([]);
+  });
+}
+
+test("Security's project grants form is accessible once a project is chosen", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Creates a project; runs once on desktop.");
+  // The picker is the only way to the grants table and form, so the tab sweep sees neither.
+  const project = `browser_grants_${Date.now()}`;
+  const created = await page.request.post("/projects", { data: { id: project, display_name: `Browser grants ${project}` } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  await page.goto("/workspace/security");
+  await page.getByRole("button", { name: "Projects & Roles", exact: true }).click();
+  await page.getByRole("combobox", { name: "Project for role grants" }).selectOption(project);
+  const panel = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Project Role Grants" }) });
+  await expect(panel.getByRole("button", { name: "Grant role" })).toBeVisible();
+  await expect(page.locator(".loading-state")).toHaveCount(0);
+  const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  const blocking = accessibility.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
+  expect(blocking, blocking.map((item) => `${item.id}: ${item.help}`).join("\n")).toEqual([]);
+});
+
 test("Object Explorer queries bootstrapped ontology objects and opens a typed profile", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful explorer workflow once on desktop.");
   expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
