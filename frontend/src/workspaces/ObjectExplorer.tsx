@@ -96,7 +96,11 @@ export function ObjectExplorer() {
   const [typesLoaded, setTypesLoaded] = useState(false);
   const [explorations, setExplorations] = useState<Exploration[]>([]);
   const [objectTypeId, setObjectTypeId] = useState("");
-  const [search, setSearch] = useState("");
+  // The search box starts from the URL's ?q= (a filter: replaced, never pushed), and follows it
+  // on a history step; what is typed applies on Enter or Run.
+  const [search, setSearch] = useState(route.q);
+  // The search the shown query was asked with.
+  const [appliedQ, setAppliedQ] = useState<string | null>(null);
   const [filters, setFilters] = useState<Record<string, FilterValue>>({});
   const [loadedQuery, setQuery] = useState<ExplorerQuery | null>(null);
   // Queries answer in the order they were asked only by luck: Back and Forward now ask ones the
@@ -117,9 +121,10 @@ export function ObjectExplorer() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const runQuery = useCallback(async (typeId = objectTypeId, nextFilters = filters, nextSearch = search) => {
+  const runQuery = useCallback(async (typeId = objectTypeId, nextFilters = filters, nextSearch = route.q) => {
     if (!typeId) return;
     const seq = ++querySeq.current;
+    setAppliedQ(nextSearch);
     setLoading(true);
     setError("");
     try {
@@ -138,7 +143,7 @@ export function ObjectExplorer() {
     } finally {
       if (seq === querySeq.current) setLoading(false);
     }
-  }, [filters, objectTypeId, search, selectedIds]);
+  }, [filters, objectTypeId, route.q, selectedIds]);
 
   // With no type named, the first, adopted and never written.
   const routeType = route.type || types[0]?.id || "";
@@ -166,7 +171,12 @@ export function ObjectExplorer() {
   // filters and nothing selected; a saved exploration sets its own before its URL, so it keeps
   // them.
   useEffect(() => {
-    if (!typesLoaded || routeType === objectTypeId) return;
+    if (!typesLoaded) return;
+    if (routeType === objectTypeId) {
+      // The same type with another search: the URL's, by Enter, Run or a history step.
+      if (!typeUnknown && routeType && route.q !== appliedQ) void runQuery(routeType, filters, route.q);
+      return;
+    }
     setObjectTypeId(routeType);
     setFilters({});
     setSelectedIds([]);
@@ -181,9 +191,21 @@ export function ObjectExplorer() {
       setLoading(false);
       return;
     }
-    void runQuery(routeType, {}, search);
+    void runQuery(routeType, {}, route.q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typesLoaded, routeType]);
+  }, [typesLoaded, routeType, route.q]);
+
+  // A history step brings its own search back into the box.
+  useEffect(() => setSearch(route.q), [route.q]);
+
+  // Enter and Run: the typed search becomes the URL's (replaced), which runs it; the search
+  // already applied runs again, as a refresh.
+  const applySearch = () => {
+    // The URL's own type, never the adopted default: a search is a filter, and a default is
+    // never written.
+    if (search === route.q) void runQuery(routeType, filters, route.q);
+    else navigate("object-explorer", { type: route.type, q: search, object: route.object });
+  };
 
   // The object inspected is the URL's, and its own 404 names it, never its absence from a
   // filtered result.
@@ -211,13 +233,13 @@ export function ObjectExplorer() {
     // The row and its link both call this; the second is the URL already open and adds nothing.
     // The object already open is asked for again, as a click on it always did.
     if (object.id === route.object) setProfileAsk((count) => count + 1);
-    else navigate("object-explorer", { type: routeType, object: object.id });
+    else navigate("object-explorer", { type: routeType, q: route.q, object: object.id });
   };
 
   const applyFacet = (facet: ExplorerFacet, value: FilterValue) => {
     const next = { ...filters, [facet.field]: value };
     setFilters(next);
-    void runQuery(objectTypeId, next, search);
+    void runQuery(objectTypeId, next, route.q);
   };
 
   const openExploration = (saved: Exploration) => {
@@ -225,8 +247,9 @@ export function ObjectExplorer() {
     setFilters(saved.filters as Record<string, FilterValue>);
     setSearch(String(saved.perspective?.query || ""));
     void runQuery(saved.object_type_id, saved.filters as Record<string, FilterValue>, String(saved.perspective?.query || ""));
-    // In the same batch, so the type's effect finds the type already open and keeps these filters.
-    navigate("object-explorer", { type: saved.object_type_id });
+    // In the same batch, so the type's effect finds the type and search already applied and
+    // keeps these filters.
+    navigate("object-explorer", { type: saved.object_type_id, q: String(saved.perspective?.query || "") });
   };
 
   const persistExploration = async () => {
@@ -242,7 +265,8 @@ export function ObjectExplorer() {
         filters,
         columns: query.columns,
         charts: query.facets,
-        perspective: { query: search },
+        // What the shown query was asked with, not text typed and not yet applied.
+        perspective: { query: route.q },
         owner: "object-explorer-ui"
       });
       setExplorations((items) => [saved, ...items]);
@@ -281,11 +305,11 @@ export function ObjectExplorer() {
   return (
     <Page title="Object Explorer" subtitle="Search ontology objects, filter with live facets, inspect relationships, and run governed actions.">
       <div className="explorer-command-bar">
-        <label><span>Object type</span><select aria-label="Object type" value={routeType} onChange={(event) => navigate("object-explorer", { type: event.target.value })}>{typeUnknown ? <option value={route.type} disabled>{`Unknown: ${route.type}`}</option> : null}{types.map((type) => <option key={type.id} value={type.id}>{type.display_name}</option>)}</select></label>
-        <label className="explorer-search"><Search size={16} /><input aria-label="Search objects" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !typeUnknown) void runQuery(); }} placeholder="Search objects and properties" /></label>
-        <button className="primary" onClick={() => void runQuery()} disabled={typeUnknown}><Play size={15} />Run</button>
+        <label><span>Object type</span><select aria-label="Object type" value={routeType} onChange={(event) => navigate("object-explorer", { type: event.target.value, q: route.q })}>{typeUnknown ? <option value={route.type} disabled>{`Unknown: ${route.type}`}</option> : null}{types.map((type) => <option key={type.id} value={type.id}>{type.display_name}</option>)}</select></label>
+        <label className="explorer-search"><Search size={16} /><input aria-label="Search objects" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !typeUnknown) applySearch(); }} placeholder="Search objects and properties" /></label>
+        <button className="primary" onClick={applySearch} disabled={typeUnknown}><Play size={15} />Run</button>
         <button onClick={() => void persistExploration()} disabled={!query}><BookmarkPlus size={15} />Save view</button>
-        <button aria-label="Refresh exploration" title="Refresh" onClick={() => { void runQuery(); setProfileAsk((count) => count + 1); }} disabled={typeUnknown}><RefreshCw size={15} /></button>
+        <button aria-label="Refresh exploration" title="Refresh" onClick={() => { void runQuery(routeType, filters, route.q); setProfileAsk((count) => count + 1); }} disabled={typeUnknown}><RefreshCw size={15} /></button>
       </div>
       <ErrorBanner message={error} />
       {notice ? <div className="inline-success" role="status">{notice}</div> : null}
@@ -296,7 +320,7 @@ export function ObjectExplorer() {
             {!explorations.length ? <EmptyState inline>Save a query to return to it later.</EmptyState> : null}
           </Panel>
           <Panel title="Filters" action={<Filter size={15} />}>
-            <div className="filter-chip-list">{Object.entries(filters).map(([field, value]) => <button key={field} onClick={() => { const next = { ...filters }; delete next[field]; setFilters(next); void runQuery(objectTypeId, next, search); }} title="Remove filter"><span>{field}: {filterLabel(value)}</span><X size={12} /></button>)}</div>
+            <div className="filter-chip-list">{Object.entries(filters).map(([field, value]) => <button key={field} onClick={() => { const next = { ...filters }; delete next[field]; setFilters(next); void runQuery(objectTypeId, next, route.q); }} title="Remove filter"><span>{field}: {filterLabel(value)}</span><X size={12} /></button>)}</div>
             {!Object.keys(filters).length ? <EmptyState inline compact>Select a facet value to filter results.</EmptyState> : null}
           </Panel>
           <div className="facet-stack">{query?.facets.map((facet) => <FacetCard key={`${query.object_type_id}:${facet.field}`} facet={facet} onApply={(value) => applyFacet(facet, value)} />)}</div>

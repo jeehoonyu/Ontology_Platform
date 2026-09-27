@@ -7,7 +7,7 @@ import table from "../routes.json";
 // oms/test_workspace_routes.py holds them equal. This rides in the entry chunk because App.tsx
 // imports it: a module only lazy screens import gets a chunk of its own and a request on open
 // (vite.config.ts: DragKit, graphLayout, Tabs).
-interface ViewRoute { params: string[]; defaults?: Record<string, string> }
+interface ViewRoute { params: string[]; defaults?: Record<string, string>; filters?: string[] }
 interface KindRoute { view: string; param: string; requires?: string[] }
 const VIEWS: Record<string, ViewRoute | undefined> = table.views;
 const KINDS: Record<string, KindRoute> = table.kinds;
@@ -57,8 +57,10 @@ function hrefFor(view: string, params: RouteParams = {}): string {
 /**
  * Opens a place in this page: pushState, then popstate for App and every reader. The place
  * already open adds no entry, and the last view's query never carries: the href is built from
- * `params` alone. Only event handlers call it, never effects: a default or automatic selection
- * never writes the URL (main.tsx runs StrictMode, which would run an effect's write twice).
+ * `params` alone. A change to the view's filters alone (routes.json) narrows the place open and
+ * replaces its entry, so Back leaves the place rather than each search typed. Only event
+ * handlers call it, never effects: a default or automatic selection never writes the URL
+ * (main.tsx runs StrictMode, which would run an effect's write twice).
  */
 export function navigate(view: string, params: RouteParams = {}): void {
   const href = hrefFor(view, params);
@@ -66,7 +68,13 @@ export function navigate(view: string, params: RouteParams = {}): void {
   // no screen reads), is the same place: read back through the table, it is this href.
   const open = window.location.pathname.match(/^\/workspace\/([^/]+)$/)?.[1];
   if (href === here() || (open === view && href === hrefFor(view, paramsOf(view, window.location.search)))) return;
-  window.history.pushState({}, "", href);
+  const route = VIEWS[view];
+  const before = open === view ? paramsOf(view, window.location.search) : null;
+  const after = paramsOf(view, new URL(href, window.location.origin).search);
+  const onlyFilters = before !== null
+    && (route?.params ?? []).every((name) => (route?.filters ?? []).includes(name) || before[name] === after[name]);
+  if (onlyFilters) window.history.replaceState({}, "", href);
+  else window.history.pushState({}, "", href);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

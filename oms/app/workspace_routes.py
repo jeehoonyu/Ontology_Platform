@@ -22,7 +22,7 @@ VIEWS: Dict[str, Dict[str, Any]] = {
     "aip": {"params": ["artifact"]},
     "investigations": {"params": ["artifact"]},
     "entity-resolution": {"params": ["artifact"]},
-    "object-explorer": {"params": ["type", "object"]},
+    "object-explorer": {"params": ["type", "q", "object"], "filters": ["q"]},
     "ontology": {"params": ["type", "section", "page"], "defaults": {"section": "overview"}},
 }
 KINDS: Dict[str, Dict[str, Any]] = {

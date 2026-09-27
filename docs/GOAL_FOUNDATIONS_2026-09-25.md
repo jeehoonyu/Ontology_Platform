@@ -553,6 +553,24 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     record (A6's table and navigation in the entry chunk, `UnknownResource`, and 64738d4's
     header CSS from another session), and the readers' own code took Object Explorer and
     Workshop past the 8 KB tolerance (+8,400 B and +8,237 B in all).
+
+  **7. Object Explorer's search, the first filter: replaced, never pushed.** `routes.json` gives
+  a view its `filters`, and `navigate` replaces the history entry when, on the view already open,
+  only filters change; anything else is a new place and is pushed. Object Explorer's `?q=` is its
+  filter. The search box starts from the URL and follows it on a history step; what is typed
+  applies on Enter or Run, which writes it (or runs it again when it is already applied). A search
+  from the bare view writes the URL's own type, which is none, never the adopted default. Facets,
+  filter chips, Refresh, a chosen object and the type select use and keep the applied search, and
+  Save view stores it, not text typed and not applied.
+
+  Proven by two filter cases in `routes.spec.ts`. Negative runs, each failing: the search not a
+  filter ("a search pushed a history entry"); Enter not writing the URL ("the search is not in the
+  URL"); a history step leaving the box alone ("a history step left another search in the box");
+  a history step's search not run; the box not started from the URL (a reload drops it); a chosen
+  object dropping the search; a search writing the adopted type ("a search from the bare view
+  wrote the adopted type, or no search"); Save view keeping the typed search. An adversarial
+  review confirmed five findings, all fixed above (the bare-view search pushing and writing the
+  default type was major); four were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

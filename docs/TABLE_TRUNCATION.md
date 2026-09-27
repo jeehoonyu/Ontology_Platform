@@ -23,7 +23,7 @@ are given: the rows past the cut are named and cannot be reached.
 | `components/data/DataDisplay.tsx` | 169 | `DataTable` | `safeRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 287 | `DataGrid` | `allRows` (slice) | held as shown | no | yes |
 | `components/data/DataGrid.tsx` | 278 | `DataGrid` | `total` (filtered row model) | filtered in the library | no | yes |
-| `workspaces/ObjectExplorer.tsx` | 271 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
+| `workspaces/ObjectExplorer.tsx` | 295 | `ObjectExplorer` | `query.columns` (slice) | held as columns | no | yes |
 
 ## Lists, canvases and chips
 

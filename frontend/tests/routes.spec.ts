@@ -902,3 +902,75 @@ test("object_type: a draft applied after the user has moved on does not pull the
   expect((await secondApplied).ok(), "the second apply failed").toBeTruthy();
   await expect(page, "an applied draft did not open its type").toHaveURL(new RegExp(`\\?type=route_draft_type_two_${s}$`));
 });
+
+test("object-explorer filter: ?q= is replaced, never pushed, and a history step brings its search back", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  const s = stamp();
+  const type = `route_search_${s}`;
+  await post(page, "/data-assets", { id: `route_search_objects_${s}`, display_name: `Route search objects ${s}`, kind: "dataset", asset_schema: {}, records: [] });
+  await post(page, "/object-types", { id: type, display_name: type, description: "", properties: { name: { type: "string" } } });
+  for (const n of [1, 2]) {
+    await post(page, "/objects", { id: `${type}_${n}`, object_type_id: type, source_asset_id: `route_search_objects_${s}`, properties: { name: `${type} item ${n}` } });
+  }
+  const table = page.locator(".explorer-table");
+  const box = page.getByLabel("Search objects");
+
+  await page.goto(`/workspace/object-explorer?type=${type}`);
+  await expect(table).toContainText(`${type}_2`);
+  const entries = await page.evaluate(() => history.length);
+
+  // A search narrows the place open: the URL holds it, and no entry is added.
+  await box.fill(`${type}_1`);
+  await box.press("Enter");
+  await expect(page, "the search is not in the URL").toHaveURL(new RegExp(`\\?type=${type}&q=${type}_1$`));
+  expect(await page.evaluate(() => history.length), "a search pushed a history entry").toBe(entries);
+  await expect(table.locator("tbody tr"), "the search did not narrow the results").toHaveCount(1);
+  await expect(table).toContainText(`${type}_1`);
+
+  // An object chosen is a new place, pushed with the search kept; Back returns to the search.
+  await table.getByRole("button", { name: `${type}_1`, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${type}&q=${type}_1&object=${type}_1$`));
+  // Searched again from there, the entry is replaced; Back brings the first search back into the box.
+  await box.fill(`${type}_2`);
+  await box.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`\\?type=${type}&q=${type}_2&object=${type}_1$`));
+  await expect(table.locator("tbody tr")).toHaveCount(1);
+  await expect(table, "the second search did not run").toContainText(`${type}_2`);
+  await page.goBack();
+  await expect(page, "Back did not return to the search before").toHaveURL(new RegExp(`\\?type=${type}&q=${type}_1$`));
+  await expect(box, "a history step left another search in the box").toHaveValue(`${type}_1`);
+  await expect(table.locator("tbody tr")).toHaveCount(1);
+  await expect(table, "Back did not run the search it brought back").toContainText(`${type}_1`);
+
+  // Save view keeps the search the shown results were asked with, not text typed and not applied.
+  await box.fill("not applied");
+  page.once("dialog", (dialog) => void dialog.accept(`Route saved ${s}`));
+  await page.getByRole("button", { name: "Save view" }).click();
+  await expect(page.getByText(`Saved exploration Route saved ${s}`)).toBeVisible();
+  const saved = await (await page.request.get("/object-explorer/explorations")).json() as Array<{ display_name: string; perspective?: { query?: string } }>;
+  expect(saved.find((item) => item.display_name === `Route saved ${s}`)?.perspective?.query, "Save view kept the typed search, not the applied one").toBe(`${type}_1`);
+
+  // Reloaded, the search still holds.
+  await page.reload();
+  await expect(box).toHaveValue(`${type}_1`);
+  await expect(table).toContainText(`${type}_1`);
+  await expect(table.getByRole("button", { name: `${type}_2`, exact: true }), "a reload dropped the search").toHaveCount(0);
+});
+
+test("object-explorer filter: a search from the bare view is replaced and writes no type", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  const s = stamp();
+  const type = `route_bare_${s}`;
+  await post(page, "/object-types", { id: type, display_name: type, description: "", properties: { name: { type: "string" } } });
+  // Opened from the sidebar, as a user opens it: the bare view, with its first type adopted.
+  await page.goto("/workspace/ops");
+  await page.getByRole("navigation", { name: "Workspaces" }).getByRole("button", { name: /^Object Explorer/ }).click();
+  await expect(page).toHaveURL(/\/workspace\/object-explorer$/);
+  await expect(page.getByLabel("Object type")).not.toHaveValue("");
+  const entries = await page.evaluate(() => history.length);
+  const box = page.getByLabel("Search objects");
+  await box.fill(`needle_${s}`);
+  await box.press("Enter");
+  await expect(page, "a search from the bare view wrote the adopted type, or no search").toHaveURL(new RegExp(`/workspace/object-explorer\\?q=needle_${s}$`));
+  expect(await page.evaluate(() => history.length), "a search from the bare view pushed a history entry").toBe(entries);
+});
