@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-26, after GOAL_FOUNDATIONS A6's third step. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-26, after GOAL_FOUNDATIONS A6 was met. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -65,11 +65,18 @@ it before trusting it.
 | `2dc19ba` | **A6, 2**: Data & Media's `?dataset=`; answers carry their id; quarantine and imports links from the table |
 | `ccd7afb` | Another session: the evaluator's sweep covers every registered workspace and measures `main.workspace`'s scroll; it lands with 14 known failures |
 | `fa8b6c7` | **A6, 3**: Pipeline Builder's `?graph=`; outputs, contracts and failures carry their pipeline; late creates never open over a move; the Command Center's newest pipeline scoped to the viewer |
+| `82385c0` | This note, updated |
+| `bf50b82`, `f634ead` | **A6, 4**: the builders' `?artifact=`; the list asked again before an id is called unknown; undo history cleared per artifact |
+| `c2c0d2f` | **A6, 5**: Object Explorer's `?type=&object=`; latest-only queries tied to the type; the profile tied to its object and refreshable |
+| `64738d4` | Another session: a long pipeline name wraps in the header |
+| `ac32af8` | **A6, 6**: Ontology Manager's `?type=&section=&page=`; no hand-built workspace link left; route payload re-baselined |
+| `98d896d` | **A6, 7**: Object Explorer's `?q=`, the first filter, replaced and never pushed |
+| `e567069` | **A6 Met**: the final spec fails 22 of 24 at `38b096a`; default tier 27 of 27 |
 
 GOAL_LOOK: **Met, U1–U11.** Nothing has been pushed. Never push tags. The work continues in
-[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A5, A8 and A9 are Met; A6 and A7
-are Open. A7's Dialog, Menu and Tooltip are all in and adopted; it stays Open only as the owner of
-`raw_colour_ceiling` (see Next). A6 has three of its readers (Ops, datasets, pipelines).
+[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A6, A8 and A9 are Met; A7
+is Open. A6 is Met. A7's Dialog, Menu and Tooltip are all in and adopted; it stays Open only as the
+owner of `raw_colour_ceiling` (see Next).
 
 **Decided 2026-09-26:** N (a), tabs and menus stay buttons; and for A5, existing media sets stay
 unassigned until someone assigns them.
@@ -103,20 +110,22 @@ I, M and N are still undecided, and the goal assumes their option (a).
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS A6, step 4 (builders' `?artifact=`)
+## Next: the owner's decisions, then A7's last question
 
 1. **Decisions U–X are assumed, not decided** (the plan's owner-decisions table, 2026-09-26):
    `page` names an ontology-level panel (U a); old spellings are not read (V a); the server
    keeps a copy of the route table (W a); the node context menu's look waits for Y15, so A7
-   stays Open as `raw_colour_ceiling`'s owner (X b). Ask the owner when they are back. A6's own
-   text settles the rest: Ops tabs are pushed, Object Explorer's search is replaced, and each
-   test is run against a `38b096a` build.
-2. **A6's remaining steps** (spec and critique in `look-census/specs/`): 4, the builders'
-   `?artifact=` (workshop, aip, investigations, entity-resolution); 5, Object Explorer's
-   `?type=&object=`; 6, Ontology's `?type=&section=&page=`; 7, Object Explorer's search replaced
-   in the URL; then each test run against a `38b096a` build, and A6 marked. Follow the pattern
-   the reviews established: every answer a screen shows carries the id it answers; a create
-   that lands after the user moved on opens nothing; each data test makes its own resources.
+   stays Open as `raw_colour_ceiling`'s owner (X b). Ask the owner. A6 is built on U, V and W;
+   each is cheap to change.
+2. **A7** closes when `raw_colour_ceiling` has another open owner: either X (a), the node context
+   menu's look inside A7 (563 → 556, then A7 can be marked with the ceiling passed on), or the
+   next goal taking the ceiling. With A7 the only open condition, GOAL_FOUNDATIONS is otherwise
+   done; the plan's next wave (H, home and shell) is where the next goal would come from, and
+   stating it is the owner's call.
+3. **The evaluator sweep's sixteen failures** (another session's `ccd7afb`) are that thread's;
+   two of them, which need a used database, are filed as their own task. Don't re-record the
+   browser-evidence baseline while they stand: it would record them as known.
+4. The default tier suggests re-measuring `tier-a-baseline.json` (32.8 days old).
 3. **The Platform Graph retry** at 1366 is still filed as its own task. It passed the last run
    at 41 s, against a 45 s limit.
 4. **A migration re-records four baselines.** Adding one stamps query-bounds, request-cost,
@@ -215,13 +224,13 @@ I, M and N are still undecided, and the goal assumes their option (a).
 
 | Measure | Value after U11 |
 | --- | --- |
-| Route payload | shared closure record 523,573 B, re-baselined at `f951fda` (Menu took PipelineBuilder 198 B past the tolerance); measured 516 KB after the Tooltip, 3,592 B inside it |
+| Route payload | re-baselined at `ac32af8` (A6's table and navigation in the entry chunk, and `64738d4`'s CSS); earlier at `f951fda` for the Menu |
 | Route cost | 266 requests on open across 16 routes. One reading taken straight after a full run once gave Automate 8, and it read 13 when measured again |
-| Six-project run | 432 passed at `67427c8`, 0 failed, none flaky. Earlier: 399 passed, 1,239 skipped, 0 failed; baseline re-recorded at A5, migration head `0048` (1,638 entries). The Platform Graph test at 1366 usually retries once | Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
+| Six-project run | 483 passed at `98d896d`, with the evaluator sweep's 16 known failures (another session's). 432 passed at `67427c8`, 0 failed, none flaky. Earlier: 399 passed, 1,239 skipped, 0 failed; baseline re-recorded at A5, migration head `0048` (1,638 entries). The Platform Graph test at 1366 usually retries once | Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
 | Style tokens | 0 undefined names and references; 0 legacy alias uses (the block is gone) |
 | Raw colours outside `tokens.css` | 563 (661 at U1's census); held by GOAL_FOUNDATIONS A7 |
 | Raw empty states | 7 (`audit_ui_states`), from 32 |
-| Look tests | 29 in `look.spec.ts`, 12 in `trust.spec.ts`, 22 in `overlays.spec.ts` (Dialog 2, Menu 7, Tooltip 13), each shown to fail with what it defends removed |
+| Look tests | 29 in `look.spec.ts`, 12 in `trust.spec.ts`, 22 in `overlays.spec.ts` (Dialog 2, Menu 7, Tooltip 13), 24 in `routes.spec.ts`, each shown to fail with what it defends removed |
 | Tenancy | `unscoped_reads_ceiling` 344, `tenant_orphan_ceiling` 50 (from 52 at A5) |
 
 ## Other open threads
