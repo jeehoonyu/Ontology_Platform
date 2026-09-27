@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-26, after GOAL_FOUNDATIONS A7's Menu and Tooltip. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-26, after GOAL_FOUNDATIONS A6's third step. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -58,12 +58,18 @@ it before trusting it.
 | `294b5c5`, `09fabbe` | Another session's work: Security's grants picker named, every Security and Control Panel tab under axe; Data & Media's upload routes wrap at 375px |
 | `f951fda` | **A7, 2**: `components/layout/Menu.tsx` and `placement.ts`, a disclosure that floats; the pipeline strip's unsaved-changes list adopts it; route payload re-baselined in the open |
 | `67427c8` | **A7, 3**: `components/layout/Tooltip.tsx`; the canvas's zoom buttons and edge inserts and Workshop's Layout, Duplicate and Delete node adopt it; `Tooltip` and `placement` ride in `dragdrop-vendor` |
-| this commit | This note; `audit_ratchet_motion` locked at 0 (all 20 ratchets have fallen at least once) |
+| `7b83488` | This note; `audit_ratchet_motion` locked at 0 (all 20 ratchets have fallen at least once) |
+| `bee53c5` | Decisions U–X recorded as assumed (the plan's table) |
+| `b0ffc66` | **A6, 1**: `routes.json`, `navigate`/`useRouteParams`/`navigateHref`, `workspace_routes.py`, Ops' `?tab=`, `UnknownResource`, ScreenBoundary cleared by a history step (`frontend/tests/routes.spec.ts`, `oms/test_workspace_routes.py`) |
+| `8f243a7` | The shell-widths strip tests unroute with `ignoreErrors`, so a late canvas answer cannot fail them |
+| `2dc19ba` | **A6, 2**: Data & Media's `?dataset=`; answers carry their id; quarantine and imports links from the table |
+| `ccd7afb` | Another session: the evaluator's sweep covers every registered workspace and measures `main.workspace`'s scroll; it lands with 14 known failures |
+| `fa8b6c7` | **A6, 3**: Pipeline Builder's `?graph=`; outputs, contracts and failures carry their pipeline; late creates never open over a move; the Command Center's newest pipeline scoped to the viewer |
 
 GOAL_LOOK: **Met, U1–U11.** Nothing has been pushed. Never push tags. The work continues in
 [`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A5, A8 and A9 are Met; A6 and A7
 are Open. A7's Dialog, Menu and Tooltip are all in and adopted; it stays Open only as the owner of
-`raw_colour_ceiling` (see Next).
+`raw_colour_ceiling` (see Next). A6 has three of its readers (Ops, datasets, pipelines).
 
 **Decided 2026-09-26:** N (a), tabs and menus stay buttons; and for A5, existing media sets stay
 unassigned until someone assigns them.
@@ -97,7 +103,7 @@ I, M and N are still undecided, and the goal assumes their option (a).
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS A6
+## Next: GOAL_FOUNDATIONS A6, step 4 (builders' `?artifact=`)
 
 1. **Decisions U–X are assumed, not decided** (the plan's owner-decisions table, 2026-09-26):
    `page` names an ontology-level panel (U a); old spellings are not read (V a); the server
@@ -105,11 +111,12 @@ I, M and N are still undecided, and the goal assumes their option (a).
    stays Open as `raw_colour_ceiling`'s owner (X b). Ask the owner when they are back. A6's own
    text settles the rest: Ops tabs are pushed, Object Explorer's search is replaced, and each
    test is run against a `38b096a` build.
-2. **A6, routes** (L): one route table (`routes.json` beside `apps.json`), `navigate(view,
-   params)`, and six query readers, one commit per reader. The spec and its critique are in
-   `look-census/specs/` (local, excluded: `a6_spec.md`, `a6_critique.json`); the critique's two major points
-   are the flushSync premise (false under React 19.2.7; drop `alongside`) and the `38b096a`
-   claim.
+2. **A6's remaining steps** (spec and critique in `look-census/specs/`): 4, the builders'
+   `?artifact=` (workshop, aip, investigations, entity-resolution); 5, Object Explorer's
+   `?type=&object=`; 6, Ontology's `?type=&section=&page=`; 7, Object Explorer's search replaced
+   in the URL; then each test run against a `38b096a` build, and A6 marked. Follow the pattern
+   the reviews established: every answer a screen shows carries the id it answers; a create
+   that lands after the user moved on opens nothing; each data test makes its own resources.
 3. **The Platform Graph retry** at 1366 is still filed as its own task. It passed the last run
    at 41 s, against a 45 s limit.
 4. **A migration re-records four baselines.** Adding one stamps query-bounds, request-cost,
@@ -191,6 +198,15 @@ I, M and N are still undecided, and the goal assumes their option (a).
 - **Late-run backend stalls** can fail a test whose route handler fetches after the test ends
   (the shell-widths strip test once, teardown past 45 s). It passed alone and in the next run;
   the readiness task owns the stall.
+- **The evaluator sweep fails 14 to 16 tests on master** since `ccd7afb` (another session's):
+  control-panel and security at 375, data-media and analytics in axe, and, with a well-used
+  database, Imports' metric overflow and an Automate scroll box (filed as a task). Compare a
+  full run's failures against that list before calling anything a regression.
+- **Playwright can orphan its web server on Windows.** A later run then fails with "port 8021
+  is already used". Find the uvicorn on the port (`Get-NetTCPConnection -LocalPort 8021`), check
+  its command line is this session's, and stop it. Never touch 8010.
+- **A test that relies on data it did not make passes in a full run and fails alone.** Negative
+  runs start from a fresh database, so they find it: create what the test reads.
 - **The original** is signed in only in the user's Chrome. Use Claude in Chrome read-only and
   never type credentials. The JS tool returns about 1,000 characters; write results into an
   `<article>` and read them with `get_page_text`.
