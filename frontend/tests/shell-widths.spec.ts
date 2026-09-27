@@ -270,6 +270,8 @@ test.describe("the pipeline status strip says what is true", () => {
     await expect(badge(page), "the strip says nothing is selected before it knows").toHaveText("loading");
     release();
     await expect(badge(page)).toHaveText("No pipeline selected");
+    // A page-state request still in the handler when the test ends is not this test's.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
   /** A pipeline of its own, opened from the Outputs pane with nothing preselected. */
@@ -310,6 +312,10 @@ test.describe("the pipeline status strip says what is true", () => {
     await expect.poll(() => status, { message: "the canvas was never requested" }).not.toBe("");
     await expect(badge(page), "the strip still says loading after the canvas arrived").toHaveText(status);
     await expect(badge(page)).not.toHaveText("loading");
+    // Selecting the pipeline selects its first node, and that second canvas request can still be
+    // in the handler when the test ends: late in a full run its fetch outlived the page, and the
+    // disposed response failed a test that had passed. What it would answer is not this test's.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
   test("a canvas that failed to load is not said to be loading", async ({ page }) => {
