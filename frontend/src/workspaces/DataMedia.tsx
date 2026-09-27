@@ -127,13 +127,16 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
     if (!name) return;
     setActionError("");
     setBusy(true);
+    // Where the user was when they asked: if they have chosen another dataset or left by the
+    // time it exists, it is not opened over their choice.
+    const askedAt = window.location.pathname + window.location.search;
     try {
       const id = slugify(name) || `dataset_${Date.now()}`;
       const created = await createDataAsset({ id, display_name: name, description: newDescription.trim() || undefined });
       // One synchronous block, so the new URL and these updates render together (React 19
       // renders the popstate's and the continuation's updates in one pass). The new dataset
       // is found through its own detail fetch, never through the reloading list.
-      openResource("dataset", created.id);
+      if (window.location.pathname + window.location.search === askedAt) openResource("dataset", created.id);
       setNewName("");
       setNewDescription("");
       reload();

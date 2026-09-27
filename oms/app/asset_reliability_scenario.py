@@ -32,6 +32,7 @@ from . import (
     reliability_ops,
     semantic_scope,
     tenancy,
+    workspace_routes,
 )
 from .database import get_db
 from .domain_maintenance import (
@@ -947,7 +948,9 @@ def _workflow_state(db: Session, principal: production_auth.Principal, *, asset_
         from . import imports_ops, ontology_generator, pipeline_builder_ops
         latest_import = db.query(imports_ops.ImportJob).order_by(imports_ops.ImportJob.updated_at.desc()).first()
         latest_draft = db.query(ontology_generator.OntologyGeneratorDraft).order_by(ontology_generator.OntologyGeneratorDraft.updated_at.desc()).first()
-        latest_graph = db.query(pipeline_builder_ops.PipelineBuilderGraph).order_by(pipeline_builder_ops.PipelineBuilderGraph.updated_at.desc()).first()
+        # The newest pipeline the viewer may open (GOAL_FOUNDATIONS A6): its id becomes a link,
+        # and a link to another project's pipeline opens nothing and names what it holds.
+        latest_graph = pipeline_builder_ops._accessible_graphs(db, principal, "view").order_by(pipeline_builder_ops.PipelineBuilderGraph.updated_at.desc()).first()
     except Exception:
         latest_import = latest_draft = latest_graph = None
     latest_run = db.query(models.PipelineRun).order_by(models.PipelineRun.created_at.desc()).first()
@@ -1009,7 +1012,7 @@ def _workflow_state(db: Session, principal: production_auth.Principal, *, asset_
             "label": "Deliver pipeline",
             "status": "complete" if latest_run else "available",
             "evidence_id": getattr(latest_run, "id", None),
-            "href": "/workspace/pipeline",
+            "href": workspace_routes.app_url("pipeline_graph", latest_graph.id) if latest_graph else "/workspace/pipeline",
             "graph_id": getattr(latest_graph, "id", None),
         },
         {
@@ -1056,7 +1059,7 @@ def _workflow_state(db: Session, principal: production_auth.Principal, *, asset_
             {"kind": "asset", "id": selected_asset.get("id"), "href": "/workspace/object-explorer?legacy=1"},
             {"kind": "import_job", "id": getattr(latest_import, "id", None), "href": "/workspace/imports"},
             {"kind": "ontology_object_type", "id": selected_asset.get("object_type_id"), "href": "/workspace/ontology"},
-            {"kind": "pipeline_graph", "id": getattr(latest_graph, "id", None), "href": "/workspace/pipeline"},
+            {"kind": "pipeline_graph", "id": getattr(latest_graph, "id", None), "href": workspace_routes.app_url("pipeline_graph", latest_graph.id) if latest_graph else "/workspace/pipeline"},
             {"kind": "pipeline_run", "id": getattr(latest_run, "id", None), "href": "/workspace/pipeline"},
             {"kind": "approval", "id": getattr(latest_approval, "id", None), "href": "/workspace/command-center"},
             {"kind": "action_execution", "id": getattr(current_action, "id", None), "href": "/workspace/command-center"},

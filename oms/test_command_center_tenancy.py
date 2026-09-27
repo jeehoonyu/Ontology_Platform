@@ -92,9 +92,15 @@ with SessionLocal() as db:
         db.add(ops_control.Incident(id=f"beta-incident-{index}", project_id=FOREIGN, display_name=f"Beta incident {index}",
                                     severity="high", status=status, linked_objects=[], alert_ids=[], approval_ids=[],
                                     runbook_execution_ids=[], timeline=[], created_at=LATER, updated_at=LATER + index))
+    # The newest pipeline of all, in another project: the workflow state names its latest pipeline
+    # and links to it (GOAL_FOUNDATIONS A6), and a viewer of `default` may not open this one.
+    from app import pipeline_builder_ops  # noqa: E402
+    db.add(pipeline_builder_ops.PipelineBuilderGraph(id="beta-graph", project_id=FOREIGN, display_name="Beta pipeline",
+                                                     nodes=[], edges=[], parameters={}, status="DRAFT",
+                                                     created_at=LATER, updated_at=LATER))
     db.commit()
 FOREIGN_IDS = ["beta-alert-1", "beta-alert-2", "beta-approval-0", "beta-approval-1", "beta-incident-0", "beta-incident-1",
-               "beta-asset"]
+               "beta-asset", "beta-graph"]
 
 
 def counts(project_ids):

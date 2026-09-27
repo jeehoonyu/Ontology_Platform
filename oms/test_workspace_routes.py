@@ -49,7 +49,7 @@ for kind, entry in table["kinds"].items():
 # Workspace hrefs written by hand, by file. A link built from the table never appears here.
 # Each reader's commit takes its links off this list.
 HAND_BUILT = {
-    "oms/app/industrial_workflow.py": 4,
+    "oms/app/industrial_workflow.py": 2,
     "oms/app/ontology_core.py": 1,
     "oms/app/ontology_health.py": 1,
     "oms/app/platform_core.py": 1,
@@ -87,6 +87,7 @@ try:
 except ValueError:
     checks += 1
 check(app_url("dataset", "d 1") == "/workspace/data-media?dataset=d+1", app_url("dataset", "d 1"))
+check(app_url("pipeline_graph", "g1") == "/workspace/pipeline?graph=g1", app_url("pipeline_graph", "g1"))
 try:
     app_url("no_such_kind", "x")
     check(False, "a kind with no row got a URL")

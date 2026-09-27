@@ -446,6 +446,32 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   link built by hand again. An adversarial review confirmed seven findings, all fixed above
   (among them the receipt following Back, the previous id's error reappearing, and tests that
   could not fail); seven were refuted.
+
+  **3. Pipeline Builder's `?graph=`.** The pipeline is the URL's, with the server's most recently
+  updated one as a default it adopts and never writes. A row and "New pipeline" open theirs with
+  `openResource`; the new pipeline's URL and state render in one pass, so its canvas is asked for
+  once. The canvas, its failure, the outputs and the ontology contracts each carry the pipeline
+  they answer, so Back, Forward or a chosen row never leave one pipeline's rail, failure or
+  unknown card under another, and a pipeline asked again reads as loading, not its old failure.
+  A 403 or 404 names the id, says "Pipeline not found" in the strip and turns off Propose,
+  Preview and Deploy; a 500 stays "Canvas failed to load". A new pipeline or dataset that lands
+  after the user has moved on (Back, another row, another view) no longer opens over their
+  choice. The server builds its pipeline links from the table: the onboarding and workflow
+  actions, the Command Center's evidence and its stepper, whose newest pipeline is now the newest
+  the viewer may open (`test_command_center_tenancy` puts a newer one in another project; before,
+  the link would have named it).
+
+  Proven by four pipeline cases in `routes.spec.ts`, one more dataset case, and the tenancy test.
+  Negative runs, each failing: the URL unread ("the URL's pipeline, not the newest"); the URL
+  read once; the new pipeline's updates a pass after its URL ("a new pipeline asked for its canvas
+  more than once"); an unknown pipeline not named; the failure not tied to its pipeline ("the
+  unknown pipeline's card stayed while the real one loaded"); a 403 not counted; a row not
+  writing the URL; Deploy left on; outputs not tied to their pipeline; a late new pipeline, and a
+  late new dataset, opened over the user's move; a pipeline asked again keeping its old failure;
+  the evidence link and the stepper link spelled by hand; the Command Center's newest pipeline
+  unscoped ("lists another project's rows: ['beta-graph']"). The contracts carry their pipeline
+  the same way as the outputs; no test separates them. An adversarial review confirmed seven
+  findings, all fixed above; eleven were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

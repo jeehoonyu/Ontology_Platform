@@ -17,9 +17,11 @@ from urllib.parse import urlencode
 VIEWS: Dict[str, Dict[str, Any]] = {
     "ops": {"params": ["tab"], "defaults": {"tab": "command"}},
     "data-media": {"params": ["dataset"]},
+    "pipeline": {"params": ["graph"]},
 }
 KINDS: Dict[str, Dict[str, Any]] = {
     "dataset": {"view": "data-media", "param": "dataset"},
+    "pipeline_graph": {"view": "pipeline", "param": "graph"},
 }
 
 

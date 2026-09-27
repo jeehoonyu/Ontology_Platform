@@ -2,14 +2,14 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, useDraggable, type DragEndEvent } from "@dnd-kit/core";
 import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../components/dnd/DragKit";
 import { Menu } from "../components/layout/Menu";
-import { hrefForResource } from "../utils/navigation";
+import { hrefForResource, openResource, useRouteParams } from "../utils/navigation";
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
 import { columnLayout, layersOf } from "../lib/graphLayout";
 import { CLIPBOARD_KIND, readNodes, writeNodes } from "../lib/nodeClipboard";
 import { bare, ctrl, ctrlShift, useHotkeys, type Hotkey } from "../lib/hotkeys";
-import { postJson } from "../api";
+import { isNotFound, postJson } from "../api";
 import {
   cancelJob,
   compilePipelinePlan,
@@ -36,7 +36,7 @@ import {
   updatePipelineNode
 } from "../api/workspaceState";
 import { BottomDrawer, LASSO_ID, PipelineCanvas, ZOOM_FIT, ZOOM_MAX, ZOOM_MIN } from "../components/canvas/PipelineCanvas";
-import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge } from "../components/data/DataDisplay";
+import { DataTable, EmptyState, KeyValueGrid, Panel, StatusBadge, UnknownResource } from "../components/data/DataDisplay";
 import { ACTION_RESULT, CHECK_RESULT, JOB_STATUS, NODE_STATUS, intentOf } from "../components/data/intents";
 import { Toolbar } from "../components/workbench/Workbench";
 import { useAsyncState } from "../hooks/useAsyncState";
@@ -87,7 +87,11 @@ const PIPELINE_PANES: PaneSpec[] = [
 
 export function PipelineBuilder() {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [selectedGraphId, setSelectedGraphId] = useState("");
+  // The pipeline is the URL's (GOAL_FOUNDATIONS A6); with none named, the server's most
+  // recently updated, adopted and never written (evaluator.spec.ts asserts /workspace/pipeline$).
+  const route = useRouteParams("pipeline");
+  const [defaultGraphId, setDefaultGraphId] = useState("");
+  const selectedGraphId = route.graph || defaultGraphId;
   const [selectedNodeId, setSelectedNodeId] = useState("");
   // Nodes selected together, so one drag can carry several. M5 of
   // GOAL_PANES_2026-09-11. The primary node still drives details, preview and the
@@ -102,12 +106,21 @@ export function PipelineBuilder() {
   // The selected node, if it is on that canvas. The id itself can outlive its
   // pipeline, so nothing that writes reads it bare.
   const nodeOnCanvas = canvas?.nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : "";
-  const [canvasFailed, setCanvasFailed] = useState(false);
+  // The graph whose canvas failed, and whether with a 403 or 404: an answer carries the id it
+  // answers, so Back or a chosen row never shows one pipeline's failure over another. A 500
+  // stays "Canvas failed to load"; a 403 or 404 names the id.
+  const [canvasError, setCanvasError] = useState<{ id: string; notFound: boolean } | null>(null);
+  const canvasFailed = canvasError?.id === selectedGraphId;
+  const graphMissing = route.graph !== "" && canvasError?.id === route.graph && canvasError.notFound;
   const [preview, setPreview] = useState<NodePreview | null>(null);
   const [suggestions, setSuggestions] = useState<NodeSuggestions | null>(null);
   const [details, setDetails] = useState<PipelineNodeDetails | null>(null);
-  const [outputs, setOutputs] = useState<PipelineOutputsState | null>(null);
-  const [contracts, setContracts] = useState<PipelineOntologyContractState | null>(null);
+  // The outputs and contracts shown are the open pipeline's or none: each answer carries its
+  // graph, so Back, Forward or a chosen row never leave one pipeline's rail under another.
+  const [loadedOutputs, setOutputs] = useState<PipelineOutputsState | null>(null);
+  const outputs = loadedOutputs?.graph_id === selectedGraphId ? loadedOutputs : null;
+  const [loadedContracts, setContracts] = useState<{ id: string; value: PipelineOntologyContractState } | null>(null);
+  const contracts = loadedContracts?.id === selectedGraphId ? loadedContracts.value : null;
   const [zoom, setZoom] = useState(0.86);
   // Committed node moves, newest last, each with every position before it. V6 of
   // GOAL_MOVEMENT_2026-09-12: a drop saved positions to the server and nothing
@@ -159,25 +172,28 @@ export function PipelineBuilder() {
 
   useEffect(() => {
     if (!selectedGraphId && state.value?.selected_canvas?.graph.id) {
-      setSelectedGraphId(state.value.selected_canvas.graph.id);
+      setDefaultGraphId(state.value.selected_canvas.graph.id);
     }
   }, [state.value, selectedGraphId]);
 
   useEffect(() => {
     if (!selectedGraphId) return;
     let cancelled = false;
-    setCanvasFailed(false);
-    getPipelineCanvas(selectedGraphId, selectedNodeId || undefined)
+    const graphId = selectedGraphId;
+    // Asked again, a graph that failed before is loading, not failed, until it answers.
+    setCanvasError((current) => (current?.id === graphId ? null : current));
+    getPipelineCanvas(graphId, selectedNodeId || undefined)
       .then((nextCanvas) => {
         if (!cancelled) {
           setCanvas(nextCanvas);
+          setCanvasError((current) => (current?.id === graphId ? null : current));
           setSelectedNodeId(nextCanvas.selected_node?.id || selectedNodeId);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
         setCanvas(null);
-        setCanvasFailed(true);
+        setCanvasError({ id: graphId, notFound: isNotFound(error) });
       });
     return () => {
       cancelled = true;
@@ -198,8 +214,9 @@ export function PipelineBuilder() {
   useEffect(() => {
     if (!selectedGraphId) return;
     let cancelled = false;
-    getPipelineOntologyContracts(selectedGraphId)
-      .then((nextContracts) => !cancelled && setContracts(nextContracts))
+    const graphId = selectedGraphId;
+    getPipelineOntologyContracts(graphId)
+      .then((nextContracts) => !cancelled && setContracts({ id: graphId, value: nextContracts }))
       .catch(() => !cancelled && setContracts(null));
     return () => {
       cancelled = true;
@@ -765,6 +782,9 @@ export function PipelineBuilder() {
 
   async function createGraph() {
     setActionStatus("Creating pipeline draft...");
+    // Where the user was when they asked: if they have gone elsewhere by the time the draft
+    // exists (Back, another pipeline, another view), it is not opened over their choice.
+    const askedAt = window.location.pathname + window.location.search;
     const graph = await postJson<{ id: string }>("/pipeline-builder/graphs", {
       display_name: "Untitled pipeline",
       description: "Visual pipeline draft",
@@ -773,7 +793,14 @@ export function PipelineBuilder() {
       parameters: {},
       status: "DRAFT"
     });
-    setSelectedGraphId(graph.id);
+    // One synchronous block, so the new URL and these updates render in one pass (React 19
+    // renders the popstate's and the continuation's updates together), and the new pipeline's
+    // canvas is asked for once, with no node.
+    if (window.location.pathname + window.location.search !== askedAt) {
+      setRefreshKey((key) => key + 1);
+      return;
+    }
+    openResource("pipeline_graph", graph.id);
     setSelectedNodeId("");
     setActionStatus("Pipeline draft created. Drag an input or transform onto the canvas.");
     setRefreshKey((key) => key + 1);
@@ -794,6 +821,7 @@ export function PipelineBuilder() {
     : pageLoading ? "loading"
     : state.error ? "Pipelines failed to load"
     : !selectedGraphId ? "No pipeline selected"
+    : graphMissing ? "Pipeline not found"
     : canvasFailed ? "Canvas failed to load"
     : "loading";
 
@@ -814,15 +842,15 @@ export function PipelineBuilder() {
                 Undo {moves[moves.length - 1]?.kind ?? "move"}
               </button>
               <button onClick={() => removeNode()} disabled={!nodeOnCanvas}>Delete node</button>
-              <button onClick={() => run("validate")} disabled={!selectedGraphId || Boolean(busyAction)}>Propose</button>
-              <button onClick={() => run("preview")} disabled={!selectedGraphId || Boolean(busyAction)}>Preview</button>
-              <button onClick={() => run("deliver")} disabled={!selectedGraphId || Boolean(busyAction)}>{busyAction === "deliver" ? "Queueing..." : "Deploy"}</button>
+              <button onClick={() => run("validate")} disabled={!selectedGraphId || graphMissing || Boolean(busyAction)}>Propose</button>
+              <button onClick={() => run("preview")} disabled={!selectedGraphId || graphMissing || Boolean(busyAction)}>Preview</button>
+              <button onClick={() => run("deliver")} disabled={!selectedGraphId || graphMissing || Boolean(busyAction)}>{busyAction === "deliver" ? "Queueing..." : "Deploy"}</button>
               <a className="legacy-button compact" href="/workspace/pipeline?legacy=1">Legacy</a>
             </>}
           />
           <Toolbar groups={canvas?.toolbar_groups || state.value?.selected_canvas?.toolbar_groups || []} />
           <div className="workbench-status-strip">
-            <StatusBadge value={stripStatus} intent={canvas ? intentOf(CHECK_RESULT, stripStatus) : stripStatus === "Pipelines failed to load" || stripStatus === "Canvas failed to load" ? "danger" : "neutral"} />
+            <StatusBadge value={stripStatus} intent={canvas ? intentOf(CHECK_RESULT, stripStatus) : stripStatus === "Pipelines failed to load" || stripStatus === "Canvas failed to load" || stripStatus === "Pipeline not found" ? "danger" : "neutral"} />
             {/* The count opens the list as a menu (A7): it floats over the canvas rather
                 than pushing it down, and choosing a node selects it and closes the list.
                 With nothing unsaved the Menu unmounts, so a list closed by saving does not
@@ -944,7 +972,7 @@ export function PipelineBuilder() {
                 </table>
               </section>
             ) : null}
-            <PipelineCanvas
+            {graphMissing ? <UnknownResource noun="pipeline" id={route.graph} /> : <PipelineCanvas
               canvas={canvas}
               zoom={zoom}
               onZoom={(next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)))}
@@ -961,7 +989,7 @@ export function PipelineBuilder() {
               onLasso={selectRegion}
               hiddenNodes={hiddenSet}
               onShowAll={showAllHidden}
-            />
+            />}
                 </div>
             );
             if (pane === "drawer") return (
@@ -1128,7 +1156,7 @@ export function PipelineBuilder() {
           </Panel>
           <Panel title="Graphs">
             {(state.value?.graphs || []).map((graph) => (
-              <button key={graph.id} className={classNames("resource-row", selectedGraphId === graph.id && "selected")} onClick={() => setSelectedGraphId(graph.id)}>
+              <button key={graph.id} className={classNames("resource-row", selectedGraphId === graph.id && "selected")} onClick={() => openResource("pipeline_graph", graph.id)}>
                 <strong>{graph.display_name || graph.id}</strong>
                 <span>{graph.nodes.length} nodes</span>
               </button>

@@ -2,9 +2,11 @@
   "about": "Every workspace view's query and every resource kind's URL (GOAL_FOUNDATIONS A6). views: the params a view's screen reads, in the order hrefs write them; a param at its default is left out of the URL. kinds: the view that opens a resource, the param that names it, and any other param its URL requires. A default or automatic selection never writes the URL. oms/app/workspace_routes.py is the server's copy; oms/test_workspace_routes.py holds them equal.",
   "views": {
     "ops": { "params": ["tab"], "defaults": { "tab": "command" } },
-    "data-media": { "params": ["dataset"] }
+    "data-media": { "params": ["dataset"] },
+    "pipeline": { "params": ["graph"] }
   },
   "kinds": {
-    "dataset": { "view": "data-media", "param": "dataset" }
+    "dataset": { "view": "data-media", "param": "dataset" },
+    "pipeline_graph": { "view": "pipeline", "param": "graph" }
   }
 }

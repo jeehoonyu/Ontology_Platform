@@ -23,10 +23,10 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `DataGrid` | `components/data/DataGrid.tsx` | **5** — ControlPanel, DataMedia, OntologyRegistryPanel, OpsWorkspace, and 1 more |
 | `DeveloperEvidence` | `components/data/DataDisplay.tsx` | **5** — App, DataMedia, Delivery, Security, and 1 more |
 | `PaneHost` | `components/layout/Pane.tsx` | **3** — OntologyManager, PipelineBuilder, VisualBuilder |
+| `UnknownResource` | `components/data/DataDisplay.tsx` | **3** — DataMedia, OpsWorkspace, PipelineBuilder |
 | `Dialog` | `components/layout/Dialog.tsx` | **2** — App, ObjectExplorer |
 | `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
 | `SegmentedControl` | `components/layout/Tabs.tsx` | **2** — OntologyHealthPanel, VisualBuilder |
-| `UnknownResource` | `components/data/DataDisplay.tsx` | **2** — DataMedia, OpsWorkspace |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |

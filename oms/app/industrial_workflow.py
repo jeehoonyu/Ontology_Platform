@@ -1250,7 +1250,7 @@ def onboard_asset_reliability(
             "ontology_contract": publication, "execution": job,
             "primary_actions": [
                 {"id": "monitor-job", "label": "Monitor background onboarding", "href": f"/jobs/{job['id']}"},
-                {"id": "open-pipeline", "label": "Open hydration pipeline", "href": f"/workspace/pipeline?graph={graph.id}"},
+                {"id": "open-pipeline", "label": "Open hydration pipeline", "href": workspace_routes.app_url("pipeline_graph", graph.id)},
             ],
             "evidence_links": [
                 {"kind": "dataset_snapshot", "id": source_snapshot.id, "href": f"/api/v1/dataset-snapshots/{source_snapshot.id}/rows"},
@@ -1298,7 +1298,7 @@ def onboard_asset_reliability(
         "ontology_contract": publication,
         "primary_actions": [
             {"id": "inspect-risk", "label": "Inspect high-risk assets", "href": "/workspace/decision"},
-            {"id": "open-pipeline", "label": "Open hydration pipeline", "href": f"/workspace/pipeline?graph={resources['ids']['pipeline_graph']}"},
+            {"id": "open-pipeline", "label": "Open hydration pipeline", "href": workspace_routes.app_url("pipeline_graph", resources['ids']['pipeline_graph'])},
             {"id": "open-ontology", "label": "Open ontology contract", "href": f"/workspace/ontology?object_type={resources['ids']['object_type']}"},
         ],
         "evidence_links": [
