@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .database import Base, get_db
 from . import models, models_action, object_writes
-from . import production_auth, runtime, semantic_scope, tenancy
+from . import production_auth, runtime, semantic_scope, tenancy, workspace_routes
 
 router = APIRouter(tags=["ontology_core"])
 
@@ -894,7 +894,7 @@ def _object_type_walkthrough(db: Session, object_type_id: str) -> Dict[str, Any]
         "steps": steps,
         "links": [
             {"label": "Pipeline Builder", "path": "/workspace/pipeline"},
-            {"label": "Ontology Manager", "path": f"/workspace/ontology?object_type_id={object_type_id}"},
+            {"label": "Ontology Manager", "path": workspace_routes.app_url("object_type", object_type_id)},
             {"label": "Validation", "path": "/workspace/validation"},
         ],
     }

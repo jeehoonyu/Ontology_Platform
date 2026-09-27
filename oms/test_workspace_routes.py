@@ -48,11 +48,7 @@ for kind, entry in table["kinds"].items():
 
 # Workspace hrefs written by hand, by file. A link built from the table never appears here.
 # Each reader's commit takes its links off this list.
-HAND_BUILT = {
-    "oms/app/industrial_workflow.py": 1,
-    "oms/app/ontology_core.py": 1,
-    "oms/app/ontology_health.py": 1,
-}
+HAND_BUILT: dict = {}
 SERVER_HREF = re.compile(r"/workspace/[a-z-]+\?")
 CLIENT_HREF = re.compile(r"/workspace/[a-z-]+\?(?!legacy=1)")
 found = {}
@@ -88,6 +84,9 @@ check(app_url("dataset", "d 1") == "/workspace/data-media?dataset=d+1", app_url(
 check(app_url("pipeline_graph", "g1") == "/workspace/pipeline?graph=g1", app_url("pipeline_graph", "g1"))
 check(app_url("aip_logic", "a") == "/workspace/aip?artifact=a", app_url("aip_logic", "a"))
 check(app_url("object", "o", type="t") == "/workspace/object-explorer?type=t&object=o", app_url("object", "o", type="t"))
+check(app_url("object_type", "t") == "/workspace/ontology?type=t", app_url("object_type", "t"))
+check(workspace_href("ontology", type="t", section="overview") == "/workspace/ontology?type=t", "the overview section is the default and is left out")
+check(workspace_href("ontology", type="t", page="releases") == "/workspace/ontology?type=t&page=releases", workspace_href("ontology", type="t", page="releases"))
 try:
     app_url("object", "o")
     check(False, "an object's URL was built without its type")

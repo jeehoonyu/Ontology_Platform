@@ -39,7 +39,7 @@ way to the rest names items nobody can reach.
 | `workspaces/DecisionWorkspace.tsx` | 129 | `RiskBoard` | `finding.risk.drivers` (slice) | mapped | **no** | **no** |
 | `workspaces/MapWorkspace.tsx` | 224 | `MapWorkspace` | `features` (slice) | held as listedFeatures, all on request | yes | yes |
 | `workspaces/ObjectExplorer.tsx` | 76 | `FacetCard` | `facet.buckets` (slice) | held as shown, all on request | yes | yes |
-| `workspaces/OntologyManager.tsx` | 292 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
+| `workspaces/OntologyManager.tsx` | 321 | `OntologyManager` | `draftList` (slice) | mapped, all on request | yes | yes |
 | `workspaces/VisualBuilder.tsx` | 776 | `VisualBuilder` | `collaborators.data.participants` (slice) | mapped | **no** | **no** |
 | `workspaces/VisualBuilder.tsx` | 880 | `VisualBuilder` | `preview.sample_output` (slice) | mapped | **no** | **no** |
 
@@ -125,8 +125,8 @@ A view that leaves out what someone hid, read by the name of the set it drops. I
 | `lib/builderKernel.ts` | 22 | `duplicateSelection` | `crypto.randomUUID()` | text |
 | `workspaces/Analytics.tsx` | 62 | `truncate` | `text` | text |
 | `workspaces/Automate.tsx` | 316 | `Automate` | `run.id` | text |
-| `workspaces/OntologyManager.tsx` | 507 | `ActionTypeEditor` | ``${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")` | text |
-| `workspaces/OntologyManager.tsx` | 755 | `OntologyRelationshipDesigner` | ``${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_")` | text |
+| `workspaces/OntologyManager.tsx` | 542 | `ActionTypeEditor` | ``${objectTypeId}_${displayName}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")` | text |
+| `workspaces/OntologyManager.tsx` | 790 | `OntologyRelationshipDesigner` | ``${connection.source}_${connection.target}_link`.replace(/[^a-zA-Z0-9_]/g, "_")` | text |
 | `workspaces/OntologyPackagePanel.tsx` | 156 | `PackageVersionRow` | `version.checksum` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 152 | `OntologyRegistryPanel` | `selected.checksum?` | text |
 | `workspaces/OntologyRegistryPanel.tsx` | 177 | `OntologyRegistryPanel` | `packageInfo.sha256` | text |

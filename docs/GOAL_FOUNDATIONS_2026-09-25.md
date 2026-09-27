@@ -520,6 +520,39 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   latest query is taken for the same type too; no test races two queries of one type. An
   adversarial review confirmed five findings, all fixed above (the profile's refresh was
   major); four were refuted.
+
+  **6. Ontology Manager's `?type=&section=&page=`.** The type, its section and the ontology's
+  page are the URL's (decision U, assumed: `section` is one of the type's navigation ids, the
+  overview by default; `page` is one of the three panels that replace the whole surface). With no
+  type named, the server's most recently updated, adopted and never written. The manager, the
+  walkthrough and the section shown each name what they answer, so none of one type's or
+  section's shows under another's, and another type's 404 is not shown again for a type made
+  since. A missing type, an unknown page and an unknown section are each named; a page given as a
+  section is an unknown section, lays out as none and is not the one marked; the page layout
+  comes only from a known page of a known type; the package panel gets no type for a missing one.
+  Discover and Resource Navigation push, the panels' Back opens the type's overview, Apply opens
+  the applied type unless the user has moved on, and Generate no longer selects a type its draft
+  has not yet made. The server builds every remaining workspace link from the table (the
+  walkthrough's, the onboarding action's, the Command Center's ontology evidence, and a health
+  finding's, which opens the ontology when the finding has no type), so `test_workspace_routes`
+  now counts no hand-built workspace link at all.
+
+  Proven by two ontology cases in `routes.spec.ts` and the ontology Python tests. Negative runs,
+  each failing: the type unread ("the URL's object type, not the newest"); the section unread
+  ("the URL's section, not the overview"); the manager not tied to its type ("the last type's
+  manager stayed under the type Back returned to"); the walkthrough not tied to its type; the
+  section not tied to its type and section ("the last section's detail stayed under the section
+  Back returned to"); another type's 404 kept ("a type's old 404 was shown again while its own
+  answer was on its way"); an unknown type, page and section each not named; the page layout
+  taken from the section; a page given as a section marked; the section effect blind to the page
+  ("leaving an unknown page for the section of its name did not load the section"); a Discover row
+  not writing the URL; a late draft opened over the user's move; an applied draft not opened; the
+  walkthrough's link spelled by hand. An adversarial review confirmed five findings, all fixed
+  above; four were refuted.
+  - Route payload, re-baselined in the open: the shared closure is 7,227 B above the Menu's
+    record (A6's table and navigation in the entry chunk, `UnknownResource`, and 64738d4's
+    header CSS from another session), and the readers' own code took Object Explorer and
+    Workshop past the 8 KB tolerance (+8,400 B and +8,237 B in all).
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

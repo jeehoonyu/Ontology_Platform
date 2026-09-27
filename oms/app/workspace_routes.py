@@ -23,6 +23,7 @@ VIEWS: Dict[str, Dict[str, Any]] = {
     "investigations": {"params": ["artifact"]},
     "entity-resolution": {"params": ["artifact"]},
     "object-explorer": {"params": ["type", "object"]},
+    "ontology": {"params": ["type", "section", "page"], "defaults": {"section": "overview"}},
 }
 KINDS: Dict[str, Dict[str, Any]] = {
     "dataset": {"view": "data-media", "param": "dataset"},
@@ -32,6 +33,7 @@ KINDS: Dict[str, Dict[str, Any]] = {
     "investigation_graph": {"view": "investigations", "param": "artifact"},
     "entity_resolution": {"view": "entity-resolution", "param": "artifact"},
     "object": {"view": "object-explorer", "param": "object", "requires": ["type"]},
+    "object_type": {"view": "ontology", "param": "type"},
 }
 
 

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, object_views_ops, ontology_core, ops_control, platform_core, tenancy
+from . import models, models_action, object_views_ops, ontology_core, ops_control, platform_core, tenancy, workspace_routes
 from .database import Base, get_db
 from .production_auth import Principal, require_permission
 
@@ -124,7 +124,8 @@ def _finding(findings: List[Dict[str, Any]], *, code: str, severity: str, catego
         "detail": detail,
         "recommendation": recommendation,
         "count": count,
-        "target_href": f"/workspace/ontology?objectType={object_type_id or resource_id}",
+        # A finding with no object type opens the ontology, not a type named after its resource.
+        "target_href": workspace_routes.app_url("object_type", object_type_id) if object_type_id else "/workspace/ontology",
     })
 
 

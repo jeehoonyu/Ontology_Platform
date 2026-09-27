@@ -1299,7 +1299,7 @@ def onboard_asset_reliability(
         "primary_actions": [
             {"id": "inspect-risk", "label": "Inspect high-risk assets", "href": "/workspace/decision"},
             {"id": "open-pipeline", "label": "Open hydration pipeline", "href": workspace_routes.app_url("pipeline_graph", resources['ids']['pipeline_graph'])},
-            {"id": "open-ontology", "label": "Open ontology contract", "href": f"/workspace/ontology?object_type={resources['ids']['object_type']}"},
+            {"id": "open-ontology", "label": "Open ontology contract", "href": workspace_routes.app_url("object_type", resources['ids']['object_type'])},
         ],
         "evidence_links": [
             {"kind": "dataset", "id": asset.id, "href": f"/data-assets/{asset.id}"},

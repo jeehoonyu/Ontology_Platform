@@ -735,3 +735,170 @@ test("object: an action dialog open on one type closes when Back leaves it", asy
   await expect(page).toHaveURL(new RegExp(`\\?type=${type}$`));
   await expect(dialog, "the last type's action dialog stayed open over this one").toHaveCount(0);
 });
+
+test("object_type: ?type=&section=&page= open that type, section and page, Back returns, unknown ones are named", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  const s = stamp();
+  const ours: Array<{ id: string; name: string }> = [];
+  for (const key of ["a", "b"]) {
+    const id = `route_${key}_${s}`;
+    const name = `Route ${key.toUpperCase()} ${s}`;
+    await post(page, "/object-types", { id, display_name: name, description: "", properties: { name: { type: "string" } } });
+    ours.push({ id, name });
+  }
+  const heading = page.locator(".manager-header-card h2");
+  const discover = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Discover" }) });
+  const navigation = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Resource Navigation" }) });
+  const section = (name: string) => navigation.getByRole("button", { name, exact: true });
+  const workbench = page.locator(".ontology-workbench-page");
+
+  await page.goto("/workspace/ontology");
+  await expect(heading).toBeVisible();
+  const opened = (await heading.textContent()) || "";
+  await expect(page, "the default type wrote itself into the URL").toHaveURL(/\/workspace\/ontology$/);
+  const target = ours.find((item) => item.name !== opened)!;
+  const other = ours.find((item) => item !== target)!;
+
+  await page.goto(`/workspace/ontology?type=${target.id}&section=properties`);
+  await expect(heading, "the URL's object type, not the newest").toHaveText(target.name);
+  await expect(section("properties")).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: "Properties Detail" }), "the URL's section, not the overview").toBeVisible();
+
+  await markDocument(page);
+  await section("datasources").click();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${target.id}&section=datasources$`));
+  await expect(page.getByRole("heading", { name: "Datasources Detail" })).toBeVisible();
+  await expectSameDocument(page, "choosing a section");
+  // Back, with the section before held back: while it is on its way, the last section's detail
+  // is not shown under it.
+  await page.route((url) => url.pathname === `/ui-state/ontology/object-types/${target.id}/sections/properties`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await page.goBack();
+  await page.waitForTimeout(300);
+  expect(await page.getByRole("heading", { name: "Datasources Detail" }).count(), "the last section's detail stayed under the section Back returned to").toBe(0);
+  await expect(page.getByRole("heading", { name: "Properties Detail" }), "Back did not restore the section before").toBeVisible();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  await section("releases").click();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${target.id}&page=releases$`));
+  await expect(workbench, "a page did not lay out as one").toHaveClass(/release-mode/);
+  await page.goBack();
+  await expect(workbench, "Back from a page kept its layout").not.toHaveClass(/release-mode/);
+  await expect(section("properties")).toHaveClass(/selected/);
+
+  await discover.locator(".resource-row").filter({ hasText: other.name }).click();
+  await expect(page, "another type kept the last one's section").toHaveURL(new RegExp(`\\?type=${other.id}$`));
+  await expect(heading).toHaveText(other.name);
+
+  // Back to the type before, with its manager held back: while it is on its way, the last type's
+  // manager is not shown under it.
+  await page.route((url) => url.pathname.includes(`/object-types/${target.id}`), async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${target.id}&section=properties$`));
+  await page.waitForTimeout(300);
+  expect(await heading.filter({ hasText: other.name }).count(), "the last type's manager stayed under the type Back returned to").toBe(0);
+  expect(await page.locator(".walkthrough-panel h2").filter({ hasText: other.name }).count(), "the last type's walkthrough stayed under the type Back returned to").toBe(0);
+  await expect(heading, "Back did not restore the type before").toHaveText(target.name);
+  await expect(section("properties")).toHaveClass(/selected/);
+  await expectSameDocument(page, "Back");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // The walkthrough's link to the manager is the one the table builds.
+  const walkthrough = await (await page.request.get(`/ui-state/ontology/object-types/${target.id}/walkthrough`)).json() as { links: Array<{ label: string; path: string }> };
+  const managerLink = walkthrough.links.find((link) => link.label === "Ontology Manager");
+  expect(managerLink?.path, "the walkthrough's manager link is not the one the table builds").toBe(`/workspace/ontology?type=${target.id}`);
+  await page.goto(managerLink!.path);
+  await expect(heading).toHaveText(target.name);
+
+  await page.goto(`/workspace/ontology?type=no_such_type_${s}`);
+  await expect(unknownCard(page, `no_such_type_${s}`), "an unknown type was not named").toBeVisible();
+  await expect(heading, "an unknown type drew another type's manager").toHaveCount(0);
+  await expect(discover.locator(".resource-row").filter({ hasText: target.name })).toBeVisible();
+  await expect(discover.locator(".resource-row.selected"), "an unknown type fell back to the newest").toHaveCount(0);
+
+  await page.goto(`/workspace/ontology?type=${target.id}&section=no_such_section_${s}`);
+  await expect(unknownCard(page, `no_such_section_${s}`), "an unknown section was not named").toBeVisible();
+  await page.goto(`/workspace/ontology?type=${target.id}&page=no_such_page_${s}`);
+  await expect(unknownCard(page, `no_such_page_${s}`), "an unknown page was not named").toBeVisible();
+  // A page given as a section is an unknown section, lays out as none, and is not the one marked.
+  await page.goto(`/workspace/ontology?type=${target.id}&section=releases`);
+  await expect(unknownCard(page, "releases"), "a page given as a section was taken for one").toBeVisible();
+  await expect(workbench).not.toHaveClass(/release-mode/);
+  await expect(section("releases"), "a page given as a section was marked as the place open").not.toHaveClass(/selected/);
+  // A section given as a page is an unknown page; choosing the section then loads it.
+  await page.goto(`/workspace/ontology?type=${target.id}&page=properties`);
+  await expect(unknownCard(page, "properties"), "a section given as a page was taken for one").toBeVisible();
+  await section("properties").click();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${target.id}&section=properties$`));
+  await expect(page.getByRole("heading", { name: "Properties Detail" }), "leaving an unknown page for the section of its name did not load the section").toBeVisible();
+  // Under an unknown type, a page is not laid out: the type is what is unknown.
+  await page.goto(`/workspace/ontology?type=no_such_type_${s}&page=releases`);
+  await expect(unknownCard(page, `no_such_type_${s}`)).toBeVisible();
+  await expect(workbench, "an unknown type laid out a page").not.toHaveClass(/release-mode/);
+
+  // A type that was missing and then made: opened again in the page, its old 404 is not shown
+  // while its own answer is on its way.
+  const late = `route_late_type_${s}`;
+  await page.goto(`/workspace/ontology?type=${late}`);
+  await expect(unknownCard(page, late)).toBeVisible();
+  await page.evaluate((id) => {
+    history.pushState({}, "", `/workspace/ontology?type=${id}`);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, target.id);
+  await expect(heading).toHaveText(target.name);
+  await post(page, "/object-types", { id: late, display_name: `Route Late ${s}`, description: "", properties: { name: { type: "string" } } });
+  await page.route((url) => url.pathname.includes(`/object-types/${late}`), async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await page.evaluate((id) => {
+    history.pushState({}, "", `/workspace/ontology?type=${id}`);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, late);
+  await page.waitForTimeout(300);
+  expect(await unknownCard(page, late).count(), "a type's old 404 was shown again while its own answer was on its way").toBe(0);
+  await expect(heading, "a type made after its 404 did not open").toHaveText(`Route Late ${s}`);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("object_type: a draft applied after the user has moved on does not pull them back", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  const s = stamp();
+  await post(page, "/data-assets", { id: `route_draft_asset_${s}`, display_name: `Route draft asset ${s}`, kind: "dataset",
+    asset_schema: { name: "string" }, records: [{ name: "one" }] });
+  const draftId = `route_draft_${s}`;
+  await post(page, "/ontology-generator/drafts", { id: draftId, asset_id: `route_draft_asset_${s}`, object_type_id: `route_draft_type_${s}`,
+    include_actions: false, create_pipeline_graph: false });
+  await page.goto("/workspace/ontology");
+  const drafts = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Drafts" }) });
+  const row = drafts.locator(".resource-row").filter({ hasText: draftId });
+  await expect(row).toBeVisible();
+  await page.route((url) => url.pathname === `/ontology-generator/drafts/${draftId}/apply`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  const applied = page.waitForResponse((response) => new URL(response.url()).pathname === `/ontology-generator/drafts/${draftId}/apply`);
+  await row.click();
+  await page.getByRole("navigation", { name: "Workspaces" }).getByRole("button", { name: /^Operational Control/ }).click();
+  await expect(page).toHaveURL(/\/workspace\/ops$/);
+  expect((await applied).ok(), "the apply failed, so this proves nothing").toBeTruthy();
+  await page.waitForTimeout(500);
+  await expect(page, "a draft applied after the user left pulled them back to its type").toHaveURL(/\/workspace\/ops$/);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // Applied with the user still there, the new type opens.
+  const secondId = `route_draft_two_${s}`;
+  await post(page, "/ontology-generator/drafts", { id: secondId, asset_id: `route_draft_asset_${s}`, object_type_id: `route_draft_type_two_${s}`,
+    include_actions: false, create_pipeline_graph: false });
+  await page.goto("/workspace/ontology");
+  const secondRow = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Drafts" }) }).locator(".resource-row").filter({ hasText: secondId });
+  const secondApplied = page.waitForResponse((response) => new URL(response.url()).pathname === `/ontology-generator/drafts/${secondId}/apply`);
+  await secondRow.click();
+  expect((await secondApplied).ok(), "the second apply failed").toBeTruthy();
+  await expect(page, "an applied draft did not open its type").toHaveURL(new RegExp(`\\?type=route_draft_type_two_${s}$`));
+});

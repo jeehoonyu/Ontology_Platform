@@ -16,7 +16,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { DragHandle, slotAwareCollision, sortableStyle, useWorkspaceSensors } from "../components/dnd/DragKit";
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import type { PaneSpec } from "../lib/paneLayout";
-import { api, postJson } from "../api";
+import { api, isNotFound, postJson } from "../api";
 import {
   addOntologyProperty,
   analyzeOntologyImpact,
@@ -32,11 +32,11 @@ import {
   updateOntologyProperty,
   updateOntologyMetadata
 } from "../api/workspaceState";
-import { DataTable, EmptyState, KeyValueGrid, Panel, RelationshipStrip, StatusBadge } from "../components/data/DataDisplay";
+import { DataTable, EmptyState, KeyValueGrid, Panel, RelationshipStrip, StatusBadge, UnknownResource } from "../components/data/DataDisplay";
 import { CHECK_RESULT, LIFECYCLE, intentOf } from "../components/data/intents";
 import { useAsyncState } from "../hooks/useAsyncState";
 import { asString, classNames, formatValue } from "../utils/format";
-import { navigate } from "../utils/navigation";
+import { navigate, openResource, useRouteParams } from "../utils/navigation";
 import { NEW_PACKAGE_FORM, OntologyPackagePanel, type PackageForm } from "./OntologyPackagePanel";
 import { OntologyReleasePanel } from "./OntologyReleasePanel";
 import { OntologyHealthPanel } from "./OntologyHealthPanel";
@@ -82,14 +82,36 @@ const ONTOLOGY_PANES: PaneSpec[] = [
   { id: "walkthrough", title: "Walkthrough", slot: "bottom" }
 ];
 
+// Ontology-wide pages (?page=), not sections of one type (decision U, assumed).
+const ONTOLOGY_PAGES = ["health_center", "releases", "schema_registry"];
+
 export function OntologyManager() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [assetId, setAssetId] = useState("");
-  const [selectedId, setSelectedId] = useState("");
-  const [selectedSection, setSelectedSection] = useState("overview");
-  const [manager, setManager] = useState<OntologyManagerState | null>(null);
-  const [walkthrough, setWalkthrough] = useState<OntologyWalkthrough | null>(null);
+  // The type, its section and the ontology's page are the URL's (GOAL_FOUNDATIONS A6). With no
+  // type named, the server's most recently updated, adopted and never written; with no section,
+  // the overview.
+  const route = useRouteParams("ontology");
+  const [defaultTypeId, setDefaultTypeId] = useState("");
+  const selectedId = route.type || defaultTypeId;
+  const selectedSection = route.page || route.section;
+  // The type whose manager answered 403 or 404.
+  const [missingType, setMissingType] = useState("");
+  const typeMissing = route.type !== "" && missingType === route.type;
+  const pageUnknown = route.page !== "" && !ONTOLOGY_PAGES.includes(route.page);
+  const releaseMode = route.page !== "" && ONTOLOGY_PAGES.includes(route.page) && !typeMissing;
+  // Every answer shown names the type it answers, and the section its section, so Back,
+  // Forward or a chosen row never leave one type's manager, walkthrough or section under
+  // another's.
+  const [loadedManager, setManager] = useState<OntologyManagerState | null>(null);
+  const manager = loadedManager && loadedManager.object_type.id === selectedId && !typeMissing ? loadedManager : null;
+  const [loadedWalkthrough, setWalkthrough] = useState<OntologyWalkthrough | null>(null);
+  const walkthrough = loadedWalkthrough && loadedWalkthrough.object_type_id === selectedId && !typeMissing ? loadedWalkthrough : null;
   const [sectionState, setSectionState] = useState<OntologySectionState | null>(null);
+  const shownSection = sectionState && sectionState.object_type_id === selectedId && sectionState.section_id === selectedSection ? sectionState : null;
+  const sectionUnknown = !route.page && manager !== null && !manager.navigation.includes(route.section);
+  // A user's choice of section or page, which writes the type too.
+  const openSection = (item: string) => navigate("ontology", ONTOLOGY_PAGES.includes(item) ? { type: selectedId, page: item } : { type: selectedId, section: item });
   const [allDrafts, setAllDrafts] = useState(false);
   // The package panel's choices and typing, held here and handed back in. The panel
   // sits in the Resources pane, and a pane moved to another slot is a new parent:
@@ -123,24 +145,30 @@ export function OntologyManager() {
 
   useEffect(() => {
     if (!selectedId && state.value?.selected_object_type?.object_type.id) {
-      setSelectedId(state.value.selected_object_type.object_type.id);
+      setDefaultTypeId(state.value.selected_object_type.object_type.id);
     }
   }, [state.value, selectedId]);
 
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
-    Promise.all([getOntologyObjectType(selectedId), getOntologyWalkthrough(selectedId)])
+    const typeId = selectedId;
+    // Another type's 404 is not this one's: a later visit waits for its own answer. Asked again,
+    // the same missing type keeps its card.
+    setMissingType((current) => (current === typeId ? current : ""));
+    Promise.all([getOntologyObjectType(typeId), getOntologyWalkthrough(typeId)])
       .then(([nextManager, nextWalkthrough]) => {
         if (!cancelled) {
           setManager(nextManager);
           setWalkthrough(nextWalkthrough);
+          setMissingType((current) => (current === typeId ? "" : current));
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setManager(null);
           setWalkthrough(null);
+          if (isNotFound(error)) setMissingType(typeId);
         }
       });
     return () => {
@@ -150,7 +178,7 @@ export function OntologyManager() {
 
   useEffect(() => {
     if (!selectedId) return;
-    if (["releases", "health_center", "schema_registry"].includes(selectedSection)) {
+    if (route.page || ONTOLOGY_PAGES.includes(selectedSection)) {
       setSectionState(null);
       return;
     }
@@ -161,7 +189,7 @@ export function OntologyManager() {
     return () => {
       cancelled = true;
     };
-  }, [selectedId, selectedSection, refreshKey]);
+  }, [selectedId, selectedSection, route.page, refreshKey]);
 
   useEffect(() => {
     const workspace = document.querySelector<HTMLElement>(".workspace");
@@ -178,12 +206,15 @@ export function OntologyManager() {
       include_actions: true,
       create_pipeline_graph: true
     });
-    setSelectedId(asString(draft.object_type_id, selectedId));
-    setSelectedSection("overview");
+    // A draft creates no object type until it is applied, so nothing is opened for it.
+    void draft;
     setRefreshKey((key) => key + 1);
   }
 
   async function applyDraft(id: string) {
+    // Where the user was when they asked: if they have gone elsewhere by the time the type
+    // exists, it is not opened over their choice.
+    const askedAt = window.location.pathname + window.location.search;
     const result = await postJson<TableRow>(`/ontology-generator/drafts/${encodeURIComponent(id)}/apply`, {
       actor: "react",
       create_actions: true,
@@ -193,8 +224,9 @@ export function OntologyManager() {
     const appliedObjectTypeId = typeof objectType === "object" && objectType !== null && !Array.isArray(objectType)
       ? (objectType as JsonObject).id
       : undefined;
-    setSelectedId(asString(result.object_type_id || appliedObjectTypeId, selectedId));
-    setSelectedSection("overview");
+    if (window.location.pathname + window.location.search === askedAt) {
+      openResource("object_type", asString(result.object_type_id || appliedObjectTypeId, selectedId));
+    }
     setRefreshKey((key) => key + 1);
   }
 
@@ -235,7 +267,7 @@ export function OntologyManager() {
   }
 
   return (
-    <section className={classNames("workbench-page ontology-workbench-page", ["releases", "health_center", "schema_registry"].includes(selectedSection) && "release-mode")}>
+    <section className={classNames("workbench-page ontology-workbench-page", releaseMode && "release-mode")}>
       <header className="manager-topbar">
         <div>
           <strong>Ontology Manager</strong>
@@ -243,7 +275,7 @@ export function OntologyManager() {
         </div>
         <input className="compact-input" aria-label="Search object types" placeholder="Search object types..." value={resourceQuery} onChange={(event) => setResourceQuery(event.target.value)} />
         <div className="button-row">
-          <button onClick={markIndexed} disabled={!selectedId}>Index</button>
+          <button onClick={markIndexed} disabled={!selectedId || typeMissing}>Index</button>
           <button onClick={() => navigate("pipeline")}>Open Pipeline</button>
           <a className="legacy-button compact" href="/workspace/ontology?legacy=1">Legacy</a>
         </div>
@@ -257,10 +289,7 @@ export function OntologyManager() {
           <Panel title="Discover">
             {needle && matchingTypes.length ? <p className="table-truncated" role="note">Showing {matchingTypes.length.toLocaleString()} of {allTypes.length.toLocaleString()} object types</p> : null}
             {matchingTypes.map((objectType) => (
-              <button key={objectType.id} className={classNames("resource-row", selectedId === objectType.id && "selected")} onClick={() => {
-                setSelectedId(objectType.id);
-                setSelectedSection("overview");
-              }}>
+              <button key={objectType.id} className={classNames("resource-row", selectedId === objectType.id && !typeMissing && "selected")} onClick={() => openResource("object_type", objectType.id)}>
                 <strong>{objectType.display_name}</strong>
                 <span>{objectType.property_count} properties</span>
               </button>
@@ -268,8 +297,8 @@ export function OntologyManager() {
             {needle && !matchingTypes.length ? <EmptyState inline>No object type matches "{resourceQuery.trim()}"</EmptyState> : null}
           </Panel>
           <Panel title="Resource Navigation">
-            {Array.from(new Set([...(manager?.navigation || []), "health_center", "releases", "schema_registry"])).map((item) => (
-              <button key={item} className={classNames("resource-row", selectedSection === item && "selected")} onClick={() => setSelectedSection(item)}>
+            {Array.from(new Set([...(manager?.navigation || []), ...ONTOLOGY_PAGES])).map((item) => (
+              <button key={item} className={classNames("resource-row", (route.page ? route.page === item : route.section === item && !ONTOLOGY_PAGES.includes(item)) && "selected")} onClick={() => openSection(item)}>
                 <strong>{item.replace(/_/g, " ")}</strong>
               </button>
             ))}
@@ -301,23 +330,29 @@ export function OntologyManager() {
               </button>
             ) : null}
           </Panel>
-          <OntologyPackagePanel objectTypeId={selectedId} objectTypeName={manager?.object_type.display_name || selectedId || "Ontology"} form={packageForm} onForm={setPackageForm} />
+          <OntologyPackagePanel objectTypeId={typeMissing ? "" : selectedId} objectTypeName={manager?.object_type.display_name || (typeMissing ? "" : selectedId) || "Ontology"} form={packageForm} onForm={setPackageForm} />
         </div>
           );
           return (
         <div className="manager-surface">
-          {manager && selectedSection === "releases" ? (
-            <OntologyReleasePanel objectTypeId={manager.object_type.id} onBack={() => setSelectedSection("overview")} />
-          ) : manager && selectedSection === "health_center" ? (
-            <OntologyHealthPanel objectTypeId={manager.object_type.id} onBack={() => setSelectedSection("overview")} />
-          ) : manager && selectedSection === "schema_registry" ? (
-            <OntologyRegistryPanel onBack={() => setSelectedSection("overview")} />
+          {typeMissing ? (
+            <UnknownResource noun="object type" id={route.type} />
+          ) : pageUnknown ? (
+            <UnknownResource scope="Ontology Manager" noun="page" id={route.page} />
+          ) : sectionUnknown && manager ? (
+            <UnknownResource scope={manager.object_type.display_name} noun="section" id={route.section} />
+          ) : manager && route.page === "releases" ? (
+            <OntologyReleasePanel objectTypeId={manager.object_type.id} onBack={() => openResource("object_type", selectedId)} />
+          ) : manager && route.page === "health_center" ? (
+            <OntologyHealthPanel objectTypeId={manager.object_type.id} onBack={() => openResource("object_type", selectedId)} />
+          ) : manager && route.page === "schema_registry" ? (
+            <OntologyRegistryPanel onBack={() => openResource("object_type", selectedId)} />
           ) : manager ? (
             <ManagerSurface
               manager={manager}
               objectTypes={state.value?.object_types || []}
               assets={assets.value || []}
-              sectionState={sectionState}
+              sectionState={shownSection}
               onIndex={markIndexed}
               onSaveMetadata={saveMetadata}
               onAddProperty={addProperty}
