@@ -22,6 +22,7 @@ VIEWS: Dict[str, Dict[str, Any]] = {
     "aip": {"params": ["artifact"]},
     "investigations": {"params": ["artifact"]},
     "entity-resolution": {"params": ["artifact"]},
+    "object-explorer": {"params": ["type", "object"]},
 }
 KINDS: Dict[str, Dict[str, Any]] = {
     "dataset": {"view": "data-media", "param": "dataset"},
@@ -30,6 +31,7 @@ KINDS: Dict[str, Dict[str, Any]] = {
     "aip_logic": {"view": "aip", "param": "artifact"},
     "investigation_graph": {"view": "investigations", "param": "artifact"},
     "entity_resolution": {"view": "entity-resolution", "param": "artifact"},
+    "object": {"view": "object-explorer", "param": "object", "requires": ["type"]},
 }
 
 

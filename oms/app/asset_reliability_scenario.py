@@ -1056,7 +1056,7 @@ def _workflow_state(db: Session, principal: production_auth.Principal, *, asset_
         "next_action": next_step,
         "steps": steps,
         "evidence_links": [
-            {"kind": "asset", "id": selected_asset.get("id"), "href": "/workspace/object-explorer?legacy=1"},
+            {"kind": "asset", "id": selected_asset.get("id"), "href": workspace_routes.app_url("object", selected_asset["id"], type=selected_asset["object_type_id"]) if selected_asset.get("id") and selected_asset.get("object_type_id") else "/workspace/object-explorer"},
             {"kind": "import_job", "id": getattr(latest_import, "id", None), "href": "/workspace/imports"},
             {"kind": "ontology_object_type", "id": selected_asset.get("object_type_id"), "href": "/workspace/ontology"},
             {"kind": "pipeline_graph", "id": getattr(latest_graph, "id", None), "href": workspace_routes.app_url("pipeline_graph", latest_graph.id) if latest_graph else "/workspace/pipeline"},

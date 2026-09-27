@@ -494,6 +494,32 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   a new draft in the list before its URL saves a loading flash that the list's own re-ask would
   cover; no test separates them. An adversarial review confirmed five findings, all fixed above
   (among them the undo history, which was major); six were refuted.
+
+  **5. Object Explorer's `?type=&object=`.** The URL drives the type and the object inspected:
+  with no type named, the first, adopted and never written. A type chosen here, by Back or by a
+  link starts with no filters, nothing selected, no action dialog and no action result; a saved
+  exploration sets its type, filters and search before its URL and keeps them. Only the latest
+  query is taken, and the query shown must answer the URL's type, so neither its rows, its
+  heading, its count nor its facets show under another. The profile is the URL's object's, and
+  its answer carries the type and object it answers, a failure included, so nothing of one
+  object shows while another's is on its way; a click on the open object, Refresh, or an action
+  that changed it asks for it again. An unknown type is named, shown as "Unknown: <id>" in the
+  select, and turns off Run, Refresh and Enter; an unknown object is named only once the types
+  are known and the type is. The server builds its object links from the table (the triage
+  evidence, and the Command Center's asset evidence, which was `?legacy=1`), and search opens an
+  object type in Object Explorer, an exception `routes.json` records.
+
+  Proven by three object cases in `routes.spec.ts`. Negative runs, each failing: the URL unread
+  ("the URL's type, not the first"); the type read once ("choosing a type did not query it"); the
+  query not tied to its type ("the last type's results heading stayed under the type Back
+  returned to"); the profile not tied to its object; a missing object named under an unknown
+  type (two cards); an unknown type not named; the select showing another type for an unknown
+  one; a row not writing the URL; the asset link spelled by hand; a click on the open object
+  asking nothing ("a click on the open object did not ask for its profile again"); a failed
+  profile shown whatever object is open; an action dialog kept across a type change. Only the
+  latest query is taken for the same type too; no test races two queries of one type. An
+  adversarial review confirmed five findings, all fixed above (the profile's refresh was
+  major); four were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

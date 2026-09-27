@@ -22,7 +22,7 @@ from sqlalchemy import Boolean, Integer, JSON, String
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, ops_control, production_auth, semantic_scope, tenancy
+from . import models, models_action, ops_control, production_auth, semantic_scope, tenancy, workspace_routes
 from .database import Base, get_db
 
 router = APIRouter(tags=["platform_core"])
@@ -385,7 +385,7 @@ def _search_resources(db: Session, query: str, kinds: List[str], limit: int, inc
 
     if allowed("object_type"):
         for row in _safe_all(db, models.ObjectType, principal):
-            _add_search_result(results, kind="object_type", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "Ontology object type", url=f"/workspace/object-explorer?type={row.id}", query=query, payload={"properties": row.properties or {}}, include_payload=include_payload)
+            _add_search_result(results, kind="object_type", resource_id=row.id, title=row.display_name or row.id, subtitle=row.description or "Ontology object type", url=workspace_routes.workspace_href("object-explorer", type=row.id), query=query, payload={"properties": row.properties or {}}, include_payload=include_payload)
 
     if allowed("object"):
         for row in _safe_all(db, models.ObjectInstance, principal):

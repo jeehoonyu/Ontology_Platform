@@ -573,3 +573,165 @@ test("aip_logic: a draft that lands after the user has moved on does not pull th
   await expect(page, "a draft created after the user left pulled them back to it").toHaveURL(/\/workspace\/ops$/);
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
+
+test("object: ?type=&object= open that type and object, Back restores both, unknown ids are named", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  const s = stamp();
+  await post(page, "/data-assets", { id: `route_objects_${s}`, display_name: `Route objects ${s}`, kind: "dataset", asset_schema: {}, records: [] });
+  const [decoy, a, b] = [`route_0_${s}`, `route_a_${s}`, `route_b_${s}`];
+  for (const id of [decoy, a, b]) {
+    await post(page, "/object-types", { id, display_name: id, description: "", properties: { name: { type: "string" } } });
+    for (const n of [1, 2]) {
+      await post(page, "/objects", { id: `${id}_${n}`, object_type_id: id, source_asset_id: `route_objects_${s}`, properties: { name: `${id} ${n}` } });
+    }
+  }
+  const typeSelect = page.getByLabel("Object type");
+  const table = page.locator(".explorer-table");
+  const preview = page.locator(".object-profile-heading small");
+  const hold = async (match: (url: URL) => boolean) => {
+    await page.route(match, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+  };
+
+  await page.goto("/workspace/object-explorer");
+  await expect(typeSelect).not.toHaveValue("");
+  const opened = await typeSelect.inputValue();
+  await expect(page, "the default type wrote itself into the URL").toHaveURL(/\/workspace\/object-explorer$/);
+  const target = [a, b].find((id) => id !== opened)!;
+  const other = [a, b].find((id) => id !== target)!;
+
+  await page.goto(`/workspace/object-explorer?type=${target}&object=${target}_1`);
+  await expect(typeSelect, "the URL's type, not the first").toHaveValue(target);
+  await expect(table).toContainText(`${target}_2`);
+  await expect(preview, "the URL's object is not the one inspected").toHaveText(`${target}_1`);
+
+  await markDocument(page);
+  await table.getByRole("button", { name: `${target}_2`, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${target}&object=${target}_2$`));
+  await expect(preview).toHaveText(`${target}_2`);
+  await expectSameDocument(page, "choosing an object");
+
+  await typeSelect.selectOption(other);
+  await expect(page, "a type change kept the last type's object").toHaveURL(new RegExp(`\\?type=${other}$`));
+  await expect(table, "choosing a type did not query it").toContainText(`${other}_1`);
+  await expect(page.locator(".object-profile-heading")).toHaveCount(0);
+
+  // Back to the type before, with its query held back: while it is on its way, the last type's
+  // rows are not shown under it.
+  await hold((url) => url.pathname === "/object-explorer/query");
+  await page.goBack();
+  await expect(typeSelect, "Back did not restore the type before").toHaveValue(target);
+  await page.waitForTimeout(300);
+  expect(await table.getByText(`${other}_1`).count(), "the last type's rows stayed under the type Back returned to").toBe(0);
+  expect(await page.locator(".explorer-results-header h2").textContent(), "the last type's results heading stayed under the type Back returned to").not.toBe(other);
+  expect(await page.locator(".explorer-results-header span").first().textContent(), "the last type's result count stayed under the type Back returned to").toBe("Run an exploration");
+  await expect(table).toContainText(`${target}_2`);
+  await expect(preview).toHaveText(`${target}_2`);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  // Back to the object before, with its profile held back: the last object is not shown meanwhile.
+  await hold((url) => url.pathname === `/objects/${target}/${target}_1/profile`);
+  await page.goBack();
+  await page.waitForTimeout(300);
+  expect(await page.locator(".object-profile-heading small").filter({ hasText: `${target}_2` }).count(),
+         "the last object stayed in the inspector while the next one's profile was on its way").toBe(0);
+  await expect(preview, "Back did not restore the object before").toHaveText(`${target}_1`);
+  await expectSameDocument(page, "Back");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+
+  await page.goto(`/workspace/object-explorer?type=no_such_type_${s}`);
+  await expect(unknownCard(page, `no_such_type_${s}`), "an unknown type was not named").toBeVisible();
+  await expect(table, "an unknown type drew the first type's objects").toHaveCount(0);
+  await expect(typeSelect, "the type select showed another type for an unknown one").toHaveValue(`no_such_type_${s}`);
+  await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
+
+  // Under an unknown type, the type is what is unknown: one card, not a second for the object.
+  await page.goto(`/workspace/object-explorer?type=no_such_type_${s}&object=x_${s}`);
+  await expect(unknownCard(page, `no_such_type_${s}`)).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.locator(".empty-state-card"), "an unknown type named its object as missing too").toHaveCount(1);
+
+  await page.goto(`/workspace/object-explorer?type=${target}&object=no_such_object_${s}`);
+  await expect(page.locator(".explorer-inspector .empty-state-card"), "an unknown object was not named").toContainText(`no_such_object_${s}`);
+  await expect(table).toContainText(`${target}_1`);
+
+  // Search opens an object type in Object Explorer, to its objects, with the URL the table builds.
+  const found = await (await page.request.get(`/search?q=${encodeURIComponent(target)}&kind=object_type`)).json() as
+    { results: Array<{ kind: string; id?: string; resource_id?: string; url: string }> };
+  const hit = found.results.find((item) => item.kind === "object_type" && (item.id === target || item.resource_id === target));
+  expect(hit?.url, "search's object type link is not the one the table builds").toBe(`/workspace/object-explorer?type=${target}`);
+
+  // The server's link, from the Command Center's evidence, opens the object it names.
+  expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+  const state = await (await page.request.get("/scenarios/asset-reliability/workflow-state")).json() as
+    { evidence_links: Array<{ kind: string; id: string | null; href: string }> };
+  const asset = state.evidence_links.find((item) => item.kind === "asset" && item.id);
+  expect(asset, "the Command Center names no asset").toBeTruthy();
+  expect(asset!.href, "the server's asset link is not the one the table builds").toMatch(new RegExp(`^/workspace/object-explorer\\?type=[^&]+&object=${encodeURIComponent(asset!.id!)}$`));
+  await page.goto(asset!.href);
+  await expect(preview, "the server's link did not open its object").toHaveText(asset!.id!);
+});
+
+test("object: a profile that failed says so for its own object only, and a click on the open object asks again", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  const s = stamp();
+  const type = `route_fail_${s}`;
+  await post(page, "/data-assets", { id: `route_fail_objects_${s}`, display_name: `Route fail objects ${s}`, kind: "dataset", asset_schema: {}, records: [] });
+  await post(page, "/object-types", { id: type, display_name: type, description: "", properties: { name: { type: "string" } } });
+  for (const n of [1, 2]) {
+    await post(page, "/objects", { id: `${type}_${n}`, object_type_id: type, source_asset_id: `route_fail_objects_${s}`, properties: { name: `${type} ${n}` } });
+  }
+  let failing = true;
+  await page.route((url) => url.pathname === `/objects/${type}/${type}_1/profile`, async (route) => {
+    if (failing) return route.fulfill({ status: 500, json: { detail: "profile held back by the test" } });
+    return route.continue();
+  });
+  const table = page.locator(".explorer-table");
+  const preview = page.locator(".object-profile-heading small");
+  const failure = page.locator(".explorer-inspector").getByText("profile held back by the test");
+
+  await page.goto(`/workspace/object-explorer?type=${type}&object=${type}_1`);
+  await expect(failure, "a profile that failed did not say so").toBeVisible();
+
+  // The next object's profile held back: while it is on its way, the failure is not shown for it.
+  await page.route((url) => url.pathname === `/objects/${type}/${type}_2/profile`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await table.getByRole("button", { name: `${type}_2`, exact: true }).click();
+  await page.waitForTimeout(300);
+  expect(await failure.count(), "one object's failed profile stayed over the next while its profile was on its way").toBe(0);
+  await expect(preview).toHaveText(`${type}_2`);
+  await expect(failure, "one object's failed profile stayed over the next").toHaveCount(0);
+
+  await page.goBack();
+  await expect(failure, "Back to the object whose profile failed did not say so").toBeVisible();
+
+  // The server answers now; a click on the object already open asks again, as it always did.
+  failing = false;
+  await table.getByRole("button", { name: `${type}_1`, exact: true }).click();
+  await expect(preview, "a click on the open object did not ask for its profile again").toHaveText(`${type}_1`);
+  await expect(failure).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("object: an action dialog open on one type closes when Back leaves it", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  expect((await page.request.post("/scenarios/asset-reliability/bootstrap", { data: {} })).ok()).toBeTruthy();
+  const s = stamp();
+  const type = `route_dialog_${s}`;
+  await post(page, "/object-types", { id: type, display_name: type, description: "", properties: { name: { type: "string" } } });
+  await page.goto(`/workspace/object-explorer?type=${type}`);
+  await page.getByLabel("Object type").selectOption("asset");
+  await expect(page).toHaveURL(/\?type=asset$/);
+  const table = page.locator(".explorer-table");
+  await table.locator("tbody input[type='checkbox']").first().check();
+  await page.locator(".explorer-action-list button:not([disabled])").first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog, "no action dialog opened, so its closing proves nothing").toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`\\?type=${type}$`));
+  await expect(dialog, "the last type's action dialog stayed open over this one").toHaveCount(0);
+});

@@ -1487,7 +1487,7 @@ def triage_asset_reliability(
         "investigation": investigations._workspace_dict(case["investigation"]),
         "report": investigations._report_dict(report),
         "evidence_links": [
-            {"kind": "object", "id": obj.id, "href": f"/workspace/object-explorer?object_type={ids['object_type']}&object={obj.id}"},
+            {"kind": "object", "id": obj.id, "href": workspace_routes.app_url("object", obj.id, type=ids["object_type"])},
             {"kind": "approval", "id": approval.id, "href": "/workspace/command-center"},
             {"kind": "incident", "id": case["incident"].id, "href": workspace_routes.workspace_href("ops", tab="incidents")},
             {"kind": "investigation", "id": case["investigation"].id, "href": "/workspace/investigations"},

@@ -49,11 +49,9 @@ for kind, entry in table["kinds"].items():
 # Workspace hrefs written by hand, by file. A link built from the table never appears here.
 # Each reader's commit takes its links off this list.
 HAND_BUILT = {
-    "oms/app/industrial_workflow.py": 2,
+    "oms/app/industrial_workflow.py": 1,
     "oms/app/ontology_core.py": 1,
     "oms/app/ontology_health.py": 1,
-    "oms/app/platform_core.py": 1,
-    "oms/app/asset_reliability_scenario.py": 1,
 }
 SERVER_HREF = re.compile(r"/workspace/[a-z-]+\?")
 CLIENT_HREF = re.compile(r"/workspace/[a-z-]+\?(?!legacy=1)")
@@ -89,6 +87,12 @@ except ValueError:
 check(app_url("dataset", "d 1") == "/workspace/data-media?dataset=d+1", app_url("dataset", "d 1"))
 check(app_url("pipeline_graph", "g1") == "/workspace/pipeline?graph=g1", app_url("pipeline_graph", "g1"))
 check(app_url("aip_logic", "a") == "/workspace/aip?artifact=a", app_url("aip_logic", "a"))
+check(app_url("object", "o", type="t") == "/workspace/object-explorer?type=t&object=o", app_url("object", "o", type="t"))
+try:
+    app_url("object", "o")
+    check(False, "an object's URL was built without its type")
+except ValueError:
+    checks += 1
 try:
     app_url("no_such_kind", "x")
     check(False, "a kind with no row got a URL")
