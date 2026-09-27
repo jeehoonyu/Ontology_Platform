@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, useDraggable, type DragEndEvent } from "@dnd-kit/core";
 import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../components/dnd/DragKit";
 import { Menu } from "../components/layout/Menu";
+import { hrefForResource } from "../utils/navigation";
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
@@ -1199,7 +1200,7 @@ function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyC
         </details>
       ) : <p className="contract-success">All preview rows satisfy the ontology contract.</p>}
       {lineage.length ? <details><summary>Mapped field lineage ({lineage.length})</summary><DataTable rows={lineage} /></details> : null}
-      {contract.quarantine_asset_id ? <a className="evidence-link" href={`/workspace/imports?asset=${encodeURIComponent(contract.quarantine_asset_id)}`}>Open quarantine dataset</a> : null}
+      {contract.quarantine_asset_id ? <a className="evidence-link" href={hrefForResource("dataset", contract.quarantine_asset_id)}>Open quarantine dataset</a> : null}
     </section>
   );
 }

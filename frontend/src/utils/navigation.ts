@@ -8,8 +8,11 @@ import table from "../routes.json";
 // imports it: a module only lazy screens import gets a chunk of its own and a request on open
 // (vite.config.ts: DragKit, graphLayout, Tabs).
 interface ViewRoute { params: string[]; defaults?: Record<string, string> }
+interface KindRoute { view: string; param: string; requires?: string[] }
 const VIEWS: Record<string, ViewRoute | undefined> = table.views;
+const KINDS: Record<string, KindRoute> = table.kinds;
 export type RouteParams = Record<string, string | null | undefined>;
+export type ResourceKind = keyof typeof table.kinds;
 
 export function currentWorkspaceView(allowedViews: Set<string>, fallback = "command-center"): string {
   const match = window.location.pathname.match(/\/workspace\/([^/?#]+)/);
@@ -65,6 +68,24 @@ export function navigate(view: string, params: RouteParams = {}): void {
   if (href === here() || (open === view && href === hrefFor(view, paramsOf(view, window.location.search)))) return;
   window.history.pushState({}, "", href);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+/** The params that open one resource: its kind's param, and what else its URL requires. */
+function resourceParams(kind: ResourceKind, id: string, context: RouteParams): RouteParams {
+  const { param, requires = [] } = KINDS[kind];
+  const missing = requires.filter((name) => !context[name]);
+  if (missing.length) throw new Error(`a ${kind} URL needs ${missing.join(", ")}`);
+  return { ...context, [param]: id };
+}
+
+/** The URL that opens one resource, for a link. */
+export function hrefForResource(kind: ResourceKind, id: string, context: RouteParams = {}): string {
+  return hrefFor(KINDS[kind].view, resourceParams(kind, id, context));
+}
+
+/** Opens one resource in this page, as a user's choice: pushed, so Back returns. */
+export function openResource(kind: ResourceKind, id: string, context: RouteParams = {}): void {
+  navigate(KINDS[kind].view, resourceParams(kind, id, context));
 }
 
 /**

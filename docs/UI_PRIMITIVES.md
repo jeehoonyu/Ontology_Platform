@@ -26,6 +26,7 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `Dialog` | `components/layout/Dialog.tsx` | **2** — App, ObjectExplorer |
 | `DragHandle` | `components/dnd/DragKit.tsx` | **2** — OntologyManager, VisualBuilder |
 | `SegmentedControl` | `components/layout/Tabs.tsx` | **2** — OntologyHealthPanel, VisualBuilder |
+| `UnknownResource` | `components/data/DataDisplay.tsx` | **2** — DataMedia, OpsWorkspace |
 | `ArtifactReviewPanel` | `components/workbench/ArtifactReviewPanel.tsx` | **1** — VisualBuilder |
 | `BottomDrawer` | `components/canvas/PipelineCanvas.tsx` | **1** — PipelineBuilder |
 | `EvidenceList` | `components/data/DataDisplay.tsx` | **1** — App |
@@ -37,6 +38,5 @@ Seven workspaces hand-rolled their empty states while `EmptyState` sat in
 | `SectionCards` | `components/data/DataDisplay.tsx` | **1** — App |
 | `Toolbar` | `components/workbench/Workbench.tsx` | **1** — PipelineBuilder |
 | `Tooltip` | `components/layout/Tooltip.tsx` | **1** — VisualBuilder |
-| `UnknownResource` | `components/data/DataDisplay.tsx` | **1** — OpsWorkspace |
 | `WarningList` | `components/data/DataDisplay.tsx` | **1** — App |
 | `DebugJson` | `components/data/DataDisplay.tsx` | **0** — — |

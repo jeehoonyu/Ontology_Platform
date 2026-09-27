@@ -54,7 +54,6 @@ HAND_BUILT = {
     "oms/app/ontology_health.py": 1,
     "oms/app/platform_core.py": 1,
     "oms/app/asset_reliability_scenario.py": 1,
-    "frontend/src/workspaces/PipelineBuilder.tsx": 1,
 }
 SERVER_HREF = re.compile(r"/workspace/[a-z-]+\?")
 CLIENT_HREF = re.compile(r"/workspace/[a-z-]+\?(?!legacy=1)")
@@ -87,6 +86,7 @@ try:
     check(False, "a param the view does not read was written into its URL")
 except ValueError:
     checks += 1
+check(app_url("dataset", "d 1") == "/workspace/data-media?dataset=d+1", app_url("dataset", "d 1"))
 try:
     app_url("no_such_kind", "x")
     check(False, "a kind with no row got a URL")

@@ -1404,6 +1404,21 @@ test("pipeline ontology output previews and persists contract evidence", async (
   await expect(page.locator(".pipeline-execution-state")).toContainText("SUCCEEDED");
   await expect(page.getByRole("heading", { name: "Ontology Contracts" }).locator("xpath=.." )).toContainText("WARN");
   await expect(page.getByRole("button", { name: new RegExp(`${objectTypeId} ontology PARTIAL`) })).toBeVisible();
+  // The latest run's contract names its quarantine dataset, which opens in Data & Media, the view
+  // that reads ?dataset= (GOAL_FOUNDATIONS A6); before, the link pointed at the imports view, which
+  // reads nothing. The panel shows the preview contract while the node has one, so the node's
+  // details are served without it here, and the panel falls back to the latest run's.
+  await page.route((url) => url.pathname === `/ui-state/pipeline/${graphId}/nodes/ontology/details`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    delete body.metadata.ontology_contract;
+    await route.fulfill({ response, json: body });
+  });
+  await page.getByRole("button", { name: /^Contract input/ }).click();
+  await page.getByRole("button", { name: /^Contract ontology output/ }).click();
+  await expect(contract).toContainText("latest run");
+  await expect(contract.getByRole("link", { name: "Open quarantine dataset" }))
+    .toHaveAttribute("href", `/workspace/data-media?dataset=${assetId}_quarantine`);
 });
 
 test("AIP agent runtime exposes durable policy and citation evidence", async ({ page }, testInfo) => {

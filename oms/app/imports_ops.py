@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Integer, JSON, String, func
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from . import models, models_action, ontology_generator, ops_control, tenancy
+from . import models, models_action, ontology_generator, ops_control, tenancy, workspace_routes
 from .database import Base, get_db
 from .production_auth import Principal, require_permission
 
@@ -1075,7 +1075,7 @@ def imports_ui_state(project_id: Optional[str] = None, principal: Principal = De
             {"kind": "import_job", "id": job.id, "href": f"/imports/jobs/{job.id}"}
             for job in jobs[:12]
         ] + [
-            {"kind": "data_asset", "id": job.target_dataset_id, "href": "/workspace/ontology"}
+            {"kind": "data_asset", "id": job.target_dataset_id, "href": workspace_routes.app_url("dataset", job.target_dataset_id)}
             for job in promoted_jobs[:12]
             if job.target_dataset_id
         ],

@@ -422,6 +422,30 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   incident link unbuilt; a hand-built count off by one, the server's default edited, and a view
   with no case (each `test_workspace_routes` message). An adversarial review confirmed five
   findings, all fixed above; eight were refuted.
+
+  **2. Data & Media's `?dataset=`.** The dataset section reads the URL, with the first dataset as a
+  default it adopts and never writes. Choosing a row and creating a dataset open it with
+  `openResource`, so Back returns. Every answer the screen shows carries the id it answers (the
+  detail, the declared schema, the upload receipt), so Back, Forward or a chosen row never leave
+  one dataset's records, receipt or error under another; while an answer is on its way, the
+  screen says it is loading. A 403 or 404 names the id with `UnknownResource` (`isNotFound`);
+  any other failure is shown as one. A failed create or upload clears when another dataset is
+  chosen. Pipeline Builder's quarantine link and the imports evidence link are built from the
+  table: both used to point where nothing read them (imports, and the ontology view), and both
+  now open the dataset in Data & Media. That quarantine link is shadowed in practice, since the
+  contract panel always prefers the preview contract; that is filed as its own task, and the
+  evaluator test strips the preview to reach it.
+
+  Proven by two dataset cases in `routes.spec.ts`, the evaluator's contract test and
+  `test_industrial_asset_workflow`. Negative runs, each failing: the URL unread ("the URL's
+  dataset, not the first"); a row not writing the URL; an unknown dataset not named; a created
+  dataset not opening; the receipt not tied to its dataset ("the last dataset's upload receipt
+  followed Back to the one before"); the detail not tied to its id ("the last dataset's records
+  stayed while the next one's answer was on its way"); a failed upload not cleared; any failure
+  counted as unknown ("a server failure was not shown as one"); a 403 not counted; and each
+  link built by hand again. An adversarial review confirmed seven findings, all fixed above
+  (among them the receipt following Back, the previous id's error reappearing, and tests that
+  could not fail); seven were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

@@ -74,6 +74,9 @@ import_job = check(client.post("/imports/json", json={
 check(client.post(f"/imports/jobs/{import_job['id']}/promote-to-dataset", json={
     "dataset_id": "alpha-promoted-assets", "display_name": "Alpha promoted assets", "replace": True,
 }), "promote own-data import")
+# A promoted import's dataset opens in Data & Media, which reads ?dataset= (GOAL_FOUNDATIONS A6).
+imports_state = check(client.get("/ui-state/imports"), "imports workspace state")
+assert {"kind": "data_asset", "id": "alpha-promoted-assets", "href": "/workspace/data-media?dataset=alpha-promoted-assets"} in imports_state["evidence_links"], imports_state["evidence_links"]
 
 request = {
     "project_id": "plant-alpha", "source_asset_id": "alpha-promoted-assets", "display_name": "Plant Asset",

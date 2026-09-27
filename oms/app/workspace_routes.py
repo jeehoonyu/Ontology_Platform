@@ -16,8 +16,11 @@ from urllib.parse import urlencode
 # Grows with routes.json, a row with each reader.
 VIEWS: Dict[str, Dict[str, Any]] = {
     "ops": {"params": ["tab"], "defaults": {"tab": "command"}},
+    "data-media": {"params": ["dataset"]},
 }
-KINDS: Dict[str, Dict[str, Any]] = {}
+KINDS: Dict[str, Dict[str, Any]] = {
+    "dataset": {"view": "data-media", "param": "dataset"},
+}
 
 
 def workspace_href(view: str, **params: object) -> str:
