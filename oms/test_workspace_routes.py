@@ -88,6 +88,7 @@ except ValueError:
     checks += 1
 check(app_url("dataset", "d 1") == "/workspace/data-media?dataset=d+1", app_url("dataset", "d 1"))
 check(app_url("pipeline_graph", "g1") == "/workspace/pipeline?graph=g1", app_url("pipeline_graph", "g1"))
+check(app_url("aip_logic", "a") == "/workspace/aip?artifact=a", app_url("aip_logic", "a"))
 try:
     app_url("no_such_kind", "x")
     check(False, "a kind with no row got a URL")

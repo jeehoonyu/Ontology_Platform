@@ -78,6 +78,9 @@ function resourceParams(kind: ResourceKind, id: string, context: RouteParams): R
   return { ...context, [param]: id };
 }
 
+/** The view that opens a kind of resource. */
+export const viewOf = (kind: ResourceKind): string => KINDS[kind].view;
+
 /** The URL that opens one resource, for a link. */
 export function hrefForResource(kind: ResourceKind, id: string, context: RouteParams = {}): string {
   return hrefFor(KINDS[kind].view, resourceParams(kind, id, context));

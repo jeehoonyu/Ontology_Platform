@@ -63,7 +63,8 @@ import {
   type ArtifactType,
   type PlatformArtifact
 } from "../api/artifactApi";
-import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from "../components/data/DataDisplay";
+import { EmptyState, ErrorBanner, LoadingState, StatusBadge, UnknownResource } from "../components/data/DataDisplay";
+import { navigate, openResource, useRouteParams, viewOf, type ResourceKind } from "../utils/navigation";
 import { CHECK_RESULT, JOB_STATUS, LIFECYCLE, NODE_STATUS, intentOf } from "../components/data/intents";
 import { ArtifactReviewPanel, NEW_REVIEW_DRAFT, type ReviewDraft } from "../components/workbench/ArtifactReviewPanel";
 import { autoLayout, diffArtifactCommands, duplicateSelection, removeSelection, replaceStateCommand, selectedNodeIds } from "../lib/builderKernel";
@@ -87,8 +88,12 @@ const VISUAL_PANES: PaneSpec[] = [
   { id: "drawer", title: "Run results", slot: "bottom" }
 ];
 
+// The builders whose artifacts have a URL (GOAL_FOUNDATIONS A6): the compiler holds each one this
+// screen serves to a row of routes.json.
+type BuilderArtifactType = Extract<ArtifactType, ResourceKind>;
+
 interface VisualBuilderProps {
-  artifactType: ArtifactType;
+  artifactType: BuilderArtifactType;
   title: string;
   subtitle: string;
 }
@@ -181,8 +186,22 @@ const BREAKPOINTS: ReadonlyArray<{ id: Breakpoint; label: string }> = [
 export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderProps) {
   const queryClient = useQueryClient();
   const artifacts = useQuery({ queryKey: ["artifacts", artifactType], queryFn: () => listArtifacts(artifactType) });
-  const [selectedId, setSelectedId] = useState("");
-  const artifact = useMemo(() => artifacts.data?.find((item) => item.id === selectedId) || artifacts.data?.[0], [artifacts.data, selectedId]);
+  // The artifact is the URL's (GOAL_FOUNDATIONS A6). With none named, the newest, derived and
+  // never written (evaluator.spec.ts asserts /workspace/entity-resolution$). A named id not in
+  // the list is named, never swapped for the newest -- once the list has been asked again, since
+  // it is cached for 15 s and an artifact made elsewhere may not be in it yet.
+  const view = viewOf(artifactType);
+  const requestedId = useRouteParams(view).artifact;
+  const artifact = useMemo(() => (requestedId ? artifacts.data?.find((item) => item.id === requestedId) : artifacts.data?.[0]),
+    [artifacts.data, requestedId]);
+  const [recheckedFor, setRecheckedFor] = useState("");
+  useEffect(() => {
+    if (!requestedId || artifact || !artifacts.data || artifacts.isFetching || recheckedFor === requestedId) return;
+    setRecheckedFor(requestedId);
+    void artifacts.refetch();
+  }, [requestedId, artifact, artifacts.data, artifacts.isFetching, recheckedFor]);
+  const artifactUnknown = Boolean(requestedId) && !artifact && Boolean(artifacts.data)
+    && recheckedFor === requestedId && !artifacts.isFetching;
   const [nodes, setNodes] = useState<Node<ArtifactNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -205,7 +224,9 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
   const sensors = useWorkspaceSensors("slots");
   const paneState = usePaneLayout(`visual-${artifactType}`, VISUAL_PANES);
   const [instance, setInstance] = useState<ReactFlowInstance<Node<ArtifactNodeData>, Edge> | null>(null);
-  const [preview, setPreview] = useState<ArtifactPreview | null>(null);
+  // A preview answers the artifact it ran on, and shows under that one only.
+  const [loadedPreview, setPreview] = useState<ArtifactPreview | null>(null);
+  const preview = loadedPreview && loadedPreview.artifact_id === artifact?.id ? loadedPreview : null;
   const [breakpoint, setBreakpoint] = useState<Breakpoint>("desktop");
   const undoStack = useRef<Array<{ nodes: Node<ArtifactNodeData>[]; edges: Edge[] }>>([]);
   // The node and box the last Inspector edit changed, while edits to it keep coming. Any
@@ -271,6 +292,16 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
     if (dirtyRef.current && hydratedArtifact.current.startsWith(`${artifact.id}:`)) {
       setCollaborationConflict("A newer shared revision is available. Reload it or finish resolving your local changes before saving.");
       return;
+    }
+    if (!hydratedArtifact.current.startsWith(`${artifact.id}:`)) {
+      // Another artifact (the picker, Back or Forward: GOAL_FOUNDATIONS A6) starts with nothing
+      // to undo. One artifact's history undone on another would write its graph there, and
+      // autosave would send it.
+      undoStack.current = [];
+      redoStack.current = [];
+      editing.current = "";
+      nodeDrag.current = null;
+      setMessage("");
     }
     setNodes(stateNodes(artifact));
     setEdges(stateEdges(artifact));
@@ -390,8 +421,13 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
 
   const createMutation = useMutation({
     mutationFn: () => createArtifact(artifactType, `${title} draft`),
-    onSuccess: async (created) => {
-      setSelectedId(created.id);
+    // Where the user was when they asked: if they have gone elsewhere by the time the draft
+    // exists, it is not opened over their choice.
+    onMutate: () => ({ askedAt: window.location.pathname + window.location.search }),
+    onSuccess: async (created, _variables, context) => {
+      // In the list before its URL, so a new draft is never read as unknown.
+      queryClient.setQueryData<PlatformArtifact[]>(["artifacts", artifactType], (items = []) => [created, ...items.filter((item) => item.id !== created.id)]);
+      if (window.location.pathname + window.location.search === context?.askedAt) openResource(artifactType, created.id);
       await queryClient.invalidateQueries({ queryKey: ["artifacts", artifactType] });
     }
   });
@@ -711,6 +747,12 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
 
   if (artifacts.isLoading) return <LoadingState label={`Loading ${title} artifacts...`} />;
   if (artifacts.error) return <ErrorBanner message={artifacts.error instanceof Error ? artifacts.error.message : String(artifacts.error)} />;
+  if (requestedId && !artifact) return artifactUnknown ? (
+    <section className="visual-builder-empty">
+      <UnknownResource noun={`${title} artifact`} id={requestedId}
+        action={<button type="button" onClick={() => navigate(view)}>Open the newest</button>} />
+    </section>
+  ) : <LoadingState label={`Loading ${title} artifacts...`} />;
   if (!artifact) return (
     <section className="visual-builder-empty">
       <EmptyState title={`No ${title} artifact`} description="Create a versioned draft to start building visually." />
@@ -727,7 +769,7 @@ export function VisualBuilder({ artifactType, title, subtitle }: VisualBuilderPr
           <p>{subtitle}</p>
         </div>
         <div className="visual-builder-actions">
-          <select aria-label={`${title} artifact`} value={artifact.id} onChange={(event) => setSelectedId(event.target.value)}>
+          <select aria-label={`${title} artifact`} value={artifact.id} onChange={(event) => openResource(artifactType, event.target.value)}>
             {(artifacts.data || []).map((item) => <option value={item.id} key={item.id}>{item.display_name}</option>)}
           </select>
           <div className="collaboration-presence" aria-label={`${collaborators.data?.participants.length || 0} active editors`}>

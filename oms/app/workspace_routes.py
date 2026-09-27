@@ -18,10 +18,18 @@ VIEWS: Dict[str, Dict[str, Any]] = {
     "ops": {"params": ["tab"], "defaults": {"tab": "command"}},
     "data-media": {"params": ["dataset"]},
     "pipeline": {"params": ["graph"]},
+    "workshop": {"params": ["artifact"]},
+    "aip": {"params": ["artifact"]},
+    "investigations": {"params": ["artifact"]},
+    "entity-resolution": {"params": ["artifact"]},
 }
 KINDS: Dict[str, Dict[str, Any]] = {
     "dataset": {"view": "data-media", "param": "dataset"},
     "pipeline_graph": {"view": "pipeline", "param": "graph"},
+    "workshop": {"view": "workshop", "param": "artifact"},
+    "aip_logic": {"view": "aip", "param": "artifact"},
+    "investigation_graph": {"view": "investigations", "param": "artifact"},
+    "entity_resolution": {"view": "entity-resolution", "param": "artifact"},
 }
 
 

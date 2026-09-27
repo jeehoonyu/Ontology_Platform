@@ -472,6 +472,28 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   unscoped ("lists another project's rows: ['beta-graph']"). The contracts carry their pipeline
   the same way as the outputs; no test separates them. An adversarial review confirmed seven
   findings, all fixed above; eleven were refuted.
+
+  **4. The builders' `?artifact=`.** One screen serves Workshop, AIP Logic, Investigations and
+  Entity Resolution; each has its view and kind in the table, and the compiler holds every builder
+  the screen serves to one (`Extract<ArtifactType, ResourceKind>`). With no id named, the newest
+  artifact shows, derived and never written. A named id missing from the list, which is cached
+  for 15 s, is asked for once more before it is called unknown; the unknown card offers "Open the
+  newest". The picker and "Create draft" open theirs with `openResource`; a draft is put in the
+  list before its URL, and one that lands after the user has moved on opens nothing. Another
+  artifact starts with nothing to undo: one artifact's history undone on another would have
+  written its graph there, and autosave would have sent it. A preview shows under the artifact
+  it ran on only.
+
+  Proven by one case per builder and two create cases in `routes.spec.ts`. Negative runs, each
+  failing: the URL unread ("the URL's artifact, not the newest", in all four); a fallback to the
+  newest ("the artifact before stayed on screen under the next one's id"); the list not asked
+  again ("an artifact made after the list was fetched was called unknown before the list was
+  asked again"); the picker not writing the URL; a created draft not opened; an unknown artifact
+  not named; the undo history kept ("the last artifact's history could be undone onto this
+  one"); the preview not tied to its artifact; a late draft opened over the user's move. Putting
+  a new draft in the list before its URL saves a loading flash that the list's own re-ask would
+  cover; no test separates them. An adversarial review confirmed five findings, all fixed above
+  (among them the undo history, which was major); six were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`

@@ -447,3 +447,129 @@ test("dataset: a dataset created after the user chose another does not open over
   await expect(page.getByRole("heading", { name: `Records — Route Y ${s}` })).toBeVisible();
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
+
+// One screen serves the four builders; each has its own view and kind in routes.json.
+const BUILDERS = [
+  ["workshop", "workshop", "Workshop"],
+  ["aip_logic", "aip", "AIP Logic"],
+  ["investigation_graph", "investigations", "Investigations"],
+  ["entity_resolution", "entity-resolution", "Entity Resolution"],
+] as const;
+const artifactState = (kind: string, label?: string) => ({
+  nodes: label ? [{ id: "route_node", position: { x: 80, y: 80 }, data: { label, nodeType: "note" } }] : [],
+  edges: [], ...(kind === "workshop" ? { widgets: [] } : {}),
+});
+
+for (const [kind, view, title] of BUILDERS) {
+  test(`${kind}: ?artifact= opens that artifact, Back restores the one before, an unknown id is named`, async ({ page }, testInfo) => {
+    desktopOnly(testInfo);
+    const s = stamp();
+    // Each with a node of its own, so what is on the canvas says whose it is.
+    const ours: Array<{ id: string; name: string; node: string }> = [];
+    for (const key of ["A", "B"]) {
+      const name = `Route ${key} ${s}`;
+      const node = `Route ${key} node ${s}`;
+      const created = await post<{ id: string }>(page, "/artifacts", { artifact_type: kind, display_name: name, state: artifactState(kind, node) });
+      ours.push({ id: created.id, name, node });
+    }
+    const picker = page.getByLabel(`${title} artifact`);
+    const onCanvas = (label: string) => page.locator(".react-flow__node").filter({ hasText: label });
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+
+    await page.goto(`/workspace/${view}`);
+    await expect(picker).toBeVisible();
+    const opened = await picker.inputValue();
+    await expect(page, "the default artifact wrote itself into the URL").toHaveURL(new RegExp(`/workspace/${view}$`));
+    const target = ours.find((item) => item.id !== opened)!;
+    const other = ours.find((item) => item !== target)!;
+
+    await page.goto(`/workspace/${view}?artifact=${target.id}`);
+    await expect(picker, "the URL's artifact, not the newest").toHaveValue(target.id);
+    await expect(onCanvas(target.node), "the URL's artifact is not the one drawn").toBeVisible();
+
+    await markDocument(page);
+    await picker.selectOption(other.id);
+    await expect(page).toHaveURL(new RegExp(`/workspace/${view}\\?artifact=${other.id}$`));
+    await expect(onCanvas(other.node)).toBeVisible();
+    await expectSameDocument(page, "choosing an artifact");
+    // Work on this one: a preview, and a node added, which Undo could take back.
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.locator(".preview-metrics"), "the preview did not run, so its absence below proves nothing").toBeVisible();
+    await page.locator(".node-library-list button").first().click();
+    await expect(undo, "adding a node left nothing to undo, so its absence below proves nothing").toBeEnabled();
+
+    await page.goBack();
+    await expect(picker, "Back did not restore the artifact before").toHaveValue(target.id);
+    await expect(page).toHaveURL(new RegExp(`/workspace/${view}\\?artifact=${target.id}$`));
+    await expect(onCanvas(target.node), "Back did not draw the artifact before").toBeVisible();
+    await expect(onCanvas(other.node), "the last artifact's node stayed on the canvas").toHaveCount(0);
+    await expect(page.locator(".preview-metrics"), "the last artifact's preview stayed under this one").toHaveCount(0);
+    await expect(undo, "the last artifact's history could be undone onto this one").toBeDisabled();
+    await expectSameDocument(page, "Back");
+
+    // Made after the page fetched its list, which is cached for 15 s: the list is asked again
+    // before the id is called unknown.
+    // The list asked again is held back: while it is on its way, the id is neither called
+    // unknown nor answered with the artifact before.
+    const late = await post<{ id: string }>(page, "/artifacts", { artifact_type: kind, display_name: `Route C ${s}`, state: artifactState(kind) });
+    await page.route((url) => url.pathname === "/artifacts" && url.searchParams.get("artifact_type") === kind, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.evaluate(({ path }) => {
+      history.pushState({}, "", path);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, { path: `/workspace/${view}?artifact=${late.id}` });
+    await page.waitForTimeout(400);
+    expect(await unknownCard(page, late.id).count(), "an artifact made after the list was fetched was called unknown before the list was asked again").toBe(0);
+    expect(await page.locator(".visual-builder-shell").count(), "the artifact before stayed on screen under the next one's id").toBe(0);
+    await expect(picker, "an artifact made after the list was fetched was not opened").toHaveValue(late.id);
+    await expect(unknownCard(page, late.id)).toHaveCount(0);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+
+    await page.goto(`/workspace/${view}?artifact=no_such_artifact_${s}`);
+    await expect(unknownCard(page, `no_such_artifact_${s}`), "an unknown artifact was not named").toBeVisible();
+    await expect(page.locator(".visual-builder-shell"), "an unknown id fell back to the newest artifact").toHaveCount(0);
+  });
+}
+
+test("aip_logic: a draft created from an empty builder opens under its own id", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  // An empty list, so the builder offers its first draft; the real list answers afterwards.
+  await page.route((url) => url.pathname === "/artifacts" && url.searchParams.get("artifact_type") === "aip_logic", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/workspace/aip");
+  const create = page.getByRole("button", { name: "Create draft" });
+  await expect(create).toBeVisible();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const created = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/artifacts");
+  await create.click();
+  const { id } = await (await created).json() as { id: string };
+  await expect(page, "a created draft is not the URL's").toHaveURL(new RegExp(`/workspace/aip\\?artifact=${id}$`));
+  await expect(page.getByLabel("AIP Logic artifact")).toHaveValue(id);
+  await expect(unknownCard(page, id), "a created draft was called unknown").toHaveCount(0);
+});
+
+test("aip_logic: a draft that lands after the user has moved on does not pull them back", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await page.route((url) => url.pathname === "/artifacts" && url.searchParams.get("artifact_type") === "aip_logic", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    return route.fulfill({ json: [] });
+  });
+  await page.route((url) => url.pathname === "/artifacts", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await page.goto("/workspace/aip");
+  const created = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/artifacts");
+  await page.getByRole("button", { name: "Create draft" }).click();
+  await page.getByRole("navigation", { name: "Workspaces" }).getByRole("button", { name: /^Operational Control/ }).click();
+  await expect(page).toHaveURL(/\/workspace\/ops$/);
+  await created;
+  await page.waitForTimeout(500);
+  await expect(page, "a draft created after the user left pulled them back to it").toHaveURL(/\/workspace\/ops$/);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});

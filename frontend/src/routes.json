@@ -3,10 +3,18 @@
   "views": {
     "ops": { "params": ["tab"], "defaults": { "tab": "command" } },
     "data-media": { "params": ["dataset"] },
-    "pipeline": { "params": ["graph"] }
+    "pipeline": { "params": ["graph"] },
+    "workshop": { "params": ["artifact"] },
+    "aip": { "params": ["artifact"] },
+    "investigations": { "params": ["artifact"] },
+    "entity-resolution": { "params": ["artifact"] }
   },
   "kinds": {
     "dataset": { "view": "data-media", "param": "dataset" },
-    "pipeline_graph": { "view": "pipeline", "param": "graph" }
+    "pipeline_graph": { "view": "pipeline", "param": "graph" },
+    "workshop": { "view": "workshop", "param": "artifact" },
+    "aip_logic": { "view": "aip", "param": "artifact" },
+    "investigation_graph": { "view": "investigations", "param": "artifact" },
+    "entity_resolution": { "view": "entity-resolution", "param": "artifact" }
   }
 }
