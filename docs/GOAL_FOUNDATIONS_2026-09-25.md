@@ -373,7 +373,7 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   **Not done:** the OIDC tier (`frontend/tests/production/oidc-rbac.spec.ts`) needs an identity
   provider this machine does not have, so it was not run. The pytest principals stand in for
   it: they are real, project-limited principals, not local mode's `*`.
-- **A6 — Every resource kind has a URL.** **Open** — one module maps each kind to a
+- **A6 — Every resource kind has a URL.** **Met** — one module maps each kind to a
   `/workspace/<view>?…` route, and `navigate(view, params)` keeps the query and dispatches
   `popstate`. The readers this wave adds: `?graph=` (Pipeline), `?type=&section=&page=`
   (Ontology), `?artifact=` (the builders), `?dataset=` (Data & Media), `?type=&object=` (Object
@@ -571,6 +571,39 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   wrote the adopted type, or no search"); Save view keeping the typed search. An adversarial
   review confirmed five findings, all fixed above (the bare-view search pushing and writing the
   default type was major); four were refuted.
+
+  **Met, 2026-09-26, at `98d896d`.** `routes.json` names nine views and eight kinds, and the
+  server builds every workspace link that carries a query from its copy: `test_workspace_routes`
+  counts none built by hand. For every kind this wave names, going to its URL selects it, Back
+  restores the one before, and an unknown id is named, never swapped for the first item
+  (`frontend/tests/routes.spec.ts`, 24 cases). A filter replaces the entry, a view change or a
+  chosen resource pushes, and a default is never written.
+
+  **At `38b096a`.** The final `routes.spec.ts` was run against a build of `38b096a` in a throwaway
+  worktree. Twenty-two of the 24 cases fail, each where that build neither reads nor writes the
+  URL: "the URL's dataset, not the first", "the URL's pipeline, not the newest", "the URL's
+  artifact, not the newest" (all four builders), "the URL's object is not the one inspected",
+  "the URL's object type, not the newest", "the search is not in the URL", "sign-in drops the
+  query …", and so on. The two that pass guard a late create (a new pipeline, a builder draft)
+  against pulling the user back: that build never navigated, so it could not; they defend
+  behaviour this goal introduced.
+
+  **Assumed and changed, in the open.** Decisions U, V and W are assumed (above). Generate no
+  longer selects its draft's future type. Opening a saved exploration clears the inspector. A
+  health finding with no object type opens the ontology rather than a type named after its
+  resource. Propose, Preview, Deploy, Index, Run and Refresh are off while the URL names
+  something that does not exist. Old spellings (`object_type_id`, `objectType`, `object_type`)
+  are not read.
+
+  **Measured.** Route cost held at every step. Route payload was re-baselined in the open twice
+  (the Menu at A7, and step 6). Each step's full run passed but for the evaluator sweep that
+  `ccd7afb` (another session) widened, whose sixteen failures it lists or needs a used database
+  for; the browser-evidence baseline was not re-recorded, since that would have recorded them as
+  known. The default tier passed.
+
+  **Not done.** The ontology contracts carry their pipeline the way the outputs do, but no test
+  separates them; two queries of one type racing is guarded by the latest-only rule and untested;
+  Pipeline Builder's quarantine link is shadowed by the preview contract (filed as its own task).
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
   focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`
