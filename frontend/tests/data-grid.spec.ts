@@ -501,8 +501,9 @@ test.describe("the records grid resizes, reorders and pins columns without a dra
       await expect(control.getByRole("button", { name: `Move ${id} later` })).toHaveCount(1);
       await expect(control.getByRole("checkbox", { name: `Pin ${id}` })).toHaveCount(1);
     }
-    // evaluator.spec.ts's axe sweep has no data-media route, so nothing else ever
-    // runs axe over the grid.
+    // evaluator.spec.ts's axe sweep loads data-media, but it sees a grid only when an
+    // earlier test left a dataset behind, and it never opens the column control, which
+    // axe skips while its <details> is closed. Nothing else runs axe over these controls.
     const results = await new AxeBuilder({ page })
       .include("details.grid-columns")
       .include(".table-wrap")

@@ -1,7 +1,7 @@
 # Resume here — the Foundry look work
 
 Started 2026-09-24 and updated at the end of each working session. The last update was
-2026-09-26, after GOAL_FOUNDATIONS A8. Read this first, then the goal. Check `git status` and `git log` against
+2026-09-26, after GOAL_FOUNDATIONS A7's Menu and Tooltip. Read this first, then the goal. Check `git status` and `git log` against
 it before trusting it.
 
 ## Where things stand
@@ -50,10 +50,23 @@ it before trusting it.
 | `15e664c` | **A8, 1**: `components/layout/Tabs.tsx` (`Tabs`, `SegmentedControl`); Decision and Ontology Health adopt; `Tabs` rides in `dragdrop-vendor` |
 | `fcc6104`, `4d8697a`, `088f3e0`, `4e01505`, `59ec98e`, `129dea3` | **A8, 2–7**: Ops, ModelOps, Security and Control Panel, the drawer (tint), the artifact review (tablist), Delivery and the breakpoint; A8 Met |
 | `f09a564` | The collaboration WebSocket and both event streams read their logs off the event loop (`oms/test_collaboration_socket_off_loop.py`) |
+| `0a6613d` | This note, updated |
+| `752572e` | **A7, 1**: `components/layout/Dialog.tsx`; the command palette and Object Explorer's action dialog adopt it (`frontend/tests/overlays.spec.ts`) |
+| `108e8bc` | The owner's decisions: N (a), menus stay buttons; A5's existing media sets stay unassigned |
+| `2d3bba0` | **A5**: search scopes incidents; media sets gain `project_id` (migration `0048`); the gate reads its checks once; four baselines re-recorded at `0048`; A5 Met |
+| `715086b` | This note, updated |
+| `294b5c5`, `09fabbe` | Another session's work: Security's grants picker named, every Security and Control Panel tab under axe; Data & Media's upload routes wrap at 375px |
+| `f951fda` | **A7, 2**: `components/layout/Menu.tsx` and `placement.ts`, a disclosure that floats; the pipeline strip's unsaved-changes list adopts it; route payload re-baselined in the open |
+| `67427c8` | **A7, 3**: `components/layout/Tooltip.tsx`; the canvas's zoom buttons and edge inserts and Workshop's Layout, Duplicate and Delete node adopt it; `Tooltip` and `placement` ride in `dragdrop-vendor` |
+| this commit | This note; `audit_ratchet_motion` locked at 0 (all 20 ratchets have fallen at least once) |
 
 GOAL_LOOK: **Met, U1–U11.** Nothing has been pushed. Never push tags. The work continues in
-[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A4, A8 and A9 are Met; A5, A6
-and A7 are Open.
+[`GOAL_FOUNDATIONS_2026-09-25.md`](GOAL_FOUNDATIONS_2026-09-25.md): A1–A5, A8 and A9 are Met; A6 and A7
+are Open. A7's Dialog, Menu and Tooltip are all in and adopted; it stays Open only as the owner of
+`raw_colour_ceiling` (see Next).
+
+**Decided 2026-09-26:** N (a), tabs and menus stay buttons; and for A5, existing media sets stay
+unassigned until someone assigns them.
 
 **Decided 2026-09-25**, recorded in the plan with the options offered:
 - J (a): `tokens.css` imported whole.
@@ -73,32 +86,42 @@ I, M and N are still undecided, and the goal assumes their option (a).
    | Command | Expected |
    | --- | --- |
    | `python oms/verify.py --fast` | 25 of 25 |
-   | `python oms/test_style_tokens_audit.py` | 51 assertions (0 undefined names, 0 references, 571 raw colours, no alias used or defined) |
-   | `python oms/test_route_payload_audit.py` | 41 assertions, shared closure 507 KB |
-   | `python oms/audit_route_payload.py` | 17 routes, shared 518,923 B, three font lines, all shared |
-   | `python oms/audit_route_cost.py` | passes; 266 requests on open across 16 routes |
-   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 571, held by GOAL_FOUNDATIONS A7 |
-   | `python oms/audit_ratchet_motion.py` | 1 ≤ 1 |
-   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 29 passed (needs a current build); `trust.spec.ts` 12 passed |
+   | `python oms/test_style_tokens_audit.py` | 51 assertions (0 undefined names, 0 references, 563 raw colours, no alias used or defined) |
+   | `python oms/test_route_payload_audit.py` | 41 assertions, shared closure 511 KB |
+   | `python oms/audit_route_payload.py` | 17 routes, shared 516 KB measured against a 523,573 B record (re-baselined at `f951fda`) |
+   | `python oms/audit_route_cost.py` | passes; no route issues more requests than it did |
+   | `python oms/audit_frontier.py` | every gap owned; the largest is `raw_colour_ceiling` 563, held by GOAL_FOUNDATIONS A7 |
+   | `python oms/audit_ratchet_motion.py` | 0 ≤ 0 |
+   | `cd frontend && PYTHON_BIN=python npx playwright test look.spec.ts --project=desktop-1280` | 29 passed (needs a current build); `trust.spec.ts` 12 passed; `overlays.spec.ts` 22 passed |
 
 3. If `frontend/dist` is stale, rebuild it with `python oms/measure_browser_evidence.py --build`.
    Check first that port 8010 is free, since another session may be serving it.
 
-## Next: GOAL_FOUNDATIONS A7, then A6; A5 waits on the owner
+## Next: GOAL_FOUNDATIONS A6
 
-1. **A5 waits on the owner.** Search incidents are a small change. Media sets need a migration
-   (`project_id`) and a choice of project for existing rows; the goal assumes none. A separate
-   task was already filed for the same scoping.
-2. **A7, overlays** (M): Dialog, Menu with Popover, Tooltip. It now owns `raw_colour_ceiling`
-   (571). The first adopters are the command palette and Object Explorer's action modal
-   (Dialog). The goal's A7 text lists the rest and the test.
-3. **A6, routes** (L): one route table, `navigate(view, params)`, and six query readers.
-4. **The known retry is fixed.** The Platform Graph test at 1366 timed out because
+1. **Decisions U–X are assumed, not decided** (the plan's owner-decisions table, 2026-09-26):
+   `page` names an ontology-level panel (U a); old spellings are not read (V a); the server
+   keeps a copy of the route table (W a); the node context menu's look waits for Y15, so A7
+   stays Open as `raw_colour_ceiling`'s owner (X b). Ask the owner when they are back. A6's own
+   text settles the rest: Ops tabs are pushed, Object Explorer's search is replaced, and each
+   test is run against a `38b096a` build.
+2. **A6, routes** (L): one route table (`routes.json` beside `apps.json`), `navigate(view,
+   params)`, and six query readers, one commit per reader. The spec and its critique are in
+   `look-census/specs/` (local, excluded: `a6_spec.md`, `a6_critique.json`); the critique's two major points
+   are the flushSync premise (false under React 19.2.7; drop `alongside`) and the `38b096a`
+   claim.
+3. **The Platform Graph retry is fixed.** The test at 1366 timed out because
    `/project/readiness` built the whole project snapshot on every page load. That was 1.0 s of
    Python per call late in a run, and calls queued two dozen deep. Readiness now reads only the
    snapshot's collection names, and the test takes 0.6 s with no retry. The details are in
-   `GOAL_FOUNDATIONS_2026-09-25.md` under A8's run. It was not the WebSocket (`f09a564`), the
-   SQLite lock wait or the thread limit.
+   `GOAL_FOUNDATIONS_2026-09-25.md` under A8. It was not the WebSocket (`f09a564`), the SQLite
+   lock wait or the thread limit.
+4. **A migration re-records four baselines.** Adding one stamps query-bounds, request-cost,
+   suite-cost and browser-evidence as past their life. Re-record them:
+   `audit_query_bounds.py --set-baseline`, `audit_request_cost.py --write-baseline`,
+   `measure_suite_cost.py` (about 20 minutes) and then `audit_suite_cost.py --write-baseline`,
+   and a full run. The suite-cost census is also the only check that sees repeated query
+   shapes: run it after any backend change.
 
 ## How each step is measured
 
@@ -158,6 +181,20 @@ I, M and N are still undecided, and the goal assumes their option (a).
   `.git/info/exclude` line, before measuring.
 - **Git Bash** rewrites `/route` arguments (`MSYS_NO_PATHCONV=1`). Heredocs can mangle
   backslashes; write regex scripts with the Write tool.
+- **A negative run that fails in setup proves nothing.** Four Menu mutations first failed at
+  "typing into a node's form did not count as unsaved": editing a second node raced the form
+  switching over. Read where each failure lands, fix the setup, and run the mutation again.
+- **The pipeline page at 1280×900:** the strip sits in no scroll box; the pane host scrolls, and
+  typing into the node form scrolls it away from the canvas (call the canvas back before a
+  lasso). The zoom buttons sit at the canvas's foot, below the pane host's fold, so
+  `scrollIntoViewIfNeeded` before any `mouse.move` onto them. The selected node's context menu
+  opens to its right, tall enough at 1.35 zoom to cover both edge inserts; select d.
+- **A lasso covers what it crosses.** Its rectangle lies over the canvas, so a test that ends
+  a lasso on a button proves nothing about that button's pointer handling; hold a button down
+  from bare page instead.
+- **Late-run backend stalls** can fail a test whose route handler fetches after the test ends
+  (the shell-widths strip test once, teardown past 45 s). It passed alone and in the next run;
+  the stall was readiness's queue, fixed with the retry (item 3).
 - **The original** is signed in only in the user's Chrome. Use Claude in Chrome read-only and
   never type credentials. The JS tool returns about 1,000 characters; write results into an
   `<article>` and read them with `get_page_text`.
@@ -166,13 +203,14 @@ I, M and N are still undecided, and the goal assumes their option (a).
 
 | Measure | Value after U11 |
 | --- | --- |
-| Route payload | shared closure 518,923 B at its ceiling, re-baselined at U8; measured 508 KB after U10 (inside the 8 KB tolerance) |
+| Route payload | shared closure record 523,573 B, re-baselined at `f951fda` (Menu took PipelineBuilder 198 B past the tolerance); measured 516 KB after the Tooltip, 3,592 B inside it |
 | Route cost | 266 requests on open across 16 routes. One reading taken straight after a full run once gave Automate 8, and it read 13 when measured again |
-| Six-project run | 397 passed, 1,229 skipped, 0 failed, 1 known retry (the Platform Graph test at 1366); baseline re-recorded at A8 (1,626 entries). Earlier: 386 at A4. Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
+| Six-project run | 432 passed at `67427c8`, 0 failed, none flaky. Earlier: 399 passed, 1,239 skipped, 0 failed; baseline re-recorded at A5, migration head `0048` (1,638 entries). The Platform Graph test at 1366 usually retries once | Known single retries under full-run load: movement-contract, the evaluator's Ctrl+K, the map's feature count, and `net::ERR_NO_BUFFER_SPACE` on a reload. Each was clean when repeated |
 | Style tokens | 0 undefined names and references; 0 legacy alias uses (the block is gone) |
-| Raw colours outside `tokens.css` | 571 (661 at U1's census); held by GOAL_FOUNDATIONS A7 |
+| Raw colours outside `tokens.css` | 563 (661 at U1's census); held by GOAL_FOUNDATIONS A7 |
 | Raw empty states | 7 (`audit_ui_states`), from 32 |
-| Look tests | 29 in `look.spec.ts` and 12 in `trust.spec.ts`, each shown to fail with what it defends removed |
+| Look tests | 29 in `look.spec.ts`, 12 in `trust.spec.ts`, 22 in `overlays.spec.ts` (Dialog 2, Menu 7, Tooltip 13), each shown to fail with what it defends removed |
+| Tenancy | `unscoped_reads_ceiling` 344, `tenant_orphan_ceiling` 50 (from 52 at A5) |
 
 ## Other open threads
 

@@ -1,6 +1,8 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, useDraggable, type DragEndEvent } from "@dnd-kit/core";
 import { dropPointOf, slotAwareCollision, useWorkspaceSensors } from "../components/dnd/DragKit";
+import { Menu } from "../components/layout/Menu";
+import { hrefForResource } from "../utils/navigation";
 import { PaneHost, usePaneLayout } from "../components/layout/Pane";
 import { DataGrid } from "../components/data/DataGrid";
 import type { PaneSpec } from "../lib/paneLayout";
@@ -782,7 +784,6 @@ export function PipelineBuilder() {
   // here, so what can be unsaved is a node's configuration. A draft is dropped when
   // what is typed is back to what is saved, so a count here is a real difference.
   const unsavedNodes = (canvas?.nodes || []).filter((node) => nodeDrafts[`${selectedGraphId}/${node.id}`]);
-  const [unsavedOpen, setUnsavedOpen] = useState(false);
 
   // S5 of GOAL_SHELL_2026-09-23. The badge read `canvas?.validation.status ||
   // "loading"`, so it said loading with no pipeline selected and after a canvas
@@ -822,24 +823,25 @@ export function PipelineBuilder() {
           <Toolbar groups={canvas?.toolbar_groups || state.value?.selected_canvas?.toolbar_groups || []} />
           <div className="workbench-status-strip">
             <StatusBadge value={stripStatus} intent={canvas ? intentOf(CHECK_RESULT, stripStatus) : stripStatus === "Pipelines failed to load" || stripStatus === "Canvas failed to load" ? "danger" : "neutral"} />
+            {/* The count opens the list as a menu (A7): it floats over the canvas rather
+                than pushing it down, and choosing a node selects it and closes the list.
+                With nothing unsaved the Menu unmounts, so a list closed by saving does not
+                come back open with the next typed change. */}
             {unsavedNodes.length ? (
-              <button type="button" className="unsaved-changes" aria-expanded={unsavedOpen}
-                      onClick={() => setUnsavedOpen((open) => !open)}>
-                {unsavedNodes.length === 1 ? "1 unsaved change" : `${unsavedNodes.length} unsaved changes`}
-              </button>
+              <Menu className="unsaved-changes"
+                    trigger={unsavedNodes.length === 1 ? "1 unsaved change" : `${unsavedNodes.length} unsaved changes`}>
+                <ul aria-label="Unsaved changes">
+                  {unsavedNodes.map((node) => (
+                    <li key={node.id}>
+                      <button type="button" onClick={() => selectNode(node.id)}>
+                        {node.label} ({node.id}): configuration not saved
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </Menu>
             ) : canvas ? <span className="saved-state">Saved</span> : null}
             <span className="strip-message">{actionStatus}</span>
-            {unsavedOpen && unsavedNodes.length ? (
-              <ul className="unsaved-list" aria-label="Unsaved changes">
-                {unsavedNodes.map((node) => (
-                  <li key={node.id}>
-                    <button type="button" onClick={() => selectNode(node.id)}>
-                      {node.label} ({node.id}): configuration not saved
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
           </div>
           <DndContext sensors={sensors} collisionDetection={slotAwareCollision} onDragStart={(event) => {
             dragging.current = true;
@@ -1198,7 +1200,7 @@ function OntologyContractPanel({ contract, mode }: { contract: PipelineOntologyC
         </details>
       ) : <p className="contract-success">All preview rows satisfy the ontology contract.</p>}
       {lineage.length ? <details><summary>Mapped field lineage ({lineage.length})</summary><DataTable rows={lineage} /></details> : null}
-      {contract.quarantine_asset_id ? <a className="evidence-link" href={`/workspace/imports?asset=${encodeURIComponent(contract.quarantine_asset_id)}`}>Open quarantine dataset</a> : null}
+      {contract.quarantine_asset_id ? <a className="evidence-link" href={hrefForResource("dataset", contract.quarantine_asset_id)}>Open quarantine dataset</a> : null}
     </section>
   );
 }

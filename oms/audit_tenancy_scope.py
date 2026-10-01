@@ -124,8 +124,15 @@ WORKER = "worker"           # nothing routed can reach it: contain by the job's 
 # predicate rather than close anything. They are reported separately, not cleared: the
 # inheritance holds only if the later read really is keyed on the authorized id, and that
 # still takes a person to confirm.
-AUTHORIZING = re.compile(r"\b(semantic_scope\.\w+|owned_row|assert_project|accessible_query"
-                         r"|_artifact_for|_locked_artifact_for|_project_for|require_project)\s*\(")
+#
+# `semantic_scope.` names only the accessors that check the caller. The pattern once took any
+# `semantic_scope.<name>(`, so `effective_principal(`, which resolves a principal and authorizes
+# nothing, filed global search's unscoped incident read as authorized (GOAL_FOUNDATIONS A5).
+AUTHORIZING = re.compile(r"\b(semantic_scope\.(?:assert_project|accessible_query|owned_row|object_type_for"
+                         r"|object_for|link_type_for|link_for|asset_for|pipeline_for)"
+                         r"|owned_row|assert_project|accessible_query"
+                         r"|_artifact_for|_locked_artifact_for|_project_for|require_project"
+                         r"|media_set_for|media_item_for)\s*\(")
 
 
 def _reachable_from_routes() -> set:

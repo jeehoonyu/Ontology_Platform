@@ -14,16 +14,18 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from .database import get_db
-from . import media_sets as _media, aip_document as _doc, runtime, storage
+from . import media_sets as _media, aip_document as _doc, production_auth, runtime, storage
 
 router = APIRouter(tags=["media_ops"])
 
 
-def _item(db: Session, media_item_id: str):
-    item = db.get(_media.MediaItem, media_item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail=f"Media item '{media_item_id}' not found")
-    return item
+def _item(db: Session, principal: production_auth.Principal, media_item_id: str, permission: str = "view"):
+    # Through its set's project (GOAL_FOUNDATIONS A5): these routes read any tenant's items.
+    return _media.media_item_for(db, principal, media_item_id, permission)
+
+
+_VIEW = Depends(production_auth.require_permission("view"))
+_EDIT = Depends(production_auth.require_permission("edit"))
 
 
 class ChunkRequest(BaseModel):
@@ -39,8 +41,9 @@ class ProcessRequest(BaseModel):
 
 
 @router.post("/media-items/{media_item_id}/chunk")
-def chunk_media(media_item_id: str, body: ChunkRequest, db: Session = Depends(get_db)):
-    item = _item(db, media_item_id)
+def chunk_media(media_item_id: str, body: ChunkRequest, db: Session = Depends(get_db),
+                principal: production_auth.Principal = _VIEW):
+    item = _item(db, principal, media_item_id)
     text = item.text_content or ""
     chunks = _doc._chunk(text, body.chunk_size, body.overlap)
     return {"media_item_id": media_item_id, "chunk_count": len(chunks), "embedding_dim": _doc.EMBED_DIM,
@@ -48,15 +51,17 @@ def chunk_media(media_item_id: str, body: ChunkRequest, db: Session = Depends(ge
 
 
 @router.post("/media-items/{media_item_id}/extract-entities")
-def extract_entities(media_item_id: str, db: Session = Depends(get_db)):
-    item = _item(db, media_item_id)
+def extract_entities(media_item_id: str, db: Session = Depends(get_db),
+                     principal: production_auth.Principal = _VIEW):
+    item = _item(db, principal, media_item_id)
     result = runtime.extract_document_intelligence(item.text_content or "", {})
     return {"media_item_id": media_item_id, "entities": result["entities"], "summary": result["summary"]}
 
 
 @router.post("/media-items/{media_item_id}/process")
-def process_media(media_item_id: str, body: ProcessRequest, db: Session = Depends(get_db)):
-    item = _item(db, media_item_id)
+def process_media(media_item_id: str, body: ProcessRequest, db: Session = Depends(get_db),
+                  principal: production_auth.Principal = _VIEW):
+    item = _item(db, principal, media_item_id)
     text = item.text_content or ""
     if body.strategy == "entities":
         return {"strategy": "entities", "entities": runtime.extract_document_intelligence(text, {})["entities"]}
@@ -84,13 +89,12 @@ _TEXTLIKE_EXT = (".txt", ".md", ".csv", ".json", ".log", ".xml", ".html")
 
 
 @router.post("/media-sets/{media_set_id}/items/upload")
-async def upload_media_item(media_set_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_media_item(media_set_id: str, file: UploadFile = File(...), db: Session = Depends(get_db),
+                            principal: production_auth.Principal = _EDIT):
     """Upload a real binary media artifact into a media set; the bytes go to object
     storage. Text-like uploads also populate `text_content` so the existing extraction
     strategies (chunk/entities/layout) work on them immediately."""
-    mset = db.get(_media.MediaSet, media_set_id)
-    if not mset:
-        raise HTTPException(status_code=404, detail=f"Media set '{media_set_id}' not found")
+    mset = _media.media_set_for(db, principal, media_set_id, "edit")
     raw = await file.read()
     item_id = uuid.uuid4().hex
     uri = storage.put(f"media/{item_id}/{file.filename or 'upload'}", raw)
@@ -113,8 +117,9 @@ async def upload_media_item(media_set_id: str, file: UploadFile = File(...), db:
 
 
 @router.get("/media-items/{media_item_id}/content")
-def media_item_content(media_item_id: str, db: Session = Depends(get_db)):
-    item = _item(db, media_item_id)
+def media_item_content(media_item_id: str, db: Session = Depends(get_db),
+                       principal: production_auth.Principal = _VIEW):
+    item = _item(db, principal, media_item_id)
     data = storage.open_bytes(item.storage_uri)
     if data is None:
         if item.text_content is not None:

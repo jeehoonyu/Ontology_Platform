@@ -9,10 +9,13 @@ import {
   LoadingState,
   Metric,
   Panel,
-  StatusBadge
+  StatusBadge,
+  UnknownResource
 } from "../components/data/DataDisplay";
 import { DataGrid } from "../components/data/DataGrid";
 import { useAsyncState } from "../hooks/useAsyncState";
+import { isNotFound } from "../api";
+import { openResource, useRouteParams } from "../utils/navigation";
 import { asString, classNames, formatValue } from "../utils/format";
 import type { JsonObject, TableRow } from "../types";
 import {
@@ -57,38 +60,63 @@ export function DataMedia() {
 // Datasets
 // ---------------------------------------------------------------------------
 
+/** A fetch's answer, with the id it answers, so nothing shown belongs to a dataset no longer open. */
+type Answer<T> = { id: string; value?: T; error?: string; notFound?: boolean };
+
 function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: () => void }) {
-  const [selectedId, setSelectedId] = useState("");
+  // The dataset is the URL's (GOAL_FOUNDATIONS A6); with none named, the first, adopted and
+  // never written.
+  const route = useRouteParams("data-media");
+  const [defaultId, setDefaultId] = useState("");
+  const selectedId = route.dataset || defaultId;
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [uploadMode, setUploadMode] = useState<"replace" | "append">("replace");
-  const [lastUpload, setLastUpload] = useState<UploadResult | null>(null);
+  const [lastUpload, setLastUpload] = useState<Answer<UploadResult> | null>(null);
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [declaredSchema, setDeclaredSchema] = useState<DatasetSchema | null>(null);
+  const [declared, setDeclared] = useState<Answer<DatasetSchema> | null>(null);
+  const [detail, setDetail] = useState<Answer<DataAsset> | null>(null);
 
   const assets = useAsyncState<DataAsset[]>(listDataAssets, [refreshKey]);
-  const detail = useAsyncState<DataAsset | null>(
-    () => (selectedId ? getDataAsset(selectedId) : Promise.resolve(null)),
-    [selectedId, refreshKey]
-  );
+
+  // The open dataset's detail. Back, Forward and a chosen row change the id with no handler of
+  // this screen's running, so every answer carries its id, and one that arrives after the id
+  // moved on is dropped. A reload keeps the answer on screen until the next one lands.
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null);
+      return undefined;
+    }
+    let cancelled = false;
+    getDataAsset(selectedId).then(
+      (asset) => { if (!cancelled) setDetail({ id: selectedId, value: asset }); },
+      (error: unknown) => {
+        if (!cancelled) setDetail({ id: selectedId, error: error instanceof Error ? error.message : String(error), notFound: isNotFound(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, refreshKey]);
 
   useEffect(() => {
-    if (!selectedId && assets.value && assets.value.length && !detail.value) {
-      setSelectedId(assets.value[0].id);
-    }
-  }, [assets.value, selectedId, detail.value]);
+    if (!selectedId && assets.value && assets.value.length) setDefaultId(assets.value[0].id);
+  }, [assets.value, selectedId]);
+
+  // A failed create or upload is about the dataset that was open; another one clears it. This
+  // writes nothing to the URL.
+  useEffect(() => setActionError(""), [selectedId]);
 
   // Declared (name/type) schema is best-effort: /datasets/{id}/schema 404s until declared.
   useEffect(() => {
     if (!selectedId) {
-      setDeclaredSchema(null);
+      setDeclared(null);
       return;
     }
     let cancelled = false;
     getDatasetSchema(selectedId)
-      .then((schema) => !cancelled && setDeclaredSchema(schema))
-      .catch(() => !cancelled && setDeclaredSchema(null));
+      .then((schema) => !cancelled && setDeclared({ id: selectedId, value: schema }))
+      .catch(() => !cancelled && setDeclared({ id: selectedId }));
     return () => {
       cancelled = true;
     };
@@ -102,10 +130,12 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
     try {
       const id = slugify(name) || `dataset_${Date.now()}`;
       const created = await createDataAsset({ id, display_name: name, description: newDescription.trim() || undefined });
+      // One synchronous block, so the new URL and these updates render together (React 19
+      // renders the popstate's and the continuation's updates in one pass). The new dataset
+      // is found through its own detail fetch, never through the reloading list.
+      openResource("dataset", created.id);
       setNewName("");
       setNewDescription("");
-      setSelectedId(created.id);
-      setLastUpload(null);
       reload();
     } catch (error) {
       setActionError((error as Error).message);
@@ -118,11 +148,12 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
     const input = event.target;
     const file = input.files?.[0];
     if (!file || !selectedId) return;
+    const id = selectedId;
     setActionError("");
     setBusy(true);
     try {
-      const result = await uploadDataAssetFile(selectedId, file, uploadMode);
-      setLastUpload(result);
+      const result = await uploadDataAssetFile(id, file, uploadMode);
+      setLastUpload({ id, value: result });
       reload();
     } catch (error) {
       setActionError((error as Error).message);
@@ -132,7 +163,14 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
     }
   }
 
-  const selectedAsset = detail.value;
+  // Only what answers the open id is shown: the records, the receipt, the schema and the error.
+  const answered = detail?.id === selectedId ? detail : null;
+  const selectedAsset = answered?.value ?? null;
+  const datasetMissing = route.dataset !== "" && Boolean(answered?.notFound);
+  const detailError = answered && !answered.notFound ? answered.error ?? "" : "";
+  const pending = Boolean(selectedId) && !answered;
+  const receipt = lastUpload?.id === selectedId ? lastUpload.value ?? null : null;
+  const declaredSchema = declared?.id === selectedId ? declared.value ?? null : null;
   const inferredSchema: JsonObject = selectedAsset?.asset_schema || {};
   const records: TableRow[] = selectedAsset?.records || [];
   const schemaRows: TableRow[] = declaredSchema?.columns?.length
@@ -145,10 +183,10 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
         <Metric label="Datasets" value={assets.value?.length ?? 0} />
         <Metric label="Selected records" value={selectedAsset?.records?.length ?? 0} />
         <Metric label="Schema columns" value={schemaRows.length} />
-        <Metric label="Last format" value={lastUpload?.source_format || selectedAsset?.kind || "-"} />
+        <Metric label="Last format" value={receipt?.source_format || selectedAsset?.kind || "-"} />
       </div>
-      <ErrorBanner message={actionError || assets.error || detail.error} />
-      {(assets.loading || detail.loading) && <LoadingState label="Loading datasets..." />}
+      <ErrorBanner message={actionError || assets.error || detailError} />
+      {(assets.loading || pending) && <LoadingState label="Loading datasets..." />}
       <div className="two-col">
         <Panel title={`Datasets ${assets.value?.length ?? 0}`}>
           <div className="button-row" style={{ flexWrap: "wrap" }}>
@@ -161,10 +199,7 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
               <button
                 key={asset.id}
                 className={classNames("resource-row", selectedId === asset.id && "selected")}
-                onClick={() => {
-                  setSelectedId(asset.id);
-                  setLastUpload(null);
-                }}
+                onClick={() => openResource("dataset", asset.id)}
               >
                 <strong>{asset.display_name || asset.id}</strong>
                 <span>{asString(asset.kind, "dataset")} · {asset.records?.length ?? 0} records</span>
@@ -176,9 +211,9 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
         </Panel>
         <Panel
           title="Upload File"
-          action={selectedId ? <a className="legacy-button compact" href={dataAssetDownloadUrl(selectedId)}>Download raw file</a> : undefined}
+          action={selectedAsset ? <a className="legacy-button compact" href={dataAssetDownloadUrl(selectedAsset.id)}>Download raw file</a> : undefined}
         >
-          {selectedId ? (
+          {datasetMissing ? <UnknownResource noun="dataset" id={route.dataset} /> : selectedAsset ? (
             <div className="summary-list">
               <div className="button-row" style={{ flexWrap: "wrap", alignItems: "center" }}>
                 <label>
@@ -191,27 +226,29 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
                 <input type="file" accept=".csv,.json,.jsonl,.ndjson,.parquet,.pq" disabled={busy} onChange={onUpload} />
               </div>
               <p className="empty" style={{ margin: 0 }}>
-                Uploads to <code>/data-assets/{selectedId}/upload</code> as multipart form data. CSV, JSON, JSONL, and Parquet are parsed into records.
+                Uploads to <code>/data-assets/{selectedAsset.id}/upload</code> as multipart form data. CSV, JSON, JSONL, and Parquet are parsed into records.
               </p>
-              {lastUpload ? (
+              {receipt ? (
                 <KeyValueGrid data={{
-                  source_format: lastUpload.source_format,
-                  added: lastUpload.added,
-                  record_count: lastUpload.record_count,
-                  columns: lastUpload.columns.join(", "),
-                  bytes: lastUpload.bytes,
-                  file_ref: lastUpload.file_ref
+                  source_format: receipt.source_format,
+                  added: receipt.added,
+                  record_count: receipt.record_count,
+                  columns: receipt.columns.join(", "),
+                  bytes: receipt.bytes,
+                  file_ref: receipt.file_ref
                 }} />
               ) : (
                 <EmptyState inline>Choose a file to ingest records into the selected dataset.</EmptyState>
               )}
             </div>
+          ) : pending ? (
+            <LoadingState label="Loading dataset..." />
           ) : (
             <EmptyState title="Select a dataset" description="Pick a dataset on the left to upload a file into it." />
           )}
         </Panel>
       </div>
-      <div className="two-col">
+      {datasetMissing ? null : <div className="two-col">
         <Panel title={selectedAsset ? `Records — ${selectedAsset.display_name || selectedAsset.id}` : "Records"}>
           {selectedAsset ? (
             // Keyed by dataset, so a column arrangement made on one does not reorder the next.
@@ -230,7 +267,7 @@ function DatasetSection({ refreshKey, reload }: { refreshKey: number; reload: ()
             <EmptyState inline>Schema is inferred once a file is uploaded, or declared via the datasets schema endpoint.</EmptyState>
           )}
         </Panel>
-      </div>
+      </div>}
       {selectedAsset ? (
         <DeveloperEvidence title="Developer evidence: selected dataset detail">
           <KeyValueGrid data={{

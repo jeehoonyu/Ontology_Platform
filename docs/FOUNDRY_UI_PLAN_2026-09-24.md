@@ -111,7 +111,7 @@ Three of these are also filed as separate tasks for immediate repair: O2 (maskin
 | Item | What | Acceptance | Depends | P / size |
 | --- | --- | --- | --- | --- |
 | **A6** | **One route table: every resource kind has a URL.** One module maps each kind to a `/workspace/<view>?…` route. It is shared by the frontend now, and by search's `app_url` (H2) and the resource index (Q4) when they land. `navigate(view, params)` keeps the query and dispatches `popstate`. Readers in this wave: `?graph=` (pipeline), `?type=&section=&page=` (ontology), `?artifact=` (builders; `&mode=` with W3), `?dataset=` (`&branch=` with Q12, `&tab=` with Q6), `?type=&object=&exploration=` (Object Explorer), `?tab=` (ops). Filters use `replaceState`, view changes `pushState`; a default or automatic selection never rewrites the URL | For each kind, `page.goto(route)` selects that resource and Back restores the previous one; an unknown id renders an EmptyState naming it (NonIdealState once GOAL_LOOK U10 lands), never the first item silently | — | P1 / L (first wave) |
-| **A7** | **Overlay primitives: Dialog, Menu with Popover, Tooltip.** Dialog traps focus and closes on Escape; Menu opens from a button with `aria-haspopup`, arrow keys move, Escape returns focus; Tooltip opens on hover and focus. The look is UI_CONFIG's overlays. Keep today's hooks: role=dialog with the names "Search workspaces" and "Hotkeys"; node menu items stay buttons (decision N) | Each is in `docs/UI_PRIMITIVES.md` with an adopter; axe-clean while open; Escape never also cancels a live drag | U3 | P1 / M (first wave) |
+| **A7** | **Overlay primitives: Dialog, Menu with Popover, Tooltip.** Dialog traps focus and closes on Escape; Menu is a disclosure, a button with `aria-expanded` and no `aria-haspopup` or menu roles (decision N (a)), arrow keys move, Escape returns focus; Tooltip opens on hover and focus. The look is UI_CONFIG's overlays. Keep today's hooks: role=dialog with the names "Search workspaces" and "Hotkeys"; node menu items stay buttons (decision N) | Each is in `docs/UI_PRIMITIVES.md` with an adopter; axe-clean while open; Escape never also cancels a live drag | U3 | P1 / M (first wave) |
 | **A8** | **Tabs and SegmentedControl.** Underline, tint, pill and vertical variants; segmented with `aria-pressed`. Replaces eight ad-hoc tab styles (decision, ops, modelops, security, drawer, artifact review, delivery, breakpoint) as screens are touched | Each variant matches UI_CONFIG; existing tab locators still pass. The decision, ops and modelops tabs are plain buttons with an `active` class and no ARIA state today; they gain `aria-current` (decision N) and keep the button role. The artifact review tabs are already `role="tab"` with `aria-selected`, and six locators use `getByRole("tab")`; they keep that role | U3 | P1 / M |
 | **A9** | **The app registry.** One list is the source of `CORE_VIEWS`, the sidebar and the launcher, each app with a category, icon, one-line description and (where a create route exists) a create path. Counts derive from the registry's length, never a literal | A test asserts the registry is the only source of all three | — | P1 / S |
 | **U1–U3** | GOAL_LOOK's first three conditions: count the style table, make the payload gate see fonts, import the tokens and resolve the seven undefined names | See [`GOAL_LOOK`](GOAL_LOOK_2026-09-24.md) | — | P1 |
@@ -322,6 +322,8 @@ each offered with the options in its row and its recommendation marked:
   separately filed scoping task).
 
 I and M are not yet decided; GOAL_LOOK assumed their option (a). O–T wait for their waves.
+U–X came up while specifying GOAL_FOUNDATIONS A6 and A7 (2026-09-26). They are not yet decided;
+the work assumes the option marked, and each is written so the owner can overturn it cheaply.
 
 | Decision | Question | Options | Recommendation |
 | --- | --- | --- | --- |
@@ -339,6 +341,10 @@ I and M are not yet decided; GOAL_LOOK assumed their option (a). O–T wait for 
 | **R** | Saved exploration defaults | (a) a private default per user and a project default; (b) private only | (a) |
 | **S** | Reopen "organise" for legend colour groups | (a) yes, citing capture 12; (b) keep it declined | (a), groups only (no folders or text nodes) |
 | **T** | Where favorites and recents live | (a) a principal-scoped table; (b) one browser module, labelled "in this browser" | (b) for recents; (a) for favorites |
+| **U** | What `&page=` means in an Ontology URL | (a) `section` is one of the type's navigation ids (default overview) and `page` one of the three ontology-level panels that replace the whole surface (health center, releases, schema registry), as line 277's "an ontology-level page"; (b) no `page` this wave, the three stay `section` values | (a), assumed |
+| **V** | Old query spellings (`object_type_id`, `object_type`, `objectType`) | (a) not read: the server's links change to `?type=` with each reader, and an old bookmark opens the view's default; (b) read as aliases, about four lines | (a), assumed |
+| **W** | The server's copy of the route table | (a) in A6: `oms/app/workspace_routes.py` with `app_url`, held equal to `routes.json`, and a check that refuses hand-built workspace links; (b) deferred to H2, A6 only renaming the server's links | (a), assumed |
+| **X** | The node context menu's look (seven raw colours) | (a) inside A7 now, 563 → 556; (b) with Y15, the builder parity row, leaving A7 Open as `raw_colour_ceiling`'s owner | (b), assumed: a live canvas look changes with the owner's say |
 
 ## Gates every item touches
 

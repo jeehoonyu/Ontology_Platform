@@ -206,6 +206,9 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     the note shows, and no release request is sent.
   - The modeling tests that release (`test_modeling_io`, `test_modeling_evaluation_ops`,
     `test_modelops`, `test_foundry_tools`, `test_docs_conformance`) all pass.
+  - Later, the suite-cost measurement at A5 found this route loading the objective twice,
+    because the gate commits and the route read `objective.project_id` again afterwards. It
+    was fixed in A5's commit.
 
   **Negative runs:**
   - The backend's gate check removed: the pytest failed again with the submission released. The
@@ -291,7 +294,7 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Repeated 4 times alongside the trust tests that create Workshop drafts, it passed 12 of 12.
     It is recorded as unexplained.
   - Route cost and the payload hold, and the browser-evidence baseline was re-recorded.
-- **A5 — Search and media sets are scoped to the caller's projects.** **Open** —
+- **A5 — Search and media sets are scoped to the caller's projects.** **Met** —
   `unscoped_reads_ceiling` (344) and `tenant_orphan_ceiling` (52) are re-recorded lower in the same
   change (K8). Search filters incidents by `project_id`, and events by their column rather than
   their payload. `media_sets` gains a project, and its list, get, items and extract are scoped.
@@ -299,6 +302,77 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   `oms/test_search_scope.py` (a project-B principal finds none of project A's incidents) and
   `oms/test_media_set_scope.py` (B neither lists nor reads A's set), each shown to fail at
   `38b096a`. The OIDC tier repeats both, because local mode resolves every caller to `*`.
+
+  **What changed.**
+  - **Search.** Events and incidents go through `_safe_all`, the same project scope as every
+    other kind, by the project column the row is filed under. Events were filtered by their
+    payload's `project_id`, and incidents not at all.
+  - **Media sets.** They gain a nullable, indexed `project_id` (migration `0048`).
+    - Existing sets keep none, as the owner decided on 2026-09-26. Only a principal who holds
+      every project reaches an unassigned set, and `POST /media-sets/{id}/project` assigns one.
+    - New sets are created in a project, which the caller must be able to edit.
+    - Every route is scoped by the set's project: in `media_sets.py` the list, get, items and
+      extract; in `media_ops.py` chunk, entities, process, upload and content. Items reach
+      their project through their set.
+  - **The audit.** `audit_tenancy_scope` no longer reads every `semantic_scope.<name>(` as
+    authorization. It now reads only the accessors that check the caller, so
+    `effective_principal(` stops filing reads as authorized.
+  - **The ratchets.** `tenant_orphan_ceiling` falls from 52 to 50: media sets, and their items
+    through their set, now name a tenant. `unscoped_reads_ceiling` holds at 344, not lower,
+    and here is why:
+    - Search's incident read left the count.
+    - `media_sets` entered the census when it gained a `project_id`, and one of its reads
+      counts: creation's check that the new id is free. That check has to look across
+      projects, because ids are global primary keys.
+  - **Baselines at the new migration head.** Adding `0048` left four baselines stamped with
+    `0047`: query bounds, request cost, suite cost and browser evidence. Each was re-measured.
+
+  **Proven by:**
+  - `oms/test_search_scope.py`: beta finds none of alpha's incident or event, including an
+    event whose payload names beta. Alpha finds both. At `108e8bc` it failed: "beta found
+    alpha's rows: ['event', 'incident']".
+  - `oms/test_media_set_scope.py`, 30 assertions:
+    - Beta cannot list, read, fill, extract, chunk or fetch the content of alpha's set or item.
+    - Alpha cannot create a set in beta.
+    - An unassigned set is hidden from both project principals and cannot be claimed by them.
+      The administrator sees it, assigns it to beta, and beta then reaches it.
+  - `oms/test_media_set_project_migration.py`: an existing set stays NULL through the upgrade,
+    the upgrade applies twice, and the downgrade drops the index and the column.
+  - The media, tenancy and platform tests pass: `test_connectivity_media_notepad`,
+    `test_tenancy_scope`, `test_tenant_orphans`, `test_semantic_plane_tenancy` and
+    `test_unified_platform`.
+
+  **Negative runs:**
+  - The list's project filter removed: beta listed alpha's set.
+  - The set authorizer emptied: beta read alpha's set (200).
+  - Both were restored byte for byte.
+
+  **Found by the suite-cost measurement** (`measure_suite_cost`, which only the full tier
+  runs): two routes repeated a query shape where their baseline allows none. Both were fixed by
+  reading the value before a commit expires the row.
+  - `POST /media-items/{id}/extract` (this change) read `item.media_set_id` after its audit
+    commit, which loaded the item a second time.
+  - `POST /modeling/objectives/{id}/release` (A3c, `d999cc3`): the release gate commits, and
+    the route's later reads of `objective.project_id` loaded the objective again. The fast and
+    default tiers do not measure query shapes, so A3c's own measurements missed it. With that fixed,
+    the next measurement showed the gate itself reading the objective's checks twice:
+    `_evaluate_submission_checks` loaded them, and `_release_eligibility` queried them again.
+    The gate now reads them once and keeps each check's kind before the evaluation commits,
+    which helps every route that asks it.
+
+  **Measured.**
+  - The full six-project run at migration head `0048` passed 399 of 399, with none retried.
+    The Platform Graph test at 1366 passed at 41.0 s, just under its 45 s limit, so its task
+    stands.
+  - Data & Media's flows pass with the scoping on.
+  - Route cost and the payload hold. The suite-cost census passed, with several routes now
+    running fewer statements.
+  - The browser-evidence, query-bounds, request-cost and suite-cost baselines are re-recorded
+    at `0048`.
+
+  **Not done:** the OIDC tier (`frontend/tests/production/oidc-rbac.spec.ts`) needs an identity
+  provider this machine does not have, so it was not run. The pytest principals stand in for
+  it: they are real, project-limited principals, not local mode's `*`.
 - **A6 — Every resource kind has a URL.** **Open** — one module maps each kind to a
   `/workspace/<view>?…` route, and `navigate(view, params)` keeps the query and dispatches
   `popstate`. The readers this wave adds: `?graph=` (Pipeline), `?type=&section=&page=`
@@ -309,15 +383,87 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   restores the previous one, and an unknown id shows a NonIdealState naming it, never the first
   item. Each is shown to fail at `38b096a`. The server's view list and `CORE_VIEWS` come from one
   source (with A9).
+
+  **Assumed, not yet decided** (the plan's U, V and W, 2026-09-26): `page` names an ontology-level
+  panel and `section` a type's navigation id; old spellings such as `objectType` are not read;
+  the server holds a copy of the route table and builds its links from it. Settled by this
+  condition's own text: a tab is a selection, so Ops tabs are pushed and Back restores the last
+  one; Object Explorer's search is the first filter and is replaced, never pushed; and each test
+  is run against a build of `38b096a` to show it fails there.
+
+  **1. The route table, `navigate`, and Ops' `?tab=`.** `frontend/src/routes.json` is the one
+  table: each view's params in the order a URL writes them, with defaults left out, and each
+  kind's view and param (rows land with their readers). `utils/navigation.ts` reads it:
+  - `useRouteParams(view)` re-reads the query on every `navigate`, Back and Forward, since the
+    screen stays mounted while only the query changes (ScreenBoundary is keyed by view).
+  - `navigate(view, params)` pushes, builds the URL from `params` alone so a view change
+    carries none of the last view's query, and adds nothing when the place is already open,
+    however its URL spells it (`?tab=command`, or a param no screen reads). Only event handlers
+    call it, so a default never writes the URL.
+  - `navigateHref` opens a server-written link in the page; `?legacy=1` and other paths load.
+  - The `alongside`/`flushSync` parameter the spec proposed is gone: its premise, that a URL
+    write after an await renders a pass early, is false under React 19.2.7.
+  - `oms/app/workspace_routes.py` is the server's copy (`workspace_href`, `app_url`), and
+    `oms/test_workspace_routes.py` holds the two equal, requires a routes.spec case for every
+    kind and view, and counts hand-built workspace links by file (the count may only fall).
+    The incident evidence link is the first built from it: `/workspace/ops?tab=incidents`.
+  - Ops reads `?tab=`; choosing a tab pushes, so Back restores the tab before; an unknown tab is
+    named by `UnknownResource` and no tab is current. Sign-in's `next=` keeps the query.
+  - ScreenBoundary clears a caught error when a history step changes the query, so Back from a
+    tab that threw lands on the tab that did not.
+
+  Proven by `frontend/tests/routes.spec.ts` (four cases so far) and the Python tests. Negative
+  runs, each failing: the open place pushing again ("opening the view already open added a
+  history entry"); the open place compared by spelling only ("the open tab, spelled
+  ?tab=command, added a history entry"); Ops' tab as its own state ("the URL's tab, not Command
+  Center"); the tab read once at mount (Incidents never shows); an unknown tab not named; a
+  history step not clearing a caught error ("the failure of the tab left behind stayed over the
+  one Back returned to"); sign-in keeping only the path ("sign-in drops the query …"); the
+  incident link unbuilt; a hand-built count off by one, the server's default edited, and a view
+  with no case (each `test_workspace_routes` message). An adversarial review confirmed five
+  findings, all fixed above; eight were refuted.
+
+  **2. Data & Media's `?dataset=`.** The dataset section reads the URL, with the first dataset as a
+  default it adopts and never writes. Choosing a row and creating a dataset open it with
+  `openResource`, so Back returns. Every answer the screen shows carries the id it answers (the
+  detail, the declared schema, the upload receipt), so Back, Forward or a chosen row never leave
+  one dataset's records, receipt or error under another; while an answer is on its way, the
+  screen says it is loading. A 403 or 404 names the id with `UnknownResource` (`isNotFound`);
+  any other failure is shown as one. A failed create or upload clears when another dataset is
+  chosen. Pipeline Builder's quarantine link and the imports evidence link are built from the
+  table: both used to point where nothing read them (imports, and the ontology view), and both
+  now open the dataset in Data & Media. That quarantine link is shadowed in practice, since the
+  contract panel always prefers the preview contract; that is filed as its own task, and the
+  evaluator test strips the preview to reach it.
+
+  Proven by two dataset cases in `routes.spec.ts`, the evaluator's contract test and
+  `test_industrial_asset_workflow`. Negative runs, each failing: the URL unread ("the URL's
+  dataset, not the first"); a row not writing the URL; an unknown dataset not named; a created
+  dataset not opening; the receipt not tied to its dataset ("the last dataset's upload receipt
+  followed Back to the one before"); the detail not tied to its id ("the last dataset's records
+  stayed while the next one's answer was on its way"); a failed upload not cleared; any failure
+  counted as unknown ("a server failure was not shown as one"); a 403 not counted; and each
+  link built by hand again. An adversarial review confirmed seven findings, all fixed above
+  (among them the receipt following Back, the previous id's error reappearing, and tests that
+  could not fail); seven were refuted.
 - **A7 — Dialog, Menu with Popover, and Tooltip exist and are adopted.** **Open** — `raw_colour_ceiling`
   (571 after A8) passes here and falls as hand-styled overlays such as `.action-modal` go. Dialog traps
-  focus, closes on Escape and returns focus; Menu opens from a button with `aria-haspopup`, arrow
-  keys move and Escape returns focus; Tooltip opens on hover and on focus. Their look is
-  UI_CONFIG's overlays. The first adopters are the command palette and Object Explorer's action
-  modal (Dialog), the pane actions (Menu, if decision N allows it) and the canvas's icon buttons
-  (Tooltip). To be proven by `frontend/tests/overlays.spec.ts`: focus stays inside while open,
+  focus, closes on Escape and returns focus; Menu is a disclosure, a button with `aria-expanded`
+  that names its panel with `aria-controls` while open (decision N (a): no `aria-haspopup` and no
+  ARIA menu roles), whose arrow keys move and whose Escape returns focus; Tooltip opens on hover
+  and on focus. Their look is UI_CONFIG's overlays. The first adopters are the command palette
+  and Object Explorer's action modal (Dialog), the pipeline strip's unsaved-changes list (Menu;
+  the pane actions stay in the page's flow, as GOAL_SHELL S4 put them) and the canvas's icon
+  buttons (Tooltip). To be proven by `frontend/tests/overlays.spec.ts`: focus stays inside while open,
   Escape closes and returns focus, axe is clean with each open, and Escape never also cancels a
   live drag. Each is shown to fail with the primitive's behaviour removed.
+
+  **Where it stands.** Dialog, Menu and Tooltip are in and adopted (1–3 below), and each proof
+  named above holds. The popover is `placement.ts` with the `.menu-panel` surface: a Popover
+  export only the Menu imported would fail `audit_ui_primitives`, and the arrow comes with the
+  Notifications layout (H8). A7 stays Open while it owns `raw_colour_ceiling` (563): the node
+  context menu's look, seven raw colours, is the next hand-styled overlay to go, and whether
+  that is A7's or Y15's is the owner's call.
 
   **1. Dialog, with its two first adopters.** `components/layout/Dialog.tsx`:
   - Focus moves inside on open, and Tab and Shift+Tab stay inside.
@@ -350,6 +496,222 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
   - Measured: the full six-project run passed 399 of 399, with the known Platform Graph retry.
     `Dialog` rides in the entry chunk, which App already loads; route cost holds at 266, and the
     shared closure is 510 KB.
+
+  **2. Menu, with its first adopter.** `components/layout/Menu.tsx`, placed by
+  `components/layout/placement.ts`:
+  - A disclosure (decision N (a)): the button carries `aria-expanded` and names its panel with
+    `aria-controls` only while it is open. There is no `aria-haspopup`, which a screen reader
+    reads as a menu, and no menu or menuitem role. The items are plain buttons.
+  - The panel follows its button in the page, so Tab goes from the button into it and a
+    dialog's trap still holds it. It floats on `position: fixed`, 8px under the button and
+    flush with its edge, so a pane's edge or a scroll box does not clip it. It follows the
+    button however the button moves (its box is read each frame while the panel is open, since
+    the page laying out again around it fires no event), and keeps its own scroll when placed
+    again. It closes when the button goes out of sight: off the screen, clipped by a scroll
+    box, or covered, as the narrow layout's sticky bar covers the strip; what is at the
+    button's middle is not the button. A keyboard on a button out of sight opens nothing.
+  - A click or Enter opens it and leaves focus on the button; ArrowDown and ArrowUp open onto
+    the first or last item. Inside, the arrows, Home and End move between items and go round,
+    leaving a field's or a select's arrows to it.
+  - Choosing an item closes it and gives focus back to the button, before anything the item
+    opens renders. Escape closes it and gives focus back. A press outside, or focus moving to
+    anything outside, closes it; focus dropped to the page, as when the window loses it, does
+    not.
+  - Escape is taken on window in the capture phase, and only with focus on the button or in
+    the panel: before a dialog's listener and every drag's, so one Escape closes the menu and
+    nothing else, and an Escape pressed elsewhere belongs to whatever has focus.
+  - The look is UI_CONFIG's menu: white, radius 4, `--shadow-overlay`, 4px in, 14px/22px items
+    at least 30px tall with the minimal hover, and an outline in forced colours. The Dialog
+    backdrop's 1100 became the `--z-overlay` token the panel shares.
+  - The pipeline strip's unsaved-changes count adopts it. Its list pushed the canvas down,
+    stayed open until the count was pressed again, and came back open with the next typed
+    change. The list now floats, closes when a node is chosen, and unmounts with the count, so
+    it never reopens by itself. `.unsaved-list` goes.
+  - The pane actions stay in the page's flow, as GOAL_SHELL S4 put them (a collapsed pane has
+    no body to hold a popover). The node context menu keeps its own look until Y15.
+  - Raw colours hold at 563. `docs/UI_PRIMITIVES.md` lists 28 primitives.
+
+  Proven by seven tests in `frontend/tests/overlays.spec.ts`, on a pipeline each builds with
+  up to four node configurations typed and not saved:
+  - The disclosure, on four items: no `aria-haspopup`; `aria-controls` only while open; a click
+    leaves focus on the button; Tab goes into the panel; ArrowDown, End, ArrowDown (round to
+    the first), ArrowUp (round to the last), ArrowUp, Home and Home land on B, D, A, D, C, A
+    and A, so no key can be taken for another; Escape from an item and from the button closes
+    and gives focus back; ArrowUp and ArrowDown on the button open onto the last and the first.
+  - The float: 8px under the button and flush with it, over the canvas; the look; axe clean
+    with it open; a 12px scroll carries it along, and so does the status before the button
+    growing 120px; a bar drawn over the strip closes it on the next move; the button moved out
+    of sight closes it; ArrowDown on that button opens nothing and keeps focus on it.
+  - Its own scroll: with items taller than the room, ArrowUp scrolls the panel to the last one,
+    and placing it again after a scroll keeps that offset.
+  - Choosing an item closes it, gives focus back and runs the item; Shift+Tab away closes it;
+    a press on the strip closes it; focus dropped to the page leaves it open.
+  - During a live lasso, with focus in the list, the first Escape closes the list and the lasso
+    stays; the second cancels the lasso. With focus outside, the Escape cancels the lasso and
+    the list stays.
+  - Escape keeps the canvas selection a lasso made, and Enter on an item runs it.
+  - The list does not come back open after its count goes and returns.
+
+  **Negative runs,** each against a rebuilt dist, each failing:
+  - Escape not stopped: "the Escape that closed the list also cancelled the drag behind it"
+    and "… also cleared the selection".
+  - Escape taken only from the panel: the disclosure test, at Escape on the button.
+  - Escape taken whenever open: "an Escape pressed outside the list did not cancel the drag".
+  - A click that focuses the first item: "opening moved focus off the button".
+  - No arrow keys in the panel: "ArrowDown did not move focus where it should".
+  - The panel portalled to the body: "Tab from the button did not go into its panel".
+  - No `position: fixed`: "the panel is not 8px under its button".
+  - `aria-controls` always set: the disclosure test.
+  - Focus leaving not closing: "focus left and the list stayed over the page".
+  - A press outside not closing: "a press outside left the list open".
+  - Choosing not closing: "choosing an item left the list open", and the keyboard test.
+  - Arrows on a closed button doing nothing: the lasso and keyboard tests.
+  - The old in-page open state: "the list came back open".
+  - No minimal hover: the hover colour.
+  - No following: "the panel stayed where the button was".
+  - No hit-test: "the panel floated on over a bar that covers its button".
+  - Focus moved into a panel that failed to place: "ArrowDown on a button out of sight dropped
+    focus to the page".
+  - The panel's scroll not kept: "the panel did not scroll to its last item" (the panel's
+    first placing after it opens already threw the scroll away).
+  - ArrowUp stepping down, and Home taken for an arrow: "… did not move focus where it should".
+  - Restored byte for byte; the hashes matched.
+
+  An adversarial review of the change (four readers, each finding checked by a second reader
+  trying to refute it) confirmed five findings, all fixed above: the panel's scroll lost on
+  placing, focus dropped when the button is out of sight (found twice), a covered button, a
+  button moved by layout alone, and an arrow test on two items that could not tell
+  directions apart. Eleven others were refuted.
+  - Measured: the full six-project run passed 420 of 420, with the known Platform Graph
+    readiness retry. `Menu` rides in the PipelineBuilder chunk, its one importer, so route
+    cost holds. Route payload, re-baselined in the open: the shared closure is 4,650 B above
+    its record (A2 through A9, the Dialog and this menu's CSS, each inside the tolerance), and
+    Menu with placement adds 3,740 B to PipelineBuilder, which took it 198 B past the 8 KB
+    tolerance. One earlier run failed a strip test that never renders the menu: its route
+    handler's canvas fetch hung past teardown, the late-run backend stall under separate
+    investigation; it passed alone three times and in the next full run.
+
+  **3. Tooltip, with its first adopters.** `components/layout/Tooltip.tsx`:
+  - UI_CONFIG's dark tooltip: `--tooltip-bg` with `--tooltip-text` at 14px/18px, 8px 12px in,
+    radius 4, the overlay shadow, no arrow, over everything on `--z-tooltip` (1200). It sits
+    8px from its child, turned to the other side when it does not fit, and is portalled to
+    the body on `position: fixed`, so the canvas's scaled stage neither scales nor clips it.
+  - It opens once a mouse comes to rest on its child (each move restarts a 100ms wait, a SHIP
+    CHOICE), and at once when the keyboard focuses it (`:focus-visible`); a finger never opens
+    it, and neither does the page moving under a resting pointer. It never opens while a
+    button is held, and a press, Enter or Space shuts it until the pointer comes back or the
+    keyboard focuses the child again, so a drag never shows one.
+  - WCAG 1.4.13: the pointer can rest in the 8px gap (a `::before` bridge on the side it took)
+    or cross onto it, and it stays; it does not time out; Escape hides it without moving focus
+    or the pointer.
+  - Escape with focus on its child is the tooltip's alone: taken on window in the capture
+    phase, so a tooltip the keyboard opened during a drag hides and the drag goes on. With
+    focus anywhere else, it hides and the Escape goes on, so a tooltip under a resting mouse
+    never costs the pipeline search, a dialog, or the canvas clearing its selection its Escape.
+  - It never supplies a name. When its text says more than the child's name ("Auto-layout
+    nodes" on Layout), the child is described by it at all times through a hidden copy, as the
+    title described it, since a screen reader's cursor moves no focus and opens no bubble.
+    When it says the same ("Zoom in"), it describes nothing.
+  - It follows its child however the child moves: its box is read each frame while it shows,
+    since the canvas's zoom moves an edge insert with no scroll and no resize. It hides when
+    the child is out of sight: off the screen, clipped by a scroll box, or covered, judged by
+    what is at the child's middle looking through the bubble itself (the Menu's check now looks
+    through its panel the same way). The window losing focus hides it.
+  - Adopters: the canvas's Zoom in, Zoom out and Fit to view (to their right, since they are a
+    stack) and its edge inserts, which gain the name "Insert selected node type" in place of
+    "+"; Workshop's Layout, and Duplicate node and Delete node, whose title was their only name
+    and which now have their own. Their titles go.
+  - Titles that stay native: table cells and spans that cannot take focus, the aria-hidden
+    ports, the hidden-link count, truncation sites, Delivery's disabled-reason (which should
+    become visible text), and Workshop's Undo and Redo, which are disabled when there is
+    nothing to take back and so cannot take focus. They come with the second wave.
+  - `Tooltip` and `placement` ride in the dragdrop-vendor chunk, which every route loads:
+    Pipeline and Vertex share the canvas that imports the Tooltip, and Workshop imports it
+    too, so either would otherwise be a chunk of its own and a request on those routes.
+  - Raw colours hold at 563. `docs/UI_PRIMITIVES.md` lists 29 primitives.
+
+  Proven by twelve tests in `frontend/tests/overlays.spec.ts`:
+  - Hover on Zoom in: a sweep across it in 1px steps opens nothing until the pointer rests;
+    then the dark tooltip 8px to its right and level with it, on the body, no title, no
+    description; the look, `position: fixed` and z-index 1200 included; resting in the gap
+    keeps it and the gap is the bubble's; on the bubble it stays, and 1.5s later still; Escape
+    hides it and focus is the same element; back on the button it shows; a press shuts it, a
+    move on the pressed button leaves it shut, and leaving and coming back shows it.
+  - Keyboard focus: Shift+Tab onto Zoom in shows it; axe is clean while it shows; Tab moves it
+    to Zoom out and Fit to view; Enter shuts it, and so does Space; blur hides it.
+  - Workshop: Layout is described as "Auto-layout nodes" before, during and after its bubble;
+    Duplicate and Delete node have names of their own, no title and no description.
+  - The edge insert at the largest zoom (1.35): the bubble 8px above, centred, on the body and
+    unscaled; resting in the gap above keeps it; from the keyboard, Up Arrow fits the canvas
+    and the bubble follows the insert.
+  - A clipped insert: scrolled just under the pane host's edge and then 30px more, its middle
+    lands where the bubble stood, above the edge; the bubble goes.
+  - A button held down from bare page onto Zoom in (the pointer checked to be on the button)
+    shows no tooltip; a lasso ending on an edge insert shows none, and Escape still cancels it.
+  - During a live lasso, a tooltip opened from the keyboard takes the first Escape and the
+    lasso the second.
+  - With focus in the pipeline search and the mouse resting on Zoom in, one Escape hides the
+    tooltip and closes the search; the keyboard then opens it without the mouse moving.
+  - With nothing focused, Enter shuts a hover tooltip while the pointer stays on the button
+    (checked); the keyboard focusing the button then opens it.
+  - With nothing focused, one Escape hides a hover tooltip and clears the lasso's selection.
+  - A synthetic touch opens nothing; the pane host scrolling Zoom in under a resting pointer
+    opens nothing until the pointer moves; a keyboard tooltip follows a 30px scroll; the window
+    losing focus hides it; scrolled up past the pane host's top, clipped but inside the window,
+    it goes.
+  - On a touch screen (`hasTouch`), a tap on Zoom in opens nothing.
+
+  **Negative runs,** each against a rebuilt dist, each failing:
+  - Focus not opening it: "keyboard focus did not show the tooltip", in two tests.
+  - The keyboard arriving not clearing a dismissal: "a key pressed while hovering kept the
+    keyboard's tooltip shut". (The search test alone did not catch it: closing the search moves
+    the button off the resting pointer, which clears the dismissal by itself.)
+  - Escape not hiding it: the hover test, at Escape.
+  - Escape on its child not kept: "the Escape that hid the tooltip also cancelled the drag".
+  - Escape kept with focus on nothing: "the tooltip took the Escape that clears the selection".
+  - Escape kept whatever has focus: "the tooltip took the Escape that belonged to the search".
+  - Opening under a held button: "a tooltip opened under a held button". (The lasso alone did
+    not prove it: its rectangle lies over what it crosses.)
+  - A finger opening it: "a touch opened a tooltip". The tap test passes either way, since a tap
+    makes no pointer move; it guards the tap flow as a whole.
+  - The bubble rendered inline: "the bubble is not on the body", in two tests.
+  - `pointer-events: none` on the bubble, and each bridge removed: "the tooltip closed with the
+    pointer resting in the gap" beside Zoom in, and above the insert.
+  - Describing always: "a tooltip that repeats the name describes nothing", in two tests.
+  - Describing never, and describing only while it shows: "Layout's explanation is heard only
+    while its bubble shows".
+  - A press not shutting it: the hover test, after the click. A move on the pressed button
+    reopening it: "a move on the button just pressed brought the tooltip back".
+  - Coming back not reopening it: "after Escape, coming back to the button did not show it
+    again".
+  - Enter, and Space, not shutting it: "Enter left the tooltip showing", "Space left the tooltip
+    showing".
+  - Not following its child: "the tooltip stayed where the insert was before the zoom" and "the
+    tooltip stayed where its button was".
+  - No hit-test: "the bubble took itself for the insert and floated on" and "the tooltip floated
+    on after its button was scrolled out of sight". The bubble counted as its child: the first.
+  - Opening 100ms after the first move, resting or not: "the tooltip opened while the pointer
+    was still moving".
+  - Opening on the pointer coming in rather than on its moves: "the page moving under a resting
+    pointer opened a tooltip".
+  - The Menu's hit-test, now looking through its panel, removed: "the panel floated on over a
+    bar that covers its button".
+  - Restored byte for byte; the hashes matched.
+
+  An adversarial review (four readers, each finding checked by a second reader trying to refute
+  it) confirmed fourteen findings, all fixed above: the bubble left behind by a zoom or any move
+  without a scroll (found three times); the hit-test taking the bubble's old place for the child
+  (and the same hole in the Menu's, through its panel); a dismissal from a key pressed elsewhere
+  keeping the keyboard's tooltip shut (twice); Layout's explanation heard only while its bubble
+  showed, where its title had always been heard; a hover tooltip taking the canvas's
+  clear-selection Escape with nothing focused; opening 100ms after the first move rather than on
+  rest; and tests that could not fail (a press, the bridge, the body branch, the lasso's guard,
+  claims with no test). The line that dropped a child's title went, since no adopter has one.
+  Four others were refuted.
+  - Measured: the full six-project run passed 432 of 432, none flaky. Route cost holds. Route
+    payload holds without re-recording: the shared closure is 4,600 B above the ceiling the
+    Menu recorded (the Tooltip, `placement` and their CSS now in a chunk every route loads),
+    3,592 B inside the tolerance; PipelineBuilder's own share fell as `placement` left it.
 - **A8 — Tabs and SegmentedControl replace the ad-hoc tabs.** **Met** — `raw_colour_ceiling`
   (599) falls as the eight per-screen tab styles go, re-recorded in each commit (K8). Underline,
   tint, pill and vertical variants; SegmentedControl with `aria-pressed`. The Decision, Ops and

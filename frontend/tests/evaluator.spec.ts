@@ -1,41 +1,116 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const routes = [
-  "command-center",
-  "imports",
-  "ontology",
-  "pipeline",
-  "object-explorer",
-  "map",
-  "models",
-  "decision",
-  "ops",
-  "workshop",
-  "aip",
-  "investigations",
-  "entity-resolution",
-  "graph",
-  "validation",
-  "control-panel"
-];
+// Every workspace app, read from `src/apps.json`: the registry App.tsx builds
+// CORE_VIEWS, the sidebar and the command palette from (GOAL_FOUNDATIONS A9). The
+// list here was typed by hand and stopped at sixteen, so the seven apps added after
+// it -- data-media, automate, security, vertex, fusion, analytics, delivery -- were
+// never swept. A route left out goes in EXCLUDED with the reason it is left out.
+const registry = JSON.parse(readFileSync(new URL("../src/apps.json", import.meta.url), "utf-8")) as {
+  apps: { id: string }[];
+};
+const EXCLUDED: Record<string, string> = {};
+const routes = registry.apps.map((app) => app.id).filter((id) => !(id in EXCLUDED));
+
+/**
+ * How far `main.workspace` scrolls sideways, and what widens it. The workspace is
+ * its own scroll container (`overflow: auto`), so the document does not scroll and
+ * `document.documentElement` reads 0 however far the workspace does: at 375px the
+ * Control Panel's workspace scrolled 125px while this sweep passed in every project.
+ *
+ * `widest` says where it goes wrong: the outermost box on the way to the overflow's
+ * far edge that something inside sticks out of, and then the deepest elements at
+ * that edge. The first is the one to fix; the second can be a grid's stretched
+ * siblings rather than the item that sized the track. A subtree that clips or
+ * scrolls on its own is not walked into, since nothing in it can widen the workspace.
+ */
+async function workspaceOverflow(page: Page) {
+  return page.evaluate(() => {
+    const workspace = document.querySelector("main.workspace") as HTMLElement;
+    const overflow = workspace.scrollWidth - workspace.clientWidth;
+    if (overflow <= 2) return { overflow, widest: [] as string[] };
+
+    const name = (element: Element) =>
+      element.tagName.toLowerCase() +
+      [...element.classList].slice(0, 2).map((item) => `.${item}`).join("");
+    const pathTo = (element: Element) => {
+      const path: string[] = [];
+      for (let node: Element | null = element; node && node !== workspace; node = node.parentElement) path.unshift(name(node));
+      return path.slice(-5).join(" > ");
+    };
+    const right = (element: Element) => element.getBoundingClientRect().right;
+    // An element's own box, or for one that lets its content spill, how far the
+    // content goes: a long word overflows a block without widening the block's box.
+    const reach = (element: Element, spills: boolean) => {
+      const block = element as HTMLElement;
+      const left = element.getBoundingClientRect().left;
+      return spills && block.clientWidth > 0 ? Math.max(right(element), left + block.clientLeft + block.scrollWidth) : right(element);
+    };
+    const reached: { element: Element; right: number }[] = [];
+    const walk = (parent: Element) => {
+      for (const child of parent.children) {
+        const style = getComputedStyle(child);
+        if (style.display === "none" || style.position === "fixed") continue;
+        const spills = style.overflowX === "visible";
+        reached.push({ element: child, right: reach(child, spills) });
+        if (spills) walk(child);
+      }
+    };
+    walk(workspace);
+    const farthest = Math.max(...reached.map((item) => item.right));
+    const atEdge = reached.filter((item) => item.right >= farthest - 1).map((item) => item.element);
+    const deepest = atEdge.filter((element) => !atEdge.some((other) => other !== element && element.contains(other)));
+
+    // Down the path to the first element at the edge, the first box whose child
+    // ends past it, or, at the end of the path, whose own text runs past it.
+    const chain: Element[] = [];
+    for (let node: Element | null = deepest[0]; node && node !== workspace; node = node.parentElement) chain.unshift(node);
+    const edge = workspace.getBoundingClientRect().left + workspace.clientLeft + workspace.clientWidth;
+    let outer: Element = workspace;
+    let outerRight = edge;
+    let begins = "";
+    for (const node of chain) {
+      if (right(node) > outerRight + 1) {
+        const where = outer === workspace ? "main.workspace" : pathTo(outer);
+        begins = `begins in ${where}: ${name(node)} inside it ends ${Math.round(right(node) - outerRight)}px past its edge`;
+        break;
+      }
+      if (getComputedStyle(node).display !== "contents") {
+        outer = node;
+        outerRight = right(node);
+      }
+    }
+    if (!begins) begins = `begins in ${pathTo(outer)}: its own text runs past its edge`;
+
+    const widest = [begins, ...deepest.slice(0, 3).map((element) => {
+      const text = (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60);
+      return `at the far edge, ${Math.round(farthest - edge)}px out: ${pathTo(element)}${text ? ` "${text}"` : ""}`;
+    })];
+    return { overflow, widest };
+  });
+}
 
 for (const route of routes) {
   test(`${route} is aligned, human-readable, and accessible`, async ({ page }, testInfo) => {
     await page.goto(`/workspace/${route}`);
     await expect(page.locator(".app-shell")).toBeVisible();
     await expect(page.locator(".sidebar")).toBeVisible();
+    // The workspace draws what its requests return; measure it once they have.
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await expect(page.locator("body")).not.toContainText("[object Object]");
     await expect(page.locator("pre:visible")).toHaveCount(0);
 
     const bodyOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(bodyOverflow).toBeLessThanOrEqual(2);
+    const workspace = await workspaceOverflow(page);
+    expect.soft(workspace.overflow, `main.workspace scrolls ${workspace.overflow}px sideways:\n${workspace.widest.join("\n")}`)
+      .toBeLessThanOrEqual(2);
 
     const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
     const blocking = accessibility.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
@@ -46,6 +121,54 @@ for (const route of routes) {
     }
   });
 }
+
+// The sweep above scans each route as it opens, so a form behind a second tab is never
+// scanned: Security's "Projects & Roles" shipped a project picker with no name
+// (select-name, critical) that nothing here reached. These two screens keep most of their
+// forms behind tabs. The tabs are read from the tab bar, so a tab added later is scanned too.
+const tabbedRoutes = [
+  { route: "security", bar: "Security & Governance views" },
+  { route: "control-panel", bar: "Administration sections" }
+];
+
+for (const { route, bar } of tabbedRoutes) {
+  test(`every ${route} tab is accessible`, async ({ page }) => {
+    await page.goto(`/workspace/${route}`);
+    const tabs = page.getByRole("navigation", { name: bar });
+    await expect(tabs).toBeVisible();
+    const labels = await tabs.getByRole("button").allInnerTexts();
+    expect(labels.length, "the tab bar lists no tabs").toBeGreaterThan(1);
+    const blocking: string[] = [];
+    for (const label of labels) {
+      const tab = tabs.getByRole("button", { name: label, exact: true });
+      await tab.click();
+      await expect(tab).toHaveAttribute("aria-current", "true");
+      await expect(page.locator(".loading-state")).toHaveCount(0);
+      const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+      blocking.push(...accessibility.violations
+        .filter((violation) => violation.impact === "critical" || violation.impact === "serious")
+        .map((violation) => `${label}: ${violation.id}: ${violation.help}`));
+    }
+    expect(blocking, blocking.join("\n")).toEqual([]);
+  });
+}
+
+test("Security's project grants form is accessible once a project is chosen", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Creates a project; runs once on desktop.");
+  // The picker is the only way to the grants table and form, so the tab sweep sees neither.
+  const project = `browser_grants_${Date.now()}`;
+  const created = await page.request.post("/projects", { data: { id: project, display_name: `Browser grants ${project}` } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  await page.goto("/workspace/security");
+  await page.getByRole("button", { name: "Projects & Roles", exact: true }).click();
+  await page.getByRole("combobox", { name: "Project for role grants" }).selectOption(project);
+  const panel = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Project Role Grants" }) });
+  await expect(panel.getByRole("button", { name: "Grant role" })).toBeVisible();
+  await expect(page.locator(".loading-state")).toHaveCount(0);
+  const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  const blocking = accessibility.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
+  expect(blocking, blocking.map((item) => `${item.id}: ${item.help}`).join("\n")).toEqual([]);
+});
 
 test("Object Explorer queries bootstrapped ontology objects and opens a typed profile", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Run the stateful explorer workflow once on desktop.");
@@ -1356,6 +1479,21 @@ test("pipeline ontology output previews and persists contract evidence", async (
   await expect(page.locator(".pipeline-execution-state")).toContainText("SUCCEEDED");
   await expect(page.getByRole("heading", { name: "Ontology Contracts" }).locator("xpath=.." )).toContainText("WARN");
   await expect(page.getByRole("button", { name: new RegExp(`${objectTypeId} ontology PARTIAL`) })).toBeVisible();
+  // The latest run's contract names its quarantine dataset, which opens in Data & Media, the view
+  // that reads ?dataset= (GOAL_FOUNDATIONS A6); before, the link pointed at the imports view, which
+  // reads nothing. The panel shows the preview contract while the node has one, so the node's
+  // details are served without it here, and the panel falls back to the latest run's.
+  await page.route((url) => url.pathname === `/ui-state/pipeline/${graphId}/nodes/ontology/details`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    delete body.metadata.ontology_contract;
+    await route.fulfill({ response, json: body });
+  });
+  await page.getByRole("button", { name: /^Contract input/ }).click();
+  await page.getByRole("button", { name: /^Contract ontology output/ }).click();
+  await expect(contract).toContainText("latest run");
+  await expect(contract.getByRole("link", { name: "Open quarantine dataset" }))
+    .toHaveAttribute("href", `/workspace/data-media?dataset=${assetId}_quarantine`);
 });
 
 test("AIP agent runtime exposes durable policy and citation evidence", async ({ page }, testInfo) => {

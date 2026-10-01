@@ -17,6 +17,10 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   return response;
 }
 
+/** A 403 or 404 from request() ("404 Not Found: …"): the id names nothing this person can open. Takes useAsyncState's message string too. */
+export const isNotFound = (error: unknown) =>
+  /^(403|404) /.test(typeof error === "string" ? error : error instanceof Error ? error.message : "");
+
 export async function api<T = JsonMap>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await request(path, init);
   const contentType = response.headers.get("content-type") || "";

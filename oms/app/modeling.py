@@ -456,6 +456,9 @@ def release_model(objective_id: str, body: ReleaseRequest, principal: Principal 
         raise HTTPException(status_code=404, detail=f"ModelSubmission '{body.submission_id}' not found for objective")
     if target.project_id != objective.project_id:
         raise HTTPException(status_code=409, detail="Model submission belongs to another project")
+    # Read before the gate: it commits, which expires the objective, and reading it again
+    # afterwards loaded the row a second time (audit_suite_cost).
+    project_id = objective.project_id
 
     # Only through the release gate (GOAL_FOUNDATIONS A3c). This marked a gate-blocked
     # submission released, and ModelOps called it before the gated release, which then
@@ -473,7 +476,7 @@ def release_model(objective_id: str, body: ReleaseRequest, principal: Principal 
     # Mark all others as not released, then mark target
     db.query(ModelSubmission).filter(
         ModelSubmission.objective_id == objective_id,
-        ModelSubmission.project_id == objective.project_id,
+        ModelSubmission.project_id == project_id,
         ModelSubmission.released == True,  # noqa: E712
     ).update({"released": False})
     target.released = True
@@ -483,7 +486,7 @@ def release_model(objective_id: str, body: ReleaseRequest, principal: Principal 
         "modeling.submission.released",
         "model_submission",
         body.submission_id,
-        {"project_id": objective.project_id, "objective_id": objective_id}, actor=principal.id,
+        {"project_id": project_id, "objective_id": objective_id}, actor=principal.id,
     )
     db.commit()
     db.refresh(target)

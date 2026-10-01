@@ -29,6 +29,7 @@ from . import (
     platform_runtime,
     production_auth,
     tenancy,
+    workspace_routes,
 )
 import evaluator_evidence
 from .pilot_evidence import current_migration_head
@@ -1488,7 +1489,7 @@ def triage_asset_reliability(
         "evidence_links": [
             {"kind": "object", "id": obj.id, "href": f"/workspace/object-explorer?object_type={ids['object_type']}&object={obj.id}"},
             {"kind": "approval", "id": approval.id, "href": "/workspace/command-center"},
-            {"kind": "incident", "id": case["incident"].id, "href": "/workspace/ops"},
+            {"kind": "incident", "id": case["incident"].id, "href": workspace_routes.workspace_href("ops", tab="incidents")},
             {"kind": "investigation", "id": case["investigation"].id, "href": "/workspace/investigations"},
             {"kind": "report", "id": report.id, "href": f"/api/v1/industrial/workflows/asset-reliability/report?project_id={body.project_id}&format=markdown"},
         ],

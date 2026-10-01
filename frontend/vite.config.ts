@@ -35,9 +35,15 @@ export default defineConfig({
           // and Ontology Manager import it, Rollup gave it a chunk of its own, and
           // `audit_route_cost` measured each at one more request on open. Every
           // route already loads this chunk, so each pays about a kilobyte instead.
+          //
+          // `Tooltip` and `placement` (A7) ride here too: the pipeline canvas, which
+          // Pipeline and Vertex share, and Workshop import the Tooltip, and the
+          // pipeline's Menu and the Tooltip both place with `placement`, so each would
+          // otherwise be a chunk of its own and a request on those routes.
           "dragdrop-vendor": ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities",
                               "./src/components/dnd/DragKit.tsx", "./src/lib/graphLayout.ts",
-                              "./src/components/layout/Tabs.tsx"],
+                              "./src/components/layout/Tabs.tsx", "./src/components/layout/Tooltip.tsx",
+                              "./src/components/layout/placement.ts"],
           "query-vendor": ["@tanstack/react-query"],
           "icons-vendor": ["lucide-react"]
         }

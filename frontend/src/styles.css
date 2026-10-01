@@ -2964,13 +2964,6 @@ pre {
   border: 1px solid #e0c46c;
 }
 
-.unsaved-list {
-  flex-basis: 100%;
-  margin: 0;
-  padding: 0 0 0 16px;
-  font-size: 12px;
-}
-
 .canvas-search {
   display: flex;
   flex-wrap: wrap;
@@ -3439,9 +3432,19 @@ pre {
   margin-top: 10px;
 }
 
+/* One column, never wider than the list. An `auto` column grew to its widest
+   item's min-content, and Data & Media's upload routes, which have nowhere to
+   break, scrolled the workspace sideways at 320-375 and 1101 and ran out of their
+   panel at 1200. The routes wrap anywhere rather than being clipped: the route is
+   what the paragraph says. */
 .summary-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+.summary-list code {
+  overflow-wrap: anywhere;
 }
 
 .proof-trail {
@@ -5603,7 +5606,7 @@ pre {
    The command palette sits higher, as a quick-search does. */
 .dialog-backdrop {
   position: fixed;
-  z-index: 1100;
+  z-index: var(--z-overlay);
   inset: 0;
   display: grid;
   place-items: center;
@@ -5676,6 +5679,109 @@ pre {
 
 .command-palette small {
   color: #607480;
+}
+
+/* Menu (GOAL_FOUNDATIONS A7): UI_CONFIG's menu. A popover of plain buttons 8px from its
+   button: white, radius 4, the overlay shadow, 4px in. Items are 30px, 14px/22px, with the
+   minimal hover. Menu places it on position: fixed, so a pane's edge or a scroll box does
+   not clip it while it stays next to its button in the page. */
+.menu-panel {
+  position: fixed;
+  z-index: var(--z-overlay);
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: var(--menu-min-width);
+  max-width: min(var(--overlay-max-width), calc(100vw - 2 * var(--overlay-offset)));
+  overflow-y: auto;
+  padding: var(--menu-padding);
+  border-radius: var(--popover-radius);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+  color: var(--text-rest);
+  font-size: var(--font-size-medium);
+  font-weight: var(--font-weight-default);
+  line-height: var(--line-height-menu);
+  text-align: left;
+}
+
+.menu-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The default button's ring, fill and drop come off (that rule is at no specificity);
+   with no border, `button:hover`'s border colour has nothing to paint. */
+.menu-panel button {
+  display: flex;
+  align-items: center;
+  gap: var(--control-icon-gap);
+  width: 100%;
+  min-height: var(--menu-item-height);
+  padding: var(--menu-item-padding);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  text-align: inherit;
+  white-space: normal;
+}
+
+.menu-panel button:hover,
+.menu-panel button:focus-visible {
+  background: var(--surface-minimal-hover);
+}
+
+/* SHIP CHOICE: a pressed item was not read; the launcher's active fill is the one on record. */
+.menu-panel button:active {
+  background: var(--surface-minimal-active);
+}
+
+/* The ring drawn inside the row, so it does not spill over the next item. */
+.menu-panel button:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* Tooltip (GOAL_FOUNDATIONS A7): UI_CONFIG's dark tooltip. #404854 with #f6f7f9 14px/18px
+   text, 8px 12px in, radius 4, the overlay shadow, no arrow. The pointer can cross onto it
+   and it stays (WCAG 1.4.13): the ::before bridge makes the gap to its button part of it. */
+.tooltip {
+  position: fixed;
+  z-index: var(--z-tooltip);
+  top: 0;
+  left: 0;
+  max-width: min(var(--overlay-max-width), calc(100vw - 2 * var(--overlay-offset)));
+  padding: var(--tooltip-padding);
+  border-radius: var(--popover-radius);
+  background: var(--tooltip-bg);
+  box-shadow: var(--shadow-overlay);
+  color: var(--tooltip-text);
+  font-size: var(--font-size-medium);
+  font-weight: var(--font-weight-default);
+  line-height: var(--line-height-default);
+  overflow-wrap: anywhere;
+}
+
+.tooltip::before {
+  content: "";
+  position: absolute;
+}
+
+.tooltip[data-side="top"]::before { top: 100%; right: 0; left: 0; height: var(--overlay-offset); }
+.tooltip[data-side="bottom"]::before { right: 0; bottom: 100%; left: 0; height: var(--overlay-offset); }
+.tooltip[data-side="right"]::before { top: 0; right: 100%; bottom: 0; width: var(--overlay-offset); }
+.tooltip[data-side="left"]::before { top: 0; bottom: 0; left: 100%; width: var(--overlay-offset); }
+
+/* Forced colours drop box-shadow, and with it the overlay's edge. */
+@media (forced-colors: active) {
+  .menu-panel,
+  .tooltip {
+    outline: 1px solid CanvasText;
+  }
 }
 
 @media (max-width: 640px) {
