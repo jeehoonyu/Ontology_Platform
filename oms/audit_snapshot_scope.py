@@ -39,10 +39,19 @@ SOURCE = REPO_ROOT / "oms" / "app" / "system_hardening.py"
 
 
 def snapshot_body(source: str) -> str:
-    """The dict literal `_snapshot` builds, up to where scoping takes over."""
-    start = source.index("def _snapshot(db")
-    end = source.index("_scope_snapshot(db, snapshot", start)
-    return source[start:end]
+    """The dict `_snapshot_collections` returns: one loader per collection.
+
+    The collections were a literal inside `_snapshot` until readiness needed
+    their names without their rows. Reading `_snapshot` after that move found
+    zero collections and passed, which is this file's own failure mode.
+    """
+    start = source.index("def _snapshot_collections(")
+    remainder = source[start + 1:]
+    return source[start:start + 1 + remainder.index("\ndef ")]
+
+
+# One entry of that dict, whole: `"name": lambda: [ ... ],`.
+ENTRY = re.compile(r'"(\w+)":\s*(?:lambda:\s*)?\[(.*?)\],\n', re.S)
 
 
 def scope_body(source: str) -> str:
@@ -61,7 +70,7 @@ def collections(source: str) -> Dict[str, Dict[str, object]]:
     as one rather than presented as a reading.
     """
     found: Dict[str, Dict[str, object]] = {}
-    for match in re.finditer(r'"(\w+)":\s*\[(.*?)\],\n', snapshot_body(source), re.S):
+    for match in ENTRY.finditer(snapshot_body(source)):
         key, inner = match.group(1), " ".join(match.group(2).split())
         fields = re.search(r"_row_dict\(row, \[(.*?)\]\)", inner)
         if fields:
@@ -105,7 +114,7 @@ def narrowed_in_builder(source: str) -> Set[str]:
     against a tree containing the state it is meant to refuse.
     """
     narrowed = set()
-    for match in re.finditer(r'"(\w+)":\s*\[(.*?)\],\n', snapshot_body(source), re.S):
+    for match in ENTRY.finditer(snapshot_body(source)):
         if "_for_project(" in match.group(2):
             narrowed.add(match.group(1))
     return narrowed

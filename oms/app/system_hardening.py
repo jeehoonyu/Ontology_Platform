@@ -17,11 +17,11 @@ import time
 import uuid
 import weakref
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, String, inspect, or_, select, text
+from sqlalchemy import Integer, String, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -818,6 +818,562 @@ def _for_project(query, column, project_id):
     return query if not project_id else query.filter(column == project_id)
 
 
+def _snapshot_collections(db: Session, project_id: Optional[str] = None) -> Dict[str, Callable[[], List[Dict[str, Any]]]]:
+    """Every collection the portable snapshot carries, by name, each as a loader.
+
+    Nothing is read until a loader is called. `_snapshot` calls every one, in
+    this order; `project_readiness` calls none, because the only thing it asks
+    of the snapshot is which collections it has -- and that is fixed by this
+    code, not by the rows. It used to build the whole snapshot to find out.
+    """
+    return {
+        "object_types": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "properties", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.ObjectType), models.ObjectType.project_id, project_id).all()
+        ],
+        "link_types": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"])
+            for row in _for_project(db.query(models.LinkType), models.LinkType.project_id, project_id).all()
+        ],
+        "action_types": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "parameters", "rules"])
+            for row in _for_project(db.query(models.ActionType), models.ActionType.project_id, project_id).all()
+        ],
+        "approval_requests": lambda: [
+            _row_dict(row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at", "consumed_at", "consumed_by_outbox_event_id"])
+            for row in _for_project(db.query(models_action.ApprovalRequest), models_action.ApprovalRequest.project_id, project_id).all()
+        ],
+        "action_outbox": lambda: [
+            _row_dict(row, ["id", "project_id", "action_type_id", "payload", "status", "created_at"])
+            for row in _for_project(db.query(models_action.OutboxEvent), models_action.OutboxEvent.project_id, project_id).all()
+        ],
+        "action_idempotency_keys": lambda: [
+            _row_dict(row, ["key", "project_id", "action_type_id", "response_payload", "created_at", "expires_at"])
+            for row in _for_project(db.query(models_action.IdempotencyKey), models_action.IdempotencyKey.project_id, project_id).all()
+        ],
+        "model_endpoints": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.ModelEndpoint), models.ModelEndpoint.project_id, project_id).all()
+        ],
+        "agent_definitions": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "system_prompt", "allowed_object_types", "allowed_actions", "model_endpoint_id", "approval_required", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.AgentDefinition), models.AgentDefinition.project_id, project_id).all()
+        ],
+        "agent_sessions": lambda: [
+            _row_dict(row, ["id", "agent_id", "user_prompt", "status", "context", "plan", "proposed_actions", "created_at", "completed_at"])
+            for row in _for_parent(db.query(models.AgentSession), "agent_sessions", project_id).all()
+        ],
+        "logic_functions": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "blocks", "input_schema", "output_schema", "approval_required", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.LogicFunction), models.LogicFunction.project_id, project_id).all()
+        ],
+        "logic_runs": lambda: [
+            _row_dict(row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"])
+            for row in _for_parent(db.query(models.LogicRun), "logic_runs", project_id).all()
+        ],
+        "eval_suites": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "target_agent_id", "cases", "criteria", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.EvalSuite), models.EvalSuite.project_id, project_id).all()
+        ],
+        "eval_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "suite_id", "status", "score", "results", "created_at", "completed_at"])
+            for row in _for_project(db.query(models.EvalRun), models.EvalRun.project_id, project_id).all()
+        ],
+        "aip_eval_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "target", "total", "passed", "pass_rate", "results", "created_at"])
+            for row in _for_project(db.query(aip_evals.AipEvalRun), aip_evals.AipEvalRun.project_id, project_id).all()
+        ],
+        "decision_rules": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "expression", "output_property", "severity", "recommended_actions", "active", "created_at", "updated_at"])
+            for row in _for_project(db.query(decision_intelligence.DecisionRule), decision_intelligence.DecisionRule.project_id, project_id).all()
+        ],
+        "decision_scorecards": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "features", "thresholds", "recommended_actions", "active", "created_at", "updated_at"])
+            for row in _for_project(db.query(decision_intelligence.DecisionScorecard), decision_intelligence.DecisionScorecard.project_id, project_id).all()
+        ],
+        "decision_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "scope", "status", "object_count", "findings", "created_at", "completed_at"])
+            for row in _for_project(db.query(decision_intelligence.DecisionRun), decision_intelligence.DecisionRun.project_id, project_id).all()
+        ],
+        "object_snapshots": lambda: [
+            _row_dict(row, ["id", "project_id", "object_id", "object_type_id", "properties", "lineage", "event_type", "actor", "source_type", "source_id", "created_at", "seq"])
+            for row in _for_project(db.query(decision_intelligence.ObjectSnapshot), decision_intelligence.ObjectSnapshot.project_id, project_id).all()
+        ],
+        "entity_resolution_jobs": lambda: [
+            _row_dict(row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count", "objects_in_scope", "objects_scanned", "last_scanned_id", "exact_objects", "exact_values_skipped"])
+            for row in _for_project(db.query(decision_intelligence.EntityResolutionJob), decision_intelligence.EntityResolutionJob.project_id, project_id).all()
+        ],
+        "entity_candidates": lambda: [
+            _row_dict(row, ["id", "project_id", "job_id", "object_type_id", "object_ids", "score", "reasons", "status", "merged_object_id", "created_at", "decided_at"])
+            for row in _for_parent(db.query(decision_intelligence.EntityCandidate), "entity_candidates", project_id).all()
+        ],
+        "decision_scenarios": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "seed_object_ids", "overrides", "propagation_rules", "baseline", "scenario_output", "impact", "created_at", "updated_at"])
+            for row in _for_project(db.query(decision_intelligence.DecisionScenario), decision_intelligence.DecisionScenario.project_id, project_id).all()
+        ],
+        "object_instances": lambda: [
+            _row_dict(row, ["id", "project_id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.ObjectInstance), models.ObjectInstance.project_id, project_id).all()
+        ],
+        "link_instances": lambda: [
+            _row_dict(row, ["id", "project_id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"])
+            for row in _for_project(db.query(models.LinkInstance), models.LinkInstance.project_id, project_id).all()
+        ],
+        "data_assets": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"])
+            for row in db.query(models.DataAsset).all()
+        ],
+        "pipeline_definitions": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.PipelineDefinition), models.PipelineDefinition.project_id, project_id).all()
+        ],
+        "pipeline_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "pipeline_id", "status", "input_asset_id", "output_asset_id", "records_in", "records_out", "lineage", "metrics", "error", "created_at", "completed_at"])
+            for row in _for_project(db.query(models.PipelineRun), models.PipelineRun.project_id, project_id).all()
+        ],
+        "saved_object_sets": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "owner", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.SavedObjectSet), models.SavedObjectSet.project_id, project_id).all()
+        ],
+        "map_layer_definitions": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "saved_object_set_id", "filters", "geometry_field", "style", "created_at", "updated_at"])
+            for row in _for_project(db.query(models.MapLayerDefinition), models.MapLayerDefinition.project_id, project_id).all()
+        ],
+        "pipeline_builder_graphs": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "nodes", "edges", "parameters", "status", "created_at", "updated_at"])
+            for row in _for_project(db.query(pipeline_builder_ops.PipelineBuilderGraph), pipeline_builder_ops.PipelineBuilderGraph.project_id, project_id).all()
+        ],
+        "pipeline_builder_builds": lambda: [
+            _row_dict(row, ["id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at"])
+            for row in _for_parent(db.query(pipeline_builder_ops.PipelineBuilderBuild), "pipeline_builder_builds", project_id).all()
+        ],
+        "pipeline_ontology_contract_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "graph_id", "build_id", "node_id", "object_type_id", "status", "input_rows", "accepted_rows", "rejected_rows", "created_objects", "updated_objects", "unchanged_objects", "quarantine_asset_id", "field_lineage", "violations", "created_at"])
+            for row in _for_project(db.query(pipeline_builder_ops.PipelineOntologyContractRun), pipeline_builder_ops.PipelineOntologyContractRun.project_id, project_id).all()
+        ],
+        "ontology_revisions": lambda: [
+            _row_dict(row, ["id", "project_id", "revision", "status", "parent_revision_id", "branch_id", "manifest", "checksum", "validation", "created_by", "created_at", "published_at"])
+            for row in _for_project(db.query(ontology_versioning.OntologyRevision), ontology_versioning.OntologyRevision.project_id, project_id).all()
+        ],
+        "ontology_change_sets": lambda: [
+            _row_dict(row, ["id", "project_id", "title", "description", "base_revision_id", "draft_revision_id", "proposal_id", "status", "changes", "diff", "impact", "validation", "migration_plan", "created_by", "reviewer", "created_at", "updated_at"])
+            for row in _for_project(db.query(ontology_versioning.OntologyChangeSet), ontology_versioning.OntologyChangeSet.project_id, project_id).all()
+        ],
+        "ontology_environments": lambda: [
+            _row_dict(row, ["id", "project_id", "name", "current_revision_id", "previous_revision_id", "updated_by", "updated_at"])
+            for row in _for_project(db.query(ontology_versioning.OntologyEnvironment), ontology_versioning.OntologyEnvironment.project_id, project_id).all()
+        ],
+        "ontology_health_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "object_type_id", "status", "score", "summary", "metrics", "findings", "created_by", "created_at"])
+            for row in _for_project(db.query(ontology_health.OntologyHealthRun), ontology_health.OntologyHealthRun.project_id, project_id).all()
+        ],
+        "ontology_registry_entries": lambda: [
+            _row_dict(row, ["id", "project_id", "channel", "version", "revision_id", "revision_number", "status", "manifest", "contract_schema", "compatibility", "checksum", "published_by", "created_at"])
+            for row in _for_project(db.query(ontology_registry.OntologyRegistryEntry), ontology_registry.OntologyRegistryEntry.project_id, project_id).all()
+        ],
+        "ontology_property_definitions": lambda: [
+            _row_dict(row, ["id", "project_id", "object_type_id", "property_name", "display_name", "base_type", "required", "primary_key", "title_key", "indexed", "position", "status", "definition", "ontology_revision_id", "created_at", "updated_at"])
+            for row in _for_project(db.query(ontology_runtime_v1.OntologyPropertyDefinition), ontology_runtime_v1.OntologyPropertyDefinition.project_id, project_id).all()
+        ],
+        "ontology_resource_definitions": lambda: [
+            _row_dict(row, ["id", "project_id", "resource_kind", "resource_id", "object_type_id", "display_name", "status", "version", "definition", "ontology_revision_id", "created_at", "updated_at"])
+            for row in _for_project(db.query(ontology_runtime_v1.OntologyResourceDefinition), ontology_runtime_v1.OntologyResourceDefinition.project_id, project_id).all()
+        ],
+        "object_change_events": lambda: [
+            _row_dict(row, ["id", "project_id", "object_type_id", "object_id", "object_version", "event_type", "actor", "source_type", "source_id", "before_state", "after_state", "changed_fields", "evidence", "ontology_revision_id", "valid_from", "valid_to", "transaction_time"])
+            for row in _for_project(db.query(ontology_runtime_v1.ObjectChangeEvent), ontology_runtime_v1.ObjectChangeEvent.project_id, project_id).all()
+        ],
+        "data_asset_snapshots": lambda: [
+            _row_dict(row, ["id", "project_id", "asset_id", "snapshot_number", "status", "storage_format", "storage_uri", "content_hash", "row_count", "byte_size", "schema", "partition_spec", "lineage", "created_by", "created_at"])
+            for row in _for_project(db.query(data_plane.DataAssetSnapshot), data_plane.DataAssetSnapshot.project_id, project_id).all()
+        ],
+        "pipeline_execution_plans": lambda: [
+            _row_dict(row, ["id", "project_id", "graph_id", "graph_updated_at", "status", "executor", "plan_hash", "logical_plan", "input_schema", "output_schema", "field_lineage", "validation", "created_by", "created_at"])
+            for row in _for_project(db.query(data_plane.PipelineExecutionPlan), data_plane.PipelineExecutionPlan.project_id, project_id).all()
+        ],
+        "model_gateway_providers": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "provider_type", "base_url", "secret_ref", "allowed_models", "policy", "configuration", "status", "created_at", "updated_at"])
+            for row in _for_project(db.query(model_gateway.ModelGatewayProvider), model_gateway.ModelGatewayProvider.project_id, project_id).all()
+        ],
+        "model_gateway_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "provider_id", "model_name", "status", "request_hash", "idempotency_key", "input_summary", "output", "usage", "policy_decision", "trace", "evidence", "error", "created_by", "created_at", "completed_at"])
+            for row in _for_project(db.query(model_gateway.ModelGatewayRun), model_gateway.ModelGatewayRun.project_id, project_id).all()
+        ],
+        "plugin_trust_keys": lambda: [
+            _row_dict(row, ["id", "organization_id", "display_name", "algorithm", "public_key", "fingerprint", "status", "created_by", "created_at", "revoked_at"])
+            for row in db.query(plugin_runtime.PluginTrustKey).all()
+        ],
+        "plugin_versions": lambda: [
+            _plugin_version_snapshot(row)
+            for row in (
+                db.query(plugin_runtime.PluginVersion).filter(plugin_runtime.PluginVersion.project_id == project_id).all()
+                if project_id else db.query(plugin_runtime.PluginVersion).all()
+            )
+        ],
+        "plugin_executions": lambda: [
+            _row_dict(row, ["id", "job_id", "project_id", "plugin_version_id", "plugin_id", "operation", "status", "request_hash", "idempotency_key", "input_summary", "output", "evidence", "sandbox", "exit_code", "duration_ms", "error", "actor", "created_at", "completed_at"])
+            for row in _for_project(db.query(plugin_runtime.PluginExecution), plugin_runtime.PluginExecution.project_id, project_id).all()
+        ],
+        "import_jobs": lambda: [
+            imports_ops._job_dict(row, include_records=True)
+            for row in _for_project(db.query(imports_ops.ImportJob), imports_ops.ImportJob.project_id, project_id).all()
+        ],
+        "workshop_modules": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "variables", "widgets", "layout", "created_at", "updated_at"])
+            for row in _for_project(db.query(apps.WorkshopModule), apps.WorkshopModule.project_id, project_id).all()
+        ],
+        "workshop_module_versions": lambda: [
+            _row_dict(row, ["id", "module_id", "version_number", "snapshot", "note", "actor", "created_at"])
+            for row in _for_parent(db.query(apps.WorkshopModuleVersion), "workshop_module_versions", project_id).all()
+        ],
+        "object_explorer_explorations": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"])
+            for row in _for_project(db.query(object_explorer_ops.ObjectExplorerExploration), object_explorer_ops.ObjectExplorerExploration.project_id, project_id).all()
+        ],
+        "modeling_objectives": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "description", "problem_type", "target_field", "feature_fields", "input_asset_id", "created_at", "updated_at"])
+            for row in _for_project(db.query(modeling.ModelingObjective), modeling.ModelingObjective.project_id, project_id).all()
+        ],
+        "model_submissions": lambda: [
+            _row_dict(row, ["id", "project_id", "objective_id", "algorithm", "metrics", "released", "status", "trainer_type", "training_dataset_id", "target_column", "eval_metric", "quality_preset", "created_at"])
+            for row in _for_project(db.query(modeling.ModelSubmission), modeling.ModelSubmission.project_id, project_id).all()
+        ],
+        "model_deployments": lambda: [
+            _row_dict(row, ["id", "project_id", "objective_id", "submission_id", "mode", "status", "created_at"])
+            for row in _for_project(db.query(modeling.ModelDeployment), modeling.ModelDeployment.project_id, project_id).all()
+        ],
+        "mev_releases": lambda: [_row_dict(row, ["id", "project_id", "objective_id", "submission_id", "version", "environment", "notes", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevRelease), modeling_evaluation_ops.MevRelease.project_id, project_id).all()],
+        "mev_checks": lambda: [_row_dict(row, ["id", "project_id", "objective_id", "name", "check_type", "metric", "operator", "threshold", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevCheck), modeling_evaluation_ops.MevCheck.project_id, project_id).all()],
+        "mev_check_results": lambda: [_row_dict(row, ["id", "project_id", "submission_id", "check_id", "status", "reviewer", "comment", "decided_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevCheckResult), modeling_evaluation_ops.MevCheckResult.project_id, project_id).all()],
+        "mev_eval_datasets": lambda: [_row_dict(row, ["id", "project_id", "objective_id", "asset_id", "display_name", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevEvalDataset), modeling_evaluation_ops.MevEvalDataset.project_id, project_id).all()],
+        "mev_eval_subsets": lambda: [_row_dict(row, ["id", "project_id", "eval_dataset_id", "name", "filter_column", "filter_values", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevEvalSubset), modeling_evaluation_ops.MevEvalSubset.project_id, project_id).all()],
+        "mev_experiments": lambda: [_row_dict(row, ["id", "project_id", "submission_id", "hyperparameters", "metrics", "artifacts", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevExperiment), modeling_evaluation_ops.MevExperiment.project_id, project_id).all()],
+        "mev_adapters": lambda: [_row_dict(row, ["id", "project_id", "submission_id", "input_schema", "output_schema", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevAdapter), modeling_evaluation_ops.MevAdapter.project_id, project_id).all()],
+        "mev_deployment_configs": lambda: [_row_dict(row, ["id", "project_id", "deployment_id", "release_id", "kind", "spark_profile", "replicas", "cpu", "gpu", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevDeploymentConfig), modeling_evaluation_ops.MevDeploymentConfig.project_id, project_id).all()],
+        "model_monitors": lambda: [
+            modelops._monitor_dict(row)
+            for row in _for_project(db.query(modelops.ModelMonitor), modelops.ModelMonitor.project_id, project_id).all()
+        ],
+        "model_monitor_runs": lambda: [
+            modelops._run_dict(row)
+            for row in _for_project(db.query(modelops.ModelMonitorRun), modelops.ModelMonitorRun.project_id, project_id).all()
+        ],
+        "model_prediction_logs": lambda: [
+            modelops._prediction_log_dict(row)
+            for row in _for_project(db.query(modelops.ModelPredictionLog), modelops.ModelPredictionLog.project_id, project_id).all()
+        ],
+        "connection_sources": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"])
+            for row in _for_project(db.query(connectivity.ConnectionSource), connectivity.ConnectionSource.project_id, project_id).all()
+        ],
+        "connection_syncs": lambda: [
+            _row_dict(row, ["id", "project_id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"])
+            for row in _for_project(db.query(connectivity.ConnectionSync), connectivity.ConnectionSync.project_id, project_id).all()
+        ],
+        "connection_sync_runs": lambda: [
+            _row_dict(row, ["id", "sync_id", "status", "records_in", "records_out", "created_at", "completed_at"])
+            for row in _for_parent(db.query(connectivity.SyncRun), "connection_sync_runs", project_id).all()
+        ],
+        "connection_exports": lambda: [
+            _row_dict(row, ["id", "project_id", "source_asset_id", "destination", "format", "created_at"])
+            for row in _for_project(db.query(connectivity.ConnectionExport), connectivity.ConnectionExport.project_id, project_id).all()
+        ],
+        "connection_export_checkpoints": lambda: [
+            _row_dict(row, ["export_id", "last_exported_count", "runs", "updated_at"])
+            for row in _for_parent(db.query(connectivity.ConnectionExportCheckpoint), "connection_export_checkpoints", project_id).all()
+        ],
+        "connection_sync_cursors": lambda: [
+            _row_dict(row, ["sync_id", "cursor_field", "last_value", "runs", "updated_at"])
+            for row in _for_parent(db.query(connectivity_ops.SyncCursorState), "connection_sync_cursors", project_id).all()
+        ],
+        "streams": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "next_sequence", "created_at"])
+            for row in _for_project(db.query(streaming.Stream), streaming.Stream.project_id, project_id).all()
+        ],
+        "stream_records": lambda: [
+            _row_dict(row, ["id", "stream_id", "sequence", "payload", "ts", "archived", "archived_at", "created_at"])
+            for row in _for_parent(db.query(streaming.StreamRecord), "stream_records", project_id).all()
+        ],
+        "stream_processors": lambda: [
+            _row_dict(row, [
+                "id", "project_id", "stream_id", "display_name", "timestamp_field",
+                "partition_key_field", "allowed_lateness_seconds", "late_policy",
+                "window_size_seconds", "value_field", "aggregation", "target_asset_id",
+                "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds", "join_type",
+                "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
+                "created_by", "created_at", "updated_at",
+            ]) for row in _for_project(db.query(stream_processing.StreamProcessor), stream_processing.StreamProcessor.project_id, project_id).all()
+        ],
+        "stream_partition_states": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "partition_key", "max_event_time",
+                "watermark", "processed_count", "late_count", "quarantined_count", "updated_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamPartitionState), "stream_partition_states", project_id).all()
+        ],
+        "stream_window_states": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "partition_key", "window_start", "window_end",
+                "count", "numeric_count", "value_sum", "value_min", "value_max", "status",
+                "emitted_at", "updated_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamWindowState), "stream_window_states", project_id).all()
+        ],
+        "stream_processing_receipts": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
+                "status", "reason", "run_id", "created_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamProcessingReceipt), "stream_processing_receipts", project_id).all()
+        ],
+        "stream_join_inputs": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "stream_id", "side",
+                "join_key", "event_time", "created_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamJoinInput), "stream_join_inputs", project_id).all()
+        ],
+        "stream_join_receipts": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "left_record_id", "right_record_id",
+                "output_record_id", "join_key", "left_event_time", "right_event_time",
+                "run_id", "created_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamJoinReceipt), "stream_join_receipts", project_id).all()
+        ],
+        "stream_join_outer_receipts": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "side", "output_record_id",
+                "join_key", "event_time", "opposite_watermark", "run_id", "created_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamJoinOuterReceipt), "stream_join_outer_receipts", project_id).all()
+        ],
+        "stream_quarantine_records": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
+                "watermark", "reason", "payload", "status", "created_at", "resolved_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamQuarantineRecord), "stream_quarantine_records", project_id).all()
+        ],
+        "stream_processing_runs": lambda: [
+            _row_dict(row, [
+                "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
+                "backlog_after", "records_processed", "records_late", "records_quarantined",
+                "windows_emitted", "joins_emitted", "outer_joins_emitted", "metrics", "error", "created_at", "completed_at",
+            ]) for row in _for_parent(db.query(stream_processing.StreamProcessingRun), "stream_processing_runs", project_id).all()
+        ],
+        "schedules": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
+            for row in _for_project(db.query(schedules.Schedule), schedules.Schedule.project_id, project_id).all()
+        ],
+        "builds": lambda: [
+            _row_dict(row, ["id", "project_id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"])
+            for row in _for_project(db.query(schedules.Build), schedules.Build.project_id, project_id).all()
+        ],
+        "webhook_listeners": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"])
+            for row in _for_project(db.query(webhooks_ops.WhListener), webhooks_ops.WhListener.project_id, project_id).all()
+        ],
+        "webhook_listener_events": lambda: [
+            _row_dict(row, ["id", "project_id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"])
+            for row in _for_project(db.query(webhooks_ops.WhListenerEvent), webhooks_ops.WhListenerEvent.project_id, project_id).all()
+        ],
+        "webhooks": lambda: [
+            _row_dict(row, ["id", "project_id", "source_id", "display_name", "mode", "request_config", "input_parameters", "output_parameters", "mock_response", "created_at", "updated_at"])
+            for row in _for_project(db.query(webhooks_ops.WhWebhook), webhooks_ops.WhWebhook.project_id, project_id).all()
+        ],
+        "webhook_executions": lambda: [
+            _row_dict(row, ["id", "project_id", "webhook_id", "request_payload", "response_payload", "response_status", "status", "extracted_outputs", "idempotency_key", "actor", "created_at"])
+            for row in _for_project(db.query(webhooks_ops.WhExecution), webhooks_ops.WhExecution.project_id, project_id).all()
+        ],
+        "webhook_credentials": lambda: [
+            _row_dict(row, ["id", "project_id", "source_id", "credential_type", "expires_at", "created_at"])
+            for row in _for_project(db.query(webhooks_ops.WhCredential), webhooks_ops.WhCredential.project_id, project_id).all()
+        ],
+        "webhook_outbound_apps": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "client_id", "token_endpoint", "scopes", "created_at"])
+            for row in _for_project(db.query(webhooks_ops.WhOutboundApp), webhooks_ops.WhOutboundApp.project_id, project_id).all()
+        ],
+        "ops_events": lambda: [ops_control._event_dict(row) for row in _for_project(db.query(ops_control.OpsEvent), ops_control.OpsEvent.project_id, project_id).all()],
+        "event_outbox": lambda: [
+            _row_dict(row, [
+                "id", "project_id", "topic", "event_type", "aggregate_type", "aggregate_id", "actor",
+                "payload", "headers", "idempotency_key", "status", "attempts", "max_attempts",
+                "available_at", "lease_owner", "lease_token", "lease_expires_at", "last_error",
+                "created_at", "updated_at", "published_at",
+            ])
+            for row in _for_project(db.query(event_outbox.EventOutbox), event_outbox.EventOutbox.project_id, project_id).all()
+        ],
+        "platform_event_log": lambda: [
+            _row_dict(row, [
+                "sequence", "event_id", "outbox_event_id", "project_id", "topic", "event_type",
+                "aggregate_type", "aggregate_id", "actor", "payload", "headers", "occurred_at",
+                "published_at",
+            ])
+            for row in _for_parent(db.query(event_outbox.PlatformEventLog), "platform_event_log", project_id).all()
+        ],
+        "event_transport_receipts": lambda: [
+            _row_dict(row, [
+                "id", "outbox_event_id", "project_id", "transport", "destination", "status",
+                "attempts", "max_attempts", "available_at", "lease_owner", "lease_token",
+                "lease_expires_at", "broker_metadata", "last_error", "created_at", "updated_at",
+                "delivered_at",
+            ])
+            for row in _for_parent(db.query(event_outbox.EventTransportReceipt), "event_transport_receipts", project_id).all()
+        ],
+        "event_stream_bindings": lambda: [
+            _row_dict(row, [
+                "id", "project_id", "display_name", "target_stream_id", "topics",
+                "event_types", "aggregate_types", "object_type_ids", "active",
+                "cursor_sequence", "created_by", "created_at", "updated_at",
+            ]) for row in _for_parent(db.query(event_outbox.EventStreamBinding), "event_stream_bindings", project_id).all()
+        ],
+        "event_stream_receipts": lambda: [
+            _row_dict(row, [
+                "id", "project_id", "binding_id", "event_id", "event_sequence",
+                "stream_record_id", "created_at",
+            ]) for row in _for_parent(db.query(event_outbox.EventStreamReceipt), "event_stream_receipts", project_id).all()
+        ],
+        "ops_alert_rules": lambda: [ops_control._rule_dict(row) for row in _for_project(db.query(ops_control.AlertRule), ops_control.AlertRule.project_id, project_id).all()],
+        "ops_alerts": lambda: [ops_control._alert_dict(row) for row in _for_project(db.query(ops_control.AlertEvent), ops_control.AlertEvent.project_id, project_id).all()],
+        "ops_runbooks": lambda: [ops_control._runbook_dict(row) for row in _for_project(db.query(ops_control.Runbook), ops_control.Runbook.project_id, project_id).all()],
+        "ops_runbook_executions": lambda: [ops_control._execution_dict(row) for row in _for_project(db.query(ops_control.RunbookExecution), ops_control.RunbookExecution.project_id, project_id).all()],
+        "ops_notifications": lambda: [ops_control._notification_dict(row) for row in _for_project(db.query(ops_control.OpsNotification), ops_control.OpsNotification.project_id, project_id).all()],
+        "ops_sla_policies": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "scope", "thresholds", "active", "created_at", "updated_at"])
+            for row in _for_project(db.query(ops_control.OpsSlaPolicy), ops_control.OpsSlaPolicy.project_id, project_id).all()
+        ],
+        "incidents": lambda: [
+            ops_control._incident_dict(row)
+            for row in _for_project(db.query(ops_control.Incident), ops_control.Incident.project_id, project_id).all()
+        ],
+        "investigations": lambda: [
+            investigations._workspace_dict(row)
+            for row in _for_project(db.query(investigations.InvestigationWorkspace), investigations.InvestigationWorkspace.project_id, project_id).all()
+        ],
+        "investigation_evidence": lambda: [
+            investigations._evidence_dict(row)
+            for row in _for_project(db.query(investigations.EvidenceItem), investigations.EvidenceItem.project_id, project_id).all()
+        ],
+        "investigation_hypotheses": lambda: [
+            investigations._hypothesis_dict(row)
+            for row in _for_project(db.query(investigations.InvestigationHypothesis), investigations.InvestigationHypothesis.project_id, project_id).all()
+        ],
+        "investigation_findings": lambda: [
+            investigations._finding_dict(row)
+            for row in _for_project(db.query(investigations.InvestigationFinding), investigations.InvestigationFinding.project_id, project_id).all()
+        ],
+        "investigation_reports": lambda: [
+            investigations._report_dict(row)
+            for row in _for_project(db.query(investigations.InvestigationReport), investigations.InvestigationReport.project_id, project_id).all()
+        ],
+        "platform_artifacts": lambda: [
+            _row_dict(row, ["id", "project_id", "artifact_type", "display_name", "description", "status", "current_revision", "published_revision", "lock_version", "owner", "metadata_", "created_at", "updated_at"])
+            for row in _for_project(db.query(platform_runtime.PlatformArtifact), platform_runtime.PlatformArtifact.project_id, project_id).all()
+        ],
+        "platform_artifact_revisions": lambda: [
+            _row_dict(row, ["id", "artifact_id", "revision", "state", "layout", "validation", "author", "message", "published", "restored_from_revision", "created_at"])
+            for row in _for_parent(db.query(platform_runtime.ArtifactRevision), "platform_artifact_revisions", project_id).all()
+        ],
+        "platform_jobs": lambda: [
+            _row_dict(row, ["id", "project_id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"])
+            for row in _for_project(db.query(platform_runtime.PlatformJob), platform_runtime.PlatformJob.project_id, project_id).all()
+        ],
+        "platform_job_events": lambda: [
+            _row_dict(row, ["id", "job_id", "event_type", "status", "payload", "created_at"])
+            for row in _for_parent(db.query(platform_runtime.PlatformJobEvent), "platform_job_events", project_id).all()
+        ],
+        "platform_job_idempotency_receipts": lambda: [
+            _row_dict(row, ["id", "scope_hash", "job_id", "project_id", "actor", "job_type", "subject_type", "subject_id", "idempotency_key", "request_hash", "created_at"])
+            for row in _for_project(db.query(platform_runtime.PlatformJobIdempotencyReceipt), platform_runtime.PlatformJobIdempotencyReceipt.project_id, project_id).all()
+        ],
+        "platform_artifact_collaboration_events": lambda: [
+            _row_dict(row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"])
+            for row in _for_parent(db.query(platform_runtime.ArtifactCollaborationEvent), "platform_artifact_collaboration_events", project_id).all()
+        ],
+        "platform_artifact_command_receipts": lambda: [
+            _row_dict(row, ["id", "artifact_id", "project_id", "command_scope", "idempotency_key", "request_hash", "revision", "lock_version", "participant_id", "command_ids", "rebased_from_lock_version", "created_at"])
+            for row in _for_project(db.query(platform_runtime.ArtifactCommandReceipt), platform_runtime.ArtifactCommandReceipt.project_id, project_id).all()
+        ],
+        "platform_artifact_review_comments": lambda: [
+            _row_dict(row, [
+                "id", "artifact_id", "project_id", "revision", "target", "thread_id",
+                "parent_id", "body", "status", "author", "resolved_by", "resolved_at",
+                "created_at", "updated_at",
+            ]) for row in _for_parent(db.query(platform_runtime.ArtifactReviewComment), "platform_artifact_review_comments", project_id).all()
+        ],
+        "platform_artifact_change_proposals": lambda: [
+            _row_dict(row, [
+                "id", "artifact_id", "project_id", "base_revision", "base_lock_version",
+                "version", "title", "description", "commands", "targets", "validation",
+                "status", "author", "reviewer", "review_note", "applied_revision",
+                "created_at", "updated_at", "reviewed_at", "applied_at",
+            ]) for row in _for_parent(db.query(platform_runtime.ArtifactChangeProposal), "platform_artifact_change_proposals", project_id).all()
+        ],
+        "organizations": lambda: [
+            _row_dict(row, ["id", "display_name", "status", "created_at", "updated_at"])
+            for row in db.query(tenancy.PlatformOrganization).all()
+        ],
+        "projects": lambda: [
+            _row_dict(row, ["id", "organization_id", "display_name", "description", "status", "created_at", "updated_at"])
+            for row in db.query(tenancy.PlatformProject).all()
+        ],
+        "project_memberships": lambda: [
+            _row_dict(row, ["id", "project_id", "principal_id", "role", "permissions", "created_at", "updated_at"])
+            for row in db.query(tenancy.ProjectMembership).all()
+        ],
+        "ontology_packages": lambda: [
+            _row_dict(row, ["id", "organization_id", "owning_project_id", "display_name", "description", "status", "current_version", "created_by", "created_at", "updated_at"])
+            for row in db.query(ontology_packages.OntologyPackage).all()
+        ],
+        "ontology_package_versions": lambda: [
+            _row_dict(row, ["id", "package_id", "version", "status", "manifest", "checksum", "validation", "author", "created_at", "published_at"])
+            for row in _for_parent(db.query(ontology_packages.OntologyPackageVersion), "ontology_package_versions", project_id).all()
+        ],
+        "ontology_package_installations": lambda: [
+            _row_dict(row, ["id", "package_id", "package_version_id", "version", "target_project_id", "namespace", "status", "installed_resources", "prior_state", "previous_installation_id", "installed_by", "installed_at", "rolled_back_at"])
+            for row in db.query(ontology_packages.OntologyPackageInstallation).all()
+        ],
+        "ontology_package_resources": lambda: [
+            _row_dict(row, ["id", "package_id", "installation_id", "target_project_id", "namespace", "resource_type", "resource_id", "source_resource_id", "created_at", "updated_at"])
+            for row in db.query(ontology_packages.OntologyPackageResource).all()
+        ],
+        "ingestion_runs": lambda: [
+            _row_dict(row, ["id", "project_id", "job_id", "idempotency_key", "run_type", "resource_type", "resource_id", "status", "records_in", "records_out", "bytes_processed", "estimated_cost_usd", "metrics", "error", "created_at", "started_at", "completed_at"])
+            for row in _for_project(db.query(ingestion_runtime.IngestionRun), ingestion_runtime.IngestionRun.project_id, project_id).all()
+        ],
+        "ingestion_budgets": lambda: [
+            _row_dict(row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "created_at", "updated_at"])
+            for row in _for_project(db.query(ingestion_runtime.IngestionBudget), ingestion_runtime.IngestionBudget.project_id, project_id).all()
+        ],
+        "ingestion_dead_letters": lambda: [
+            _row_dict(row, ["id", "project_id", "run_id", "resource_type", "resource_id", "payload", "error", "status", "replay_job_id", "attempts", "created_at", "updated_at"])
+            for row in _for_project(db.query(ingestion_runtime.IngestionDeadLetter), ingestion_runtime.IngestionDeadLetter.project_id, project_id).all()
+        ],
+        "runtime_job_observations": lambda: [
+            _row_dict(row, ["id", "project_id", "job_id", "correlation_id", "job_type", "actor", "status", "attempt", "progress", "queue_latency_ms", "duration_ms", "compute_seconds", "token_units", "record_units", "estimated_cost_usd", "metrics", "spans", "error", "created_at", "updated_at", "completed_at"])
+            for row in _for_project(db.query(runtime_observability.RuntimeJobObservation), runtime_observability.RuntimeJobObservation.project_id, project_id).all()
+        ],
+        "runtime_budget_policies": lambda: [
+            _row_dict(row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "enabled", "created_at", "updated_at"])
+            for row in _for_project(db.query(runtime_observability.RuntimeBudgetPolicy), runtime_observability.RuntimeBudgetPolicy.project_id, project_id).all()
+        ],
+        "runtime_slo_policies": lambda: [
+            _row_dict(row, ["id", "project_id", "display_name", "job_type", "metric", "operator", "threshold", "window_seconds", "severity", "enabled", "created_at", "updated_at"])
+            for row in _for_project(db.query(runtime_observability.RuntimeSloPolicy), runtime_observability.RuntimeSloPolicy.project_id, project_id).all()
+        ],
+        "runtime_slo_evaluations": lambda: [
+            _row_dict(row, ["id", "project_id", "policy_id", "status", "observed_value", "threshold", "sample_count", "details", "created_at"])
+            for row in _for_project(db.query(runtime_observability.RuntimeSloEvaluation), runtime_observability.RuntimeSloEvaluation.project_id, project_id).all()
+        ],
+        "runtime_workers": lambda: [
+            _row_dict(row, ["id", "organization_id", "worker_name", "principal_id", "project_id", "status", "supported_job_types", "max_concurrency", "labels", "started_at", "heartbeat_at", "last_claimed_at", "drain_requested_at"])
+            for row in _for_project(db.query(worker_control.RuntimeWorker), worker_control.RuntimeWorker.project_id, project_id).all()
+        ],
+        "runtime_queue_policies": lambda: [
+            _row_dict(row, ["id", "project_id", "weight", "max_concurrency", "paused", "updated_by", "created_at", "updated_at"])
+            for row in _for_project(db.query(worker_control.RuntimeQueuePolicy), worker_control.RuntimeQueuePolicy.project_id, project_id).all()
+        ],
+        "connector_fetch_attempts": lambda: [
+            _row_dict(row, ["id", "project_id", "source_id", "sync_id", "ingestion_run_id", "adapter_id", "operation", "status", "records_read", "bytes_read", "duration_ms", "cursor_in", "cursor_out", "metadata_", "error", "created_at"])
+            for row in _for_project(db.query(connector_runtime.ConnectorFetchAttempt), connector_runtime.ConnectorFetchAttempt.project_id, project_id).all()
+        ],
+    }
+
+
 def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Optional[str] = None,
               *, finalize: bool = True) -> Dict[str, Any]:
     """Assemble the portable project snapshot.
@@ -834,550 +1390,7 @@ def _snapshot(db: Session, project_id: Optional[str] = None, organization_id: Op
     snapshot = {
         "snapshot_version": PORTABLE_SNAPSHOT_VERSION,
         "exported_at": _now(),
-        "object_types": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "properties", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.ObjectType), models.ObjectType.project_id, project_id).all()
-        ],
-        "link_types": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "source_object_type_id", "target_object_type_id", "cardinality"])
-            for row in _for_project(db.query(models.LinkType), models.LinkType.project_id, project_id).all()
-        ],
-        "action_types": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "parameters", "rules"])
-            for row in _for_project(db.query(models.ActionType), models.ActionType.project_id, project_id).all()
-        ],
-        "approval_requests": [
-            _row_dict(row, ["id", "project_id", "action_type_id", "requester", "parameters", "status", "reason", "created_at", "decided_at", "consumed_at", "consumed_by_outbox_event_id"])
-            for row in _for_project(db.query(models_action.ApprovalRequest), models_action.ApprovalRequest.project_id, project_id).all()
-        ],
-        "action_outbox": [
-            _row_dict(row, ["id", "project_id", "action_type_id", "payload", "status", "created_at"])
-            for row in _for_project(db.query(models_action.OutboxEvent), models_action.OutboxEvent.project_id, project_id).all()
-        ],
-        "action_idempotency_keys": [
-            _row_dict(row, ["key", "project_id", "action_type_id", "response_payload", "created_at", "expires_at"])
-            for row in _for_project(db.query(models_action.IdempotencyKey), models_action.IdempotencyKey.project_id, project_id).all()
-        ],
-        "model_endpoints": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "provider", "model_name", "purpose", "policy", "status", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.ModelEndpoint), models.ModelEndpoint.project_id, project_id).all()
-        ],
-        "agent_definitions": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "system_prompt", "allowed_object_types", "allowed_actions", "model_endpoint_id", "approval_required", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.AgentDefinition), models.AgentDefinition.project_id, project_id).all()
-        ],
-        "agent_sessions": [
-            _row_dict(row, ["id", "agent_id", "user_prompt", "status", "context", "plan", "proposed_actions", "created_at", "completed_at"])
-            for row in _for_parent(db.query(models.AgentSession), "agent_sessions", project_id).all()
-        ],
-        "logic_functions": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "blocks", "input_schema", "output_schema", "approval_required", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.LogicFunction), models.LogicFunction.project_id, project_id).all()
-        ],
-        "logic_runs": [
-            _row_dict(row, ["id", "logic_function_id", "status", "inputs", "outputs", "trace", "proposed_actions", "created_at", "completed_at"])
-            for row in _for_parent(db.query(models.LogicRun), "logic_runs", project_id).all()
-        ],
-        "eval_suites": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "target_agent_id", "cases", "criteria", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.EvalSuite), models.EvalSuite.project_id, project_id).all()
-        ],
-        "eval_runs": [
-            _row_dict(row, ["id", "project_id", "suite_id", "status", "score", "results", "created_at", "completed_at"])
-            for row in _for_project(db.query(models.EvalRun), models.EvalRun.project_id, project_id).all()
-        ],
-        "aip_eval_runs": [
-            _row_dict(row, ["id", "project_id", "target", "total", "passed", "pass_rate", "results", "created_at"])
-            for row in _for_project(db.query(aip_evals.AipEvalRun), aip_evals.AipEvalRun.project_id, project_id).all()
-        ],
-        "decision_rules": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "expression", "output_property", "severity", "recommended_actions", "active", "created_at", "updated_at"])
-            for row in _for_project(db.query(decision_intelligence.DecisionRule), decision_intelligence.DecisionRule.project_id, project_id).all()
-        ],
-        "decision_scorecards": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "features", "thresholds", "recommended_actions", "active", "created_at", "updated_at"])
-            for row in _for_project(db.query(decision_intelligence.DecisionScorecard), decision_intelligence.DecisionScorecard.project_id, project_id).all()
-        ],
-        "decision_runs": [
-            _row_dict(row, ["id", "project_id", "scope", "status", "object_count", "findings", "created_at", "completed_at"])
-            for row in _for_project(db.query(decision_intelligence.DecisionRun), decision_intelligence.DecisionRun.project_id, project_id).all()
-        ],
-        "object_snapshots": [
-            _row_dict(row, ["id", "project_id", "object_id", "object_type_id", "properties", "lineage", "event_type", "actor", "source_type", "source_id", "created_at", "seq"])
-            for row in _for_project(db.query(decision_intelligence.ObjectSnapshot), decision_intelligence.ObjectSnapshot.project_id, project_id).all()
-        ],
-        "entity_resolution_jobs": [
-            _row_dict(row, ["id", "project_id", "object_type_id", "fields", "status", "created_at", "completed_at", "candidate_count", "objects_in_scope", "objects_scanned", "last_scanned_id", "exact_objects", "exact_values_skipped"])
-            for row in _for_project(db.query(decision_intelligence.EntityResolutionJob), decision_intelligence.EntityResolutionJob.project_id, project_id).all()
-        ],
-        "entity_candidates": [
-            _row_dict(row, ["id", "project_id", "job_id", "object_type_id", "object_ids", "score", "reasons", "status", "merged_object_id", "created_at", "decided_at"])
-            for row in _for_parent(db.query(decision_intelligence.EntityCandidate), "entity_candidates", project_id).all()
-        ],
-        "decision_scenarios": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "seed_object_ids", "overrides", "propagation_rules", "baseline", "scenario_output", "impact", "created_at", "updated_at"])
-            for row in _for_project(db.query(decision_intelligence.DecisionScenario), decision_intelligence.DecisionScenario.project_id, project_id).all()
-        ],
-        "object_instances": [
-            _row_dict(row, ["id", "project_id", "object_type_id", "properties", "source_asset_id", "lineage", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.ObjectInstance), models.ObjectInstance.project_id, project_id).all()
-        ],
-        "link_instances": [
-            _row_dict(row, ["id", "project_id", "link_type_id", "source_object_id", "target_object_id", "properties", "created_at"])
-            for row in _for_project(db.query(models.LinkInstance), models.LinkInstance.project_id, project_id).all()
-        ],
-        "data_assets": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "kind", "asset_schema", "records", "created_at", "updated_at"])
-            for row in db.query(models.DataAsset).all()
-        ],
-        "pipeline_definitions": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "input_asset_id", "output_asset_id", "mode", "schedule", "steps", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.PipelineDefinition), models.PipelineDefinition.project_id, project_id).all()
-        ],
-        "pipeline_runs": [
-            _row_dict(row, ["id", "project_id", "pipeline_id", "status", "input_asset_id", "output_asset_id", "records_in", "records_out", "lineage", "metrics", "error", "created_at", "completed_at"])
-            for row in _for_project(db.query(models.PipelineRun), models.PipelineRun.project_id, project_id).all()
-        ],
-        "saved_object_sets": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "owner", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.SavedObjectSet), models.SavedObjectSet.project_id, project_id).all()
-        ],
-        "map_layer_definitions": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "saved_object_set_id", "filters", "geometry_field", "style", "created_at", "updated_at"])
-            for row in _for_project(db.query(models.MapLayerDefinition), models.MapLayerDefinition.project_id, project_id).all()
-        ],
-        "pipeline_builder_graphs": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "nodes", "edges", "parameters", "status", "created_at", "updated_at"])
-            for row in _for_project(db.query(pipeline_builder_ops.PipelineBuilderGraph), pipeline_builder_ops.PipelineBuilderGraph.project_id, project_id).all()
-        ],
-        "pipeline_builder_builds": [
-            _row_dict(row, ["id", "graph_id", "status", "run_id", "output_asset_id", "preview", "lineage", "metrics", "created_at"])
-            for row in _for_parent(db.query(pipeline_builder_ops.PipelineBuilderBuild), "pipeline_builder_builds", project_id).all()
-        ],
-        "pipeline_ontology_contract_runs": [
-            _row_dict(row, ["id", "project_id", "graph_id", "build_id", "node_id", "object_type_id", "status", "input_rows", "accepted_rows", "rejected_rows", "created_objects", "updated_objects", "unchanged_objects", "quarantine_asset_id", "field_lineage", "violations", "created_at"])
-            for row in _for_project(db.query(pipeline_builder_ops.PipelineOntologyContractRun), pipeline_builder_ops.PipelineOntologyContractRun.project_id, project_id).all()
-        ],
-        "ontology_revisions": [
-            _row_dict(row, ["id", "project_id", "revision", "status", "parent_revision_id", "branch_id", "manifest", "checksum", "validation", "created_by", "created_at", "published_at"])
-            for row in _for_project(db.query(ontology_versioning.OntologyRevision), ontology_versioning.OntologyRevision.project_id, project_id).all()
-        ],
-        "ontology_change_sets": [
-            _row_dict(row, ["id", "project_id", "title", "description", "base_revision_id", "draft_revision_id", "proposal_id", "status", "changes", "diff", "impact", "validation", "migration_plan", "created_by", "reviewer", "created_at", "updated_at"])
-            for row in _for_project(db.query(ontology_versioning.OntologyChangeSet), ontology_versioning.OntologyChangeSet.project_id, project_id).all()
-        ],
-        "ontology_environments": [
-            _row_dict(row, ["id", "project_id", "name", "current_revision_id", "previous_revision_id", "updated_by", "updated_at"])
-            for row in _for_project(db.query(ontology_versioning.OntologyEnvironment), ontology_versioning.OntologyEnvironment.project_id, project_id).all()
-        ],
-        "ontology_health_runs": [
-            _row_dict(row, ["id", "project_id", "object_type_id", "status", "score", "summary", "metrics", "findings", "created_by", "created_at"])
-            for row in _for_project(db.query(ontology_health.OntologyHealthRun), ontology_health.OntologyHealthRun.project_id, project_id).all()
-        ],
-        "ontology_registry_entries": [
-            _row_dict(row, ["id", "project_id", "channel", "version", "revision_id", "revision_number", "status", "manifest", "contract_schema", "compatibility", "checksum", "published_by", "created_at"])
-            for row in _for_project(db.query(ontology_registry.OntologyRegistryEntry), ontology_registry.OntologyRegistryEntry.project_id, project_id).all()
-        ],
-        "ontology_property_definitions": [
-            _row_dict(row, ["id", "project_id", "object_type_id", "property_name", "display_name", "base_type", "required", "primary_key", "title_key", "indexed", "position", "status", "definition", "ontology_revision_id", "created_at", "updated_at"])
-            for row in _for_project(db.query(ontology_runtime_v1.OntologyPropertyDefinition), ontology_runtime_v1.OntologyPropertyDefinition.project_id, project_id).all()
-        ],
-        "ontology_resource_definitions": [
-            _row_dict(row, ["id", "project_id", "resource_kind", "resource_id", "object_type_id", "display_name", "status", "version", "definition", "ontology_revision_id", "created_at", "updated_at"])
-            for row in _for_project(db.query(ontology_runtime_v1.OntologyResourceDefinition), ontology_runtime_v1.OntologyResourceDefinition.project_id, project_id).all()
-        ],
-        "object_change_events": [
-            _row_dict(row, ["id", "project_id", "object_type_id", "object_id", "object_version", "event_type", "actor", "source_type", "source_id", "before_state", "after_state", "changed_fields", "evidence", "ontology_revision_id", "valid_from", "valid_to", "transaction_time"])
-            for row in _for_project(db.query(ontology_runtime_v1.ObjectChangeEvent), ontology_runtime_v1.ObjectChangeEvent.project_id, project_id).all()
-        ],
-        "data_asset_snapshots": [
-            _row_dict(row, ["id", "project_id", "asset_id", "snapshot_number", "status", "storage_format", "storage_uri", "content_hash", "row_count", "byte_size", "schema", "partition_spec", "lineage", "created_by", "created_at"])
-            for row in _for_project(db.query(data_plane.DataAssetSnapshot), data_plane.DataAssetSnapshot.project_id, project_id).all()
-        ],
-        "pipeline_execution_plans": [
-            _row_dict(row, ["id", "project_id", "graph_id", "graph_updated_at", "status", "executor", "plan_hash", "logical_plan", "input_schema", "output_schema", "field_lineage", "validation", "created_by", "created_at"])
-            for row in _for_project(db.query(data_plane.PipelineExecutionPlan), data_plane.PipelineExecutionPlan.project_id, project_id).all()
-        ],
-        "model_gateway_providers": [
-            _row_dict(row, ["id", "project_id", "display_name", "provider_type", "base_url", "secret_ref", "allowed_models", "policy", "configuration", "status", "created_at", "updated_at"])
-            for row in _for_project(db.query(model_gateway.ModelGatewayProvider), model_gateway.ModelGatewayProvider.project_id, project_id).all()
-        ],
-        "model_gateway_runs": [
-            _row_dict(row, ["id", "project_id", "provider_id", "model_name", "status", "request_hash", "idempotency_key", "input_summary", "output", "usage", "policy_decision", "trace", "evidence", "error", "created_by", "created_at", "completed_at"])
-            for row in _for_project(db.query(model_gateway.ModelGatewayRun), model_gateway.ModelGatewayRun.project_id, project_id).all()
-        ],
-        "plugin_trust_keys": [
-            _row_dict(row, ["id", "organization_id", "display_name", "algorithm", "public_key", "fingerprint", "status", "created_by", "created_at", "revoked_at"])
-            for row in db.query(plugin_runtime.PluginTrustKey).all()
-        ],
-        "plugin_versions": [
-            _plugin_version_snapshot(row)
-            for row in (
-                db.query(plugin_runtime.PluginVersion).filter(plugin_runtime.PluginVersion.project_id == project_id).all()
-                if project_id else db.query(plugin_runtime.PluginVersion).all()
-            )
-        ],
-        "plugin_executions": [
-            _row_dict(row, ["id", "job_id", "project_id", "plugin_version_id", "plugin_id", "operation", "status", "request_hash", "idempotency_key", "input_summary", "output", "evidence", "sandbox", "exit_code", "duration_ms", "error", "actor", "created_at", "completed_at"])
-            for row in _for_project(db.query(plugin_runtime.PluginExecution), plugin_runtime.PluginExecution.project_id, project_id).all()
-        ],
-        "import_jobs": [
-            imports_ops._job_dict(row, include_records=True)
-            for row in _for_project(db.query(imports_ops.ImportJob), imports_ops.ImportJob.project_id, project_id).all()
-        ],
-        "workshop_modules": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "variables", "widgets", "layout", "created_at", "updated_at"])
-            for row in _for_project(db.query(apps.WorkshopModule), apps.WorkshopModule.project_id, project_id).all()
-        ],
-        "workshop_module_versions": [
-            _row_dict(row, ["id", "module_id", "version_number", "snapshot", "note", "actor", "created_at"])
-            for row in _for_parent(db.query(apps.WorkshopModuleVersion), "workshop_module_versions", project_id).all()
-        ],
-        "object_explorer_explorations": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "object_type_id", "filters", "columns", "charts", "perspective", "owner", "created_at", "updated_at"])
-            for row in _for_project(db.query(object_explorer_ops.ObjectExplorerExploration), object_explorer_ops.ObjectExplorerExploration.project_id, project_id).all()
-        ],
-        "modeling_objectives": [
-            _row_dict(row, ["id", "project_id", "display_name", "description", "problem_type", "target_field", "feature_fields", "input_asset_id", "created_at", "updated_at"])
-            for row in _for_project(db.query(modeling.ModelingObjective), modeling.ModelingObjective.project_id, project_id).all()
-        ],
-        "model_submissions": [
-            _row_dict(row, ["id", "project_id", "objective_id", "algorithm", "metrics", "released", "status", "trainer_type", "training_dataset_id", "target_column", "eval_metric", "quality_preset", "created_at"])
-            for row in _for_project(db.query(modeling.ModelSubmission), modeling.ModelSubmission.project_id, project_id).all()
-        ],
-        "model_deployments": [
-            _row_dict(row, ["id", "project_id", "objective_id", "submission_id", "mode", "status", "created_at"])
-            for row in _for_project(db.query(modeling.ModelDeployment), modeling.ModelDeployment.project_id, project_id).all()
-        ],
-        "mev_releases": [_row_dict(row, ["id", "project_id", "objective_id", "submission_id", "version", "environment", "notes", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevRelease), modeling_evaluation_ops.MevRelease.project_id, project_id).all()],
-        "mev_checks": [_row_dict(row, ["id", "project_id", "objective_id", "name", "check_type", "metric", "operator", "threshold", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevCheck), modeling_evaluation_ops.MevCheck.project_id, project_id).all()],
-        "mev_check_results": [_row_dict(row, ["id", "project_id", "submission_id", "check_id", "status", "reviewer", "comment", "decided_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevCheckResult), modeling_evaluation_ops.MevCheckResult.project_id, project_id).all()],
-        "mev_eval_datasets": [_row_dict(row, ["id", "project_id", "objective_id", "asset_id", "display_name", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevEvalDataset), modeling_evaluation_ops.MevEvalDataset.project_id, project_id).all()],
-        "mev_eval_subsets": [_row_dict(row, ["id", "project_id", "eval_dataset_id", "name", "filter_column", "filter_values", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevEvalSubset), modeling_evaluation_ops.MevEvalSubset.project_id, project_id).all()],
-        "mev_experiments": [_row_dict(row, ["id", "project_id", "submission_id", "hyperparameters", "metrics", "artifacts", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevExperiment), modeling_evaluation_ops.MevExperiment.project_id, project_id).all()],
-        "mev_adapters": [_row_dict(row, ["id", "project_id", "submission_id", "input_schema", "output_schema", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevAdapter), modeling_evaluation_ops.MevAdapter.project_id, project_id).all()],
-        "mev_deployment_configs": [_row_dict(row, ["id", "project_id", "deployment_id", "release_id", "kind", "spark_profile", "replicas", "cpu", "gpu", "created_at"]) for row in _for_project(db.query(modeling_evaluation_ops.MevDeploymentConfig), modeling_evaluation_ops.MevDeploymentConfig.project_id, project_id).all()],
-        "model_monitors": [
-            modelops._monitor_dict(row)
-            for row in _for_project(db.query(modelops.ModelMonitor), modelops.ModelMonitor.project_id, project_id).all()
-        ],
-        "model_monitor_runs": [
-            modelops._run_dict(row)
-            for row in _for_project(db.query(modelops.ModelMonitorRun), modelops.ModelMonitorRun.project_id, project_id).all()
-        ],
-        "model_prediction_logs": [
-            modelops._prediction_log_dict(row)
-            for row in _for_project(db.query(modelops.ModelPredictionLog), modelops.ModelPredictionLog.project_id, project_id).all()
-        ],
-        "connection_sources": [
-            _row_dict(row, ["id", "project_id", "display_name", "source_type", "config", "uses_agent", "status", "created_at"])
-            for row in _for_project(db.query(connectivity.ConnectionSource), connectivity.ConnectionSource.project_id, project_id).all()
-        ],
-        "connection_syncs": [
-            _row_dict(row, ["id", "project_id", "source_id", "target_asset_id", "mode", "cursor_field", "sample_records", "created_at"])
-            for row in _for_project(db.query(connectivity.ConnectionSync), connectivity.ConnectionSync.project_id, project_id).all()
-        ],
-        "connection_sync_runs": [
-            _row_dict(row, ["id", "sync_id", "status", "records_in", "records_out", "created_at", "completed_at"])
-            for row in _for_parent(db.query(connectivity.SyncRun), "connection_sync_runs", project_id).all()
-        ],
-        "connection_exports": [
-            _row_dict(row, ["id", "project_id", "source_asset_id", "destination", "format", "created_at"])
-            for row in _for_project(db.query(connectivity.ConnectionExport), connectivity.ConnectionExport.project_id, project_id).all()
-        ],
-        "connection_export_checkpoints": [
-            _row_dict(row, ["export_id", "last_exported_count", "runs", "updated_at"])
-            for row in _for_parent(db.query(connectivity.ConnectionExportCheckpoint), "connection_export_checkpoints", project_id).all()
-        ],
-        "connection_sync_cursors": [
-            _row_dict(row, ["sync_id", "cursor_field", "last_value", "runs", "updated_at"])
-            for row in _for_parent(db.query(connectivity_ops.SyncCursorState), "connection_sync_cursors", project_id).all()
-        ],
-        "streams": [
-            _row_dict(row, ["id", "project_id", "display_name", "schema_", "retention_seconds", "archive_policy", "next_sequence", "created_at"])
-            for row in _for_project(db.query(streaming.Stream), streaming.Stream.project_id, project_id).all()
-        ],
-        "stream_records": [
-            _row_dict(row, ["id", "stream_id", "sequence", "payload", "ts", "archived", "archived_at", "created_at"])
-            for row in _for_parent(db.query(streaming.StreamRecord), "stream_records", project_id).all()
-        ],
-        "stream_processors": [
-            _row_dict(row, [
-                "id", "project_id", "stream_id", "display_name", "timestamp_field",
-                "partition_key_field", "allowed_lateness_seconds", "late_policy",
-                "window_size_seconds", "value_field", "aggregation", "target_asset_id",
-                "join_stream_id", "join_left_key", "join_right_key", "join_time_tolerance_seconds", "join_type",
-                "max_batch_records", "max_backlog_records", "backpressure_mode", "enabled",
-                "created_by", "created_at", "updated_at",
-            ]) for row in _for_project(db.query(stream_processing.StreamProcessor), stream_processing.StreamProcessor.project_id, project_id).all()
-        ],
-        "stream_partition_states": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "partition_key", "max_event_time",
-                "watermark", "processed_count", "late_count", "quarantined_count", "updated_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamPartitionState), "stream_partition_states", project_id).all()
-        ],
-        "stream_window_states": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "partition_key", "window_start", "window_end",
-                "count", "numeric_count", "value_sum", "value_min", "value_max", "status",
-                "emitted_at", "updated_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamWindowState), "stream_window_states", project_id).all()
-        ],
-        "stream_processing_receipts": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
-                "status", "reason", "run_id", "created_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamProcessingReceipt), "stream_processing_receipts", project_id).all()
-        ],
-        "stream_join_inputs": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "record_id", "stream_id", "side",
-                "join_key", "event_time", "created_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamJoinInput), "stream_join_inputs", project_id).all()
-        ],
-        "stream_join_receipts": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "left_record_id", "right_record_id",
-                "output_record_id", "join_key", "left_event_time", "right_event_time",
-                "run_id", "created_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamJoinReceipt), "stream_join_receipts", project_id).all()
-        ],
-        "stream_join_outer_receipts": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "record_id", "side", "output_record_id",
-                "join_key", "event_time", "opposite_watermark", "run_id", "created_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamJoinOuterReceipt), "stream_join_outer_receipts", project_id).all()
-        ],
-        "stream_quarantine_records": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "record_id", "partition_key", "event_time",
-                "watermark", "reason", "payload", "status", "created_at", "resolved_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamQuarantineRecord), "stream_quarantine_records", project_id).all()
-        ],
-        "stream_processing_runs": [
-            _row_dict(row, [
-                "id", "processor_id", "project_id", "job_id", "status", "backlog_before",
-                "backlog_after", "records_processed", "records_late", "records_quarantined",
-                "windows_emitted", "joins_emitted", "outer_joins_emitted", "metrics", "error", "created_at", "completed_at",
-            ]) for row in _for_parent(db.query(stream_processing.StreamProcessingRun), "stream_processing_runs", project_id).all()
-        ],
-        "schedules": [
-            _row_dict(row, ["id", "project_id", "display_name", "target_type", "target_id", "trigger_type", "cron", "event_input", "enabled", "created_at", "updated_at"])
-            for row in _for_project(db.query(schedules.Schedule), schedules.Schedule.project_id, project_id).all()
-        ],
-        "builds": [
-            _row_dict(row, ["id", "project_id", "schedule_id", "target_type", "target_id", "status", "triggered_by", "metrics", "created_at", "completed_at"])
-            for row in _for_project(db.query(schedules.Build), schedules.Build.project_id, project_id).all()
-        ],
-        "webhook_listeners": [
-            _row_dict(row, ["id", "project_id", "display_name", "auth_type", "auth_secret", "target_asset_id", "event_schema", "created_at"])
-            for row in _for_project(db.query(webhooks_ops.WhListener), webhooks_ops.WhListener.project_id, project_id).all()
-        ],
-        "webhook_listener_events": [
-            _row_dict(row, ["id", "project_id", "listener_id", "raw_payload", "auth_valid", "processing_status", "error_message", "created_at"])
-            for row in _for_project(db.query(webhooks_ops.WhListenerEvent), webhooks_ops.WhListenerEvent.project_id, project_id).all()
-        ],
-        "webhooks": [
-            _row_dict(row, ["id", "project_id", "source_id", "display_name", "mode", "request_config", "input_parameters", "output_parameters", "mock_response", "created_at", "updated_at"])
-            for row in _for_project(db.query(webhooks_ops.WhWebhook), webhooks_ops.WhWebhook.project_id, project_id).all()
-        ],
-        "webhook_executions": [
-            _row_dict(row, ["id", "project_id", "webhook_id", "request_payload", "response_payload", "response_status", "status", "extracted_outputs", "idempotency_key", "actor", "created_at"])
-            for row in _for_project(db.query(webhooks_ops.WhExecution), webhooks_ops.WhExecution.project_id, project_id).all()
-        ],
-        "webhook_credentials": [
-            _row_dict(row, ["id", "project_id", "source_id", "credential_type", "expires_at", "created_at"])
-            for row in _for_project(db.query(webhooks_ops.WhCredential), webhooks_ops.WhCredential.project_id, project_id).all()
-        ],
-        "webhook_outbound_apps": [
-            _row_dict(row, ["id", "project_id", "display_name", "client_id", "token_endpoint", "scopes", "created_at"])
-            for row in _for_project(db.query(webhooks_ops.WhOutboundApp), webhooks_ops.WhOutboundApp.project_id, project_id).all()
-        ],
-        "ops_events": [ops_control._event_dict(row) for row in _for_project(db.query(ops_control.OpsEvent), ops_control.OpsEvent.project_id, project_id).all()],
-        "event_outbox": [
-            _row_dict(row, [
-                "id", "project_id", "topic", "event_type", "aggregate_type", "aggregate_id", "actor",
-                "payload", "headers", "idempotency_key", "status", "attempts", "max_attempts",
-                "available_at", "lease_owner", "lease_token", "lease_expires_at", "last_error",
-                "created_at", "updated_at", "published_at",
-            ])
-            for row in _for_project(db.query(event_outbox.EventOutbox), event_outbox.EventOutbox.project_id, project_id).all()
-        ],
-        "platform_event_log": [
-            _row_dict(row, [
-                "sequence", "event_id", "outbox_event_id", "project_id", "topic", "event_type",
-                "aggregate_type", "aggregate_id", "actor", "payload", "headers", "occurred_at",
-                "published_at",
-            ])
-            for row in _for_parent(db.query(event_outbox.PlatformEventLog), "platform_event_log", project_id).all()
-        ],
-        "event_transport_receipts": [
-            _row_dict(row, [
-                "id", "outbox_event_id", "project_id", "transport", "destination", "status",
-                "attempts", "max_attempts", "available_at", "lease_owner", "lease_token",
-                "lease_expires_at", "broker_metadata", "last_error", "created_at", "updated_at",
-                "delivered_at",
-            ])
-            for row in _for_parent(db.query(event_outbox.EventTransportReceipt), "event_transport_receipts", project_id).all()
-        ],
-        "event_stream_bindings": [
-            _row_dict(row, [
-                "id", "project_id", "display_name", "target_stream_id", "topics",
-                "event_types", "aggregate_types", "object_type_ids", "active",
-                "cursor_sequence", "created_by", "created_at", "updated_at",
-            ]) for row in _for_parent(db.query(event_outbox.EventStreamBinding), "event_stream_bindings", project_id).all()
-        ],
-        "event_stream_receipts": [
-            _row_dict(row, [
-                "id", "project_id", "binding_id", "event_id", "event_sequence",
-                "stream_record_id", "created_at",
-            ]) for row in _for_parent(db.query(event_outbox.EventStreamReceipt), "event_stream_receipts", project_id).all()
-        ],
-        "ops_alert_rules": [ops_control._rule_dict(row) for row in _for_project(db.query(ops_control.AlertRule), ops_control.AlertRule.project_id, project_id).all()],
-        "ops_alerts": [ops_control._alert_dict(row) for row in _for_project(db.query(ops_control.AlertEvent), ops_control.AlertEvent.project_id, project_id).all()],
-        "ops_runbooks": [ops_control._runbook_dict(row) for row in _for_project(db.query(ops_control.Runbook), ops_control.Runbook.project_id, project_id).all()],
-        "ops_runbook_executions": [ops_control._execution_dict(row) for row in _for_project(db.query(ops_control.RunbookExecution), ops_control.RunbookExecution.project_id, project_id).all()],
-        "ops_notifications": [ops_control._notification_dict(row) for row in _for_project(db.query(ops_control.OpsNotification), ops_control.OpsNotification.project_id, project_id).all()],
-        "ops_sla_policies": [
-            _row_dict(row, ["id", "project_id", "display_name", "scope", "thresholds", "active", "created_at", "updated_at"])
-            for row in _for_project(db.query(ops_control.OpsSlaPolicy), ops_control.OpsSlaPolicy.project_id, project_id).all()
-        ],
-        "incidents": [
-            ops_control._incident_dict(row)
-            for row in _for_project(db.query(ops_control.Incident), ops_control.Incident.project_id, project_id).all()
-        ],
-        "investigations": [
-            investigations._workspace_dict(row)
-            for row in _for_project(db.query(investigations.InvestigationWorkspace), investigations.InvestigationWorkspace.project_id, project_id).all()
-        ],
-        "investigation_evidence": [
-            investigations._evidence_dict(row)
-            for row in _for_project(db.query(investigations.EvidenceItem), investigations.EvidenceItem.project_id, project_id).all()
-        ],
-        "investigation_hypotheses": [
-            investigations._hypothesis_dict(row)
-            for row in _for_project(db.query(investigations.InvestigationHypothesis), investigations.InvestigationHypothesis.project_id, project_id).all()
-        ],
-        "investigation_findings": [
-            investigations._finding_dict(row)
-            for row in _for_project(db.query(investigations.InvestigationFinding), investigations.InvestigationFinding.project_id, project_id).all()
-        ],
-        "investigation_reports": [
-            investigations._report_dict(row)
-            for row in _for_project(db.query(investigations.InvestigationReport), investigations.InvestigationReport.project_id, project_id).all()
-        ],
-        "platform_artifacts": [
-            _row_dict(row, ["id", "project_id", "artifact_type", "display_name", "description", "status", "current_revision", "published_revision", "lock_version", "owner", "metadata_", "created_at", "updated_at"])
-            for row in _for_project(db.query(platform_runtime.PlatformArtifact), platform_runtime.PlatformArtifact.project_id, project_id).all()
-        ],
-        "platform_artifact_revisions": [
-            _row_dict(row, ["id", "artifact_id", "revision", "state", "layout", "validation", "author", "message", "published", "restored_from_revision", "created_at"])
-            for row in _for_parent(db.query(platform_runtime.ArtifactRevision), "platform_artifact_revisions", project_id).all()
-        ],
-        "platform_jobs": [
-            _row_dict(row, ["id", "project_id", "job_type", "status", "actor", "subject_type", "subject_id", "payload", "result", "error", "attempt", "progress", "created_at", "updated_at", "started_at", "completed_at"])
-            for row in _for_project(db.query(platform_runtime.PlatformJob), platform_runtime.PlatformJob.project_id, project_id).all()
-        ],
-        "platform_job_events": [
-            _row_dict(row, ["id", "job_id", "event_type", "status", "payload", "created_at"])
-            for row in _for_parent(db.query(platform_runtime.PlatformJobEvent), "platform_job_events", project_id).all()
-        ],
-        "platform_job_idempotency_receipts": [
-            _row_dict(row, ["id", "scope_hash", "job_id", "project_id", "actor", "job_type", "subject_type", "subject_id", "idempotency_key", "request_hash", "created_at"])
-            for row in _for_project(db.query(platform_runtime.PlatformJobIdempotencyReceipt), platform_runtime.PlatformJobIdempotencyReceipt.project_id, project_id).all()
-        ],
-        "platform_artifact_collaboration_events": [
-            _row_dict(row, ["id", "artifact_id", "participant_id", "actor", "event_type", "lock_version", "revision", "payload", "created_at"])
-            for row in _for_parent(db.query(platform_runtime.ArtifactCollaborationEvent), "platform_artifact_collaboration_events", project_id).all()
-        ],
-        "platform_artifact_command_receipts": [
-            _row_dict(row, ["id", "artifact_id", "project_id", "command_scope", "idempotency_key", "request_hash", "revision", "lock_version", "participant_id", "command_ids", "rebased_from_lock_version", "created_at"])
-            for row in _for_project(db.query(platform_runtime.ArtifactCommandReceipt), platform_runtime.ArtifactCommandReceipt.project_id, project_id).all()
-        ],
-        "platform_artifact_review_comments": [
-            _row_dict(row, [
-                "id", "artifact_id", "project_id", "revision", "target", "thread_id",
-                "parent_id", "body", "status", "author", "resolved_by", "resolved_at",
-                "created_at", "updated_at",
-            ]) for row in _for_parent(db.query(platform_runtime.ArtifactReviewComment), "platform_artifact_review_comments", project_id).all()
-        ],
-        "platform_artifact_change_proposals": [
-            _row_dict(row, [
-                "id", "artifact_id", "project_id", "base_revision", "base_lock_version",
-                "version", "title", "description", "commands", "targets", "validation",
-                "status", "author", "reviewer", "review_note", "applied_revision",
-                "created_at", "updated_at", "reviewed_at", "applied_at",
-            ]) for row in _for_parent(db.query(platform_runtime.ArtifactChangeProposal), "platform_artifact_change_proposals", project_id).all()
-        ],
-        "organizations": [
-            _row_dict(row, ["id", "display_name", "status", "created_at", "updated_at"])
-            for row in db.query(tenancy.PlatformOrganization).all()
-        ],
-        "projects": [
-            _row_dict(row, ["id", "organization_id", "display_name", "description", "status", "created_at", "updated_at"])
-            for row in db.query(tenancy.PlatformProject).all()
-        ],
-        "project_memberships": [
-            _row_dict(row, ["id", "project_id", "principal_id", "role", "permissions", "created_at", "updated_at"])
-            for row in db.query(tenancy.ProjectMembership).all()
-        ],
-        "ontology_packages": [
-            _row_dict(row, ["id", "organization_id", "owning_project_id", "display_name", "description", "status", "current_version", "created_by", "created_at", "updated_at"])
-            for row in db.query(ontology_packages.OntologyPackage).all()
-        ],
-        "ontology_package_versions": [
-            _row_dict(row, ["id", "package_id", "version", "status", "manifest", "checksum", "validation", "author", "created_at", "published_at"])
-            for row in _for_parent(db.query(ontology_packages.OntologyPackageVersion), "ontology_package_versions", project_id).all()
-        ],
-        "ontology_package_installations": [
-            _row_dict(row, ["id", "package_id", "package_version_id", "version", "target_project_id", "namespace", "status", "installed_resources", "prior_state", "previous_installation_id", "installed_by", "installed_at", "rolled_back_at"])
-            for row in db.query(ontology_packages.OntologyPackageInstallation).all()
-        ],
-        "ontology_package_resources": [
-            _row_dict(row, ["id", "package_id", "installation_id", "target_project_id", "namespace", "resource_type", "resource_id", "source_resource_id", "created_at", "updated_at"])
-            for row in db.query(ontology_packages.OntologyPackageResource).all()
-        ],
-        "ingestion_runs": [
-            _row_dict(row, ["id", "project_id", "job_id", "idempotency_key", "run_type", "resource_type", "resource_id", "status", "records_in", "records_out", "bytes_processed", "estimated_cost_usd", "metrics", "error", "created_at", "started_at", "completed_at"])
-            for row in _for_project(db.query(ingestion_runtime.IngestionRun), ingestion_runtime.IngestionRun.project_id, project_id).all()
-        ],
-        "ingestion_budgets": [
-            _row_dict(row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "created_at", "updated_at"])
-            for row in _for_project(db.query(ingestion_runtime.IngestionBudget), ingestion_runtime.IngestionBudget.project_id, project_id).all()
-        ],
-        "ingestion_dead_letters": [
-            _row_dict(row, ["id", "project_id", "run_id", "resource_type", "resource_id", "payload", "error", "status", "replay_job_id", "attempts", "created_at", "updated_at"])
-            for row in _for_project(db.query(ingestion_runtime.IngestionDeadLetter), ingestion_runtime.IngestionDeadLetter.project_id, project_id).all()
-        ],
-        "runtime_job_observations": [
-            _row_dict(row, ["id", "project_id", "job_id", "correlation_id", "job_type", "actor", "status", "attempt", "progress", "queue_latency_ms", "duration_ms", "compute_seconds", "token_units", "record_units", "estimated_cost_usd", "metrics", "spans", "error", "created_at", "updated_at", "completed_at"])
-            for row in _for_project(db.query(runtime_observability.RuntimeJobObservation), runtime_observability.RuntimeJobObservation.project_id, project_id).all()
-        ],
-        "runtime_budget_policies": [
-            _row_dict(row, ["id", "project_id", "metric", "limit_value", "window_seconds", "enforcement", "enabled", "created_at", "updated_at"])
-            for row in _for_project(db.query(runtime_observability.RuntimeBudgetPolicy), runtime_observability.RuntimeBudgetPolicy.project_id, project_id).all()
-        ],
-        "runtime_slo_policies": [
-            _row_dict(row, ["id", "project_id", "display_name", "job_type", "metric", "operator", "threshold", "window_seconds", "severity", "enabled", "created_at", "updated_at"])
-            for row in _for_project(db.query(runtime_observability.RuntimeSloPolicy), runtime_observability.RuntimeSloPolicy.project_id, project_id).all()
-        ],
-        "runtime_slo_evaluations": [
-            _row_dict(row, ["id", "project_id", "policy_id", "status", "observed_value", "threshold", "sample_count", "details", "created_at"])
-            for row in _for_project(db.query(runtime_observability.RuntimeSloEvaluation), runtime_observability.RuntimeSloEvaluation.project_id, project_id).all()
-        ],
-        "runtime_workers": [
-            _row_dict(row, ["id", "organization_id", "worker_name", "principal_id", "project_id", "status", "supported_job_types", "max_concurrency", "labels", "started_at", "heartbeat_at", "last_claimed_at", "drain_requested_at"])
-            for row in _for_project(db.query(worker_control.RuntimeWorker), worker_control.RuntimeWorker.project_id, project_id).all()
-        ],
-        "runtime_queue_policies": [
-            _row_dict(row, ["id", "project_id", "weight", "max_concurrency", "paused", "updated_by", "created_at", "updated_at"])
-            for row in _for_project(db.query(worker_control.RuntimeQueuePolicy), worker_control.RuntimeQueuePolicy.project_id, project_id).all()
-        ],
-        "connector_fetch_attempts": [
-            _row_dict(row, ["id", "project_id", "source_id", "sync_id", "ingestion_run_id", "adapter_id", "operation", "status", "records_read", "bytes_read", "duration_ms", "cursor_in", "cursor_out", "metadata_", "error", "created_at"])
-            for row in _for_project(db.query(connector_runtime.ConnectorFetchAttempt), connector_runtime.ConnectorFetchAttempt.project_id, project_id).all()
-        ],
+        **{name: load() for name, load in _snapshot_collections(db, project_id).items()},
     }
     if project_id:
         snapshot = _scope_snapshot(db, snapshot, project_id, organization_id or "local")
@@ -1759,7 +1772,12 @@ def _docs_matrix_rows() -> List[Dict[str, str]]:
     return rows
 
 
-def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def _snapshot_coverage(snapshot: Dict[str, Any], *, count_rows: bool = True) -> Dict[str, Any]:
+    """Which expected collections the snapshot carries and, with `count_rows`, how many rows each.
+
+    Without `count_rows` only the names are read, so `_snapshot_collections`' loaders
+    will do in place of a built snapshot.
+    """
     expected = [
         "object_types",
         "action_types",
@@ -1873,13 +1891,14 @@ def _snapshot_coverage(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "connector_fetch_attempts",
     ]
     missing = [key for key in expected if key not in snapshot]
-    counts = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
-    return {
+    coverage: Dict[str, Any] = {
         "status": "PASS" if not missing else "WARN",
         "expected": expected,
         "missing": missing,
-        "counts": counts,
     }
+    if count_rows:
+        coverage["counts"] = {key: len(snapshot.get(key) or []) for key in expected if key in snapshot}
+    return coverage
 
 
 @router.get("/system/schema-health")
@@ -2010,9 +2029,12 @@ def event_consistency(db: Session = Depends(get_db)):
     conflicted_change_proposals = db.query(platform_runtime.ArtifactChangeProposal).filter(
         platform_runtime.ArtifactChangeProposal.status == "CONFLICT"
     ).count()
-    source_counts: Dict[str, int] = {}
-    for row in db.query(ops_control.OpsEvent).all():
-        source_counts[row.source] = source_counts.get(row.source, 0) + 1
+    # Tallied by the database. Loading every event to count one column decoded
+    # every payload, on every readiness call, for as many events as there are.
+    source_counts: Dict[str, int] = dict(
+        db.query(ops_control.OpsEvent.source, func.count(ops_control.OpsEvent.id))
+        .group_by(ops_control.OpsEvent.source).all()
+    )
 
     checks = [
         {
@@ -2154,6 +2176,29 @@ def event_consistency(db: Session = Depends(get_db)):
 
 @router.get("/project/validate")
 def validate_project(db: Session = Depends(get_db)):
+    return _validate_project(db, count_rows=True)
+
+
+def _validate_project(db: Session, *, count_rows: bool) -> Dict[str, Any]:
+    """Every validation section. `count_rows=False` is readiness's question.
+
+    Readiness reads each section's status and nothing else, and snapshot
+    coverage's status turns only on which collections the snapshot has. With
+    `count_rows=False` the coverage is taken from `_snapshot_collections`'
+    names and not a row is loaded.
+
+    Readiness used to build the whole scoped snapshot to learn those names. On
+    the database a full browser run had built by the time `laptop-1366` reached
+    `shell-widths.spec.ts` (33 MB, 25k snapshot rows), one call was 1.0 s of
+    Python: 0.57 s loading and decoding rows, 0.43 s deep-copying them in
+    `_scope_snapshot`. The top bar asks on every page load, and the suite loads
+    pages faster than that, so calls overlapped and shared one interpreter: two
+    dozen in flight at once, the slowest taking 56 s, none of it spent waiting
+    for a thread. The shell-widths test that holds readiness until the workspace
+    has drawn released its request behind them and waited 40 s against a 45 s
+    timeout, or past it; it passed on retry, because the wait had stopped new
+    page loads long enough for the queue to drain.
+    """
     schema = schema_health(db)
     migration_info = migrations(db)
     if schema.get("migration_required"):
@@ -2182,11 +2227,14 @@ def validate_project(db: Session = Depends(get_db)):
             },
         }
     event_info = event_consistency(db)
-    # Unfinalized: coverage reads the collection names and their lengths, and
-    # nothing else. The redaction, deep copy and checksum are what an *exported*
-    # snapshot needs, and this one is discarded.
-    snapshot = _snapshot(db, "default", "local", finalize=False)
-    snapshot_info = _snapshot_coverage(snapshot)
+    if count_rows:
+        # Unfinalized: coverage reads the collection names and their lengths, and
+        # nothing else. The redaction, deep copy and checksum are what an *exported*
+        # snapshot needs, and this one is discarded.
+        snapshot = _snapshot(db, "default", "local", finalize=False)
+    else:
+        snapshot = _snapshot_collections(db, "default")
+    snapshot_info = _snapshot_coverage(snapshot, count_rows=count_rows)
     docs_info = _docs_matrix_summary()
     route_paths = [
         "/workspace/command-center",
@@ -2236,7 +2284,7 @@ def validate_project(db: Session = Depends(get_db)):
 
 @router.get("/project/readiness")
 def project_readiness(db: Session = Depends(get_db)):
-    validation = validate_project(db)
+    validation = _validate_project(db, count_rows=False)
     sections = validation.get("sections") or {}
     plugin_mode = os.getenv("PLUGIN_EXECUTION_MODE", "direct").strip().lower()
     plugin_workers = [

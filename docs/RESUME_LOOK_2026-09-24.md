@@ -121,7 +121,7 @@ I, M and N are still undecided, and the goal assumes their option (a).
    [`GOAL_HOME_2026-10-01.md`](GOAL_HOME_2026-10-01.md), the plan's wave 2 (H1–H16 and A10),
    re-read against `27cc953`. Its H7 names `raw_colour_ceiling`, so the ceiling now has two
    open owners and A7 can be marked Met on the owner's word. It assumes H (b) as H7b, T, X (b)
-   and a new decision Z (Home replaces Command Center as the default route). It is uncommitted.
+   and a new decision Z (Home replaces Command Center as the default route). Committed as `1270d0c`.
 2. **A7** closes when `raw_colour_ceiling` has another open owner: either X (a), the node context
    menu's look inside A7 (563 → 556, then A7 can be marked with the ceiling passed on), or the
    next goal taking the ceiling. With A7 the only open condition, GOAL_FOUNDATIONS is otherwise
@@ -131,9 +131,13 @@ I, M and N are still undecided, and the goal assumes their option (a).
    two of them, which need a used database, are filed as their own task. Don't re-record the
    browser-evidence baseline while they stand: it would record them as known.
 4. The default tier suggests re-measuring `tier-a-baseline.json` (32.8 days old).
-3. **The Platform Graph retry** at 1366 is still filed as its own task. It passed the last run
-   at 41 s, against a 45 s limit.
-4. **A migration re-records four baselines.** Adding one stamps query-bounds, request-cost,
+5. **The Platform Graph retry is fixed.** The test at 1366 timed out because
+   `/project/readiness` built the whole project snapshot on every page load. That was 1.0 s of
+   Python per call late in a run, and calls queued two dozen deep. Readiness now reads only the
+   snapshot's collection names, and the test takes 0.6 s with no retry. The details are in
+   `GOAL_FOUNDATIONS_2026-09-25.md` under A8. It was not the WebSocket (`f09a564`), the SQLite
+   lock wait or the thread limit.
+6. **A migration re-records four baselines.** Adding one stamps query-bounds, request-cost,
    suite-cost and browser-evidence as past their life. Re-record them:
    `audit_query_bounds.py --set-baseline`, `audit_request_cost.py --write-baseline`,
    `measure_suite_cost.py` (about 20 minutes) and then `audit_suite_cost.py --write-baseline`,
@@ -211,7 +215,7 @@ I, M and N are still undecided, and the goal assumes their option (a).
   from bare page instead.
 - **Late-run backend stalls** can fail a test whose route handler fetches after the test ends
   (the shell-widths strip test once, teardown past 45 s). It passed alone and in the next run;
-  the readiness task owns the stall.
+  the stall was readiness's queue, fixed with the retry (item 5).
 - **The evaluator sweep fails 14 to 16 tests on master** since `ccd7afb` (another session's):
   control-panel and security at 375, data-media and analytics in axe, and, with a well-used
   database, Imports' metric overflow and an Automate scroll box (filed as a task). Compare a

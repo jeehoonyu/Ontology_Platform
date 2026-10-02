@@ -938,6 +938,25 @@ The register is in [the plan](FOUNDRY_UI_PLAN_2026-09-24.md#owner-decisions).
     `/jobs/summary` answers. SQLite's 30 s lock wait and the 40-thread limit on sync endpoints
     are the leading suspects. It stays filed as its own task, with these findings, to be found
     with server-side evidence rather than by raising the timeout.
+  - **Found, and it was neither suspect.** A wrapper around the app logged each request's wait
+    for a thread and its run time, and sampled the stacks of slow ones. Readiness never waited
+    more than 0.05 s for a thread; it was running Python. On the database the run had built by
+    the time 1366 reached this test (33 MB, 25k snapshot rows), one call cost 1.0 s. It built
+    the whole scoped project snapshot, loading and deep-copying every row, to learn which
+    collections the snapshot has. The 0.04 s was measured on a small database.
+  - The top bar asks on every page load, so calls overlapped two dozen deep, the slowest taking
+    56 s. The test's released request waited 40 s behind them. The retry passed because the
+    wait had stopped new page loads long enough for the queue to drain.
+  - Readiness now takes the collection names from `_snapshot_collections`, which declares one
+    loader per collection and loads nothing until one is called. Event consistency tallies ops
+    events with a `GROUP BY`. Validation still counts rows. On the same database readiness takes
+    0.011 s.
+  - `oms/test_project_readiness_cost.py`: readiness loads the same 64 rows before and after
+    1,000 more events, and gives validation's answers. It fails with either half of the fix
+    taken out. `audit_snapshot_scope.py` reads the new shape, and its test now requires exactly
+    the collections the builder declares. Moving them first made it read zero and pass.
+  - Full run: the test takes 0.6 s at 1366 and 0.6 s at 1600, against 40.5 s and 11.3 s, with
+    no retry. The suite takes 7.0 min against 8.6.
 
   **2. Ops.** Ops' tab bar is `Tabs`, and keeps `.ops-tabs` and its name. Its three rules go.
   They used tokens only, so raw colours hold at 594.
