@@ -117,6 +117,11 @@ I, M and N are still undecided, and the goal assumes their option (a).
    keeps a copy of the route table (W a); the node context menu's look waits for Y15, so A7
    stays Open as `raw_colour_ceiling`'s owner (X b). Ask the owner. A6 is built on U, V and W;
    each is cheap to change.
+   **2026-10-01:** the next goal is stated, at the owner's request:
+   [`GOAL_HOME_2026-10-01.md`](GOAL_HOME_2026-10-01.md), the plan's wave 2 (H1–H16 and A10),
+   re-read against `27cc953`. Its H7 names `raw_colour_ceiling`, so the ceiling now has two
+   open owners and A7 can be marked Met on the owner's word. It assumes H (b) as H7b, T, X (b)
+   and a new decision Z (Home replaces Command Center as the default route). It is uncommitted.
 2. **A7** closes when `raw_colour_ceiling` has another open owner: either X (a), the node context
    menu's look inside A7 (563 → 556, then A7 can be marked with the ceiling passed on), or the
    next goal taking the ceiling. With A7 the only open condition, GOAL_FOUNDATIONS is otherwise
